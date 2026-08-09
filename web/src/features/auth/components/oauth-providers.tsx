@@ -32,6 +32,7 @@ import { cn } from '@/lib/utils'
 import { useOAuthLogin } from '../hooks/use-oauth-login'
 import type { SystemStatus } from '../types'
 import { CustomOAuthProviderIcon } from './custom-oauth-provider-icon'
+import { oauthProviderGridClassName } from './oauth-provider-layout'
 import { TelegramLoginDialog } from './telegram-login-dialog'
 
 type OAuthProvidersProps = {
@@ -170,7 +171,7 @@ export function OAuthProviders({
           </div>
         </div>
 
-        <div className='flex flex-col gap-2'>
+        <div className={oauthProviderGridClassName}>
           {providerButtons.map(
             ({ key, label, onClick, icon, disabled: extraDisabled }) => (
               <Button

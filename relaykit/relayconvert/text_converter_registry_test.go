@@ -28,14 +28,11 @@ func TestLookupBuiltinTextConverters(t *testing.T) {
 		{id: ConverterOpenAIChatToOpenAIResponses, from: types.RelayFormatOpenAI, to: types.RelayFormatOpenAIResponses, quality: TextConverterQualityGood, reqDirect: true, respDirect: true, respAlias: ResponseConverterOAIChatToOAIResponses, streamDirect: true},
 		{id: ConverterOpenAIResponsesToOpenAIChat, from: types.RelayFormatOpenAIResponses, to: types.RelayFormatOpenAI, quality: TextConverterQualityGood, reqDirect: true, respDirect: true, respAlias: ResponseConverterOAIResponsesToOAIChat, streamDirect: true},
 		{
-			id:      requestConverterClaudeToGemini,
-			from:    types.RelayFormatClaude,
-			to:      types.RelayFormatGemini,
-			quality: TextConverterQualityDiscouraged,
-			reqSteps: []string{
-				ConverterClaudeMessagesToOpenAIChat,
-				ConverterOpenAIChatToGeminiContent,
-			},
+			id:        requestConverterClaudeToGemini,
+			from:      types.RelayFormatClaude,
+			to:        types.RelayFormatGemini,
+			quality:   TextConverterQualityFair,
+			reqDirect: true,
 			respSteps: []string{
 				ConverterClaudeMessagesToOpenAIChat,
 				ConverterOpenAIChatToGeminiContent,

@@ -31,11 +31,7 @@ func TestRequestConverterRegistryListsSupportedTextConverters(t *testing.T) {
 			converter: requestConverterClaudeToGemini,
 			from:      types.RelayFormatClaude,
 			to:        types.RelayFormatGemini,
-			quality:   RequestConverterQualityDiscouraged,
-			stepConverters: []string{
-				ConverterClaudeMessagesToOpenAIChat,
-				ConverterOpenAIChatToGeminiContent,
-			},
+			quality:   RequestConverterQualityFair,
 		},
 		{
 			converter: requestConverterClaudeToResponses,
@@ -131,6 +127,44 @@ func TestConvertRequestToTargetRecordsConversionChain(t *testing.T) {
 		},
 	}, result.Steps)
 	assert.Equal(t, []types.RelayFormat{types.RelayFormatOpenAI, types.RelayFormatOpenAIResponses}, info.ConversionChain)
+}
+
+func TestConvertClaudeRequestToGeminiUsesDirectConverter(t *testing.T) {
+	info := &convmeta.Values{
+		ConversionChain:     []types.RelayFormat{types.RelayFormatClaude},
+		UpstreamModelName:   "gemini-3-pro-image-preview",
+		ChannelMetaAttached: true,
+		Options: &convmeta.Options{
+			Gemini: convmeta.GeminiOptions{
+				SupportsImagine: func(string) bool { return true },
+			},
+		},
+	}
+	maxTokens := uint(1024)
+	req := &dto.ClaudeRequest{
+		Model:     "gemini-3-pro-image-preview",
+		MaxTokens: &maxTokens,
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "Generate a landscape."},
+		},
+		ExtraBody: []byte(`{"google":{"image_config":{"aspect_ratio":"16:9","image_size":"4K"}}}`),
+	}
+
+	result, err := ConvertRequest(nil, info, types.RelayFormatGemini, req)
+
+	require.NoError(t, err)
+	require.IsType(t, &dto.GeminiChatRequest{}, result.Value)
+	geminiRequest := result.Value.(*dto.GeminiChatRequest)
+	assert.Equal(t, requestConverterClaudeToGemini, result.Converter)
+	assert.Equal(t, RequestConverterQualityFair, result.Quality)
+	assert.Equal(t, []RequestStep{{
+		Converter: requestConverterClaudeToGemini,
+		From:      types.RelayFormatClaude,
+		To:        types.RelayFormatGemini,
+	}}, result.Steps)
+	assert.Equal(t, []types.RelayFormat{types.RelayFormatClaude, types.RelayFormatGemini}, info.ConversionChain)
+	assert.Equal(t, []string{"TEXT", "IMAGE"}, geminiRequest.GenerationConfig.ResponseModalities)
+	assert.JSONEq(t, `{"aspectRatio":"16:9","imageSize":"4K"}`, string(geminiRequest.GenerationConfig.ImageConfig))
 }
 
 func TestConvertRequestPlansMultiHopPath(t *testing.T) {

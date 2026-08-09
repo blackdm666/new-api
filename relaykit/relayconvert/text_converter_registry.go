@@ -143,12 +143,9 @@ var builtinTextConverters = []TextConverterSpec{
 		ID:      requestConverterClaudeToGemini,
 		From:    types.RelayFormatClaude,
 		To:      types.RelayFormatGemini,
-		Quality: TextConverterQualityDiscouraged,
+		Quality: TextConverterQualityFair,
 		Req: TextRequestSide{
-			StepConverters: []string{
-				ConverterClaudeMessagesToOpenAIChat,
-				ConverterOpenAIChatToGeminiContent,
-			},
+			Convert: convertClaudeRequestToGemini,
 		},
 		Resp: TextResponseSide{
 			StepConverters: []string{
