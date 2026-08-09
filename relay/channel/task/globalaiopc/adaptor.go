@@ -283,7 +283,7 @@ func convertToRequestPayload(req relaycommon.TaskSubmitReq, info *relaycommon.Re
 	if body.Resolution == "" {
 		body.Resolution = defaultResolution
 	}
-	return &body, validatePayload(*body)
+	return &body, validatePayload(body)
 }
 
 func validateSeedanceRequest(req relaycommon.TaskSubmitReq) error {
