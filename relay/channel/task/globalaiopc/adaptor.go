@@ -25,6 +25,7 @@ import (
 const (
 	ChannelName       = "globalaiopc"
 	ModelSeedance25   = "seedance-2.5"
+	ModelMiniMaxH3    = "minimax-h3"
 	defaultBaseURL    = "https://zcbservice.aizfw.cn/kyyReactApiServer"
 	defaultDuration   = 4
 	minDuration       = 4
@@ -41,6 +42,9 @@ type requestPayload struct {
 	Duration        int      `json:"duration,omitempty"`
 	AspectRatio     string   `json:"aspect_ratio,omitempty"`
 	Resolution      string   `json:"resolution"`
+	Size            string   `json:"size,omitempty"`
+	FirstImage      string   `json:"first_image,omitempty"`
+	LastImage       string   `json:"last_image,omitempty"`
 }
 
 type responsePayload struct {
@@ -81,10 +85,10 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if err != nil {
 		return service.TaskErrorWrapperLocal(err, "get_task_request_failed", http.StatusBadRequest)
 	}
-	if err := validateSeedanceRequest(req); err != nil {
+	if err := validateGlobalAiOpcRequest(req, info); err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 	}
-	if len(req.Images) > 0 {
+	if hasReferenceInputs(req) {
 		info.Action = constant.TaskActionReferenceGenerate
 	} else {
 		info.Action = constant.TaskActionTextGenerate
@@ -92,14 +96,14 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	return nil
 }
 
-func (a *TaskAdaptor) EstimateBilling(c *gin.Context, _ *relaycommon.RelayInfo) map[string]float64 {
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
 		return nil
 	}
 	duration := requestDuration(req)
 	if duration <= 0 {
-		duration = defaultDuration
+		duration = configForModel(taskcommon.DefaultString(info.UpstreamModelName, req.Model)).defaultDuration
 	}
 	return map[string]float64{"seconds": float64(duration)}
 }
@@ -224,7 +228,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 }
 
 func (a *TaskAdaptor) GetModelList() []string {
-	return []string{ModelSeedance25}
+	return []string{ModelSeedance25, ModelMiniMaxH3}
 }
 
 func (a *TaskAdaptor) GetChannelName() string {
@@ -260,34 +264,43 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 }
 
 func convertToRequestPayload(req relaycommon.TaskSubmitReq, info *relaycommon.RelayInfo) (*requestPayload, error) {
+	modelName := taskcommon.DefaultString(info.UpstreamModelName, req.Model)
+	if modelName == "" {
+		modelName = ModelSeedance25
+	}
+	cfg := configForModel(modelName)
 	body := requestPayload{
-		Model:           taskcommon.DefaultString(info.UpstreamModelName, ModelSeedance25),
+		Model:           modelName,
 		Prompt:          req.Prompt,
 		ReferenceImages: req.Images,
 		Duration:        requestDuration(req),
-		AspectRatio:     aspectRatio(req.Size),
-		Resolution:      defaultResolution,
+		AspectRatio:     aspectRatioForModel(modelName, req.Size),
+		Resolution:      cfg.defaultResolution,
+	}
+	if isAllowedSize(modelName, req.Size) {
+		body.Size = req.Size
 	}
 	if body.Duration == 0 {
-		body.Duration = defaultDuration
+		body.Duration = cfg.defaultDuration
 	}
 	if err := taskcommon.UnmarshalMetadata(req.Metadata, &body); err != nil {
 		return nil, errors.Wrap(err, "unmarshal metadata failed")
 	}
 	if body.Model == "" {
-		body.Model = ModelSeedance25
+		body.Model = modelName
 	}
+	cfg = configForModel(body.Model)
 	if body.AspectRatio == "" {
-		body.AspectRatio = defaultRatio
+		body.AspectRatio = cfg.defaultRatio
 	}
 	if body.Resolution == "" {
-		body.Resolution = defaultResolution
+		body.Resolution = cfg.defaultResolution
 	}
 	return &body, validatePayload(body)
 }
 
-func validateSeedanceRequest(req relaycommon.TaskSubmitReq) error {
-	body, err := convertToRequestPayload(req, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: ModelSeedance25}})
+func validateGlobalAiOpcRequest(req relaycommon.TaskSubmitReq, info *relaycommon.RelayInfo) error {
+	body, err := convertToRequestPayload(req, info)
 	if err != nil {
 		return err
 	}
@@ -295,30 +308,40 @@ func validateSeedanceRequest(req relaycommon.TaskSubmitReq) error {
 }
 
 func validatePayload(body requestPayload) error {
-	if body.Model != ModelSeedance25 {
-		return fmt.Errorf("model must be %s", ModelSeedance25)
+	cfg, ok := modelConfigs[body.Model]
+	if !ok {
+		return fmt.Errorf("model must be one of %s, %s", ModelSeedance25, ModelMiniMaxH3)
 	}
 	if strings.TrimSpace(body.Prompt) == "" {
 		return fmt.Errorf("prompt is required")
 	}
-	if len(body.ReferenceImages) > 30 {
-		return fmt.Errorf("reference_images must contain at most 30 items")
+	if len([]rune(body.Prompt)) > cfg.maxPromptLength {
+		return fmt.Errorf("prompt must contain at most %d characters", cfg.maxPromptLength)
 	}
-	if len(body.ReferenceAudios) > 10 {
-		return fmt.Errorf("reference_audios must contain at most 10 items")
+	if len(body.ReferenceImages) > cfg.maxReferenceImages {
+		return fmt.Errorf("reference_images must contain at most %d items", cfg.maxReferenceImages)
 	}
-	if body.Duration < minDuration || body.Duration > maxDuration {
-		return fmt.Errorf("duration must be between %d and %d", minDuration, maxDuration)
+	if len(body.ReferenceAudios) > cfg.maxReferenceAudios {
+		return fmt.Errorf("reference_audios must contain at most %d items", cfg.maxReferenceAudios)
 	}
-	if body.Resolution != defaultResolution {
-		return fmt.Errorf("resolution must be %s", defaultResolution)
+	if cfg.requireImageWithAudio && len(body.ReferenceAudios) > 0 && len(body.ReferenceImages) == 0 && body.FirstImage == "" && body.LastImage == "" {
+		return fmt.Errorf("reference_audios requires at least one image reference")
 	}
-	switch body.AspectRatio {
-	case "16:9", "9:16", "1:1":
-		return nil
-	default:
-		return fmt.Errorf("aspect_ratio must be one of 16:9, 9:16, 1:1")
+	if body.Duration < cfg.minDuration || body.Duration > cfg.maxDuration {
+		return fmt.Errorf("duration must be between %d and %d", cfg.minDuration, cfg.maxDuration)
 	}
+	if body.Resolution != cfg.defaultResolution {
+		return fmt.Errorf("resolution must be %s", cfg.defaultResolution)
+	}
+	if _, ok := cfg.allowedRatios[body.AspectRatio]; !ok {
+		return fmt.Errorf("aspect_ratio must be one of %s", strings.Join(cfg.allowedRatioList, ", "))
+	}
+	if body.Size != "" {
+		if _, ok := cfg.allowedSizes[body.Size]; !ok {
+			return fmt.Errorf("size must be one of %s", strings.Join(cfg.allowedSizeList, ", "))
+		}
+	}
+	return nil
 }
 
 func requestDuration(req relaycommon.TaskSubmitReq) int {
@@ -333,19 +356,124 @@ func requestDuration(req relaycommon.TaskSubmitReq) int {
 	return 0
 }
 
-func aspectRatio(size string) string {
-	switch size {
-	case "16:9", "9:16", "1:1":
+func aspectRatioForModel(modelName, size string) string {
+	cfg := configForModel(modelName)
+	if _, ok := cfg.allowedRatios[size]; ok {
 		return size
-	case "1280x720", "1920x1080":
-		return "16:9"
-	case "720x1280", "1080x1920":
-		return "9:16"
-	case "1024x1024", "512x512":
-		return "1:1"
-	default:
-		return defaultRatio
 	}
+	switch size {
+	case "1280x720", "1920x1080", "2560x1440":
+		return "16:9"
+	case "720x1280", "1080x1920", "1440x2560":
+		return "9:16"
+	case "1024x1024", "512x512", "1440x1440":
+		return "1:1"
+	case "1920x1440":
+		return "4:3"
+	case "1440x1920":
+		return "3:4"
+	case "3360x1440":
+		return "21:9"
+	default:
+		return cfg.defaultRatio
+	}
+}
+
+func isAllowedSize(modelName, size string) bool {
+	if size == "" {
+		return false
+	}
+	_, ok := configForModel(modelName).allowedSizes[size]
+	return ok
+}
+
+func hasReferenceInputs(req relaycommon.TaskSubmitReq) bool {
+	if len(req.Images) > 0 {
+		return true
+	}
+	body := requestPayload{}
+	if err := taskcommon.UnmarshalMetadata(req.Metadata, &body); err != nil {
+		return false
+	}
+	return len(body.ReferenceImages) > 0 || len(body.ReferenceAudios) > 0 || body.FirstImage != "" || body.LastImage != ""
+}
+
+type modelConfig struct {
+	defaultDuration       int
+	minDuration           int
+	maxDuration           int
+	defaultRatio          string
+	defaultResolution     string
+	maxPromptLength       int
+	maxReferenceImages    int
+	maxReferenceAudios    int
+	requireImageWithAudio bool
+	allowedRatios         map[string]struct{}
+	allowedRatioList      []string
+	allowedSizes          map[string]struct{}
+	allowedSizeList       []string
+}
+
+var modelConfigs = map[string]modelConfig{
+	ModelSeedance25: newModelConfig(
+		defaultDuration,
+		minDuration,
+		maxDuration,
+		defaultRatio,
+		defaultResolution,
+		2000,
+		30,
+		10,
+		false,
+		[]string{"16:9", "9:16", "1:1"},
+		nil,
+	),
+	ModelMiniMaxH3: newModelConfig(
+		5,
+		5,
+		15,
+		"16:9",
+		"2k",
+		2000,
+		5,
+		1,
+		true,
+		[]string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"},
+		[]string{"2560x1440", "1440x2560", "1440x1440", "1920x1440", "1440x1920", "3360x1440"},
+	),
+}
+
+func newModelConfig(defaultDurationValue, minDurationValue, maxDurationValue int, defaultRatioValue, defaultResolutionValue string, maxPromptLengthValue, maxReferenceImagesValue, maxReferenceAudiosValue int, requireImageWithAudioValue bool, ratios, sizes []string) modelConfig {
+	return modelConfig{
+		defaultDuration:       defaultDurationValue,
+		minDuration:           minDurationValue,
+		maxDuration:           maxDurationValue,
+		defaultRatio:          defaultRatioValue,
+		defaultResolution:     defaultResolutionValue,
+		maxPromptLength:       maxPromptLengthValue,
+		maxReferenceImages:    maxReferenceImagesValue,
+		maxReferenceAudios:    maxReferenceAudiosValue,
+		requireImageWithAudio: requireImageWithAudioValue,
+		allowedRatios:         stringSet(ratios),
+		allowedRatioList:      ratios,
+		allowedSizes:          stringSet(sizes),
+		allowedSizeList:       sizes,
+	}
+}
+
+func configForModel(modelName string) modelConfig {
+	if cfg, ok := modelConfigs[modelName]; ok {
+		return cfg
+	}
+	return modelConfigs[ModelSeedance25]
+}
+
+func stringSet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		set[value] = struct{}{}
+	}
+	return set
 }
 
 func progressString(progress any) string {

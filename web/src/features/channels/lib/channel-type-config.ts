@@ -172,7 +172,7 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
     hints: {
       baseUrl: 'Default: https://zcbservice.aizfw.cn/kyyReactApiServer',
       key: 'Bearer API key from GlobalAiOpc',
-      models: 'seedance-2.5',
+      models: 'seedance-2.5,minimax-h3',
     },
   },
 }
