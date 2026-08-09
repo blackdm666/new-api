@@ -1,6 +1,7 @@
 package vertex
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -51,8 +52,9 @@ var claudeModelMap = map[string]string{
 const anthropicVersion = "vertex-2023-10-16"
 
 type Adaptor struct {
-	RequestMode        int
-	AccountCredentials Credentials
+	RequestMode         int
+	AccountCredentials  Credentials
+	AudioResponseFormat string
 }
 
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
@@ -115,8 +117,84 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 }
 
 func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
-	//TODO implement me
-	return nil, errors.New("not implemented")
+	if info == nil {
+		return nil, errors.New("relay info is nil")
+	}
+	if info.RelayMode != constant.RelayModeAudioSpeech {
+		return nil, errors.New("Vertex AI only supports audio speech requests")
+	}
+	if a.RequestMode != RequestModeGemini {
+		return nil, errors.New("Vertex AI audio speech requires a Gemini TTS model")
+	}
+	if info.IsStream || request.StreamFormat == "sse" {
+		return nil, errors.New("Vertex AI audio speech streaming is not supported")
+	}
+
+	input := strings.TrimSpace(request.Input)
+	if input == "" {
+		return nil, errors.New("input is required")
+	}
+	voice := strings.TrimSpace(request.Voice)
+	if voice == "" {
+		return nil, errors.New("voice is required")
+	}
+
+	responseFormat := strings.ToLower(strings.TrimSpace(request.ResponseFormat))
+	if responseFormat == "" {
+		responseFormat = "wav"
+	}
+	if responseFormat != "pcm" && responseFormat != "wav" {
+		return nil, fmt.Errorf("Vertex AI audio speech supports response_format pcm or wav, got %q", responseFormat)
+	}
+	a.AudioResponseFormat = responseFormat
+
+	instructions := strings.TrimSpace(request.Instructions)
+	if request.Speed != nil {
+		if *request.Speed < 0.25 || *request.Speed > 4 {
+			return nil, fmt.Errorf("speed must be between 0.25 and 4, got %g", *request.Speed)
+		}
+		if *request.Speed != 1 {
+			speedInstruction := fmt.Sprintf("Speak at %gx normal speed", *request.Speed)
+			if instructions == "" {
+				instructions = speedInstruction
+			} else {
+				instructions += ". " + speedInstruction
+			}
+		}
+	}
+
+	prompt := input
+	if instructions != "" {
+		prompt = instructions + ": " + input
+	}
+	if len([]byte(prompt)) > 8000 {
+		return nil, errors.New("Vertex AI audio speech input and instructions must not exceed 8000 bytes")
+	}
+
+	speechConfig, err := common.Marshal(VertexSpeechConfig{
+		VoiceConfig: VertexVoiceConfig{
+			PrebuiltVoiceConfig: VertexPrebuiltVoiceConfig{VoiceName: voice},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Vertex AI speech config: %w", err)
+	}
+
+	vertexRequest := dto.GeminiChatRequest{
+		Contents: []dto.GeminiChatContent{{
+			Role:  "user",
+			Parts: []dto.GeminiPart{{Text: prompt}},
+		}},
+		GenerationConfig: dto.GeminiChatGenerationConfig{
+			ResponseModalities: []string{"AUDIO"},
+			SpeechConfig:       speechConfig,
+		},
+	}
+	jsonData, err := common.Marshal(vertexRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Vertex AI audio speech request: %w", err)
+	}
+	return bytes.NewReader(jsonData), nil
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
@@ -138,6 +216,10 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 
 func (a *Adaptor) getRequestUrl(info *relaycommon.RelayInfo, modelName, suffix string) (string, error) {
 	region := GetModelRegion(info.ApiVersion, info.OriginModelName)
+	apiVersion := DefaultAPIVersion
+	if info.RelayMode == constant.RelayModeAudioSpeech {
+		apiVersion = GeminiTTSAPIVersion
+	}
 	if info.ChannelOtherSettings.VertexKeyType != dto.VertexKeyTypeAPIKey {
 		adc := &Credentials{}
 		if err := common.Unmarshal([]byte(info.ApiKey), adc); err != nil {
@@ -146,7 +228,7 @@ func (a *Adaptor) getRequestUrl(info *relaycommon.RelayInfo, modelName, suffix s
 		a.AccountCredentials = *adc
 
 		if a.RequestMode == RequestModeGemini {
-			return BuildGoogleModelURL(info.ChannelBaseUrl, DefaultAPIVersion, adc.ProjectID, region, modelName, suffix), nil
+			return BuildGoogleModelURL(info.ChannelBaseUrl, apiVersion, adc.ProjectID, region, modelName, suffix), nil
 		} else if a.RequestMode == RequestModeClaude {
 			return BuildAnthropicModelURL(info.ChannelBaseUrl, DefaultAPIVersion, adc.ProjectID, region, modelName, suffix), nil
 		} else if a.RequestMode == RequestModeOpenSource {
@@ -162,7 +244,7 @@ func (a *Adaptor) getRequestUrl(info *relaycommon.RelayInfo, modelName, suffix s
 		if a.RequestMode == RequestModeGemini {
 			return fmt.Sprintf(
 				"%s%skey=%s",
-				BuildGoogleModelURL(info.ChannelBaseUrl, DefaultAPIVersion, "", region, modelName, suffix),
+				BuildGoogleModelURL(info.ChannelBaseUrl, apiVersion, "", region, modelName, suffix),
 				keyPrefix,
 				info.ApiKey,
 			), nil
@@ -348,6 +430,13 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+	if info.RelayMode == constant.RelayModeAudioSpeech {
+		if a.RequestMode != RequestModeGemini {
+			return nil, types.NewOpenAIError(errors.New("Vertex AI audio speech requires a Gemini TTS model"), types.ErrorCodeBadResponse, http.StatusBadRequest)
+		}
+		return handleVertexTTSResponse(c, resp, info, a.AudioResponseFormat)
+	}
+
 	claudeAdaptor := claude.Adaptor{}
 	if info.IsStream {
 		switch a.RequestMode {
