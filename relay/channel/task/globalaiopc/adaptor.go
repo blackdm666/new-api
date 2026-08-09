@@ -23,15 +23,19 @@ import (
 )
 
 const (
-	ChannelName       = "globalaiopc"
-	ModelSeedance25   = "seedance-2.5"
-	ModelMiniMaxH3    = "minimax-h3"
-	defaultBaseURL    = "https://zcbservice.aizfw.cn/kyyReactApiServer"
-	defaultDuration   = 4
-	minDuration       = 4
-	maxDuration       = 30
-	defaultRatio      = "9:16"
-	defaultResolution = "720p"
+	ChannelName           = "globalaiopc"
+	ModelSeedance25       = "seedance-2.5" // legacy alias kept for existing tasks
+	ModelSeedance25480P   = "seedance-2.5-480p"
+	ModelSeedance25720P   = "seedance-2.5-720p"
+	ModelSeedance25C2720P = "seedance-2.5-c2-720p"
+	ModelMiniMaxH3        = "minimax-h3"
+	upstreamSeedance25C2  = "seedance-2.5-c2"
+	defaultBaseURL        = "https://zcbservice.aizfw.cn/kyyReactApiServer"
+	defaultDuration       = 4
+	minDuration           = 4
+	maxDuration           = 30
+	defaultRatio          = "9:16"
+	defaultResolution     = "720p"
 )
 
 type requestPayload struct {
@@ -48,17 +52,17 @@ type requestPayload struct {
 }
 
 type responsePayload struct {
-	ID             string      `json:"id"`
-	Object         string      `json:"object"`
-	Created        int64       `json:"created"`
-	Model          string      `json:"model"`
-	Status         string      `json:"status"`
-	Progress       any         `json:"progress,omitempty"`
-	ResultURL      string      `json:"result_url,omitempty"`
-	VideoURL       string      `json:"video_url,omitempty"`
-	Amount         float64     `json:"amount,omitempty"`
-	ActualDuration int         `json:"actualDuration,omitempty"`
-	Error          any         `json:"error,omitempty"`
+	ID             string  `json:"id"`
+	Object         string  `json:"object"`
+	Created        int64   `json:"created"`
+	Model          string  `json:"model"`
+	Status         string  `json:"status"`
+	Progress       any     `json:"progress,omitempty"`
+	ResultURL      string  `json:"result_url,omitempty"`
+	VideoURL       string  `json:"video_url,omitempty"`
+	Amount         float64 `json:"amount,omitempty"`
+	ActualDuration float64 `json:"actualDuration,omitempty"`
+	Error          any     `json:"error,omitempty"`
 }
 
 type TaskAdaptor struct {
@@ -228,7 +232,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 }
 
 func (a *TaskAdaptor) GetModelList() []string {
-	return []string{ModelSeedance25, ModelMiniMaxH3}
+	return []string{ModelSeedance25480P, ModelSeedance25720P, ModelSeedance25C2720P, ModelMiniMaxH3}
 }
 
 func (a *TaskAdaptor) GetChannelName() string {
@@ -250,7 +254,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 	openAIVideo.CompletedAt = originTask.UpdatedAt
 	openAIVideo.Model = originTask.Properties.OriginModelName
 	if upstream.ActualDuration > 0 {
-		openAIVideo.Seconds = strconv.Itoa(upstream.ActualDuration)
+		openAIVideo.Seconds = strconv.FormatFloat(upstream.ActualDuration, 'f', -1, 64)
 	}
 	if resultURL := firstNonEmpty(upstream.VideoURL, upstream.ResultURL); resultURL != "" {
 		openAIVideo.SetMetadata("url", resultURL)
@@ -266,11 +270,14 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 func convertToRequestPayload(req relaycommon.TaskSubmitReq, info *relaycommon.RelayInfo) (*requestPayload, error) {
 	modelName := taskcommon.DefaultString(info.UpstreamModelName, req.Model)
 	if modelName == "" {
-		modelName = ModelSeedance25
+		modelName = ModelSeedance25720P
 	}
-	cfg := configForModel(modelName)
+	cfg, ok := modelConfigs[modelName]
+	if !ok {
+		return nil, fmt.Errorf("model must be one of %s", strings.Join((&TaskAdaptor{}).GetModelList(), ", "))
+	}
 	body := requestPayload{
-		Model:           modelName,
+		Model:           upstreamModelFor(modelName),
 		Prompt:          req.Prompt,
 		ReferenceImages: req.Images,
 		Duration:        requestDuration(req),
@@ -286,32 +293,22 @@ func convertToRequestPayload(req relaycommon.TaskSubmitReq, info *relaycommon.Re
 	if err := taskcommon.UnmarshalMetadata(req.Metadata, &body); err != nil {
 		return nil, errors.Wrap(err, "unmarshal metadata failed")
 	}
-	if body.Model == "" {
-		body.Model = modelName
-	}
-	cfg = configForModel(body.Model)
+	// Model and resolution define the billable SKU. Do not allow metadata to
+	// switch to a more expensive upstream variant after pricing is calculated.
+	body.Model = upstreamModelFor(modelName)
+	body.Resolution = cfg.defaultResolution
 	if body.AspectRatio == "" {
 		body.AspectRatio = cfg.defaultRatio
 	}
-	if body.Resolution == "" {
-		body.Resolution = cfg.defaultResolution
-	}
-	return &body, validatePayload(body)
+	return &body, validatePayload(body, cfg)
 }
 
 func validateGlobalAiOpcRequest(req relaycommon.TaskSubmitReq, info *relaycommon.RelayInfo) error {
-	body, err := convertToRequestPayload(req, info)
-	if err != nil {
-		return err
-	}
-	return validatePayload(*body)
+	_, err := convertToRequestPayload(req, info)
+	return err
 }
 
-func validatePayload(body requestPayload) error {
-	cfg, ok := modelConfigs[body.Model]
-	if !ok {
-		return fmt.Errorf("model must be one of %s, %s", ModelSeedance25, ModelMiniMaxH3)
-	}
+func validatePayload(body requestPayload, cfg modelConfig) error {
 	if strings.TrimSpace(body.Prompt) == "" {
 		return fmt.Errorf("prompt is required")
 	}
@@ -428,6 +425,45 @@ var modelConfigs = map[string]modelConfig{
 		[]string{"16:9", "9:16", "1:1"},
 		nil,
 	),
+	ModelSeedance25480P: newModelConfig(
+		defaultDuration,
+		minDuration,
+		maxDuration,
+		defaultRatio,
+		"480p",
+		2000,
+		30,
+		10,
+		false,
+		[]string{"16:9", "9:16", "1:1"},
+		nil,
+	),
+	ModelSeedance25720P: newModelConfig(
+		defaultDuration,
+		minDuration,
+		maxDuration,
+		defaultRatio,
+		"720p",
+		2000,
+		30,
+		10,
+		false,
+		[]string{"16:9", "9:16", "1:1"},
+		nil,
+	),
+	ModelSeedance25C2720P: newModelConfig(
+		defaultDuration,
+		minDuration,
+		maxDuration,
+		defaultRatio,
+		"720p",
+		2000,
+		30,
+		10,
+		false,
+		[]string{"16:9", "9:16", "1:1"},
+		nil,
+	),
 	ModelMiniMaxH3: newModelConfig(
 		5,
 		5,
@@ -466,6 +502,17 @@ func configForModel(modelName string) modelConfig {
 		return cfg
 	}
 	return modelConfigs[ModelSeedance25]
+}
+
+func upstreamModelFor(modelName string) string {
+	switch modelName {
+	case ModelSeedance25480P, ModelSeedance25720P:
+		return ModelSeedance25
+	case ModelSeedance25C2720P:
+		return upstreamSeedance25C2
+	default:
+		return modelName
+	}
 }
 
 func stringSet(values []string) map[string]struct{} {
