@@ -141,7 +141,7 @@ func TestParseTaskResultCompleted(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "mcp_example_123456", info.TaskID)
-	assert.Equal(t, model.TaskStatusSuccess, model.TaskStatus(info.Status))
+	assert.EqualValues(t, model.TaskStatusSuccess, info.Status)
 	assert.Equal(t, "100%", info.Progress)
 	assert.Equal(t, "https://example.com/video.mp4", info.Url)
 }
@@ -156,6 +156,6 @@ func TestParseTaskResultFailed(t *testing.T) {
 	info, err := (&TaskAdaptor{}).ParseTaskResult(body)
 
 	require.NoError(t, err)
-	assert.Equal(t, model.TaskStatusFailure, model.TaskStatus(info.Status))
+	assert.EqualValues(t, model.TaskStatusFailure, info.Status)
 	assert.Equal(t, "policy rejected", info.Reason)
 }
