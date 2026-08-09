@@ -164,6 +164,17 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Models',
     },
   },
+  61: {
+    id: 61,
+    name: CHANNEL_TYPES[61],
+    icon: 'video',
+    defaultBaseUrl: 'https://zcbservice.aizfw.cn/kyyReactApiServer',
+    hints: {
+      baseUrl: 'Default: https://zcbservice.aizfw.cn/kyyReactApiServer',
+      key: 'Bearer API key from GlobalAiOpc',
+      models: 'seedance-2.5',
+    },
+  },
 }
 
 /**
