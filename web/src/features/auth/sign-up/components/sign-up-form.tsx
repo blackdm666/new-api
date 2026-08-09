@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Loader2 } from 'lucide-react'
+import { Loader2, UserRoundPlus } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -374,7 +374,11 @@ export function SignUpForm({
             !turnstileReady
           }
         >
-          {isLoading ? <Loader2 className='h-4 w-4 animate-spin' /> : null}
+          {isLoading ? (
+            <Loader2 className='h-4 w-4 animate-spin' />
+          ) : (
+            <UserRoundPlus className='h-4 w-4' />
+          )}
           {t('Create account')}
         </Button>
 

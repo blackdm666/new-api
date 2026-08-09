@@ -28,6 +28,7 @@ import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { createOAuthFlow } from '@/features/auth/api'
+import { CustomOAuthProviderIcon } from '@/features/auth/components/custom-oauth-provider-icon'
 import {
   OAUTH_BIND_CALLBACK_MESSAGE,
   OAUTH_BIND_RESULT_MESSAGE,
@@ -485,7 +486,11 @@ export function AccountBindingsTab({
                 >
                   <div className='flex min-w-0 items-center gap-2.5 sm:gap-3'>
                     <div className='bg-muted shrink-0 rounded-md p-1.5 sm:p-2'>
-                      <Link2 className='h-4 w-4' />
+                      <CustomOAuthProviderIcon
+                        provider={provider}
+                        className='h-4 w-4 object-contain'
+                        fallback={<Link2 className='h-4 w-4' />}
+                      />
                     </div>
                     <div className='min-w-0'>
                       <div className='flex items-center gap-1.5'>
