@@ -18,6 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { PermissionCatalog } from '@/lib/admin-permissions'
 import { api } from '@/lib/api'
+import {
+  normalizeOAuthBindings,
+  type OAuthBinding as NormalizedOAuthBinding,
+} from '@/lib/oauth-bindings'
 
 import type {
   User,
@@ -178,12 +182,7 @@ export async function getPermissionCatalog(): Promise<PermissionCatalog> {
 // Admin Binding Management APIs
 // ============================================================================
 
-export interface OAuthBinding {
-  provider_id: string
-  provider_name: string
-  user_id?: number
-  external_id?: string
-}
+export type OAuthBinding = NormalizedOAuthBinding
 
 /**
  * Get user's custom OAuth bindings (admin)
@@ -192,7 +191,11 @@ export async function getUserOAuthBindings(
   userId: number
 ): Promise<ApiResponse<OAuthBinding[]>> {
   const res = await api.get(`/api/user/${userId}/oauth/bindings`)
-  return res.data
+  const response = res.data as ApiResponse<unknown>
+  return {
+    ...response,
+    data: normalizeOAuthBindings(response.data),
+  }
 }
 
 /**

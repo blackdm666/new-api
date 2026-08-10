@@ -17,6 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import {
+  normalizeOAuthBindings,
+  type OAuthBinding as NormalizedOAuthBinding,
+} from '@/lib/oauth-bindings'
 import type { LoginSession } from '@/stores/auth-store'
 
 import type {
@@ -172,11 +176,7 @@ export async function revokeOtherLoginSessions(): Promise<ApiResponse> {
 // Custom OAuth Binding APIs
 // ============================================================================
 
-export interface CustomOAuthBinding {
-  provider_id: string
-  provider_name: string
-  external_id?: string
-}
+export type CustomOAuthBinding = NormalizedOAuthBinding
 
 /**
  * Get current user's custom OAuth bindings
@@ -185,7 +185,11 @@ export async function getSelfOAuthBindings(): Promise<
   ApiResponse<CustomOAuthBinding[]>
 > {
   const res = await api.get('/api/user/oauth/bindings')
-  return res.data
+  const response = res.data as ApiResponse<unknown>
+  return {
+    ...response,
+    data: normalizeOAuthBindings(response.data),
+  }
 }
 
 /**
