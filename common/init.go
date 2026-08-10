@@ -66,6 +66,7 @@ func InitEnv() {
 		log.Fatal(err)
 	}
 	initUserSessionSettings()
+	initGeeTestSettings()
 	if os.Getenv("SQLITE_PATH") != "" {
 		SQLitePath = os.Getenv("SQLITE_PATH")
 	}
@@ -134,6 +135,25 @@ func InitEnv() {
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
 	initConstantEnv()
+}
+
+func initGeeTestSettings() {
+	GeeTestRegisterCaptchaID = strings.TrimSpace(os.Getenv("GEETEST_REGISTER_CAPTCHA_ID"))
+	GeeTestRegisterCaptchaKey = strings.TrimSpace(os.Getenv("GEETEST_REGISTER_CAPTCHA_KEY"))
+	GeeTestLoginCaptchaID = strings.TrimSpace(os.Getenv("GEETEST_LOGIN_CAPTCHA_ID"))
+	GeeTestLoginCaptchaKey = strings.TrimSpace(os.Getenv("GEETEST_LOGIN_CAPTCHA_KEY"))
+
+	registerConfigured := GeeTestRegisterCaptchaID != "" || GeeTestRegisterCaptchaKey != ""
+	loginConfigured := GeeTestLoginCaptchaID != "" || GeeTestLoginCaptchaKey != ""
+	GeeTestRegisterCheckEnabled = GetEnvOrDefaultBool("GEETEST_REGISTER_ENABLED", registerConfigured)
+	GeeTestLoginCheckEnabled = GetEnvOrDefaultBool("GEETEST_LOGIN_ENABLED", loginConfigured)
+
+	if GeeTestRegisterCheckEnabled && (GeeTestRegisterCaptchaID == "" || GeeTestRegisterCaptchaKey == "") {
+		log.Fatal("GEETEST_REGISTER_ENABLED requires both GEETEST_REGISTER_CAPTCHA_ID and GEETEST_REGISTER_CAPTCHA_KEY")
+	}
+	if GeeTestLoginCheckEnabled && (GeeTestLoginCaptchaID == "" || GeeTestLoginCaptchaKey == "") {
+		log.Fatal("GEETEST_LOGIN_ENABLED requires both GEETEST_LOGIN_CAPTCHA_ID and GEETEST_LOGIN_CAPTCHA_KEY")
+	}
 }
 
 func initUserSessionSettings() {

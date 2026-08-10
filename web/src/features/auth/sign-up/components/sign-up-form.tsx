@@ -25,6 +25,7 @@ import { toast } from 'sonner'
 import type { z } from 'zod'
 
 import { Dialog } from '@/components/dialog'
+import { GeeTest } from '@/components/geetest'
 import { PasswordInput } from '@/components/password-input'
 import { Turnstile } from '@/components/turnstile'
 import { Button } from '@/components/ui/button'
@@ -44,6 +45,7 @@ import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { registerFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useEmailVerification } from '@/features/auth/hooks/use-email-verification'
+import { useGeeTest } from '@/features/auth/hooks/use-geetest'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import {
   getAffiliateCode,
@@ -76,15 +78,28 @@ export function SignUpForm({
     setTurnstileToken,
     validateTurnstile,
   } = useTurnstile()
+  const {
+    isGeeTestEnabled,
+    geeTestCaptchaId,
+    geeTestValidation,
+    setGeeTestValidation,
+    geeTestWidgetKey,
+    validateGeeTest,
+    resetGeeTest,
+  } = useGeeTest('register')
   const { redirectToLogin, handleLoginSuccess } = useAuthRedirect()
+  const validateHumanVerification = isGeeTestEnabled
+    ? validateGeeTest
+    : validateTurnstile
   const {
     isSending: isSendingCode,
     secondsLeft,
     isActive,
     sendCode,
   } = useEmailVerification({
-    turnstileToken,
-    validateTurnstile,
+    turnstileToken: isGeeTestEnabled ? undefined : turnstileToken,
+    validateHumanVerification,
+    geeTestValidation,
   })
 
   const form = useForm<z.infer<typeof registerFormSchema>>({
@@ -107,7 +122,9 @@ export function SignUpForm({
     status?.data?.oauth_register_enabled ??
     true
   const hasWeChatLogin = Boolean(status?.wechat_login)
-  const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
+  const humanVerificationReady = isGeeTestEnabled
+    ? Boolean(geeTestValidation)
+    : !isTurnstileEnabled || Boolean(turnstileToken)
 
   const wechatQrCodeUrl = useMemo(() => {
     return (
@@ -156,7 +173,7 @@ export function SignUpForm({
       }
     }
 
-    if (!validateTurnstile()) return
+    if (!validateHumanVerification()) return
 
     setIsLoading(true)
     try {
@@ -166,7 +183,8 @@ export function SignUpForm({
         email: data.email || undefined,
         verification_code: verificationCode || undefined,
         aff_code: getAffiliateCode(),
-        turnstile: turnstileToken,
+        turnstile: isGeeTestEnabled ? undefined : turnstileToken,
+        geetest: geeTestValidation,
       })
 
       if (res?.success) {
@@ -179,13 +197,18 @@ export function SignUpForm({
       // Errors are handled by global interceptor
     } finally {
       setIsLoading(false)
+      if (isGeeTestEnabled) resetGeeTest()
     }
   }
 
   async function handleSendVerificationCode() {
     if (await sendCode(emailValue || '')) {
-      setTurnstileToken('')
-      setTurnstileWidgetKey((current) => current + 1)
+      if (isGeeTestEnabled) {
+        resetGeeTest()
+      } else {
+        setTurnstileToken('')
+        setTurnstileWidgetKey((current) => current + 1)
+      }
     }
   }
 
@@ -336,7 +359,7 @@ export function SignUpForm({
                   isSendingCode ||
                   isActive ||
                   !emailValue ||
-                  !turnstileReady
+                  !humanVerificationReady
                 }
                 onClick={handleSendVerificationCode}
               >
@@ -346,8 +369,17 @@ export function SignUpForm({
           </>
         )}
 
-        {/* Turnstile */}
-        {isTurnstileEnabled && (
+        {/* Human verification */}
+        {isGeeTestEnabled && (
+          <div className='mt-2'>
+            <GeeTest
+              key={geeTestWidgetKey}
+              captchaId={geeTestCaptchaId}
+              onVerify={setGeeTestValidation}
+            />
+          </div>
+        )}
+        {!isGeeTestEnabled && isTurnstileEnabled && (
           <div className='mt-2'>
             <Turnstile
               key={turnstileWidgetKey}
@@ -371,7 +403,7 @@ export function SignUpForm({
           disabled={
             isLoading ||
             (requiresLegalConsent && !agreedToLegal) ||
-            !turnstileReady
+            !humanVerificationReady
           }
         >
           {isLoading ? (

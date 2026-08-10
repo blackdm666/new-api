@@ -27,6 +27,7 @@ import { toast } from 'sonner'
 import type { z } from 'zod'
 
 import { Dialog } from '@/components/dialog'
+import { GeeTest } from '@/components/geetest'
 import { PasswordInput } from '@/components/password-input'
 import { Turnstile } from '@/components/turnstile'
 import { Button } from '@/components/ui/button'
@@ -45,6 +46,7 @@ import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { loginFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
+import { useGeeTest } from '@/features/auth/hooks/use-geetest'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import { beginPasskeyLogin, finishPasskeyLogin } from '@/features/auth/passkey'
 import type { AuthFormProps } from '@/features/auth/types'
@@ -90,6 +92,15 @@ export function UserAuthForm({
     setTurnstileToken,
     validateTurnstile,
   } = useTurnstile()
+  const {
+    isGeeTestEnabled,
+    geeTestCaptchaId,
+    geeTestValidation,
+    setGeeTestValidation,
+    geeTestWidgetKey,
+    validateGeeTest,
+    resetGeeTest,
+  } = useGeeTest('login')
   const { handleLoginSuccess, redirectTo2FA } = useAuthRedirect()
   const setPending2FAFlowToken = useAuthStore(
     (state) => state.auth.setPending2FAFlowToken
@@ -113,6 +124,9 @@ export function UserAuthForm({
   )
   const hasAlternativeLogin =
     passkeyLoginEnabled || hasWeChatLogin || hasOAuthLogin
+  const humanVerificationReady = isGeeTestEnabled
+    ? Boolean(geeTestValidation)
+    : !isTurnstileEnabled || Boolean(turnstileToken)
 
   useEffect(() => {
     if (requiresLegalConsent) {
@@ -156,14 +170,19 @@ export function UserAuthForm({
       return
     }
 
-    if (!validateTurnstile()) return
+    if (isGeeTestEnabled) {
+      if (!validateGeeTest()) return
+    } else if (!validateTurnstile()) {
+      return
+    }
 
     setIsLoading(true)
     try {
       const res = await login({
         username: data.username,
         password: data.password,
-        turnstile: turnstileToken,
+        turnstile: isGeeTestEnabled ? undefined : turnstileToken,
+        geetest: geeTestValidation,
       })
 
       if (res.success) {
@@ -187,6 +206,7 @@ export function UserAuthForm({
       toast.error(error instanceof Error ? error.message : loginFailedMessage)
     } finally {
       setIsLoading(false)
+      if (isGeeTestEnabled) resetGeeTest()
     }
   }
 
@@ -398,14 +418,27 @@ export function UserAuthForm({
             <Button
               type='submit'
               className='mt-2 w-full justify-center gap-2'
-              disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
+              disabled={
+                isLoading ||
+                !humanVerificationReady ||
+                (requiresLegalConsent && !agreedToLegal)
+              }
             >
               {isLoading ? <Loader2 className='animate-spin' /> : <LogIn />}
               {t('Sign in')}
             </Button>
 
-            {/* Turnstile */}
-            {isTurnstileEnabled && (
+            {/* Human verification */}
+            {isGeeTestEnabled && (
+              <div className='mt-2'>
+                <GeeTest
+                  key={geeTestWidgetKey}
+                  captchaId={geeTestCaptchaId}
+                  onVerify={setGeeTestValidation}
+                />
+              </div>
+            )}
+            {!isGeeTestEnabled && isTurnstileEnabled && (
               <div className='mt-2'>
                 <Turnstile
                   siteKey={turnstileSiteKey}

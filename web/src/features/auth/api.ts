@@ -21,6 +21,7 @@ import axios from 'axios'
 import { api, refreshAuthentication, type RefreshOutcome } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { getGeeTestQueryParams } from './lib/geetest'
 import { getAffiliateCode } from './lib/storage'
 import type { TelegramAuthorization } from './lib/telegram-login'
 import type {
@@ -30,6 +31,7 @@ import type {
   TwoFAPayload,
   RegisterPayload,
   ApiResponse,
+  GeeTestValidation,
 } from './types'
 
 // ============================================================================
@@ -48,6 +50,7 @@ export async function login(payload: LoginPayload) {
     {
       username: payload.username,
       password: payload.password,
+      geetest: payload.geetest,
     },
     { skipAuthRefresh: true }
   )
@@ -191,10 +194,11 @@ export async function register(payload: RegisterPayload): Promise<ApiResponse> {
 // Send email verification code
 export async function sendEmailVerification(
   email: string,
-  turnstile?: string
+  turnstile?: string,
+  geetest?: GeeTestValidation
 ): Promise<ApiResponse> {
   const res = await api.get('/api/verification', {
-    params: { email, turnstile },
+    params: { email, turnstile, ...getGeeTestQueryParams(geetest) },
   })
   return res.data
 }
