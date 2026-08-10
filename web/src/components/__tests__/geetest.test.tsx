@@ -138,6 +138,7 @@ describe('GeeTest component', () => {
 
     assert.equal(receivedOptions?.captchaId, 'public-register-id')
     assert.equal(receivedOptions?.product, 'float')
+    assert.deepEqual(receivedOptions?.hideBar, ['close', 'refresh'])
     assert.equal(
       container
         .querySelector('[data-geetest-mounted]')

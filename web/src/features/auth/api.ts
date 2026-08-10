@@ -21,7 +21,7 @@ import axios from 'axios'
 import { api, refreshAuthentication, type RefreshOutcome } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { getGeeTestQueryParams } from './lib/geetest'
+import { getGeeTestQueryParams, type GeeTestScene } from './lib/geetest'
 import { getAffiliateCode } from './lib/storage'
 import type { TelegramAuthorization } from './lib/telegram-login'
 import type {
@@ -134,6 +134,23 @@ export async function sendPasswordResetEmail(
 // OAuth
 // ----------------------------------------------------------------------------
 
+export interface HumanVerificationPayload {
+  scene: GeeTestScene
+  turnstile?: string
+  geetest?: GeeTestValidation
+}
+
+function getHumanVerificationQueryParams(
+  verification?: HumanVerificationPayload
+) {
+  if (!verification) return {}
+  return {
+    geetest_scene: verification.scene,
+    turnstile: verification.turnstile,
+    ...getGeeTestQueryParams(verification.geetest),
+  }
+}
+
 // Start GitHub OAuth flow
 export async function githubOAuthStart(clientId: string, state: string) {
   const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&state=${state}&scope=user:email`
@@ -143,13 +160,23 @@ export async function githubOAuthStart(clientId: string, state: string) {
 // Get OAuth state for CSRF protection
 export async function createOAuthFlow(
   provider: string,
-  intent: 'login' | 'bind'
+  intent: 'login' | 'bind',
+  verification?: HumanVerificationPayload
 ): Promise<string> {
   const aff = intent === 'login' ? getAffiliateCode() : ''
   const res = await api.post(
     '/api/oauth/state',
-    { provider, intent, aff: aff || undefined },
-    { skipAuthRefresh: intent === 'login' }
+    {
+      provider,
+      intent,
+      aff: aff || undefined,
+      geetest_scene: verification?.scene,
+      geetest: verification?.geetest,
+    },
+    {
+      params: { turnstile: verification?.turnstile },
+      skipAuthRefresh: intent === 'login',
+    }
   )
   if (res.data?.success) {
     if (typeof res.data.data === 'string') return res.data.data
@@ -161,16 +188,25 @@ export async function createOAuthFlow(
 }
 
 // WeChat login by authorization code
-export async function wechatLoginByCode(code: string): Promise<ApiResponse> {
-  const res = await api.get('/api/oauth/wechat', { params: { code } })
+export async function wechatLoginByCode(
+  code: string,
+  verification?: HumanVerificationPayload
+): Promise<ApiResponse> {
+  const res = await api.get('/api/oauth/wechat', {
+    params: { code, ...getHumanVerificationQueryParams(verification) },
+  })
   return res.data
 }
 
 export async function telegramLogin(
-  authorization: TelegramAuthorization
+  authorization: TelegramAuthorization,
+  verification?: HumanVerificationPayload
 ): Promise<ApiResponse> {
   const res = await api.get('/api/oauth/telegram/login', {
-    params: authorization,
+    params: {
+      ...authorization,
+      ...getHumanVerificationQueryParams(verification),
+    },
     disableDuplicate: true,
     skipAuthRefresh: true,
     skipBusinessError: true,

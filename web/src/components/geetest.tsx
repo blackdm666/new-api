@@ -39,6 +39,7 @@ interface GeeTestOptions {
   language: string
   protocol: 'https://'
   timeout: number
+  hideBar: Array<'close' | 'refresh'>
   nativeButton: {
     width: string
     height: string
@@ -140,6 +141,7 @@ export function GeeTest({ captchaId, onVerify, className }: GeeTestProps) {
             language: geeTestLanguage(i18n.resolvedLanguage || i18n.language),
             protocol: 'https://',
             timeout: 10000,
+            hideBar: ['close', 'refresh'],
             nativeButton: { width: '100%', height: '44px' },
           },
           (captcha) => {

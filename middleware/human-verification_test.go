@@ -147,6 +147,78 @@ func TestHumanVerificationAcceptsRegistrationProofFromQuery(t *testing.T) {
 	assert.True(t, businessCalled)
 }
 
+func TestOAuthStateHumanVerificationRequiresRequestedSceneAndRestoresBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	configureGeeTestTest(t, successfulGeeTestHandler(t))
+	router := gin.New()
+	router.POST("/oauth/state", OAuthStateHumanVerification(), func(c *gin.Context) {
+		var request struct {
+			Provider string `json:"provider"`
+		}
+		require.NoError(t, common.DecodeJson(c.Request.Body, &request))
+		c.JSON(http.StatusOK, gin.H{"success": true, "provider": request.Provider})
+	})
+
+	body := `{"provider":"google","intent":"login","geetest_scene":"register","geetest":{"lot_number":"lot-1","captcha_output":"output","pass_token":"pass","gen_time":"123"}}`
+	request := httptest.NewRequest(http.MethodPost, "/oauth/state", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusOK, response.Code)
+	assert.Contains(t, response.Body.String(), `"success":true`)
+	assert.Contains(t, response.Body.String(), `"provider":"google"`)
+}
+
+func TestOAuthStateHumanVerificationSkipsSessionBoundBindFlow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstreamCalled := false
+	configureGeeTestTest(t, func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+	businessCalled := false
+	router := gin.New()
+	router.POST("/oauth/state", OAuthStateHumanVerification(), func(c *gin.Context) {
+		businessCalled = true
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/oauth/state", strings.NewReader(`{"provider":"google","intent":"bind"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusOK, response.Code)
+	assert.False(t, upstreamCalled)
+	assert.True(t, businessCalled)
+}
+
+func TestOAuthLoginHumanVerificationAcceptsRequestedSceneFromQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	configureGeeTestTest(t, successfulGeeTestHandler(t))
+	businessCalled := false
+	router := gin.New()
+	router.GET("/oauth/wechat", OAuthLoginHumanVerification(GeeTestProofFromQuery), func(c *gin.Context) {
+		businessCalled = true
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+
+	query := url.Values{
+		"geetest_scene":          {"register"},
+		"geetest_lot_number":     {"lot-1"},
+		"geetest_captcha_output": {"output"},
+		"geetest_pass_token":     {"pass"},
+		"geetest_gen_time":       {"123"},
+	}
+	request := httptest.NewRequest(http.MethodGet, "/oauth/wechat?"+query.Encode(), nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusOK, response.Code)
+	assert.True(t, businessCalled)
+}
+
 func TestGeeTestConfigKeepsRegisterAndLoginCredentialsSeparate(t *testing.T) {
 	oldRegisterEnabled := common.GeeTestRegisterCheckEnabled
 	oldRegisterID := common.GeeTestRegisterCaptchaID

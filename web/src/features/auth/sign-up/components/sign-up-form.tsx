@@ -125,6 +125,19 @@ export function SignUpForm({
   const humanVerificationReady = isGeeTestEnabled
     ? Boolean(geeTestValidation)
     : !isTurnstileEnabled || Boolean(turnstileToken)
+  const humanVerificationPayload = {
+    scene: 'register' as const,
+    turnstile: isGeeTestEnabled ? undefined : turnstileToken,
+    geetest: geeTestValidation,
+  }
+  const resetHumanVerification = () => {
+    if (isGeeTestEnabled) {
+      resetGeeTest()
+    } else {
+      setTurnstileToken('')
+      setTurnstileWidgetKey((current) => current + 1)
+    }
+  }
 
   const wechatQrCodeUrl = useMemo(() => {
     return (
@@ -217,6 +230,7 @@ export function SignUpForm({
       toast.error(legalConsentErrorMessage)
       return
     }
+    if (!validateHumanVerification()) return
 
     setIsWeChatDialogOpen(true)
   }
@@ -237,7 +251,7 @@ export function SignUpForm({
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode)
+      const res = await wechatLoginByCode(wechatCode, humanVerificationPayload)
       if (res?.success && isAuthBundle(res.data)) {
         await handleLoginSuccess(res.data)
         toast.success(t('Signed in via WeChat'))
@@ -251,6 +265,7 @@ export function SignUpForm({
       toast.error(t('Login failed'))
     } finally {
       setIsWeChatSubmitting(false)
+      resetHumanVerification()
     }
   }
 
@@ -420,6 +435,11 @@ export function SignUpForm({
             disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
             onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
             isWeChatLoading={isWeChatSubmitting}
+            humanVerification={{
+              ...humanVerificationPayload,
+              validate: validateHumanVerification,
+              reset: resetHumanVerification,
+            }}
             className='pt-2'
           />
         )}

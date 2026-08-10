@@ -22,7 +22,12 @@ import { toast } from 'sonner'
 
 import { clearAuthentication, isAuthBundle } from '@/lib/api'
 
-import { createOAuthFlow, logout, telegramLogin } from '../api'
+import {
+  createOAuthFlow,
+  logout,
+  telegramLogin,
+  type HumanVerificationPayload,
+} from '../api'
 import {
   buildGitHubOAuthUrl,
   buildDiscordOAuthUrl,
@@ -33,12 +38,18 @@ import { pickTelegramAuthorization } from '../lib/telegram-login'
 import type { SystemStatus, CustomOAuthProviderInfo } from '../types'
 import { useAuthRedirect } from './use-auth-redirect'
 
+export interface OAuthHumanVerification extends HumanVerificationPayload {
+  validate: () => boolean
+  reset?: () => void
+}
+
 /**
  * Hook for managing OAuth login
  */
 export function useOAuthLogin(
   status: SystemStatus | null,
-  redirectTo?: string
+  redirectTo?: string,
+  humanVerification?: OAuthHumanVerification
 ) {
   const { t } = useTranslation()
   const { handleLoginSuccess } = useAuthRedirect()
@@ -67,9 +78,20 @@ export function useOAuthLogin(
     clearAuthentication()
   }
 
+  const validateHumanVerification = () => humanVerification?.validate() ?? true
+
+  const verificationPayload = humanVerification
+    ? {
+        scene: humanVerification.scene,
+        turnstile: humanVerification.turnstile,
+        geetest: humanVerification.geetest,
+      }
+    : undefined
+
   const handleGitHubLogin = async () => {
     if (!status?.github_client_id) return
     if (githubButtonDisabled) return
+    if (!validateHumanVerification()) return
 
     setIsLoading(true)
     setGithubButtonDisabled(true)
@@ -89,11 +111,16 @@ export function useOAuthLogin(
 
     try {
       await resetSession()
-      const state = await createOAuthFlow('github', 'login')
+      const state = await createOAuthFlow(
+        'github',
+        'login',
+        verificationPayload
+      )
 
       const url = buildGitHubOAuthUrl(status.github_client_id, state)
       window.open(url, '_self')
     } catch {
+      humanVerification?.reset?.()
       toast.error(t('Failed to start GitHub login'))
       if (githubTimeoutRef.current) {
         clearTimeout(githubTimeoutRef.current)
@@ -106,15 +133,21 @@ export function useOAuthLogin(
 
   const handleDiscordLogin = async () => {
     if (!status?.discord_client_id) return
+    if (!validateHumanVerification()) return
 
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow('discord', 'login')
+      const state = await createOAuthFlow(
+        'discord',
+        'login',
+        verificationPayload
+      )
 
       const url = buildDiscordOAuthUrl(status.discord_client_id, state)
       window.open(url, '_self')
     } catch {
+      humanVerification?.reset?.()
       toast.error(t('Failed to start Discord login'))
     } finally {
       setIsLoading(false)
@@ -123,11 +156,12 @@ export function useOAuthLogin(
 
   const handleOIDCLogin = async () => {
     if (!status?.oidc_authorization_endpoint || !status?.oidc_client_id) return
+    if (!validateHumanVerification()) return
 
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow('oidc', 'login')
+      const state = await createOAuthFlow('oidc', 'login', verificationPayload)
 
       const url = buildOIDCOAuthUrl(
         status.oidc_authorization_endpoint,
@@ -136,6 +170,7 @@ export function useOAuthLogin(
       )
       window.open(url, '_self')
     } catch {
+      humanVerification?.reset?.()
       toast.error(t('Failed to start OIDC login'))
     } finally {
       setIsLoading(false)
@@ -144,15 +179,21 @@ export function useOAuthLogin(
 
   const handleLinuxDOLogin = async () => {
     if (!status?.linuxdo_client_id) return
+    if (!validateHumanVerification()) return
 
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow('linuxdo', 'login')
+      const state = await createOAuthFlow(
+        'linuxdo',
+        'login',
+        verificationPayload
+      )
 
       const url = buildLinuxDOOAuthUrl(status.linuxdo_client_id, state)
       window.open(url, '_self')
     } catch {
+      humanVerification?.reset?.()
       toast.error(t('Failed to start LinuxDO login'))
     } finally {
       setIsLoading(false)
@@ -164,6 +205,7 @@ export function useOAuthLogin(
       toast.error(t('Login failed'))
       return
     }
+    if (!validateHumanVerification()) return
 
     setIsLoading(true)
     try {
@@ -187,7 +229,7 @@ export function useOAuthLogin(
 
     setIsTelegramPending(true)
     try {
-      const response = await telegramLogin(authorization)
+      const response = await telegramLogin(authorization, verificationPayload)
       if (!response.success || !isAuthBundle(response.data)) {
         toast.error(t('Login failed'))
         return
@@ -199,17 +241,23 @@ export function useOAuthLogin(
     } catch {
       toast.error(t('Login failed'))
     } finally {
+      humanVerification?.reset?.()
       setIsTelegramPending(false)
     }
   }
 
   const handleCustomOAuthLogin = async (provider: CustomOAuthProviderInfo) => {
     if (!provider.authorization_endpoint || !provider.client_id) return
+    if (!validateHumanVerification()) return
 
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow(provider.slug, 'login')
+      const state = await createOAuthFlow(
+        provider.slug,
+        'login',
+        verificationPayload
+      )
 
       const redirectUri = `${window.location.origin}/oauth/${provider.slug}`
       const url = new URL(provider.authorization_endpoint)
@@ -223,6 +271,7 @@ export function useOAuthLogin(
 
       window.open(url.toString(), '_self')
     } catch {
+      humanVerification?.reset?.()
       toast.error(
         t('Failed to start {{provider}} login', { provider: provider.name })
       )

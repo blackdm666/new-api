@@ -46,7 +46,9 @@ type geeTestProof struct {
 }
 
 type geeTestRequestBody struct {
-	GeeTest geeTestProof `json:"geetest"`
+	GeeTest      geeTestProof `json:"geetest"`
+	GeeTestScene GeeTestScene `json:"geetest_scene"`
+	Intent       string       `json:"intent"`
 }
 
 type geeTestResponse struct {
@@ -56,35 +58,68 @@ type geeTestResponse struct {
 
 func HumanVerification(scene GeeTestScene, source GeeTestProofSource) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		captchaID, captchaKey, enabled := geeTestConfig(scene)
-		if !enabled {
-			TurnstileCheck()(c)
-			return
-		}
-
 		proof, err := readGeeTestProof(c, source)
-		if err != nil || !proof.valid() {
-			common.ApiErrorI18n(c, i18n.MsgHumanVerificationRequired)
-			c.Abort()
-			return
-		}
-
-		result, err := verifyGeeTest(c, captchaID, captchaKey, proof)
-		if err != nil {
-			common.SysLog(fmt.Sprintf("GeeTest %s verification unavailable: %v", scene, err))
-			common.ApiErrorI18n(c, i18n.MsgHumanVerificationUnavailable)
-			c.Abort()
-			return
-		}
-		if result.Result != "success" {
-			common.SysLog(fmt.Sprintf("GeeTest %s verification failed: %s", scene, result.Reason))
-			common.ApiErrorI18n(c, i18n.MsgHumanVerificationFailed)
-			c.Abort()
-			return
-		}
-
-		c.Next()
+		runHumanVerification(c, scene, proof, err)
 	}
+}
+
+// OAuthStateHumanVerification protects anonymous OAuth login flows before a
+// state token is issued. Account binding is already session-bound and cannot
+// create a user, so it intentionally skips the challenge.
+func OAuthStateHumanVerification() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		request, err := readGeeTestRequestBody(c)
+		if err == nil && strings.TrimSpace(request.Intent) == "bind" {
+			c.Next()
+			return
+		}
+		runHumanVerification(c, request.GeeTestScene, request.GeeTest, err)
+	}
+}
+
+// OAuthLoginHumanVerification protects non-standard third-party login routes
+// that can be reached without first obtaining an OAuth state token.
+func OAuthLoginHumanVerification(source GeeTestProofSource) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		scene, proof, err := readRequestedGeeTestProof(c, source)
+		runHumanVerification(c, scene, proof, err)
+	}
+}
+
+func runHumanVerification(c *gin.Context, scene GeeTestScene, proof geeTestProof, readErr error) {
+	if scene != GeeTestSceneRegister && scene != GeeTestSceneLogin {
+		common.ApiErrorI18n(c, i18n.MsgHumanVerificationRequired)
+		c.Abort()
+		return
+	}
+
+	captchaID, captchaKey, enabled := geeTestConfig(scene)
+	if !enabled {
+		TurnstileCheck()(c)
+		return
+	}
+
+	if readErr != nil || !proof.valid() {
+		common.ApiErrorI18n(c, i18n.MsgHumanVerificationRequired)
+		c.Abort()
+		return
+	}
+
+	result, err := verifyGeeTest(c, captchaID, captchaKey, proof)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("GeeTest %s verification unavailable: %v", scene, err))
+		common.ApiErrorI18n(c, i18n.MsgHumanVerificationUnavailable)
+		c.Abort()
+		return
+	}
+	if result.Result != "success" {
+		common.SysLog(fmt.Sprintf("GeeTest %s verification failed: %s", scene, result.Reason))
+		common.ApiErrorI18n(c, i18n.MsgHumanVerificationFailed)
+		c.Abort()
+		return
+	}
+
+	c.Next()
 }
 
 func geeTestConfig(scene GeeTestScene) (captchaID string, captchaKey string, enabled bool) {
@@ -108,16 +143,30 @@ func readGeeTestProof(c *gin.Context, source GeeTestProofSource) (geeTestProof, 
 		}, nil
 	}
 
+	request, err := readGeeTestRequestBody(c)
+	return request.GeeTest, err
+}
+
+func readRequestedGeeTestProof(c *gin.Context, source GeeTestProofSource) (GeeTestScene, geeTestProof, error) {
+	if source == GeeTestProofFromQuery {
+		proof, err := readGeeTestProof(c, source)
+		return GeeTestScene(c.Query("geetest_scene")), proof, err
+	}
+	request, err := readGeeTestRequestBody(c)
+	return request.GeeTestScene, request.GeeTest, err
+}
+
+func readGeeTestRequestBody(c *gin.Context) (geeTestRequestBody, error) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		return geeTestProof{}, err
+		return geeTestRequestBody{}, err
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(body))
 	var request geeTestRequestBody
 	if err := common.Unmarshal(body, &request); err != nil {
-		return geeTestProof{}, err
+		return geeTestRequestBody{}, err
 	}
-	return request.GeeTest, nil
+	return request, nil
 }
 
 func (proof geeTestProof) valid() bool {

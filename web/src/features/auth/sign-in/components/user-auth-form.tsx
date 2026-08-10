@@ -124,9 +124,26 @@ export function UserAuthForm({
   )
   const hasAlternativeLogin =
     passkeyLoginEnabled || hasWeChatLogin || hasOAuthLogin
+  const requiresHumanVerificationSurface =
+    passwordLoginEnabled || hasWeChatLogin || hasOAuthLogin
   const humanVerificationReady = isGeeTestEnabled
     ? Boolean(geeTestValidation)
     : !isTurnstileEnabled || Boolean(turnstileToken)
+  const validateHumanVerification = isGeeTestEnabled
+    ? validateGeeTest
+    : validateTurnstile
+  const humanVerificationPayload = {
+    scene: 'login' as const,
+    turnstile: isGeeTestEnabled ? undefined : turnstileToken,
+    geetest: geeTestValidation,
+  }
+  const resetHumanVerification = () => {
+    if (isGeeTestEnabled) {
+      resetGeeTest()
+    } else {
+      setTurnstileToken('')
+    }
+  }
 
   useEffect(() => {
     if (requiresLegalConsent) {
@@ -170,11 +187,7 @@ export function UserAuthForm({
       return
     }
 
-    if (isGeeTestEnabled) {
-      if (!validateGeeTest()) return
-    } else if (!validateTurnstile()) {
-      return
-    }
+    if (!validateHumanVerification()) return
 
     setIsLoading(true)
     try {
@@ -215,6 +228,7 @@ export function UserAuthForm({
       toast.error(legalConsentErrorMessage)
       return
     }
+    if (!validateHumanVerification()) return
 
     setIsWeChatDialogOpen(true)
   }
@@ -235,7 +249,7 @@ export function UserAuthForm({
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode)
+      const res = await wechatLoginByCode(wechatCode, humanVerificationPayload)
       if (res?.success && isAuthBundle(res.data)) {
         await handleLoginSuccess(res.data, redirectTo)
         toast.success(t('Signed in via WeChat'))
@@ -249,6 +263,7 @@ export function UserAuthForm({
       toast.error(loginFailedMessage)
     } finally {
       setIsWeChatSubmitting(false)
+      resetHumanVerification()
     }
   }
 
@@ -357,6 +372,11 @@ export function UserAuthForm({
         disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
         onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
         isWeChatLoading={isWeChatSubmitting}
+        humanVerification={{
+          ...humanVerificationPayload,
+          validate: validateHumanVerification,
+          reset: resetHumanVerification,
+        }}
       />
     </>
   )
@@ -413,41 +433,29 @@ export function UserAuthForm({
                 </FormItem>
               )}
             />
-
-            {/* Submit Button */}
-            <Button
-              type='submit'
-              className='mt-2 w-full justify-center gap-2'
-              disabled={
-                isLoading ||
-                !humanVerificationReady ||
-                (requiresLegalConsent && !agreedToLegal)
-              }
-            >
-              {isLoading ? <Loader2 className='animate-spin' /> : <LogIn />}
-              {t('Sign in')}
-            </Button>
-
-            {/* Human verification */}
-            {isGeeTestEnabled && (
-              <div className='mt-2'>
-                <GeeTest
-                  key={geeTestWidgetKey}
-                  captchaId={geeTestCaptchaId}
-                  onVerify={setGeeTestValidation}
-                />
-              </div>
-            )}
-            {!isGeeTestEnabled && isTurnstileEnabled && (
-              <div className='mt-2'>
-                <Turnstile
-                  siteKey={turnstileSiteKey}
-                  onVerify={setTurnstileToken}
-                />
-              </div>
-            )}
           </>
         )}
+
+        {/* Human verification also gates registration-capable OAuth routes. */}
+        {requiresHumanVerificationSurface && isGeeTestEnabled && (
+          <div className='mt-2'>
+            <GeeTest
+              key={geeTestWidgetKey}
+              captchaId={geeTestCaptchaId}
+              onVerify={setGeeTestValidation}
+            />
+          </div>
+        )}
+        {requiresHumanVerificationSurface &&
+          !isGeeTestEnabled &&
+          isTurnstileEnabled && (
+            <div className='mt-2'>
+              <Turnstile
+                siteKey={turnstileSiteKey}
+                onVerify={setTurnstileToken}
+              />
+            </div>
+          )}
 
         <LegalConsent
           status={status}
@@ -457,6 +465,21 @@ export function UserAuthForm({
         />
 
         {!hasAlternativeLogin && alternativeLoginMethods}
+
+        {passwordLoginEnabled && (
+          <Button
+            type='submit'
+            className='mt-2 w-full justify-center gap-2'
+            disabled={
+              isLoading ||
+              !humanVerificationReady ||
+              (requiresLegalConsent && !agreedToLegal)
+            }
+          >
+            {isLoading ? <Loader2 className='animate-spin' /> : <LogIn />}
+            {t('Sign in')}
+          </Button>
+        )}
       </form>
 
       {hasWeChatLogin && (
