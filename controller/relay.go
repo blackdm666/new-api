@@ -119,6 +119,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		return
 	}
+	if shortCircuitClaudeTitleRequest(c, relayFormat, request) {
+		return
+	}
 
 	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
