@@ -20,8 +20,14 @@ import { useEffect, useRef } from 'react'
 
 declare global {
   interface Window {
-    turnstile?: {
-      render: (element: HTMLElement, options: Record<string, unknown>) => void
+    Captcha88?: {
+      render: (opts: {
+        el: HTMLElement | string
+        endpoint?: string
+        act?: string
+        onToken?: (token: string) => void
+        onError?: (msg: string) => void
+      }) => unknown
     }
   }
 }
@@ -33,6 +39,11 @@ interface TurnstileProps {
   className?: string
 }
 
+// 88API 自研人机验证组件(伪装 Cloudflare 外观:勾选 → 行为/点击/滑块)。
+// 复用 new-api 现成的 Turnstile 接线:后台“Turnstile 站点密钥”填我方验证服务地址
+// (如 https://verify.88api.ai),组件据此加载 widget.js 并渲染。校验通过后通过
+// onVerify 回传一次性 pass_token,后端由 TurnstileCheck 中间件核销。
+// 组件对外签名与原 Cloudflare 版保持一致,表单/hook/api 层无需改动。
 export function Turnstile({
   siteKey,
   onVerify,
@@ -40,32 +51,41 @@ export function Turnstile({
   className,
 }: TurnstileProps) {
   const ref = useRef<HTMLDivElement | null>(null)
+  const rendered = useRef(false)
 
   useEffect(() => {
+    const endpoint =
+      (siteKey || '').replace(/\/+$/, '') || 'https://verify.88api.ai'
+
     const render = () => {
-      if (!ref.current || !window.turnstile) return
+      if (!ref.current || rendered.current || !window.Captcha88) return
+      rendered.current = true
       try {
-        window.turnstile.render(ref.current, {
-          sitekey: siteKey,
-          callback: (token: string) => onVerify(token),
-          'error-callback': () => onExpire?.(),
-          'expired-callback': () => onExpire?.(),
+        window.Captcha88.render({
+          el: ref.current,
+          endpoint,
+          act: 'register',
+          onToken: (token: string) => onVerify(token),
+          onError: () => onExpire?.(),
         })
       } catch {
         /* empty */
       }
     }
 
-    if (window.turnstile) {
+    if (window.Captcha88) {
       render()
       return
     }
-    const scriptId = 'cf-turnstile'
-    if (document.getElementById(scriptId)) return
+    const scriptId = 'c88-widget'
+    const existing = document.getElementById(scriptId) as HTMLScriptElement | null
+    if (existing) {
+      existing.addEventListener('load', render)
+      return
+    }
     const s = document.createElement('script')
     s.id = scriptId
-    s.src =
-      'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+    s.src = `${endpoint}/widget.js`
     s.async = true
     s.defer = true
     s.onload = () => render()
