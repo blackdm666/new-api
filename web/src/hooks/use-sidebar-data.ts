@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { TFunction } from 'i18next'
 import {
   Activity,
   Box,
@@ -26,6 +27,7 @@ import {
   LayoutDashboard,
   ListTodo,
   MessageSquare,
+  PanelsTopLeft,
   Radio,
   ServerCog,
   Settings,
@@ -36,24 +38,23 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { type SidebarData } from '@/components/layout/types'
+import type { SidebarData } from '@/components/layout/types'
+import { INFINITE_CANVAS_URL } from '@/lib/external-links'
 import { ROLE } from '@/lib/roles'
 
-/**
- * Root navigation groups for the application sidebar.
- *
- * These are shown when the URL does not match any nested sidebar view
- * registered in `layout/lib/sidebar-view-registry.ts`.
- */
-export function useSidebarData(): SidebarData {
-  const { t } = useTranslation()
-
+export function buildSidebarData(t: TFunction): SidebarData {
   return {
     navGroups: [
       {
         id: 'chat',
         title: t('Chat'),
         items: [
+          {
+            title: t('Infinite Canvas'),
+            url: INFINITE_CANVAS_URL,
+            icon: PanelsTopLeft,
+            external: true,
+          },
           {
             title: t('Playground'),
             url: '/playground',
@@ -160,4 +161,15 @@ export function useSidebarData(): SidebarData {
       },
     ],
   }
+}
+
+/**
+ * Root navigation groups for the application sidebar.
+ *
+ * These are shown when the URL does not match any nested sidebar view
+ * registered in `layout/lib/sidebar-view-registry.ts`.
+ */
+export function useSidebarData(): SidebarData {
+  const { t } = useTranslation()
+  return buildSidebarData(t)
 }

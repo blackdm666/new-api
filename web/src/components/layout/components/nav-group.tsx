@@ -125,14 +125,23 @@ function SidebarMenuLink({ item, href }: { item: NavLink; href: string }) {
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        isActive={checkIsActive(href, item)}
+        isActive={!item.external && checkIsActive(href, item)}
         tooltip={item.title}
         render={
-          <Link
-            to={item.url}
-            preload={isMobile ? false : undefined}
-            onClick={() => setOpenMobile(false)}
-          />
+          item.external ? (
+            <a
+              href={String(item.url)}
+              target='_blank'
+              rel='noopener noreferrer'
+              onClick={() => setOpenMobile(false)}
+            />
+          ) : (
+            <Link
+              to={item.url}
+              preload={isMobile ? false : undefined}
+              onClick={() => setOpenMobile(false)}
+            />
+          )
         }
       >
         {item.icon && <item.icon className='shrink-0' />}
@@ -188,13 +197,22 @@ function SidebarMenuCollapsible({
           {item.items.map((subItem) => (
             <SidebarMenuSubItem key={subItem.title}>
               <SidebarMenuSubButton
-                isActive={checkIsActive(href, subItem)}
+                isActive={!subItem.external && checkIsActive(href, subItem)}
                 render={
-                  <Link
-                    to={subItem.url}
-                    preload={isMobile ? false : undefined}
-                    onClick={() => setOpenMobile(false)}
-                  />
+                  subItem.external ? (
+                    <a
+                      href={String(subItem.url)}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      onClick={() => setOpenMobile(false)}
+                    />
+                  ) : (
+                    <Link
+                      to={subItem.url}
+                      preload={isMobile ? false : undefined}
+                      onClick={() => setOpenMobile(false)}
+                    />
+                  )
                 }
               >
                 {subItem.icon && <subItem.icon className='shrink-0' />}
@@ -246,10 +264,18 @@ function SidebarMenuCollapsedDropdown({
               <DropdownMenuItem
                 key={`${sub.title}-${sub.url}`}
                 render={
-                  <Link
-                    to={sub.url}
-                    className={`${checkIsActive(href, sub) ? 'bg-secondary' : ''}`}
-                  />
+                  sub.external ? (
+                    <a
+                      href={String(sub.url)}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                    />
+                  ) : (
+                    <Link
+                      to={sub.url}
+                      className={`${checkIsActive(href, sub) ? 'bg-secondary' : ''}`}
+                    />
+                  )
                 }
               >
                 {sub.icon && <sub.icon />}
