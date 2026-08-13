@@ -235,7 +235,18 @@ func GetHomePageContent(c *gin.Context) {
 }
 
 func SendEmailVerification(c *gin.Context) {
-	email := model.NormalizeEmail(c.Query("email"))
+	email := c.Query("email")
+	if c.Request.Method == http.MethodPost {
+		var request struct {
+			Email string `json:"email"`
+		}
+		if err := c.ShouldBindJSON(&request); err != nil {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+		email = request.Email
+	}
+	email = model.NormalizeEmail(email)
 	if err := common.Validate.Var(email, "required,email"); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -300,7 +311,18 @@ func SendEmailVerification(c *gin.Context) {
 }
 
 func SendPasswordResetEmail(c *gin.Context) {
-	email := model.NormalizeEmail(c.Query("email"))
+	email := c.Query("email")
+	if c.Request.Method == http.MethodPost {
+		var request struct {
+			Email string `json:"email"`
+		}
+		if err := c.ShouldBindJSON(&request); err != nil {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+		email = request.Email
+	}
+	email = model.NormalizeEmail(email)
 	if err := common.Validate.Var(email, "required,email"); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return

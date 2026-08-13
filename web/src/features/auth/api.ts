@@ -121,9 +121,7 @@ export async function sendPasswordResetEmail(
   email: string,
   turnstile?: string
 ): Promise<ApiResponse> {
-  const res = await api.get('/api/reset_password', {
-    params: { email, turnstile },
-  })
+  const res = await api.post('/api/reset_password', { email, turnstile })
   return res.data
 }
 
@@ -219,9 +217,7 @@ export async function sendEmailVerification(
   email: string,
   turnstile?: string
 ): Promise<ApiResponse> {
-  const res = await api.get('/api/verification', {
-    params: { email, turnstile },
-  })
+  const res = await api.post('/api/verification', { email, turnstile })
   return res.data
 }
 

@@ -169,7 +169,7 @@ func (midjourney *Midjourney) Insert() error {
 
 func (midjourney *Midjourney) Update() error {
 	var err error
-	err = DB.Save(midjourney).Error
+	err = DB.Omit("quota", "token_id", "billing_channel_id").Save(midjourney).Error
 	return err
 }
 
@@ -187,12 +187,14 @@ func (midjourney *Midjourney) GetBillingChannelId() int {
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
-// Returns (true, nil) if this caller won the update, (false, nil) if
-// another process already moved the task out of fromStatus.
-// UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
-// Uses Model().Select("*").Updates() to avoid GORM Save()'s INSERT fallback.
+// Billing fields are intentionally omitted: a stale polling/notify snapshot
+// must never restore a quota marker that a concurrent refund already cleared.
 func (midjourney *Midjourney) UpdateWithStatus(fromStatus string) (bool, error) {
-	result := DB.Model(midjourney).Where("status = ?", fromStatus).Select("*").Updates(midjourney)
+	result := DB.Model(midjourney).
+		Where("status = ?", fromStatus).
+		Select("*").
+		Omit("quota", "token_id", "billing_channel_id").
+		Updates(midjourney)
 	if result.Error != nil {
 		return false, result.Error
 	}

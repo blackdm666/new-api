@@ -125,7 +125,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
       } else {
         toast.error(response.message || t('Failed to update settings'))
       }
-    } catch (_error) {
+    } catch {
       toast.error(t('Failed to update settings'))
     } finally {
       setLoading(false)
@@ -143,8 +143,9 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
           value={[notifyType]}
           onValueChange={(value) => {
             const nextValue = value.find((item) => item !== notifyType)
-            if (nextValue)
+            if (nextValue) {
               updateField('notify_type', normalizeNotifyType(nextValue))
+            }
           }}
           aria-label={t('Notification Method')}
           variant='outline'
@@ -356,25 +357,27 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
           </div>
         )}
 
-        {/* Accept Unset Model Price */}
-        <div className='flex items-start justify-between gap-3 rounded-lg border p-3 sm:items-center sm:p-4'>
-          <div className='space-y-0.5'>
-            <Label htmlFor='acceptUnsetPrice'>
-              {t('Accept Unpriced Models')}
-            </Label>
-            <p className='text-muted-foreground text-xs sm:text-sm'>
-              {t('Allow using models without price configuration')}
-            </p>
+        {/* Accept Unset Model Price (admin only) */}
+        {isAdmin && (
+          <div className='flex items-start justify-between gap-3 rounded-lg border p-3 sm:items-center sm:p-4'>
+            <div className='space-y-0.5'>
+              <Label htmlFor='acceptUnsetPrice'>
+                {t('Accept Unpriced Models')}
+              </Label>
+              <p className='text-muted-foreground text-xs sm:text-sm'>
+                {t('Allow using models without price configuration')}
+              </p>
+            </div>
+            <Switch
+              id='acceptUnsetPrice'
+              className='shrink-0'
+              checked={settings.accept_unset_model_ratio_model}
+              onCheckedChange={(checked) =>
+                updateField('accept_unset_model_ratio_model', checked)
+              }
+            />
           </div>
-          <Switch
-            id='acceptUnsetPrice'
-            className='shrink-0'
-            checked={settings.accept_unset_model_ratio_model}
-            onCheckedChange={(checked) =>
-              updateField('accept_unset_model_ratio_model', checked)
-            }
-          />
-        </div>
+        )}
 
         {/* Record IP Log */}
         <div className='flex items-start justify-between gap-3 rounded-lg border p-3 sm:items-center sm:p-4'>

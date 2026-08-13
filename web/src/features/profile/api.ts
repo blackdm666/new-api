@@ -106,11 +106,10 @@ export async function sendEmailVerification(
   email: string,
   turnstileToken?: string
 ): Promise<ApiResponse> {
-  const params = new URLSearchParams({ email })
-  if (turnstileToken) {
-    params.append('turnstile', turnstileToken)
-  }
-  const res = await api.get(`/api/verification?${params}`)
+  const res = await api.post('/api/verification', {
+    email,
+    turnstile: turnstileToken,
+  })
   return res.data
 }
 

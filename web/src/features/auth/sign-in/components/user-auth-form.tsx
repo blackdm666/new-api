@@ -90,6 +90,7 @@ export function UserAuthForm({
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
+    isStatusReady,
   } = useTurnstile()
   const { handleLoginSuccess, redirectTo2FA } = useAuthRedirect()
   const setPending2FAFlowToken = useAuthStore(
@@ -116,7 +117,8 @@ export function UserAuthForm({
     passkeyLoginEnabled || hasWeChatLogin || hasOAuthLogin
   const requiresTurnstileSurface =
     passwordLoginEnabled || hasWeChatLogin || hasOAuthLogin
-  const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
+  const turnstileReady =
+    isStatusReady && (!isTurnstileEnabled || Boolean(turnstileToken))
   const turnstilePayload = { turnstile: turnstileToken }
   const resetTurnstile = () => {
     setTurnstileToken('')

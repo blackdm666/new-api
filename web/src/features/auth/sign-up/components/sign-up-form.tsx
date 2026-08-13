@@ -75,6 +75,7 @@ export function SignUpForm({
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
+    isStatusReady,
   } = useTurnstile()
   const { redirectToLogin, handleLoginSuccess } = useAuthRedirect()
   const {
@@ -107,7 +108,8 @@ export function SignUpForm({
     status?.data?.oauth_register_enabled ??
     true
   const hasWeChatLogin = Boolean(status?.wechat_login)
-  const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
+  const turnstileReady =
+    isStatusReady && (!isTurnstileEnabled || Boolean(turnstileToken))
   const turnstilePayload = { turnstile: turnstileToken }
   const resetTurnstile = () => {
     setTurnstileToken('')
@@ -195,7 +197,8 @@ export function SignUpForm({
   }
 
   async function handleSendVerificationCode() {
-    if (await sendCode(emailValue || '')) {
+    await sendCode(emailValue || '')
+    if (isTurnstileEnabled && turnstileToken) {
       resetTurnstile()
     }
   }

@@ -20,6 +20,7 @@ package middleware
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -85,4 +86,73 @@ func TestTurnstileVerifyURL(t *testing.T) {
 		t.Setenv("TURNSTILE_VERIFY_URL", "")
 		assert.Equal(t, defaultTurnstileVerifyURL, turnstileVerifyURL())
 	})
+}
+
+func TestTurnstileCheckFromBodyVerifiesTokenAndRestoresBody(t *testing.T) {
+	oldEnabled := common.TurnstileCheckEnabled
+	oldSecret := common.TurnstileSecretKey
+	common.TurnstileCheckEnabled = true
+	common.TurnstileSecretKey = "test-secret"
+	t.Cleanup(func() {
+		common.TurnstileCheckEnabled = oldEnabled
+		common.TurnstileSecretKey = oldSecret
+	})
+
+	var verifiedToken string
+	verifyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		verifiedToken = r.Form.Get("response")
+		_, _ = io.WriteString(w, `{"success":true}`)
+	}))
+	t.Cleanup(verifyServer.Close)
+	t.Setenv("TURNSTILE_VERIFY_URL", verifyServer.URL)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	nextCalled := false
+	router.POST("/verification", TurnstileCheckFromBody(), func(c *gin.Context) {
+		nextCalled = true
+		var request struct {
+			Email     string `json:"email"`
+			Turnstile string `json:"turnstile"`
+		}
+		require.NoError(t, common.DecodeJson(c.Request.Body, &request))
+		assert.Equal(t, "bind@example.com", request.Email)
+		assert.Equal(t, "one-use-token", request.Turnstile)
+		c.Status(http.StatusNoContent)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/verification", bytes.NewBufferString(
+		`{"email":"bind@example.com","turnstile":"one-use-token"}`,
+	))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.True(t, nextCalled)
+	assert.Equal(t, "one-use-token", verifiedToken)
+	assert.Empty(t, request.URL.Query().Get("turnstile"))
+}
+
+func TestTurnstileCheckFromBodyRejectsMissingToken(t *testing.T) {
+	oldEnabled := common.TurnstileCheckEnabled
+	common.TurnstileCheckEnabled = true
+	t.Cleanup(func() { common.TurnstileCheckEnabled = oldEnabled })
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	nextCalled := false
+	router.POST("/verification", TurnstileCheckFromBody(), func(c *gin.Context) {
+		nextCalled = true
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/verification", bytes.NewBufferString(`{"email":"bind@example.com"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.False(t, nextCalled)
+	assert.Contains(t, recorder.Body.String(), "Turnstile token")
 }
