@@ -1,3 +1,5 @@
+// @ts-expect-error The CI runtime provides bun:test; the application tsconfig intentionally omits Bun globals.
+import { afterAll, beforeEach, describe, test } from 'bun:test'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -7,7 +9,6 @@ published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
 import assert from 'node:assert/strict'
-import { after, beforeEach, describe, test } from 'node:test'
 
 import { Window } from 'happy-dom'
 
@@ -36,7 +37,7 @@ describe('Turnstile compatibility component', () => {
     delete window.turnstile
   })
 
-  after(() => domWindow.close())
+  afterAll(() => domWindow.close())
 
   test('uses Captcha88 when the configured site key is a service URL', async () => {
     let renderOptions:
