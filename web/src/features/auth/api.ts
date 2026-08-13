@@ -21,7 +21,6 @@ import axios from 'axios'
 import { api, refreshAuthentication, type RefreshOutcome } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { getGeeTestQueryParams, type GeeTestScene } from './lib/geetest'
 import { getAffiliateCode } from './lib/storage'
 import type { TelegramAuthorization } from './lib/telegram-login'
 import type {
@@ -31,7 +30,6 @@ import type {
   TwoFAPayload,
   RegisterPayload,
   ApiResponse,
-  GeeTestValidation,
 } from './types'
 
 // ============================================================================
@@ -50,7 +48,6 @@ export async function login(payload: LoginPayload) {
     {
       username: payload.username,
       password: payload.password,
-      geetest: payload.geetest,
     },
     { skipAuthRefresh: true }
   )
@@ -134,21 +131,13 @@ export async function sendPasswordResetEmail(
 // OAuth
 // ----------------------------------------------------------------------------
 
-export interface HumanVerificationPayload {
-  scene: GeeTestScene
+export interface TurnstileVerificationPayload {
   turnstile?: string
-  geetest?: GeeTestValidation
 }
 
-function getHumanVerificationQueryParams(
-  verification?: HumanVerificationPayload
-) {
+function getTurnstileQueryParams(verification?: TurnstileVerificationPayload) {
   if (!verification) return {}
-  return {
-    geetest_scene: verification.scene,
-    turnstile: verification.turnstile,
-    ...getGeeTestQueryParams(verification.geetest),
-  }
+  return { turnstile: verification.turnstile }
 }
 
 // Start GitHub OAuth flow
@@ -161,7 +150,7 @@ export async function githubOAuthStart(clientId: string, state: string) {
 export async function createOAuthFlow(
   provider: string,
   intent: 'login' | 'bind',
-  verification?: HumanVerificationPayload
+  verification?: TurnstileVerificationPayload
 ): Promise<string> {
   const aff = intent === 'login' ? getAffiliateCode() : ''
   const res = await api.post(
@@ -170,8 +159,6 @@ export async function createOAuthFlow(
       provider,
       intent,
       aff: aff || undefined,
-      geetest_scene: verification?.scene,
-      geetest: verification?.geetest,
     },
     {
       params: { turnstile: verification?.turnstile },
@@ -190,22 +177,22 @@ export async function createOAuthFlow(
 // WeChat login by authorization code
 export async function wechatLoginByCode(
   code: string,
-  verification?: HumanVerificationPayload
+  verification?: TurnstileVerificationPayload
 ): Promise<ApiResponse> {
   const res = await api.get('/api/oauth/wechat', {
-    params: { code, ...getHumanVerificationQueryParams(verification) },
+    params: { code, ...getTurnstileQueryParams(verification) },
   })
   return res.data
 }
 
 export async function telegramLogin(
   authorization: TelegramAuthorization,
-  verification?: HumanVerificationPayload
+  verification?: TurnstileVerificationPayload
 ): Promise<ApiResponse> {
   const res = await api.get('/api/oauth/telegram/login', {
     params: {
       ...authorization,
-      ...getHumanVerificationQueryParams(verification),
+      ...getTurnstileQueryParams(verification),
     },
     disableDuplicate: true,
     skipAuthRefresh: true,
@@ -230,11 +217,10 @@ export async function register(payload: RegisterPayload): Promise<ApiResponse> {
 // Send email verification code
 export async function sendEmailVerification(
   email: string,
-  turnstile?: string,
-  geetest?: GeeTestValidation
+  turnstile?: string
 ): Promise<ApiResponse> {
   const res = await api.get('/api/verification', {
-    params: { email, turnstile, ...getGeeTestQueryParams(geetest) },
+    params: { email, turnstile },
   })
   return res.data
 }

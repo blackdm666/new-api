@@ -322,7 +322,7 @@ func verifyTelegramAuthorization(params url.Values, token string, now time.Time)
 
 	strs := make([]string, 0, len(params)-1)
 	for k, v := range params {
-		if k == "hash" || isHumanVerificationQueryParameter(k) {
+		if k == "hash" || k == "turnstile" {
 			continue
 		}
 		strs = append(strs, k+"="+v[0])
@@ -337,13 +337,4 @@ func verifyTelegramAuthorization(params url.Values, token string, now time.Time)
 	}
 
 	return telegramID, nil
-}
-
-func isHumanVerificationQueryParameter(name string) bool {
-	switch name {
-	case "geetest_scene", "geetest_lot_number", "geetest_captcha_output", "geetest_pass_token", "geetest_gen_time", "turnstile":
-		return true
-	default:
-		return false
-	}
 }

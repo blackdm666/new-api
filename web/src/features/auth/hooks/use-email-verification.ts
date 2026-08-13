@@ -24,12 +24,10 @@ import { useCountdown } from '@/hooks/use-countdown'
 
 import { sendEmailVerification } from '../api'
 import { EMAIL_VERIFICATION_COUNTDOWN } from '../constants'
-import type { GeeTestValidation } from '../types'
 
 interface UseEmailVerificationOptions {
   turnstileToken?: string
-  validateHumanVerification?: () => boolean
-  geeTestValidation?: GeeTestValidation
+  validateTurnstile?: () => boolean
 }
 
 /**
@@ -52,20 +50,14 @@ export function useEmailVerification(options?: UseEmailVerificationOptions) {
       return false
     }
 
-    if (
-      options?.validateHumanVerification &&
-      !options.validateHumanVerification()
-    ) {
+    // Validate turnstile if validation function is provided
+    if (options?.validateTurnstile && !options.validateTurnstile()) {
       return false
     }
 
     setIsSending(true)
     try {
-      const res = await sendEmailVerification(
-        email,
-        options?.turnstileToken,
-        options?.geeTestValidation
-      )
+      const res = await sendEmailVerification(email, options?.turnstileToken)
       if (res?.success) {
         startCountdown()
         toast.success(i18next.t('Verification email sent'))

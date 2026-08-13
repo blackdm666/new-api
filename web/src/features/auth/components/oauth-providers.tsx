@@ -31,7 +31,7 @@ import { cn } from '@/lib/utils'
 
 import {
   useOAuthLogin,
-  type OAuthHumanVerification,
+  type OAuthTurnstileVerification,
 } from '../hooks/use-oauth-login'
 import type { SystemStatus } from '../types'
 import { CustomOAuthProviderIcon } from './custom-oauth-provider-icon'
@@ -45,7 +45,7 @@ type OAuthProvidersProps = {
   onWeChatLogin?: () => void
   isWeChatLoading?: boolean
   redirectTo?: string
-  humanVerification?: OAuthHumanVerification
+  turnstileVerification?: OAuthTurnstileVerification
 }
 
 type ProviderButton = {
@@ -63,7 +63,7 @@ export function OAuthProviders({
   onWeChatLogin,
   isWeChatLoading = false,
   redirectTo,
-  humanVerification,
+  turnstileVerification,
 }: OAuthProvidersProps) {
   const { t } = useTranslation()
   const {
@@ -80,7 +80,7 @@ export function OAuthProviders({
     isTelegramPending,
     handleTelegramAuthorization,
     setIsTelegramDialogOpen,
-  } = useOAuthLogin(status, redirectTo, humanVerification)
+  } = useOAuthLogin(status, redirectTo, turnstileVerification)
 
   const providerButtons: ProviderButton[] = []
 

@@ -27,7 +27,6 @@ import { toast } from 'sonner'
 import type { z } from 'zod'
 
 import { Dialog } from '@/components/dialog'
-import { GeeTest } from '@/components/geetest'
 import { PasswordInput } from '@/components/password-input'
 import { Turnstile } from '@/components/turnstile'
 import { Button } from '@/components/ui/button'
@@ -46,7 +45,6 @@ import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { loginFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
-import { useGeeTest } from '@/features/auth/hooks/use-geetest'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import { beginPasskeyLogin, finishPasskeyLogin } from '@/features/auth/passkey'
 import type { AuthFormProps } from '@/features/auth/types'
@@ -74,6 +72,7 @@ export function UserAuthForm({
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false)
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
   const [isWeChatSubmitting, setIsWeChatSubmitting] = useState(false)
+  const [turnstileWidgetKey, setTurnstileWidgetKey] = useState(0)
   const legalConsentErrorMessage = t('Please agree to the legal terms first')
   const loginFailedMessage = t('Login failed')
 
@@ -92,15 +91,6 @@ export function UserAuthForm({
     setTurnstileToken,
     validateTurnstile,
   } = useTurnstile()
-  const {
-    isGeeTestEnabled,
-    geeTestCaptchaId,
-    geeTestValidation,
-    setGeeTestValidation,
-    geeTestWidgetKey,
-    validateGeeTest,
-    resetGeeTest,
-  } = useGeeTest('login')
   const { handleLoginSuccess, redirectTo2FA } = useAuthRedirect()
   const setPending2FAFlowToken = useAuthStore(
     (state) => state.auth.setPending2FAFlowToken
@@ -124,24 +114,14 @@ export function UserAuthForm({
   )
   const hasAlternativeLogin =
     passkeyLoginEnabled || hasWeChatLogin || hasOAuthLogin
-  const requiresHumanVerificationSurface =
+  const requiresTurnstileSurface =
     passwordLoginEnabled || hasWeChatLogin || hasOAuthLogin
-  const humanVerificationReady = isGeeTestEnabled
-    ? Boolean(geeTestValidation)
-    : !isTurnstileEnabled || Boolean(turnstileToken)
-  const validateHumanVerification = isGeeTestEnabled
-    ? validateGeeTest
-    : validateTurnstile
-  const humanVerificationPayload = {
-    scene: 'login' as const,
-    turnstile: isGeeTestEnabled ? undefined : turnstileToken,
-    geetest: geeTestValidation,
-  }
-  const resetHumanVerification = () => {
-    if (isGeeTestEnabled) {
-      resetGeeTest()
-    } else {
-      setTurnstileToken('')
+  const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
+  const turnstilePayload = { turnstile: turnstileToken }
+  const resetTurnstile = () => {
+    setTurnstileToken('')
+    if (isTurnstileEnabled) {
+      setTurnstileWidgetKey((current) => current + 1)
     }
   }
 
@@ -187,15 +167,19 @@ export function UserAuthForm({
       return
     }
 
-    if (!validateHumanVerification()) return
+    if (!validateTurnstile()) return
+
+    const submittedTurnstileToken = turnstileToken
+    if (isTurnstileEnabled) {
+      resetTurnstile()
+    }
 
     setIsLoading(true)
     try {
       const res = await login({
         username: data.username,
         password: data.password,
-        turnstile: isGeeTestEnabled ? undefined : turnstileToken,
-        geetest: geeTestValidation,
+        turnstile: submittedTurnstileToken,
       })
 
       if (res.success) {
@@ -219,7 +203,6 @@ export function UserAuthForm({
       toast.error(error instanceof Error ? error.message : loginFailedMessage)
     } finally {
       setIsLoading(false)
-      if (isGeeTestEnabled) resetGeeTest()
     }
   }
 
@@ -228,7 +211,7 @@ export function UserAuthForm({
       toast.error(legalConsentErrorMessage)
       return
     }
-    if (!validateHumanVerification()) return
+    if (!validateTurnstile()) return
 
     setIsWeChatDialogOpen(true)
   }
@@ -249,7 +232,7 @@ export function UserAuthForm({
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode, humanVerificationPayload)
+      const res = await wechatLoginByCode(wechatCode, turnstilePayload)
       if (res?.success && isAuthBundle(res.data)) {
         await handleLoginSuccess(res.data, redirectTo)
         toast.success(t('Signed in via WeChat'))
@@ -263,7 +246,7 @@ export function UserAuthForm({
       toast.error(loginFailedMessage)
     } finally {
       setIsWeChatSubmitting(false)
-      resetHumanVerification()
+      resetTurnstile()
     }
   }
 
@@ -372,10 +355,10 @@ export function UserAuthForm({
         disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
         onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
         isWeChatLoading={isWeChatSubmitting}
-        humanVerification={{
-          ...humanVerificationPayload,
-          validate: validateHumanVerification,
-          reset: resetHumanVerification,
+        turnstileVerification={{
+          ...turnstilePayload,
+          validate: validateTurnstile,
+          reset: resetTurnstile,
         }}
       />
     </>
@@ -436,26 +419,17 @@ export function UserAuthForm({
           </>
         )}
 
-        {/* Human verification also gates registration-capable OAuth routes. */}
-        {requiresHumanVerificationSurface && isGeeTestEnabled && (
+        {/* Turnstile also gates registration-capable OAuth routes. */}
+        {requiresTurnstileSurface && isTurnstileEnabled && (
           <div className='mt-2'>
-            <GeeTest
-              key={geeTestWidgetKey}
-              captchaId={geeTestCaptchaId}
-              onVerify={setGeeTestValidation}
+            <Turnstile
+              key={turnstileWidgetKey}
+              siteKey={turnstileSiteKey}
+              onVerify={setTurnstileToken}
+              onExpire={resetTurnstile}
             />
           </div>
         )}
-        {requiresHumanVerificationSurface &&
-          !isGeeTestEnabled &&
-          isTurnstileEnabled && (
-            <div className='mt-2'>
-              <Turnstile
-                siteKey={turnstileSiteKey}
-                onVerify={setTurnstileToken}
-              />
-            </div>
-          )}
 
         <LegalConsent
           status={status}
@@ -472,7 +446,7 @@ export function UserAuthForm({
             className='mt-2 w-full justify-center gap-2'
             disabled={
               isLoading ||
-              !humanVerificationReady ||
+              !turnstileReady ||
               (requiresLegalConsent && !agreedToLegal)
             }
           >

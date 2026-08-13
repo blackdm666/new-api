@@ -26,7 +26,7 @@ import {
   createOAuthFlow,
   logout,
   telegramLogin,
-  type HumanVerificationPayload,
+  type TurnstileVerificationPayload,
 } from '../api'
 import {
   buildGitHubOAuthUrl,
@@ -38,7 +38,7 @@ import { pickTelegramAuthorization } from '../lib/telegram-login'
 import type { SystemStatus, CustomOAuthProviderInfo } from '../types'
 import { useAuthRedirect } from './use-auth-redirect'
 
-export interface OAuthHumanVerification extends HumanVerificationPayload {
+export interface OAuthTurnstileVerification extends TurnstileVerificationPayload {
   validate: () => boolean
   reset?: () => void
 }
@@ -49,7 +49,7 @@ export interface OAuthHumanVerification extends HumanVerificationPayload {
 export function useOAuthLogin(
   status: SystemStatus | null,
   redirectTo?: string,
-  humanVerification?: OAuthHumanVerification
+  turnstileVerification?: OAuthTurnstileVerification
 ) {
   const { t } = useTranslation()
   const { handleLoginSuccess } = useAuthRedirect()
@@ -78,20 +78,18 @@ export function useOAuthLogin(
     clearAuthentication()
   }
 
-  const validateHumanVerification = () => humanVerification?.validate() ?? true
+  const validateTurnstile = () => turnstileVerification?.validate() ?? true
 
-  const verificationPayload = humanVerification
+  const verificationPayload = turnstileVerification
     ? {
-        scene: humanVerification.scene,
-        turnstile: humanVerification.turnstile,
-        geetest: humanVerification.geetest,
+        turnstile: turnstileVerification.turnstile,
       }
     : undefined
 
   const handleGitHubLogin = async () => {
     if (!status?.github_client_id) return
     if (githubButtonDisabled) return
-    if (!validateHumanVerification()) return
+    if (!validateTurnstile()) return
 
     setIsLoading(true)
     setGithubButtonDisabled(true)
@@ -120,7 +118,7 @@ export function useOAuthLogin(
       const url = buildGitHubOAuthUrl(status.github_client_id, state)
       window.open(url, '_self')
     } catch {
-      humanVerification?.reset?.()
+      turnstileVerification?.reset?.()
       toast.error(t('Failed to start GitHub login'))
       if (githubTimeoutRef.current) {
         clearTimeout(githubTimeoutRef.current)
@@ -133,7 +131,7 @@ export function useOAuthLogin(
 
   const handleDiscordLogin = async () => {
     if (!status?.discord_client_id) return
-    if (!validateHumanVerification()) return
+    if (!validateTurnstile()) return
 
     setIsLoading(true)
     try {
@@ -147,7 +145,7 @@ export function useOAuthLogin(
       const url = buildDiscordOAuthUrl(status.discord_client_id, state)
       window.open(url, '_self')
     } catch {
-      humanVerification?.reset?.()
+      turnstileVerification?.reset?.()
       toast.error(t('Failed to start Discord login'))
     } finally {
       setIsLoading(false)
@@ -156,7 +154,7 @@ export function useOAuthLogin(
 
   const handleOIDCLogin = async () => {
     if (!status?.oidc_authorization_endpoint || !status?.oidc_client_id) return
-    if (!validateHumanVerification()) return
+    if (!validateTurnstile()) return
 
     setIsLoading(true)
     try {
@@ -170,7 +168,7 @@ export function useOAuthLogin(
       )
       window.open(url, '_self')
     } catch {
-      humanVerification?.reset?.()
+      turnstileVerification?.reset?.()
       toast.error(t('Failed to start OIDC login'))
     } finally {
       setIsLoading(false)
@@ -179,7 +177,7 @@ export function useOAuthLogin(
 
   const handleLinuxDOLogin = async () => {
     if (!status?.linuxdo_client_id) return
-    if (!validateHumanVerification()) return
+    if (!validateTurnstile()) return
 
     setIsLoading(true)
     try {
@@ -193,7 +191,7 @@ export function useOAuthLogin(
       const url = buildLinuxDOOAuthUrl(status.linuxdo_client_id, state)
       window.open(url, '_self')
     } catch {
-      humanVerification?.reset?.()
+      turnstileVerification?.reset?.()
       toast.error(t('Failed to start LinuxDO login'))
     } finally {
       setIsLoading(false)
@@ -205,7 +203,7 @@ export function useOAuthLogin(
       toast.error(t('Login failed'))
       return
     }
-    if (!validateHumanVerification()) return
+    if (!validateTurnstile()) return
 
     setIsLoading(true)
     try {
@@ -241,14 +239,14 @@ export function useOAuthLogin(
     } catch {
       toast.error(t('Login failed'))
     } finally {
-      humanVerification?.reset?.()
+      turnstileVerification?.reset?.()
       setIsTelegramPending(false)
     }
   }
 
   const handleCustomOAuthLogin = async (provider: CustomOAuthProviderInfo) => {
     if (!provider.authorization_endpoint || !provider.client_id) return
-    if (!validateHumanVerification()) return
+    if (!validateTurnstile()) return
 
     setIsLoading(true)
     try {
@@ -271,7 +269,7 @@ export function useOAuthLogin(
 
       window.open(url.toString(), '_self')
     } catch {
-      humanVerification?.reset?.()
+      turnstileVerification?.reset?.()
       toast.error(
         t('Failed to start {{provider}} login', { provider: provider.name })
       )

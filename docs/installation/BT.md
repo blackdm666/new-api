@@ -89,21 +89,6 @@ docker-compose up -d
 | `SQL_DSN`           | 数据库连接字符串（使用外部数据库时） | 可选     |
 | `REDIS_CONN_STRING` | Redis 连接字符串        | 可选     |
 
-### GeeTest v4 人机验证
-
-GeeTest 使用注册、登录两套相互独立的验证配置。`CAPTCHA_ID` 会通过公开状态接口下发给浏览器；`CAPTCHA_KEY` 仅用于服务端签名，必须作为容器环境变量保存，禁止写入前端代码或提交到仓库。
-
-| 变量名                                | 说明                                      | 默认值 |
-| ------------------------------------- | ----------------------------------------- | ------ |
-| `GEETEST_REGISTER_ENABLED`            | 注册及注册邮箱验证码接口是否启用 GeeTest  | 自动   |
-| `GEETEST_REGISTER_CAPTCHA_ID`         | 注册场景验证 ID                           | 空     |
-| `GEETEST_REGISTER_CAPTCHA_KEY`        | 注册场景服务端验证 Key                    | 空     |
-| `GEETEST_LOGIN_ENABLED`               | 密码登录接口是否启用 GeeTest              | 自动   |
-| `GEETEST_LOGIN_CAPTCHA_ID`            | 登录场景验证 ID                           | 空     |
-| `GEETEST_LOGIN_CAPTCHA_KEY`           | 登录场景服务端验证 Key                    | 空     |
-
-任一场景配置了 ID 或 Key 时会自动启用；也可以显式设置对应的 `*_ENABLED=true`。启用后 ID 与 Key 必须同时存在，否则应用会拒绝启动，避免错误配置造成验证绕过。OAuth、通行密钥与二次验证接口不使用登录场景 GeeTest。
-
 ### 生成随机密钥
 
 ```bash

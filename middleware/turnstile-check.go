@@ -1,8 +1,11 @@
 package middleware
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-gonic/gin"
@@ -10,6 +13,25 @@ import (
 
 type turnstileCheckResponse struct {
 	Success bool `json:"success"`
+}
+
+// OAuthStateTurnstileCheck requires Turnstile for anonymous login flows while
+// leaving authenticated account-binding flows to their existing session check.
+func OAuthStateTurnstileCheck() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err == nil {
+			c.Request.Body = io.NopCloser(bytes.NewReader(body))
+			var request struct {
+				Intent string `json:"intent"`
+			}
+			if common.Unmarshal(body, &request) == nil && strings.TrimSpace(request.Intent) == "bind" {
+				c.Next()
+				return
+			}
+		}
+		TurnstileCheck()(c)
+	}
 }
 
 func TurnstileCheck() gin.HandlerFunc {

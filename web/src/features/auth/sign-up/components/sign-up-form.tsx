@@ -25,7 +25,6 @@ import { toast } from 'sonner'
 import type { z } from 'zod'
 
 import { Dialog } from '@/components/dialog'
-import { GeeTest } from '@/components/geetest'
 import { PasswordInput } from '@/components/password-input'
 import { Turnstile } from '@/components/turnstile'
 import { Button } from '@/components/ui/button'
@@ -45,7 +44,6 @@ import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { registerFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useEmailVerification } from '@/features/auth/hooks/use-email-verification'
-import { useGeeTest } from '@/features/auth/hooks/use-geetest'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import {
   getAffiliateCode,
@@ -78,28 +76,15 @@ export function SignUpForm({
     setTurnstileToken,
     validateTurnstile,
   } = useTurnstile()
-  const {
-    isGeeTestEnabled,
-    geeTestCaptchaId,
-    geeTestValidation,
-    setGeeTestValidation,
-    geeTestWidgetKey,
-    validateGeeTest,
-    resetGeeTest,
-  } = useGeeTest('register')
   const { redirectToLogin, handleLoginSuccess } = useAuthRedirect()
-  const validateHumanVerification = isGeeTestEnabled
-    ? validateGeeTest
-    : validateTurnstile
   const {
     isSending: isSendingCode,
     secondsLeft,
     isActive,
     sendCode,
   } = useEmailVerification({
-    turnstileToken: isGeeTestEnabled ? undefined : turnstileToken,
-    validateHumanVerification,
-    geeTestValidation,
+    turnstileToken,
+    validateTurnstile,
   })
 
   const form = useForm<z.infer<typeof registerFormSchema>>({
@@ -122,19 +107,11 @@ export function SignUpForm({
     status?.data?.oauth_register_enabled ??
     true
   const hasWeChatLogin = Boolean(status?.wechat_login)
-  const humanVerificationReady = isGeeTestEnabled
-    ? Boolean(geeTestValidation)
-    : !isTurnstileEnabled || Boolean(turnstileToken)
-  const humanVerificationPayload = {
-    scene: 'register' as const,
-    turnstile: isGeeTestEnabled ? undefined : turnstileToken,
-    geetest: geeTestValidation,
-  }
-  const resetHumanVerification = () => {
-    if (isGeeTestEnabled) {
-      resetGeeTest()
-    } else {
-      setTurnstileToken('')
+  const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
+  const turnstilePayload = { turnstile: turnstileToken }
+  const resetTurnstile = () => {
+    setTurnstileToken('')
+    if (isTurnstileEnabled) {
       setTurnstileWidgetKey((current) => current + 1)
     }
   }
@@ -186,7 +163,12 @@ export function SignUpForm({
       }
     }
 
-    if (!validateHumanVerification()) return
+    if (!validateTurnstile()) return
+
+    const submittedTurnstileToken = turnstileToken
+    if (isTurnstileEnabled) {
+      resetTurnstile()
+    }
 
     setIsLoading(true)
     try {
@@ -196,8 +178,7 @@ export function SignUpForm({
         email: data.email || undefined,
         verification_code: verificationCode || undefined,
         aff_code: getAffiliateCode(),
-        turnstile: isGeeTestEnabled ? undefined : turnstileToken,
-        geetest: geeTestValidation,
+        turnstile: submittedTurnstileToken,
       })
 
       if (res?.success) {
@@ -210,18 +191,12 @@ export function SignUpForm({
       // Errors are handled by global interceptor
     } finally {
       setIsLoading(false)
-      if (isGeeTestEnabled) resetGeeTest()
     }
   }
 
   async function handleSendVerificationCode() {
     if (await sendCode(emailValue || '')) {
-      if (isGeeTestEnabled) {
-        resetGeeTest()
-      } else {
-        setTurnstileToken('')
-        setTurnstileWidgetKey((current) => current + 1)
-      }
+      resetTurnstile()
     }
   }
 
@@ -230,7 +205,7 @@ export function SignUpForm({
       toast.error(legalConsentErrorMessage)
       return
     }
-    if (!validateHumanVerification()) return
+    if (!validateTurnstile()) return
 
     setIsWeChatDialogOpen(true)
   }
@@ -251,7 +226,7 @@ export function SignUpForm({
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode, humanVerificationPayload)
+      const res = await wechatLoginByCode(wechatCode, turnstilePayload)
       if (res?.success && isAuthBundle(res.data)) {
         await handleLoginSuccess(res.data)
         toast.success(t('Signed in via WeChat'))
@@ -265,7 +240,7 @@ export function SignUpForm({
       toast.error(t('Login failed'))
     } finally {
       setIsWeChatSubmitting(false)
-      resetHumanVerification()
+      resetTurnstile()
     }
   }
 
@@ -374,7 +349,7 @@ export function SignUpForm({
                   isSendingCode ||
                   isActive ||
                   !emailValue ||
-                  !humanVerificationReady
+                  !turnstileReady
                 }
                 onClick={handleSendVerificationCode}
               >
@@ -384,22 +359,14 @@ export function SignUpForm({
           </>
         )}
 
-        {/* Human verification */}
-        {isGeeTestEnabled && (
-          <div className='mt-2'>
-            <GeeTest
-              key={geeTestWidgetKey}
-              captchaId={geeTestCaptchaId}
-              onVerify={setGeeTestValidation}
-            />
-          </div>
-        )}
-        {!isGeeTestEnabled && isTurnstileEnabled && (
+        {/* Turnstile */}
+        {isTurnstileEnabled && (
           <div className='mt-2'>
             <Turnstile
               key={turnstileWidgetKey}
               siteKey={turnstileSiteKey}
               onVerify={setTurnstileToken}
+              onExpire={resetTurnstile}
             />
           </div>
         )}
@@ -418,7 +385,7 @@ export function SignUpForm({
           disabled={
             isLoading ||
             (requiresLegalConsent && !agreedToLegal) ||
-            !humanVerificationReady
+            !turnstileReady
           }
         >
           {isLoading ? (
@@ -435,10 +402,10 @@ export function SignUpForm({
             disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
             onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
             isWeChatLoading={isWeChatSubmitting}
-            humanVerification={{
-              ...humanVerificationPayload,
-              validate: validateHumanVerification,
-              reset: resetHumanVerification,
+            turnstileVerification={{
+              ...turnstilePayload,
+              validate: validateTurnstile,
+              reset: resetTurnstile,
             }}
             className='pt-2'
           />
