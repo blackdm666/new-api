@@ -74,3 +74,15 @@ func TestOAuthStateTurnstileCheckRejectsLoginWithoutToken(t *testing.T) {
 	assert.False(t, nextCalled)
 	assert.Contains(t, recorder.Body.String(), "Turnstile token")
 }
+
+func TestTurnstileVerifyURL(t *testing.T) {
+	t.Run("uses the self-hosted compatible endpoint", func(t *testing.T) {
+		t.Setenv("TURNSTILE_VERIFY_URL", " https://verify.88api.ai/turnstile/v0/siteverify ")
+		assert.Equal(t, "https://verify.88api.ai/turnstile/v0/siteverify", turnstileVerifyURL())
+	})
+
+	t.Run("falls back to Cloudflare when unset", func(t *testing.T) {
+		t.Setenv("TURNSTILE_VERIFY_URL", "")
+		assert.Equal(t, defaultTurnstileVerifyURL, turnstileVerifyURL())
+	})
+}

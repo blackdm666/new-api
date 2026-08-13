@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -13,6 +14,18 @@ import (
 
 type turnstileCheckResponse struct {
 	Success bool `json:"success"`
+}
+
+const defaultTurnstileVerifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+
+// turnstileVerifyURL keeps the upstream Cloudflare endpoint as the default,
+// while allowing the production Captcha88 service to provide a compatible
+// siteverify endpoint through the existing deployment environment.
+func turnstileVerifyURL() string {
+	if verifyURL := strings.TrimSpace(os.Getenv("TURNSTILE_VERIFY_URL")); verifyURL != "" {
+		return verifyURL
+	}
+	return defaultTurnstileVerifyURL
 }
 
 // OAuthStateTurnstileCheck requires Turnstile for anonymous login flows while
@@ -46,7 +59,7 @@ func TurnstileCheck() gin.HandlerFunc {
 				c.Abort()
 				return
 			}
-			rawRes, err := http.PostForm("https://challenges.cloudflare.com/turnstile/v0/siteverify", url.Values{
+			rawRes, err := http.PostForm(turnstileVerifyURL(), url.Values{
 				"secret":   {common.TurnstileSecretKey},
 				"response": {response},
 				"remoteip": {c.ClientIP()},

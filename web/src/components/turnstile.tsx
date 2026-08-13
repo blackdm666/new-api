@@ -20,6 +20,15 @@ import { useEffect, useRef } from 'react'
 
 declare global {
   interface Window {
+    Captcha88?: {
+      render: (options: {
+        el: HTMLElement | string
+        endpoint?: string
+        act?: string
+        onToken?: (token: string) => void
+        onError?: (message: string) => void
+      }) => unknown
+    }
     turnstile?: {
       render: (element: HTMLElement, options: Record<string, unknown>) => void
     }
@@ -40,36 +49,67 @@ export function Turnstile({
   className,
 }: TurnstileProps) {
   const ref = useRef<HTMLDivElement | null>(null)
+  const rendered = useRef(false)
 
   useEffect(() => {
+    const selfHosted = /^https?:\/\//i.test(siteKey)
+    const endpoint = siteKey.replace(/\/+$/, '')
+
     const render = () => {
-      if (!ref.current || !window.turnstile) return
+      if (!ref.current || rendered.current) return
+
       try {
-        window.turnstile.render(ref.current, {
-          sitekey: siteKey,
-          callback: (token: string) => onVerify(token),
-          'error-callback': () => onExpire?.(),
-          'expired-callback': () => onExpire?.(),
-        })
+        if (selfHosted && window.Captcha88) {
+          rendered.current = true
+          window.Captcha88.render({
+            el: ref.current,
+            endpoint,
+            act: 'register',
+            onToken: (token: string) => onVerify(token),
+            onError: () => onExpire?.(),
+          })
+        } else if (!selfHosted && window.turnstile) {
+          rendered.current = true
+          window.turnstile.render(ref.current, {
+            sitekey: siteKey,
+            callback: (token: string) => onVerify(token),
+            'error-callback': () => onExpire?.(),
+            'expired-callback': () => onExpire?.(),
+          })
+        }
       } catch {
-        /* empty */
+        onExpire?.()
       }
     }
 
-    if (window.turnstile) {
+    if ((selfHosted && window.Captcha88) || (!selfHosted && window.turnstile)) {
       render()
       return
     }
-    const scriptId = 'cf-turnstile'
-    if (document.getElementById(scriptId)) return
+
+    const scriptId = selfHosted ? 'c88-widget' : 'cf-turnstile'
+    const existing = document.querySelector(`#${scriptId}`)
+    if (existing) {
+      existing.addEventListener('load', render)
+      return () => existing.removeEventListener('load', render)
+    }
+
     const s = document.createElement('script')
     s.id = scriptId
-    s.src =
-      'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+    s.src = selfHosted
+      ? `${endpoint}/widget.js`
+      : 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
     s.async = true
     s.defer = true
-    s.onload = () => render()
+    const handleScriptError = () => onExpire?.()
+    s.addEventListener('load', render)
+    s.addEventListener('error', handleScriptError)
     document.head.appendChild(s)
+
+    return () => {
+      s.removeEventListener('load', render)
+      s.removeEventListener('error', handleScriptError)
+    }
   }, [siteKey, onVerify, onExpire])
 
   return <div ref={ref} className={className} />
