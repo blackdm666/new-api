@@ -100,6 +100,16 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/passkey/verify/finish", middleware.DisableCache(), controller.PasskeyVerifyFinish)
 				selfRoute.DELETE("/passkey", middleware.DisableCache(), controller.PasskeyDelete)
 				selfRoute.GET("/aff", controller.GetAffCode)
+				selfRoute.GET("/aff/summary", controller.GetAffiliateSummary)
+				selfRoute.GET("/aff/commissions", controller.GetAffiliateCommissions)
+				selfRoute.GET("/aff/invitees", controller.GetUserInvitees)
+				selfRoute.GET("/aff/invitee_stats", controller.GetAffiliateInviteeStats)
+				selfRoute.GET("/aff/transfers", controller.GetAffiliateTransfers)
+				selfRoute.POST("/aff/transfers", middleware.UserCriticalRateLimit("affiliate-transfer"), controller.TransferAffiliateCommission)
+				selfRoute.GET("/aff/payouts/summary", controller.GetAffiliatePayoutSummary)
+				selfRoute.GET("/aff/payouts", controller.GetAffiliatePayouts)
+				selfRoute.POST("/aff/payouts", middleware.UserCriticalRateLimit("affiliate-payout"), controller.CreateAffiliatePayout)
+				selfRoute.POST("/aff/payouts/:id/cancel", middleware.UserCriticalRateLimit("affiliate-payout-cancel"), controller.CancelAffiliatePayout)
 				selfRoute.GET("/topup/info", controller.GetTopUpInfo)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)
 				selfRoute.POST("/topup", middleware.CriticalRateLimit(), controller.TopUp)
@@ -154,6 +164,66 @@ func SetApiRouter(router *gin.Engine) {
 			}
 		}
 
+		affiliateAdminRoute := apiRouter.Group("/affiliate/admin")
+		affiliateAdminRoute.Use(middleware.DisableCache(), middleware.AdminAuth())
+		{
+			affiliateAdminRoute.GET("/summary", controller.GetAdminAffiliateSummary)
+			affiliateAdminRoute.GET("/commissions", controller.GetAdminAffiliateCommissions)
+			affiliateAdminRoute.GET("/transfers", controller.GetAdminAffiliateTransfers)
+			affiliateAdminRoute.POST("/commissions/:id/approve", middleware.CriticalRateLimit(), controller.ApproveAffiliateCommission)
+			affiliateAdminRoute.POST("/commissions/:id/reject", middleware.CriticalRateLimit(), controller.RejectAffiliateCommission)
+			affiliateAdminRoute.GET("/payouts/summary", controller.GetAdminAffiliatePayoutSummary)
+			affiliateAdminRoute.GET("/payouts", controller.GetAdminAffiliatePayouts)
+			affiliateAdminRoute.GET("/payout-provider", controller.GetAdminAffiliateAlipayPayoutStatus)
+			affiliateAdminRoute.POST("/payouts/:id/approve", middleware.CriticalRateLimit(), controller.ApproveAffiliatePayout)
+			affiliateAdminRoute.POST("/payouts/:id/reject", middleware.CriticalRateLimit(), controller.RejectAffiliatePayout)
+			affiliateAdminRoute.POST("/payouts/:id/paid", middleware.CriticalRateLimit(), controller.MarkAffiliatePayoutPaid)
+			affiliateAdminRoute.POST("/payouts/:id/alipay", middleware.CriticalRateLimit(), controller.PayAffiliatePayoutWithAlipay)
+			affiliateAdminRoute.POST("/payouts/:id/alipay/status", middleware.CriticalRateLimit(), controller.RefreshAffiliatePayoutAlipayStatus)
+			affiliateAdminRoute.GET("/upgrade-candidates", controller.GetAdminAffiliateUpgradeCandidates)
+			affiliateAdminRoute.POST("/upgrade-candidates/:id/approve", middleware.CriticalRateLimit(), controller.ApproveAdminAffiliateUpgrade)
+			affiliateAdminRoute.GET("/notification-failures", controller.GetFailedAffiliateUpgradeNotices)
+			affiliateAdminRoute.POST("/notification-failures/:id/retry", middleware.CriticalRateLimit(), controller.RetryAffiliateUpgradeNotice)
+		}
+		affiliateRootRoute := apiRouter.Group("/affiliate/root")
+		affiliateRootRoute.Use(middleware.DisableCache(), middleware.RootAuth())
+		{
+			affiliateRootRoute.PUT("/settings", controller.UpdateAffiliateSettings)
+			affiliateRootRoute.GET("/payout-settings", controller.GetAffiliateAlipayPayoutSettings)
+			affiliateRootRoute.PUT("/payout-settings", middleware.CriticalRateLimit(), controller.UpdateAffiliateAlipayPayoutSettings)
+			affiliateRootRoute.POST("/payout-settings/test", middleware.CriticalRateLimit(), controller.TestAffiliateAlipayPayoutSettings)
+		}
+
+		invoiceRoute := apiRouter.Group("/invoice")
+		invoiceRoute.Use(middleware.DisableCache(), middleware.UserAuth())
+		{
+			invoiceRoute.GET("/config", controller.GetInvoiceConfig)
+			invoiceRoute.GET("/eligible_orders", controller.ListEligibleInvoiceOrders)
+			invoiceRoute.POST("/requests", middleware.UserCriticalRateLimit("invoice-create"), controller.CreateInvoiceRequest)
+			invoiceRoute.GET("/requests", controller.ListUserInvoiceRequests)
+			invoiceRoute.GET("/requests/:id", controller.GetUserInvoiceRequest)
+			invoiceRoute.POST("/requests/:id/withdraw", middleware.UserCriticalRateLimit("invoice-withdraw"), controller.WithdrawInvoiceRequest)
+			invoiceRoute.GET("/requests/:id/files/:file_id", controller.DownloadInvoiceFile)
+		}
+
+		invoiceAdminRoute := apiRouter.Group("/invoice/admin")
+		invoiceAdminRoute.Use(middleware.DisableCache(), middleware.AdminAuth())
+		{
+			invoiceAdminRoute.GET("/requests", controller.ListAdminInvoiceRequests)
+			invoiceAdminRoute.GET("/requests/:id", controller.GetAdminInvoiceRequest)
+			invoiceAdminRoute.GET("/requests/:id/user-profile", controller.GetInvoiceUserProfile)
+			invoiceAdminRoute.POST("/requests/:id/files", middleware.CriticalRateLimit(), controller.UploadInvoiceFile)
+			invoiceAdminRoute.DELETE("/requests/:id/files/:file_id", controller.DeleteInvoiceFile)
+			invoiceAdminRoute.POST("/requests/:id/notifications/issued/resend", middleware.CriticalRateLimit(), controller.ResendIssuedInvoiceNotification)
+			invoiceAdminRoute.PUT("/requests/:id/status", middleware.CriticalRateLimit(), controller.UpdateInvoiceRequestStatus)
+			invoiceAdminRoute.DELETE("/requests/:id", middleware.CriticalRateLimit(), controller.PurgeInvoiceRequest)
+			invoiceAdminRoute.GET("/maintenance", controller.GetInvoiceMaintenance)
+			invoiceAdminRoute.POST("/maintenance/cleanups/:cleanup_id/retry", middleware.CriticalRateLimit(), controller.RetryInvoiceFileCleanup)
+			invoiceAdminRoute.POST("/maintenance/notifications/:delivery_id/retry", middleware.CriticalRateLimit(), controller.RetryInvoiceNotification)
+			invoiceAdminRoute.POST("/maintenance/reconcile", middleware.CriticalRateLimit(), controller.ReconcileInvoiceStorage)
+			invoiceAdminRoute.POST("/maintenance/orphans/cleanup", middleware.CriticalRateLimit(), controller.CleanupInvoiceOrphans)
+		}
+
 		// Subscription billing (plans, purchase, admin management)
 		subscriptionRoute := apiRouter.Group("/subscription")
 		subscriptionRoute.Use(middleware.UserAuth())
@@ -191,7 +261,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/subscription/epay/return", controller.SubscriptionEpayReturn)
 		apiRouter.POST("/subscription/epay/return", anonymousRequestBodyLimit, controller.SubscriptionEpayReturn)
 		optionRoute := apiRouter.Group("/option")
-		optionRoute.Use(middleware.RootAuth())
+		optionRoute.Use(middleware.DisableCache(), middleware.RootAuth())
 		{
 			optionRoute.GET("/", controller.GetOptions)
 			optionRoute.PUT("/", controller.UpdateOption)
@@ -204,6 +274,14 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/waffo-pancake/save", controller.SaveWaffoPancake)
 			optionRoute.POST("/waffo-pancake/subscription-product", controller.CreateWaffoPancakeSubscriptionProduct)
 			optionRoute.GET("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
+			optionRoute.GET("/email_templates", controller.ListEmailTemplates)
+			optionRoute.POST("/email_templates/save", controller.SaveEmailTemplate)
+			optionRoute.POST("/email_templates/preview", controller.PreviewEmailTemplate)
+			optionRoute.POST("/email_templates/reset", controller.ResetEmailTemplate)
+			optionRoute.GET("/email_deliveries/failures", controller.ListFailedEmailDeliveries)
+			optionRoute.POST("/email_deliveries/:id/retry", middleware.CriticalRateLimit(), controller.RetryFailedEmailDelivery)
+			optionRoute.PUT("/invoice", controller.UpdateInvoiceSettings)
+			optionRoute.POST("/invoice/storage-test", controller.TestInvoiceStorage)
 		}
 
 		// Custom OAuth provider management (root only)

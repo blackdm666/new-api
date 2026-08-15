@@ -426,7 +426,8 @@ func GenerateAccessToken(c *gin.Context) {
 }
 
 type TransferAffQuotaRequest struct {
-	Quota int `json:"quota" binding:"required"`
+	Quota     int    `json:"quota" binding:"required"`
+	RequestId string `json:"request_id"`
 }
 
 func TransferAffQuota(c *gin.Context) {
@@ -445,7 +446,10 @@ func TransferAffQuota(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	err = user.TransferAffQuotaToQuota(tran.Quota)
+	if strings.TrimSpace(tran.RequestId) == "" {
+		tran.RequestId = common.NewRequestId()
+	}
+	err = model.TransferLegacyAffQuotaToQuota(user.Id, tran.Quota)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserTransferFailed, map[string]any{"Error": err.Error()})
 		return
@@ -476,6 +480,21 @@ func GetAffCode(c *gin.Context) {
 		"data":    user.AffCode,
 	})
 	return
+}
+
+func GetUserInvitees(c *gin.Context) {
+	userId := c.GetInt("id")
+	pageInfo := common.GetPageQuery(c)
+
+	invitees, total, err := model.GetUserInvitees(userId, pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	pageInfo.SetItems(invitees)
+	pageInfo.SetTotal(int(total))
+	common.ApiSuccess(c, pageInfo)
 }
 
 func GetSelf(c *gin.Context) {

@@ -329,7 +329,7 @@ type webhookSubscriptionInfo struct {
 	SubscriptionRequest string `json:"subscriptionRequest,omitempty"`
 }
 
-// WaffoWebhook 处理 Waffo 回调通知（支付/退款/订阅）
+// WaffoWebhook 处理 Waffo 支付回调通知
 func WaffoWebhook(c *gin.Context) {
 	if !isWaffoWebhookEnabled() {
 		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Waffo webhook 被拒绝 reason=webhook_disabled path=%q client_ip=%s", c.Request.RequestURI, c.ClientIP()))

@@ -13,6 +13,18 @@ import (
 	"github.com/QuantumNous/new-api/setting/system_setting"
 )
 
+// ResolveUserNotificationEmail returns the explicit notification address, or
+// falls back to the account email when no override is configured.
+func ResolveUserNotificationEmail(user *model.User, userSetting dto.UserSetting) string {
+	if override := strings.TrimSpace(userSetting.NotificationEmail); override != "" {
+		return override
+	}
+	if user == nil {
+		return ""
+	}
+	return strings.TrimSpace(user.Email)
+}
+
 func NotifyRootUser(t string, subject string, content string) {
 	user := model.GetRootUser().ToBaseUser()
 	err := NotifyUser(user.Id, user.Email, user.GetSetting(), dto.NewNotify(t, subject, content, nil))
@@ -31,7 +43,7 @@ func NotifyUpstreamModelUpdateWatchers(subject string, content string) {
 		return
 	}
 
-	notification := dto.NewNotify(dto.NotifyTypeChannelUpdate, subject, content, nil)
+	notification := dto.NewNotify(dto.NotifyTypeInspectionAlert, subject, content, nil)
 	sentCount := 0
 	for _, user := range users {
 		userSetting := user.GetSetting()
@@ -74,7 +86,7 @@ func NotifyUser(userId int, userEmail string, userSetting dto.UserSetting, data 
 			common.SysLog(fmt.Sprintf("user %d has no email, skip sending email", userId))
 			return nil
 		}
-		return sendEmailNotify(emailToUse, data)
+		return sendEmailNotify(userId, emailToUse, userSetting.Language, data)
 	case dto.NotifyTypeWebhook:
 		webhookURLStr := userSetting.WebhookUrl
 		if webhookURLStr == "" {
@@ -104,14 +116,11 @@ func NotifyUser(userId int, userEmail string, userSetting dto.UserSetting, data 
 	return nil
 }
 
-func sendEmailNotify(userEmail string, data dto.Notify) error {
-	// make email content
-	content := data.Content
-	// 处理占位符
-	for _, value := range data.Values {
-		content = strings.Replace(content, dto.ContentValueParam, fmt.Sprintf("%v", value), 1)
-	}
-	return common.SendEmail(data.Title, userEmail, content)
+func sendEmailNotify(userId int, userEmail string, lang string, data dto.Notify) error {
+	subject, content := BuildSystemAlertEmail(lang, data)
+	templateKey := NotificationEmailTemplateKey(data.Type)
+	_, err := QueueSystemEmail(templateKey+":"+common.NewRequestId(), templateKey, 0, userId, userEmail, subject, content, 0)
+	return err
 }
 
 func sendBarkNotify(barkURL string, data dto.Notify) error {

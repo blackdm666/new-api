@@ -2,10 +2,35 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGetUserModelUsageTopNUsesLiveConsumeLogs(t *testing.T) {
+	truncateTables(t)
+	now := time.Now().Unix()
+	logs := []*Log{
+		{UserId: 7, CreatedAt: now - 30, Type: LogTypeConsume, ModelName: "gpt-live", Quota: 100, PromptTokens: 10, CompletionTokens: 5},
+		{UserId: 7, CreatedAt: now - 20, Type: LogTypeConsume, ModelName: "gpt-live", Quota: 120, PromptTokens: 12, CompletionTokens: 6},
+		{UserId: 7, CreatedAt: now - 10, Type: LogTypeConsume, ModelName: "gemini-live", Quota: 80, PromptTokens: 8, CompletionTokens: 4},
+		{UserId: 8, CreatedAt: now - 5, Type: LogTypeConsume, ModelName: "other-user", Quota: 999},
+		{UserId: 7, CreatedAt: now - 5, Type: LogTypeManage, ModelName: "not-consume", Quota: 999},
+	}
+	for _, log := range logs {
+		require.NoError(t, LOG_DB.Create(log).Error)
+	}
+
+	usage, err := GetUserModelUsageTopN(7, now-60, 8)
+	require.NoError(t, err)
+	require.Len(t, usage, 2)
+	require.Equal(t, "gpt-live", usage[0].ModelName)
+	require.Equal(t, 2, usage[0].Count)
+	require.Equal(t, 220, usage[0].Quota)
+	require.Equal(t, 33, usage[0].TokenUsed)
+	require.Equal(t, "gemini-live", usage[1].ModelName)
+}
 
 func seedFlowQuotaData(t *testing.T, quotaData QuotaData) {
 	t.Helper()

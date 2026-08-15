@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { SystemBehaviorSection } from '../general/system-behavior-section'
 import { EmailSettingsSection } from '../integrations/email-settings-section'
+import { EmailTemplateSettingsSection } from '../integrations/email-template-section'
+import { InvoiceSettingsSection } from '../integrations/invoice-section'
 import { MonitoringSettingsSection } from '../integrations/monitoring-settings-section'
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
 import { LogSettingsSection } from '../maintenance/log-settings-section'
@@ -74,6 +76,54 @@ const OPERATIONS_SECTIONS = [
           SMTPStartTLSEnabled: settings.SMTPStartTLSEnabled,
           SMTPInsecureSkipVerify: settings.SMTPInsecureSkipVerify,
           SMTPForceAuthLogin: settings.SMTPForceAuthLogin,
+        }}
+      />
+    ),
+  },
+  {
+    id: 'email-templates',
+    titleKey: 'Email Templates',
+    build: () => <EmailTemplateSettingsSection />,
+  },
+  {
+    id: 'billing',
+    titleKey: 'Invoice Management',
+    build: (settings: OperationsSettings) => (
+      <InvoiceSettingsSection
+        defaultValues={{
+          InvoiceApplicationNotifyAdminEnabled:
+            settings.InvoiceApplicationNotifyAdminEnabled,
+          InvoiceIssuedNotifyUserEnabled:
+            settings.InvoiceIssuedNotifyUserEnabled,
+          InvoiceAdminEmail: settings.InvoiceAdminEmail,
+          InvoiceMinimumAmountCents: settings.InvoiceMinimumAmountCents,
+          InvoiceDataRetentionDays: settings.InvoiceDataRetentionDays,
+          InvoicePendingExpiryDays: settings.InvoicePendingExpiryDays,
+          InvoiceFileEnabled: settings.InvoiceFileEnabled,
+          InvoiceFileStorage: settings.InvoiceFileStorage,
+          InvoiceFileMaxSize: settings.InvoiceFileMaxSize,
+          InvoiceFileMaxCount: settings.InvoiceFileMaxCount,
+          InvoiceFileAllowedExts: settings.InvoiceFileAllowedExts,
+          InvoiceFileLocalPath: settings.InvoiceFileLocalPath,
+          InvoiceFileSignedURLTTL: settings.InvoiceFileSignedURLTTL,
+          InvoiceFileOSSEndpoint: settings.InvoiceFileOSSEndpoint,
+          InvoiceFileOSSBucket: settings.InvoiceFileOSSBucket,
+          InvoiceFileOSSRegion: settings.InvoiceFileOSSRegion,
+          InvoiceFileOSSAccessKeyId: settings.InvoiceFileOSSAccessKeyId,
+          InvoiceFileOSSAccessKeySecret: settings.InvoiceFileOSSAccessKeySecret,
+          InvoiceFileOSSCustomDomain: settings.InvoiceFileOSSCustomDomain,
+          InvoiceFileS3Endpoint: settings.InvoiceFileS3Endpoint,
+          InvoiceFileS3Bucket: settings.InvoiceFileS3Bucket,
+          InvoiceFileS3Region: settings.InvoiceFileS3Region,
+          InvoiceFileS3AccessKeyId: settings.InvoiceFileS3AccessKeyId,
+          InvoiceFileS3AccessKeySecret: settings.InvoiceFileS3AccessKeySecret,
+          InvoiceFileS3CustomDomain: settings.InvoiceFileS3CustomDomain,
+          InvoiceFileCOSEndpoint: settings.InvoiceFileCOSEndpoint,
+          InvoiceFileCOSBucket: settings.InvoiceFileCOSBucket,
+          InvoiceFileCOSRegion: settings.InvoiceFileCOSRegion,
+          InvoiceFileCOSSecretId: settings.InvoiceFileCOSSecretId,
+          InvoiceFileCOSSecretKey: settings.InvoiceFileCOSSecretKey,
+          InvoiceFileCOSCustomDomain: settings.InvoiceFileCOSCustomDomain,
         }}
       />
     ),

@@ -32,6 +32,84 @@ type fakeSMTPServer struct {
 	startTLSCommands  chan string
 }
 
+func TestWriteEmailMessageIncludesInvoiceAttachment(t *testing.T) {
+	withSMTPSettings(t)
+	SMTPFrom = "sender@example.com"
+	SystemName = "New API"
+	var message strings.Builder
+	err := writeEmailMessage(
+		&message,
+		"<message@example.com>",
+		"=?UTF-8?B?VGVzdA==?=",
+		"receiver@example.com",
+		"<p>issued</p>",
+		[]EmailAttachment{{
+			Filename: "发票.pdf", ContentType: "application/pdf", Reader: strings.NewReader("invoice"),
+		}},
+		SystemNameOrDefault(),
+	)
+	require.NoError(t, err)
+	require.Contains(t, message.String(), "Content-Type: multipart/mixed")
+	require.Contains(t, message.String(), "filename*=UTF-8''%E5%8F%91%E7%A5%A8.pdf")
+	require.Contains(t, message.String(), "aW52b2ljZQ==")
+}
+
+func TestWriteEmailMessageUsesConfiguredSystemNameAsSender(t *testing.T) {
+	withSMTPSettings(t)
+	SMTPFrom = "api@88fk.org"
+	OptionMapRWMutex.Lock()
+	originalMap := OptionMap
+	if OptionMap == nil {
+		OptionMap = map[string]string{}
+	}
+	originalName, existed := OptionMap["SystemName"]
+	OptionMap["SystemName"] = "YMeng CC"
+	OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		OptionMapRWMutex.Lock()
+		defer OptionMapRWMutex.Unlock()
+		if originalMap == nil {
+			OptionMap = nil
+			return
+		}
+		if existed {
+			OptionMap["SystemName"] = originalName
+		} else {
+			delete(OptionMap, "SystemName")
+		}
+	})
+
+	var message strings.Builder
+	err := writeEmailMessage(
+		&message,
+		"<message@88fk.org>",
+		"=?UTF-8?B?VGVzdA==?=",
+		"receiver@example.com",
+		"<p>content</p>",
+		nil,
+		SystemNameOrDefault(),
+	)
+	require.NoError(t, err)
+	require.Contains(t, message.String(), `From: "YMeng CC" <api@88fk.org>`)
+
+	OptionMapRWMutex.Lock()
+	OptionMap["SystemName"] = "88API"
+	OptionMapRWMutex.Unlock()
+	message.Reset()
+	err = writeEmailMessage(
+		&message,
+		"<message-2@88fk.org>",
+		"=?UTF-8?B?VGVzdA==?=",
+		"receiver@example.com",
+		"<p>content</p>",
+		nil,
+		SystemNameOrDefault(),
+	)
+	require.NoError(t, err)
+	require.Contains(t, message.String(), `From: "88API" <api@88fk.org>`)
+	require.NotContains(t, message.String(), "YMeng CC")
+}
+
 func newFakeSMTPServer(t *testing.T) *fakeSMTPServer {
 	return newFakeSMTPServerWithSTARTTLSAdvertisement(t, true)
 }

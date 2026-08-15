@@ -272,6 +272,21 @@ func migrateDB() error {
 		&Log{},
 		&Midjourney{},
 		&TopUp{},
+		&AffiliateAccount{},
+		&AffiliateCommission{},
+		&AffiliateUpgradeNotice{},
+		&AffiliatePayout{},
+		&AffiliateTransfer{},
+		&InvoiceRequest{},
+		&InvoiceOrderClaim{},
+		&InvoiceStorageProfile{},
+		&InvoiceFileUpload{},
+		&InvoiceFile{},
+		&InvoiceRequestEvent{},
+		&InvoiceSearchTerm{},
+		&InvoiceFileCleanup{},
+		&InvoiceNotificationDelivery{},
+		&EmailDelivery{},
 		&QuotaData{},
 		&Task{},
 		&Model{},
@@ -296,10 +311,22 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := backfillAffiliateAccounts(); err != nil {
+		return err
+	}
+	if err := ensureInvoiceCleanupCompositeIndex(); err != nil {
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}
 	if err := InitializeExternalIdentityClaims(); err != nil {
+		return err
+	}
+	if err := ensureInvoiceSearchIndexes(); err != nil {
+		return err
+	}
+	if _, err := BackfillInvoiceSearchTerms(100); err != nil {
 		return err
 	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
@@ -335,6 +362,21 @@ func migrateDBFast() error {
 		{&Log{}, "Log"},
 		{&Midjourney{}, "Midjourney"},
 		{&TopUp{}, "TopUp"},
+		{&AffiliateCommission{}, "AffiliateCommission"},
+		{&AffiliateAccount{}, "AffiliateAccount"},
+		{&AffiliateUpgradeNotice{}, "AffiliateUpgradeNotice"},
+		{&AffiliatePayout{}, "AffiliatePayout"},
+		{&AffiliateTransfer{}, "AffiliateTransfer"},
+		{&InvoiceRequest{}, "InvoiceRequest"},
+		{&InvoiceOrderClaim{}, "InvoiceOrderClaim"},
+		{&InvoiceStorageProfile{}, "InvoiceStorageProfile"},
+		{&InvoiceFileUpload{}, "InvoiceFileUpload"},
+		{&InvoiceFile{}, "InvoiceFile"},
+		{&InvoiceRequestEvent{}, "InvoiceRequestEvent"},
+		{&InvoiceSearchTerm{}, "InvoiceSearchTerm"},
+		{&InvoiceFileCleanup{}, "InvoiceFileCleanup"},
+		{&InvoiceNotificationDelivery{}, "InvoiceNotificationDelivery"},
+		{&EmailDelivery{}, "EmailDelivery"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
 		{&Model{}, "Model"},
@@ -377,10 +419,22 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := backfillAffiliateAccounts(); err != nil {
+		return err
+	}
+	if err := ensureInvoiceCleanupCompositeIndex(); err != nil {
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}
 	if err := InitializeExternalIdentityClaims(); err != nil {
+		return err
+	}
+	if err := ensureInvoiceSearchIndexes(); err != nil {
+		return err
+	}
+	if _, err := BackfillInvoiceSearchTerms(100); err != nil {
 		return err
 	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
@@ -393,6 +447,31 @@ func migrateDBFast() error {
 		}
 	}
 	common.SysLog("database migrated")
+	return nil
+}
+
+func ensureInvoiceSearchIndexes() error {
+	switch common.MainDatabaseType() {
+	case common.DatabaseTypeSQLite:
+		return DB.Exec("CREATE INDEX IF NOT EXISTS idx_invoice_search_terms_value_nocase ON invoice_search_terms (value COLLATE NOCASE)").Error
+	case common.DatabaseTypePostgreSQL:
+		return DB.Exec("CREATE INDEX IF NOT EXISTS idx_invoice_search_terms_value_pattern ON invoice_search_terms (value varchar_pattern_ops)").Error
+	default:
+		return nil
+	}
+}
+
+func ensureInvoiceCleanupCompositeIndex() error {
+	migrator := DB.Migrator()
+	legacyIndex := "idx_invoice_file_cleanups_storage_key"
+	if migrator.HasIndex(&InvoiceFileCleanup{}, legacyIndex) {
+		if err := migrator.DropIndex(&InvoiceFileCleanup{}, legacyIndex); err != nil {
+			return err
+		}
+	}
+	if !migrator.HasIndex(&InvoiceFileCleanup{}, "idx_invoice_cleanup_profile_key") {
+		return migrator.CreateIndex(&InvoiceFileCleanup{}, "idx_invoice_cleanup_profile_key")
+	}
 	return nil
 }
 

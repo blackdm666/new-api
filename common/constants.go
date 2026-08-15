@@ -105,6 +105,11 @@ var SMTPAccount = ""
 var SMTPFrom = ""
 var SMTPToken = ""
 
+// 发票邮件通知配置。
+var InvoiceApplicationNotifyAdminEnabled = false
+var InvoiceIssuedNotifyUserEnabled = false
+var InvoiceAdminEmail = ""
+
 var GitHubClientId = ""
 var GitHubClientSecret = ""
 var LinuxDOClientId = ""
@@ -184,6 +189,21 @@ const (
 
 func IsValidateRole(role int) bool {
 	return role == RoleGuestUser || role == RoleCommonUser || role == RoleAdminUser || role == RoleRootUser
+}
+
+func RoleLabel(role int) string {
+	switch role {
+	case RoleGuestUser:
+		return "访客"
+	case RoleCommonUser:
+		return "普通用户"
+	case RoleAdminUser:
+		return "管理员"
+	case RoleRootUser:
+		return "超级管理员"
+	default:
+		return "未知"
+	}
 }
 
 var (

@@ -366,11 +366,17 @@ func EpayNotify(c *gin.Context) {
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 webhook 验签成功 trade_no=%s callback_type=%s trade_status=%s client_ip=%s verify_info=%q", verifyInfo.ServiceTradeNo, verifyInfo.Type, verifyInfo.TradeStatus, c.ClientIP(), common.GetJsonString(verifyInfo)))
 
 	if verifyInfo.TradeStatus == epay.StatusTradeSuccess {
+		paidMoney, parseErr := strconv.ParseFloat(verifyInfo.Money, 64)
+		if parseErr != nil || paidMoney <= 0 {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 回调实付金额无效 trade_no=%s callback_money=%q client_ip=%s", verifyInfo.ServiceTradeNo, verifyInfo.Money, c.ClientIP()))
+			_, _ = c.Writer.Write([]byte("fail"))
+			return
+		}
 		// 进程内锁只是优化；重复/并发回调的正确性由 RechargeEpay 的
 		// 数据库行锁 + 事务内状态校验保证（多实例部署下同样安全）。
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
-		alreadyDone, err := model.RechargeEpay(verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP())
+		alreadyDone, err := model.RechargeEpay(verifyInfo.ServiceTradeNo, verifyInfo.Type, paidMoney, c.ClientIP())
 		if err != nil {
 			switch {
 			case errors.Is(err, model.ErrTopUpNotFound):
@@ -379,6 +385,8 @@ func EpayNotify(c *gin.Context) {
 				logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 订单支付网关不匹配 trade_no=%s callback_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP()))
 			case errors.Is(err, model.ErrTopUpStatusInvalid):
 				logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 订单状态非法 trade_no=%s callback_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP()))
+			case errors.Is(err, model.ErrTopUpAmountMismatch):
+				logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 回调金额与本地订单不一致 trade_no=%s callback_money=%.2f client_ip=%s", verifyInfo.ServiceTradeNo, paidMoney, c.ClientIP()))
 			default:
 				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 充值处理失败 trade_no=%s client_ip=%s error=%q", verifyInfo.ServiceTradeNo, c.ClientIP(), err.Error()))
 			}

@@ -66,6 +66,54 @@ func InitOptionMap() {
 	common.OptionMap["SMTPStartTLSEnabled"] = strconv.FormatBool(common.SMTPStartTLSEnabled)
 	common.OptionMap["SMTPInsecureSkipVerify"] = strconv.FormatBool(common.SMTPInsecureSkipVerify)
 	common.OptionMap["SMTPForceAuthLogin"] = strconv.FormatBool(common.SMTPForceAuthLogin)
+	common.OptionMap["InvoiceApplicationNotifyAdminEnabled"] = strconv.FormatBool(common.InvoiceApplicationNotifyAdminEnabled)
+	common.OptionMap["InvoiceIssuedNotifyUserEnabled"] = strconv.FormatBool(common.InvoiceIssuedNotifyUserEnabled)
+	common.OptionMap["InvoiceAdminEmail"] = common.InvoiceAdminEmail
+	common.OptionMap[AffiliateCommissionEnabledOptionKey] = "false"
+	common.OptionMap[AffiliateCommissionAutoApproveOptionKey] = "false"
+	common.OptionMap[AffiliateCommissionDefaultRateOptionKey] = strconv.Itoa(affiliateCommissionDefaultRateBasisPoints)
+	common.OptionMap[AffiliateCommissionGroupRatesOptionKey] = affiliateCommissionDefaultGroupRatesJSON
+	common.OptionMap[AffiliateUpgradeInviteesThresholdOptionKey] = strconv.Itoa(AffiliateUpgradeEffectiveInviteesThreshold)
+	common.OptionMap[AffiliateGoldUpgradeInviteesThresholdOptionKey] = strconv.Itoa(AffiliateGoldUpgradeEffectiveInviteesThreshold)
+	common.OptionMap[AffiliateUpgradeTopUpAmountThresholdOptionKey] = strconv.FormatInt(AffiliateUpgradeEffectiveTopUpAmountCents, 10)
+	common.OptionMap[AffiliateGoldUpgradeTopUpAmountThresholdOptionKey] = strconv.FormatInt(AffiliateGoldUpgradeEffectiveTopUpAmountCents, 10)
+	common.OptionMap[AffiliateCommissionActivatedAtOptionKey] = "0"
+	common.OptionMap[AffiliateAlipayPayoutEnabledOptionKey] = "false"
+	common.OptionMap[AffiliateAlipayAppIdOptionKey] = ""
+	common.OptionMap[AffiliateAlipayPrivateKeyOptionKey] = ""
+	common.OptionMap[AffiliateAlipayAppCertificateOptionKey] = ""
+	common.OptionMap[AffiliateAlipayPublicCertificateOptionKey] = ""
+	common.OptionMap[AffiliateAlipayRootCertificateOptionKey] = ""
+	common.OptionMap[AffiliateAlipayTransferTitleOptionKey] = AffiliateAlipayDefaultTransferTitle
+	common.OptionMap["InvoiceFileEnabled"] = strconv.FormatBool(setting.InvoiceFileEnabled)
+	common.OptionMap["InvoiceFileMaxSize"] = strconv.FormatInt(setting.InvoiceFileMaxSize, 10)
+	common.OptionMap["InvoiceFileMaxCount"] = strconv.Itoa(setting.InvoiceFileMaxCount)
+	common.OptionMap["InvoiceMinimumAmountCents"] = strconv.FormatInt(setting.InvoiceMinimumAmountCents, 10)
+	common.OptionMap["InvoiceDataRetentionDays"] = strconv.Itoa(setting.InvoiceDataRetentionDays)
+	common.OptionMap["InvoicePendingExpiryDays"] = strconv.Itoa(setting.InvoicePendingExpiryDays)
+	common.OptionMap["InvoiceFileAllowedExts"] = setting.InvoiceFileAllowedExts
+	common.OptionMap["InvoiceFileAllowedMimes"] = setting.InvoiceFileAllowedMimes
+	common.OptionMap["InvoiceFileStorage"] = setting.InvoiceFileStorage
+	common.OptionMap["InvoiceFileLocalPath"] = setting.InvoiceFileLocalPath
+	common.OptionMap["InvoiceFileSignedURLTTL"] = strconv.FormatInt(setting.InvoiceFileSignedURLTTL, 10)
+	common.OptionMap["InvoiceFileOSSEndpoint"] = setting.InvoiceFileOSSEndpoint
+	common.OptionMap["InvoiceFileOSSBucket"] = setting.InvoiceFileOSSBucket
+	common.OptionMap["InvoiceFileOSSRegion"] = setting.InvoiceFileOSSRegion
+	common.OptionMap["InvoiceFileOSSAccessKeyId"] = setting.InvoiceFileOSSAccessKeyId
+	common.OptionMap["InvoiceFileOSSAccessKeySecret"] = setting.InvoiceFileOSSAccessKeySecret
+	common.OptionMap["InvoiceFileOSSCustomDomain"] = setting.InvoiceFileOSSCustomDomain
+	common.OptionMap["InvoiceFileS3Endpoint"] = setting.InvoiceFileS3Endpoint
+	common.OptionMap["InvoiceFileS3Bucket"] = setting.InvoiceFileS3Bucket
+	common.OptionMap["InvoiceFileS3Region"] = setting.InvoiceFileS3Region
+	common.OptionMap["InvoiceFileS3AccessKeyId"] = setting.InvoiceFileS3AccessKeyId
+	common.OptionMap["InvoiceFileS3AccessKeySecret"] = setting.InvoiceFileS3AccessKeySecret
+	common.OptionMap["InvoiceFileS3CustomDomain"] = setting.InvoiceFileS3CustomDomain
+	common.OptionMap["InvoiceFileCOSEndpoint"] = setting.InvoiceFileCOSEndpoint
+	common.OptionMap["InvoiceFileCOSBucket"] = setting.InvoiceFileCOSBucket
+	common.OptionMap["InvoiceFileCOSRegion"] = setting.InvoiceFileCOSRegion
+	common.OptionMap["InvoiceFileCOSSecretId"] = setting.InvoiceFileCOSSecretId
+	common.OptionMap["InvoiceFileCOSSecretKey"] = setting.InvoiceFileCOSSecretKey
+	common.OptionMap["InvoiceFileCOSCustomDomain"] = setting.InvoiceFileCOSCustomDomain
 	common.OptionMap["Notice"] = ""
 	common.OptionMap["About"] = ""
 	common.OptionMap["HomePageContent"] = ""
@@ -206,6 +254,9 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if err := ValidateAffiliateOptionValue(key, value); err != nil {
+		return err
+	}
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
 	}
@@ -215,8 +266,39 @@ func validateOptionValue(key string, value string) error {
 	return nil
 }
 
+func validateRelatedOptionValues(values map[string]string) error {
+	_, advancedChanged := values[AffiliateUpgradeInviteesThresholdOptionKey]
+	_, goldChanged := values[AffiliateGoldUpgradeInviteesThresholdOptionKey]
+	_, advancedAmountChanged := values[AffiliateUpgradeTopUpAmountThresholdOptionKey]
+	_, goldAmountChanged := values[AffiliateGoldUpgradeTopUpAmountThresholdOptionKey]
+	if !advancedChanged && !goldChanged && !advancedAmountChanged && !goldAmountChanged {
+		return nil
+	}
+	policy := getAffiliatePolicy()
+	advancedThreshold := policy.UpgradeInviteesThreshold
+	goldThreshold := policy.GoldUpgradeInviteesThreshold
+	advancedAmountCents := policy.UpgradeTopUpAmountThresholdCents
+	goldAmountCents := policy.GoldUpgradeTopUpAmountThresholdCents
+	if raw, ok := values[AffiliateUpgradeInviteesThresholdOptionKey]; ok {
+		advancedThreshold, _ = strconv.Atoi(raw)
+	}
+	if raw, ok := values[AffiliateGoldUpgradeInviteesThresholdOptionKey]; ok {
+		goldThreshold, _ = strconv.Atoi(raw)
+	}
+	if raw, ok := values[AffiliateUpgradeTopUpAmountThresholdOptionKey]; ok {
+		advancedAmountCents, _ = strconv.ParseInt(raw, 10, 64)
+	}
+	if raw, ok := values[AffiliateGoldUpgradeTopUpAmountThresholdOptionKey]; ok {
+		goldAmountCents, _ = strconv.ParseInt(raw, 10, 64)
+	}
+	return ValidateAffiliateUpgradeThresholds(advancedThreshold, goldThreshold, advancedAmountCents, goldAmountCents)
+}
+
 func UpdateOption(key string, value string) error {
 	if err := validateOptionValue(key, value); err != nil {
+		return err
+	}
+	if err := validateRelatedOptionValues(map[string]string{key: value}); err != nil {
 		return err
 	}
 	// Save to database first
@@ -247,6 +329,9 @@ func UpdateOptionsBulk(values map[string]string) error {
 		if err := validateOptionValue(key, value); err != nil {
 			return err
 		}
+	}
+	if err := validateRelatedOptionValues(values); err != nil {
+		return err
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		for k, v := range values {
@@ -383,6 +468,12 @@ func updateOptionMap(key string, value string) (err error) {
 			common.SMTPInsecureSkipVerify = boolValue
 		case "SMTPForceAuthLogin":
 			common.SMTPForceAuthLogin = boolValue
+		case "InvoiceApplicationNotifyAdminEnabled":
+			common.InvoiceApplicationNotifyAdminEnabled = boolValue
+		case "InvoiceIssuedNotifyUserEnabled":
+			common.InvoiceIssuedNotifyUserEnabled = boolValue
+		case "InvoiceFileEnabled":
+			setting.InvoiceFileEnabled = boolValue
 		case "WorkerAllowHttpImageRequestEnabled":
 			system_setting.WorkerAllowHttpImageRequestEnabled = boolValue
 		case "DefaultUseAutoGroup":
@@ -405,6 +496,76 @@ func updateOptionMap(key string, value string) (err error) {
 		common.SMTPFrom = value
 	case "SMTPToken":
 		common.SMTPToken = value
+	case "InvoiceAdminEmail":
+		common.InvoiceAdminEmail = value
+	case "InvoiceFileMaxSize":
+		if v, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil && v > 0 {
+			setting.InvoiceFileMaxSize = v
+		}
+	case "InvoiceFileMaxCount":
+		if v, parseErr := strconv.Atoi(value); parseErr == nil && v > 0 {
+			setting.InvoiceFileMaxCount = v
+		}
+	case "InvoiceMinimumAmountCents":
+		if v, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil && v > 0 {
+			setting.InvoiceMinimumAmountCents = v
+		}
+	case "InvoiceDataRetentionDays":
+		if v, parseErr := strconv.Atoi(value); parseErr == nil && v >= 0 {
+			setting.InvoiceDataRetentionDays = v
+		}
+	case "InvoicePendingExpiryDays":
+		if v, parseErr := strconv.Atoi(value); parseErr == nil && v >= 0 {
+			setting.InvoicePendingExpiryDays = v
+		}
+	case "InvoiceFileAllowedExts":
+		setting.InvoiceFileAllowedExts = value
+	case "InvoiceFileAllowedMimes":
+		setting.InvoiceFileAllowedMimes = value
+	case "InvoiceFileStorage":
+		setting.InvoiceFileStorage = value
+	case "InvoiceFileLocalPath":
+		setting.InvoiceFileLocalPath = value
+	case "InvoiceFileSignedURLTTL":
+		if v, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil && v > 0 {
+			setting.InvoiceFileSignedURLTTL = v
+		}
+	case "InvoiceFileOSSEndpoint":
+		setting.InvoiceFileOSSEndpoint = value
+	case "InvoiceFileOSSBucket":
+		setting.InvoiceFileOSSBucket = value
+	case "InvoiceFileOSSRegion":
+		setting.InvoiceFileOSSRegion = value
+	case "InvoiceFileOSSAccessKeyId":
+		setting.InvoiceFileOSSAccessKeyId = value
+	case "InvoiceFileOSSAccessKeySecret":
+		setting.InvoiceFileOSSAccessKeySecret = value
+	case "InvoiceFileOSSCustomDomain":
+		setting.InvoiceFileOSSCustomDomain = value
+	case "InvoiceFileS3Endpoint":
+		setting.InvoiceFileS3Endpoint = value
+	case "InvoiceFileS3Bucket":
+		setting.InvoiceFileS3Bucket = value
+	case "InvoiceFileS3Region":
+		setting.InvoiceFileS3Region = value
+	case "InvoiceFileS3AccessKeyId":
+		setting.InvoiceFileS3AccessKeyId = value
+	case "InvoiceFileS3AccessKeySecret":
+		setting.InvoiceFileS3AccessKeySecret = value
+	case "InvoiceFileS3CustomDomain":
+		setting.InvoiceFileS3CustomDomain = value
+	case "InvoiceFileCOSEndpoint":
+		setting.InvoiceFileCOSEndpoint = value
+	case "InvoiceFileCOSBucket":
+		setting.InvoiceFileCOSBucket = value
+	case "InvoiceFileCOSRegion":
+		setting.InvoiceFileCOSRegion = value
+	case "InvoiceFileCOSSecretId":
+		setting.InvoiceFileCOSSecretId = value
+	case "InvoiceFileCOSSecretKey":
+		setting.InvoiceFileCOSSecretKey = value
+	case "InvoiceFileCOSCustomDomain":
+		setting.InvoiceFileCOSCustomDomain = value
 	case "ServerAddress":
 		system_setting.ServerAddress = value
 	case "WorkerUrl":

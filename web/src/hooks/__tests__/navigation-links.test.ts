@@ -80,3 +80,41 @@ test('places Infinite Canvas immediately before Playground', () => {
     }
   )
 })
+
+test('places referral and invoice pages between Wallet and Profile', () => {
+  const sidebar = buildSidebarData(translate)
+  const personalItems = sidebar.navGroups.find(
+    (group) => group.id === 'personal'
+  )?.items
+
+  assert.ok(personalItems)
+  assert.deepEqual(
+    personalItems.map((item) => ('url' in item ? item.url : undefined)),
+    ['/wallet', '/referral', '/invoices', '/profile']
+  )
+})
+
+test('places invoice management immediately after subscriptions', () => {
+  const sidebar = buildSidebarData(translate)
+  const adminItems = sidebar.navGroups.find(
+    (group) => group.id === 'admin'
+  )?.items
+
+  assert.ok(adminItems)
+  const subscriptionsIndex = adminItems.findIndex(
+    (item) => 'url' in item && item.url === '/subscriptions'
+  )
+  const invoiceManagement = adminItems[subscriptionsIndex + 1]
+
+  assert.ok(invoiceManagement)
+  assert.deepEqual(
+    {
+      title: invoiceManagement.title,
+      url: 'url' in invoiceManagement ? invoiceManagement.url : undefined,
+    },
+    {
+      title: 'Invoice Management',
+      url: '/admin-invoices',
+    }
+  )
+})

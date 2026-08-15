@@ -170,6 +170,27 @@ func GetQuotaDataGroupByUser(startTime int64, endTime int64) (quotaData []*Quota
 	return quotaDatas, err
 }
 
+func GetUserModelUsageTopN(userId int, since int64, topN int) ([]*QuotaData, error) {
+	if userId <= 0 {
+		return []*QuotaData{}, nil
+	}
+	if topN <= 0 || topN > 100 {
+		topN = 8
+	}
+	var rows []*QuotaData
+	// Invoice review needs live, user-scoped usage even when the optional
+	// dashboard aggregation/export job is disabled. Aggregate the canonical
+	// consume logs directly instead of relying on quota_data snapshots.
+	err := LOG_DB.Table("logs").
+		Select("model_name, COUNT(*) AS count, COALESCE(SUM(quota), 0) AS quota, COALESCE(SUM(prompt_tokens), 0) + COALESCE(SUM(completion_tokens), 0) AS token_used").
+		Where("user_id = ? AND type = ? AND created_at >= ? AND model_name <> ''", userId, LogTypeConsume, since).
+		Group("model_name").
+		Order("count DESC, quota DESC, model_name ASC").
+		Limit(topN).
+		Scan(&rows).Error
+	return rows, err
+}
+
 func GetAllQuotaDates(startTime int64, endTime int64, username string) (quotaData []*QuotaData, err error) {
 	if username != "" {
 		return GetQuotaDataByUsername(username, startTime, endTime)

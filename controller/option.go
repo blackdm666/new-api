@@ -34,6 +34,27 @@ func isPaymentComplianceOptionKey(key string) bool {
 	return strings.HasPrefix(key, "payment_setting.compliance_")
 }
 
+func isAffiliatePayoutOptionKey(key string) bool {
+	return strings.HasPrefix(key, "AffiliateAlipay")
+}
+
+func isAffiliateCommissionOptionKey(key string) bool {
+	switch key {
+	case model.AffiliateCommissionEnabledOptionKey,
+		model.AffiliateCommissionAutoApproveOptionKey,
+		model.AffiliateCommissionDefaultRateOptionKey,
+		model.AffiliateCommissionGroupRatesOptionKey,
+		model.AffiliateUpgradeInviteesThresholdOptionKey,
+		model.AffiliateGoldUpgradeInviteesThresholdOptionKey,
+		model.AffiliateUpgradeTopUpAmountThresholdOptionKey,
+		model.AffiliateGoldUpgradeTopUpAmountThresholdOptionKey,
+		model.AffiliateCommissionActivatedAtOptionKey:
+		return true
+	default:
+		return false
+	}
+}
+
 func isPositiveOptionValue(value string) bool {
 	intValue, err := strconv.Atoi(strings.TrimSpace(value))
 	if err == nil {
@@ -150,6 +171,14 @@ func UpdateOption(c *gin.Context) {
 	default:
 		if isPaymentComplianceOptionKey(option.Key) {
 			common.ApiErrorMsg(c, "合规确认字段不允许通过通用设置接口修改")
+			return
+		}
+		if isAffiliatePayoutOptionKey(option.Key) {
+			common.ApiErrorMsg(c, "自动打款配置不允许通过通用设置接口修改")
+			return
+		}
+		if isAffiliateCommissionOptionKey(option.Key) {
+			common.ApiErrorMsg(c, "返佣配置不允许通过通用设置接口单独修改")
 			return
 		}
 	}

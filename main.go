@@ -323,6 +323,9 @@ func InitResources() error {
 		}
 	}
 	model.InitOptionMap()
+	if err := service.InitializeInvoiceStorageProfiles(); err != nil {
+		return fmt.Errorf("initialize invoice storage profiles: %w", err)
+	}
 
 	// 清理旧的磁盘缓存文件
 	common.CleanupOldCacheFiles()
@@ -363,6 +366,11 @@ func InitResources() error {
 	}
 
 	service.StartAuthArtifactCleanup()
+	service.StartInvoiceFileCleanup()
+	service.StartInvoiceNotificationDelivery()
+	service.StartEmailDelivery()
+	service.StartInvoiceDataRetention()
+	service.StartAffiliateUpgradeNotificationDelivery()
 
 	return nil
 }

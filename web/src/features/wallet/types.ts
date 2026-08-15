@@ -218,6 +218,8 @@ export interface AmountRequest {
 export interface AffiliateTransferRequest {
   /** Quota amount to transfer */
   quota: number
+  /** Idempotency key for safe retries */
+  request_id: string
 }
 
 /**
@@ -242,6 +244,18 @@ export interface UserWalletData {
   aff_count: number
   /** User group */
   group: string
+}
+
+export interface UserInvitee {
+  username: string
+  display_name: string
+  created_at: number
+  is_new: boolean
+}
+
+export interface InviteeHistoryResponse {
+  items: UserInvitee[]
+  total: number
 }
 
 /**
