@@ -16,15 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export interface OAuthBinding {
-  provider_id: string
-  provider_name: string
-  provider_slug?: string
-  provider_icon?: string
-  provider_user_id?: string
-  external_id?: string
-  user_id?: number
-}
+import type { CustomOAuthBinding } from './oauth'
 
 function scalarString(value: unknown): string | undefined {
   if (typeof value === 'string') return value
@@ -45,34 +37,29 @@ function numericId(value: unknown): number | undefined {
  * Invalid non-array payloads become an empty list so a malformed response
  * cannot take down the whole profile or admin users page.
  */
-export function normalizeOAuthBindings(value: unknown): OAuthBinding[] {
+export function normalizeOAuthBindings(value: unknown): CustomOAuthBinding[] {
   if (!Array.isArray(value)) return []
 
   return value.flatMap((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return []
 
     const raw = item as Record<string, unknown>
-    const providerId = scalarString(raw.provider_id)
-    if (providerId === undefined || providerId === '') return []
+    const providerId = numericId(raw.provider_id)
+    if (providerId === undefined) return []
 
-    const providerUserId = scalarString(raw.provider_user_id)
-    const externalId = scalarString(raw.external_id) ?? providerUserId
-    const providerName = scalarString(raw.provider_name) || providerId
-    const providerSlug = scalarString(raw.provider_slug)
-    const providerIcon = scalarString(raw.provider_icon)
-    const userId = numericId(raw.user_id)
+    const providerUserId =
+      scalarString(raw.provider_user_id) ?? scalarString(raw.external_id) ?? ''
+    const providerName = scalarString(raw.provider_name) || String(providerId)
+    const providerSlug = scalarString(raw.provider_slug) ?? ''
+    const providerIcon = scalarString(raw.provider_icon) ?? ''
 
     return [
       {
         provider_id: providerId,
         provider_name: providerName,
-        ...(providerSlug !== undefined && { provider_slug: providerSlug }),
-        ...(providerIcon !== undefined && { provider_icon: providerIcon }),
-        ...(providerUserId !== undefined && {
-          provider_user_id: providerUserId,
-        }),
-        ...(externalId !== undefined && { external_id: externalId }),
-        ...(userId !== undefined && { user_id: userId }),
+        provider_slug: providerSlug,
+        provider_icon: providerIcon,
+        provider_user_id: providerUserId,
       },
     ]
   })

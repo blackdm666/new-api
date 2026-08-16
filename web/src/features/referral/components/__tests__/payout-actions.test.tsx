@@ -17,31 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { after, describe, test } from 'node:test'
 
-import { Window } from 'happy-dom'
-
-const domWindow = new Window()
-for (const key of [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLButtonElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'MouseEvent',
-  'getComputedStyle',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-] as const) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
+import { describe, test } from 'vitest'
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -102,8 +79,6 @@ async function openPayoutMenu(container: HTMLElement) {
 }
 
 describe('administrator payout actions', () => {
-  after(() => domWindow.close())
-
   test('groups manual and Alipay actions in one compact settlement menu', async () => {
     const actions: string[] = []
     const container = document.createElement('div')

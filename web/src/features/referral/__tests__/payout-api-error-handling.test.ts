@@ -17,9 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { after, describe, test } from 'node:test'
 
 import type { AxiosAdapter } from 'axios'
+import { afterAll, describe, test } from 'vitest'
 
 import { api } from '@/lib/api'
 
@@ -31,7 +31,7 @@ import {
 describe('Alipay payout API error ownership', () => {
   const originalAdapter = api.defaults.adapter
 
-  after(() => {
+  afterAll(() => {
     api.defaults.adapter = originalAdapter
   })
 

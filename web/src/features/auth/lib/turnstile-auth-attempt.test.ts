@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-// @ts-expect-error The CI runtime provides bun:test; the application tsconfig intentionally omits Bun globals.
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 
 import { runTurnstileProtectedAuthAttempt } from './turnstile-auth-attempt'
 

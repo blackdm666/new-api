@@ -17,7 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+
+import { describe, test } from 'vitest'
 
 import { normalizeOAuthBindings } from './oauth-bindings'
 
@@ -46,13 +47,11 @@ describe('OAuth binding response normalization', () => {
       ]),
       [
         {
-          provider_id: '12',
+          provider_id: 12,
           provider_name: 'Google',
           provider_slug: 'google',
           provider_icon: 'google',
           provider_user_id: 'google-user-42',
-          external_id: 'google-user-42',
-          user_id: 7,
         },
       ]
     )
@@ -69,9 +68,11 @@ describe('OAuth binding response normalization', () => {
       ]),
       [
         {
-          provider_id: '12',
+          provider_id: 12,
           provider_name: 'Google',
-          external_id: 'legacy-user-42',
+          provider_slug: '',
+          provider_icon: '',
+          provider_user_id: 'legacy-user-42',
         },
       ]
     )
@@ -82,9 +83,11 @@ describe('OAuth binding response normalization', () => {
       normalizeOAuthBindings([null, {}, { provider_id: 3, external_id: 99 }]),
       [
         {
-          provider_id: '3',
+          provider_id: 3,
           provider_name: '3',
-          external_id: '99',
+          provider_slug: '',
+          provider_icon: '',
+          provider_user_id: '99',
         },
       ]
     )

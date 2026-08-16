@@ -16,11 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-// @ts-expect-error The CI runtime provides bun:test; the application tsconfig intentionally omits Bun globals.
-import { describe, expect, test } from 'bun:test'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { describe, expect, test } from 'vitest'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const webSource = resolve(currentDirectory, '../../..')

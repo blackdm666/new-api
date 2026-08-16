@@ -16,27 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-// @ts-expect-error The CI runtime provides bun:test; the application tsconfig intentionally omits Bun globals.
-import { afterAll, beforeEach, describe, test } from 'bun:test'
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-*/
 import assert from 'node:assert/strict'
 
-import { Window } from 'happy-dom'
-
-const domWindow = new Window()
-for (const key of ['window', 'document', 'navigator', 'HTMLElement'] as const) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
+import { beforeEach, describe, test } from 'vitest'
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -55,8 +37,6 @@ describe('Turnstile compatibility component', () => {
     delete window.Captcha88
     delete window.turnstile
   })
-
-  afterAll(() => domWindow.close())
 
   test('routes self-hosted verification through the optional development proxy', () => {
     assert.equal(
@@ -94,7 +74,10 @@ describe('Turnstile compatibility component', () => {
       )
     })
 
-    assert.equal(renderOptions?.endpoint, 'https://verify.88api.ai')
+    assert.equal(
+      renderOptions?.endpoint,
+      resolveTurnstileEndpoint('https://verify.88api.ai/', import.meta.env.DEV)
+    )
     assert.equal(renderOptions?.act, 'register')
     renderOptions?.onToken?.('one-use-token')
     assert.equal(verifiedToken, 'one-use-token')

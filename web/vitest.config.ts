@@ -16,21 +16,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { describe, expect, test } from 'vitest'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-import {
-  MAX_INVOICE_ORDER_SELECTION,
-  selectInvoiceOrderIds,
-} from '../lib/invoice-selection'
+import { defineConfig } from 'vitest/config'
 
-describe('invoice order selection', () => {
-  test('select all never selects more than the backend limit', () => {
-    const ids = Array.from({ length: 150 }, (_, index) => index + 1)
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-    const selected = selectInvoiceOrderIds(ids)
-
-    expect(selected.size).toBe(MAX_INVOICE_ORDER_SELECTION)
-    expect(selected.has(100)).toBe(true)
-    expect(selected.has(101)).toBe(false)
-  })
+export default defineConfig({
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test-setup.ts'],
+    clearMocks: true,
+    restoreMocks: true,
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+  },
 })

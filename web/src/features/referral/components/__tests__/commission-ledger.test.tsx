@@ -17,30 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { after, describe, test } from 'node:test'
 
-import { Window } from 'happy-dom'
+import { describe, test } from 'vitest'
 
 import {
   AFFILIATE_COMMISSION_STATUS,
   type AffiliateCommission,
 } from '../../types'
-
-const domWindow = new Window()
-for (const key of [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'SVGElement',
-  'Node',
-  'Element',
-] as const) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -85,8 +68,6 @@ function commissionFixture(
 }
 
 describe('affiliate commission ledger', () => {
-  after(() => domWindow.close())
-
   test('shows durable status history and distinct tier badge colors without review actions', async () => {
     const items = [
       commissionFixture(1, '初级推广', AFFILIATE_COMMISSION_STATUS.PENDING),
