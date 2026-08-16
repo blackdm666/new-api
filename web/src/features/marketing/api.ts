@@ -42,6 +42,10 @@ export async function fetchMarketingOverview(): Promise<MarketingOverview> {
   return data(await api.get('/api/marketing/overview'))
 }
 
+export async function fetchMarketingUserGroups(): Promise<string[]> {
+  return data(await api.get('/api/group/'))
+}
+
 export async function fetchMarketingCampaigns(
   page = 1
 ): Promise<Paginated<MarketingCampaign>> {

@@ -41,6 +41,7 @@ for (const key of ['window', 'document', 'navigator', 'HTMLElement'] as const) {
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { Turnstile } = await import('../turnstile')
+const { resolveTurnstileEndpoint } = await import('../turnstile-utils')
 
 const reactTestGlobals = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean
@@ -56,6 +57,17 @@ describe('Turnstile compatibility component', () => {
   })
 
   afterAll(() => domWindow.close())
+
+  test('routes self-hosted verification through the optional development proxy', () => {
+    assert.equal(
+      resolveTurnstileEndpoint('https://verify.88api.ai/', true),
+      '/__turnstile'
+    )
+    assert.equal(
+      resolveTurnstileEndpoint('https://verify.88api.ai/', false),
+      'https://verify.88api.ai'
+    )
+  })
 
   test('uses Captcha88 when the configured site key is a service URL', async () => {
     let renderOptions:

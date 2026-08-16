@@ -61,6 +61,62 @@ func performManageUserRequest(t *testing.T, body string) *httptest.ResponseRecor
 	return recorder
 }
 
+func performUpdateUserRequest(t *testing.T, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/user/", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("id", 9999)
+	c.Set("role", common.RoleAdminUser)
+	c.Set("username", "admin-operator")
+	UpdateUser(c)
+	return recorder
+}
+
+func TestUpdateUserAddsPreservesAndClearsManualInviter(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	inviter := model.User{
+		Username: "manual-inviter", Password: "unused-password-hash", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, AffCode: "manual-controller-inviter-aff",
+	}
+	require.NoError(t, db.Create(&inviter).Error)
+	target := model.User{
+		Username: "manual-invitee", DisplayName: "Invitee", Password: "unused-password-hash", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, AffCode: "manual-controller-invitee-aff",
+	}
+	require.NoError(t, db.Create(&target).Error)
+
+	recorder := performUpdateUserRequest(t, fmt.Sprintf(
+		`{"id":%d,"username":%q,"display_name":%q,"group":"default","inviter_id":%d}`,
+		target.Id, target.Username, target.DisplayName, inviter.Id,
+	))
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	require.NoError(t, db.First(&target, target.Id).Error)
+	require.NoError(t, db.First(&inviter, inviter.Id).Error)
+	assert.Equal(t, inviter.Id, target.InviterId)
+	assert.Equal(t, 1, inviter.AffCount)
+
+	recorder = performUpdateUserRequest(t, fmt.Sprintf(
+		`{"id":%d,"username":%q,"display_name":"Updated","group":"default"}`,
+		target.Id, target.Username,
+	))
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	require.NoError(t, db.First(&target, target.Id).Error)
+	assert.Equal(t, inviter.Id, target.InviterId, "omitting inviter_id must preserve the relationship")
+
+	recorder = performUpdateUserRequest(t, fmt.Sprintf(
+		`{"id":%d,"username":%q,"display_name":"Updated","group":"default","inviter_id":0}`,
+		target.Id, target.Username,
+	))
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	require.NoError(t, db.First(&target, target.Id).Error)
+	require.NoError(t, db.First(&inviter, inviter.Id).Error)
+	assert.Zero(t, target.InviterId)
+	assert.Zero(t, inviter.AffCount)
+}
+
 func TestManageUserDisableAdvancesAuthVersionOnceAndRevokesSession(t *testing.T) {
 	db := setupManageUserTestDB(t)
 	now := time.Now().Unix()

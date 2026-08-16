@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { defineConfig, loadEnv } from '@rsbuild/core'
+import { defineConfig, loadEnv, type ProxyOptions } from '@rsbuild/core'
 import { pluginReact } from '@rsbuild/plugin-react'
 import { pluginTailwindcss } from '@rsbuild/plugin-tailwindcss'
 import { tanstackRouter } from '@tanstack/router-plugin/rspack'
@@ -14,14 +14,29 @@ export default defineConfig(({ envMode }) => {
     process.env.VITE_REACT_APP_SERVER_URL ||
     env.rawPublicVars.VITE_REACT_APP_SERVER_URL ||
     'http://localhost:3000'
+  const turnstileDevServerUrl =
+    process.env.VITE_TURNSTILE_DEV_SERVER_URL ||
+    env.rawPublicVars.VITE_TURNSTILE_DEV_SERVER_URL ||
+    'https://verify.88api.ai'
+  const serverOrigin = new URL(serverUrl).origin
 
   const isProd = envMode === 'production'
-  const devProxy = Object.fromEntries(
+  const devProxy: Record<string, ProxyOptions> = Object.fromEntries(
     (['/api', '/mj', '/pg'] as const).map((key) => [
       key,
-      { target: serverUrl, changeOrigin: true },
+      {
+        target: serverUrl,
+        changeOrigin: true,
+        headers: { origin: serverOrigin },
+      },
     ])
-  ) as Record<string, { target: string; changeOrigin: boolean }>
+  )
+  devProxy['/__turnstile'] = {
+    target: turnstileDevServerUrl,
+    changeOrigin: true,
+    headers: { origin: serverOrigin },
+    pathRewrite: { '^/__turnstile': '' },
+  }
 
   return {
     plugins: [pluginReact(), pluginTailwindcss({ optimize: false })],

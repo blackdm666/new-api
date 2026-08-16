@@ -46,6 +46,7 @@ import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { loginFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
+import { runTurnstileProtectedAuthAttempt } from '@/features/auth/lib/turnstile-auth-attempt'
 import { beginPasskeyLogin, finishPasskeyLogin } from '@/features/auth/passkey'
 import type { AuthFormProps } from '@/features/auth/types'
 import { useStatus } from '@/hooks/use-status'
@@ -126,6 +127,7 @@ export function UserAuthForm({
       setTurnstileWidgetKey((current) => current + 1)
     }
   }
+  const clearTurnstileToken = () => setTurnstileToken('')
 
   useEffect(() => {
     if (requiresLegalConsent) {
@@ -172,34 +174,37 @@ export function UserAuthForm({
     if (!validateTurnstile()) return
 
     const submittedTurnstileToken = turnstileToken
-    if (isTurnstileEnabled) {
-      resetTurnstile()
-    }
 
     setIsLoading(true)
     try {
-      const res = await login({
-        username: data.username,
-        password: data.password,
-        turnstile: submittedTurnstileToken,
-      })
+      await runTurnstileProtectedAuthAttempt(
+        async () => {
+          const res = await login({
+            username: data.username,
+            password: data.password,
+            turnstile: submittedTurnstileToken,
+          })
 
-      if (res.success) {
-        if (res.data && 'require_2fa' in res.data && res.data.require_2fa) {
-          if (!res.data.flow_token) {
-            throw new Error(t('Login flow expired. Please sign in again.'))
+          if (!res.success) return false
+
+          if (res.data && 'require_2fa' in res.data && res.data.require_2fa) {
+            if (!res.data.flow_token) {
+              throw new Error(t('Login flow expired. Please sign in again.'))
+            }
+            setPending2FAFlowToken(res.data.flow_token)
+            redirectTo2FA()
+            return true
           }
-          setPending2FAFlowToken(res.data.flow_token)
-          redirectTo2FA()
-          return
-        }
 
-        if (!isAuthBundle(res.data)) {
-          throw new Error(t('Login failed'))
-        }
-        await handleLoginSuccess(res.data, redirectTo)
-        toast.success(t('Welcome back!'))
-      }
+          if (!isAuthBundle(res.data)) {
+            throw new Error(t('Login failed'))
+          }
+          await handleLoginSuccess(res.data, redirectTo)
+          toast.success(t('Welcome back!'))
+          return true
+        },
+        isTurnstileEnabled ? resetTurnstile : undefined
+      )
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) return
       toast.error(error instanceof Error ? error.message : loginFailedMessage)
@@ -428,7 +433,7 @@ export function UserAuthForm({
               key={turnstileWidgetKey}
               siteKey={turnstileSiteKey}
               onVerify={setTurnstileToken}
-              onExpire={resetTurnstile}
+              onExpire={clearTurnstileToken}
             />
           </div>
         )}

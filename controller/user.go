@@ -37,6 +37,14 @@ var (
 	errOriginalPasswordFail = errors.New("original password is incorrect")
 )
 
+func writeLoginFailure(c *gin.Context, code string, messageKey string) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": false,
+		"code":    code,
+		"message": i18n.T(c, messageKey),
+	})
+}
+
 func Login(c *gin.Context) {
 	if !common.PasswordLoginEnabled {
 		common.ApiErrorI18n(c, i18n.MsgUserPasswordLoginDisabled)
@@ -66,8 +74,10 @@ func Login(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgDatabaseError)
 		case errors.Is(err, model.ErrUserEmptyCredentials):
 			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		case errors.Is(err, model.ErrUserDisabled):
+			writeLoginFailure(c, "AUTH_USER_DISABLED", i18n.MsgAuthUserBanned)
 		default:
-			common.ApiErrorI18n(c, i18n.MsgUserUsernameOrPasswordError)
+			writeLoginFailure(c, "AUTH_INVALID_CREDENTIALS", i18n.MsgUserUsernameOrPasswordError)
 		}
 		return
 	}
@@ -157,7 +167,7 @@ func setupLogin(user *model.User, c *gin.Context) {
 
 func setupLoginAtAuthVersion(user *model.User, expectedAuthVersion int64, c *gin.Context) {
 	if user == nil || user.Id <= 0 || user.Status != common.UserStatusEnabled {
-		common.ApiErrorI18n(c, i18n.MsgAuthUserBanned)
+		writeLoginFailure(c, "AUTH_USER_DISABLED", i18n.MsgAuthUserBanned)
 		return
 	}
 	currentUser, err := model.GetUserById(user.Id, false)
@@ -366,6 +376,38 @@ func SearchUsers(c *gin.Context) {
 	pageInfo.SetItems(users)
 	common.ApiSuccess(c, pageInfo)
 	return
+}
+
+func GetUserInviterOptions(c *gin.Context) {
+	targetUserId, err := strconv.Atoi(c.Query("target_id"))
+	if err != nil || targetUserId <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	targetUser, err := model.GetUserById(targetUserId, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !canManageTargetRole(c.GetInt("role"), targetUser.Role) {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+		return
+	}
+
+	selectedUserId := 0
+	if selected := strings.TrimSpace(c.Query("selected_id")); selected != "" {
+		selectedUserId, err = strconv.Atoi(selected)
+		if err != nil || selectedUserId < 0 {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+	}
+	options, err := model.SearchUserInviterOptions(c.Query("keyword"), targetUserId, selectedUserId, 20)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, options)
 }
 
 func canManageTargetRole(myRole int, targetRole int) bool {
@@ -681,12 +723,57 @@ func GetUserModels(c *gin.Context) {
 	})
 }
 
+type updateUserRequest struct {
+	Id               int                        `json:"id"`
+	Username         string                     `json:"username"`
+	Password         string                     `json:"password"`
+	DisplayName      string                     `json:"display_name"`
+	Role             int                        `json:"role"`
+	Group            string                     `json:"group"`
+	Remark           string                     `json:"remark"`
+	AdminPermissions map[string]map[string]bool `json:"admin_permissions"`
+	InviterId        *int                       `json:"inviter_id"`
+}
+
+func writeUserInviterError(c *gin.Context, err error) bool {
+	var code string
+	var messageKey string
+	switch {
+	case errors.Is(err, model.ErrUserInviterInvalid):
+		code, messageKey = "USER_INVITER_INVALID", i18n.MsgUserInviterInvalid
+	case errors.Is(err, model.ErrUserInviterNotFound):
+		code, messageKey = "USER_INVITER_NOT_FOUND", i18n.MsgUserInviterNotFound
+	case errors.Is(err, model.ErrUserInviterSelf):
+		code, messageKey = "USER_INVITER_SELF", i18n.MsgUserInviterSelf
+	case errors.Is(err, model.ErrUserInviterCycle):
+		code, messageKey = "USER_INVITER_CYCLE", i18n.MsgUserInviterCycle
+	default:
+		return false
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": false,
+		"code":    code,
+		"message": i18n.T(c, messageKey),
+	})
+	return true
+}
+
 func UpdateUser(c *gin.Context) {
-	var updatedUser model.User
-	err := common.DecodeJson(c.Request.Body, &updatedUser)
-	if err != nil || updatedUser.Id == 0 {
+	var request updateUserRequest
+	err := common.DecodeJson(c.Request.Body, &request)
+	if err != nil || request.Id == 0 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
+	}
+	updatedUser := model.User{
+		Id:               request.Id,
+		Username:         request.Username,
+		Password:         request.Password,
+		DisplayName:      request.DisplayName,
+		Role:             request.Role,
+		Group:            request.Group,
+		Remark:           request.Remark,
+		AdminPermissions: request.AdminPermissions,
 	}
 	updatedUser.Username = strings.TrimSpace(updatedUser.Username)
 	if updatedUser.Username == "" {
@@ -720,7 +807,16 @@ func UpdateUser(c *gin.Context) {
 	}
 	updatePassword := updatedUser.Password != ""
 	authzTouched := false
+	previousInviterId := originUser.InviterId
+	inviterChanged := false
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if request.InviterId != nil {
+			var err error
+			previousInviterId, inviterChanged, err = model.UpdateUserInviterWithTx(tx, updatedUser.Id, *request.InviterId)
+			if err != nil {
+				return err
+			}
+		}
 		if err := updatedUser.EditWithTx(tx, updatePassword); err != nil {
 			return err
 		}
@@ -728,6 +824,9 @@ func UpdateUser(c *gin.Context) {
 		authzTouched = touched
 		return err
 	}); err != nil {
+		if writeUserInviterError(c, err) {
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}
@@ -747,10 +846,15 @@ func UpdateUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	recordManageAuditFor(c, updatedUser.Id, "user.update", map[string]interface{}{
+	auditDetails := map[string]interface{}{
 		"username": originUser.Username,
 		"id":       updatedUser.Id,
-	})
+	}
+	if inviterChanged && request.InviterId != nil {
+		auditDetails["previous_inviter_id"] = previousInviterId
+		auditDetails["inviter_id"] = *request.InviterId
+	}
+	recordManageAuditFor(c, updatedUser.Id, "user.update", auditDetails)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

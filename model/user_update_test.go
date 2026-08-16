@@ -354,6 +354,30 @@ func TestValidateAndFillRejectsPasswordlessUser(t *testing.T) {
 	assert.Empty(t, stored.Password)
 }
 
+func TestValidateAndFillDistinguishesDisabledUserAfterPasswordCheck(t *testing.T) {
+	setupUserUpdateTestState(t)
+
+	passwordHash, err := common.Password2Hash("CorrectPassword123")
+	require.NoError(t, err)
+	require.NoError(t, DB.Create(&User{
+		Username: "disabled-login-user",
+		Password: passwordHash,
+		Status:   common.UserStatusDisabled,
+	}).Error)
+
+	correctPassword := User{
+		Username: "disabled-login-user",
+		Password: "CorrectPassword123",
+	}
+	require.ErrorIs(t, correctPassword.ValidateAndFill(), ErrUserDisabled)
+
+	wrongPassword := User{
+		Username: "disabled-login-user",
+		Password: "WrongPassword123",
+	}
+	require.ErrorIs(t, wrongPassword.ValidateAndFill(), ErrInvalidCredentials)
+}
+
 func TestResetUserPasswordByEmailRequiresSingleActiveMatch(t *testing.T) {
 	setupUserUpdateTestState(t)
 

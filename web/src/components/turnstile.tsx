@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useRef } from 'react'
 
+import { resolveTurnstileEndpoint } from '@/components/turnstile-utils'
+
 declare global {
   interface Window {
     Captcha88?: {
@@ -53,7 +55,8 @@ export function Turnstile({
 
   useEffect(() => {
     const selfHosted = /^https?:\/\//i.test(siteKey)
-    const endpoint = siteKey.replace(/\/+$/, '')
+    const scriptEndpoint = siteKey.replace(/\/+$/, '')
+    const endpoint = resolveTurnstileEndpoint(siteKey, import.meta.env.DEV)
 
     const render = () => {
       if (!ref.current || rendered.current) return
@@ -97,7 +100,7 @@ export function Turnstile({
     const s = document.createElement('script')
     s.id = scriptId
     s.src = selfHosted
-      ? `${endpoint}/widget.js`
+      ? `${scriptEndpoint}/widget.js`
       : 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
     s.async = true
     s.defer = true

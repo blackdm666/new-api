@@ -38,6 +38,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { MultiSelect } from '@/components/multi-select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -78,6 +79,7 @@ import {
   fetchMarketingOverview,
   fetchMarketingRecipients,
   fetchMarketingSuppressions,
+  fetchMarketingUserGroups,
   previewMarketingAudience,
   previewMarketingAutomation,
   scheduleMarketingCampaign,
@@ -86,6 +88,10 @@ import {
   updateMarketingAutomation,
   updateMarketingCampaign,
 } from './api'
+import {
+  buildMarketingGroupOptions,
+  normalizeMarketingGroups,
+} from './lib/marketing-groups'
 import type {
   MarketingAudienceRule,
   MarketingAutomation,
@@ -543,7 +549,9 @@ function CampaignDialog(props: {
   const [name, setName] = useState(props.campaign?.name ?? '')
   const [language, setLanguage] = useState('zh-CN')
   const [contents, setContents] = useState(initialContent)
-  const [groups, setGroups] = useState((initialRule.groups ?? []).join(', '))
+  const [groups, setGroups] = useState(
+    normalizeMarketingGroups(initialRule.groups)
+  )
   const [inactiveDays, setInactiveDays] = useState(
     valueOrEmpty(initialRule.inactive_days)
   )
@@ -571,13 +579,18 @@ function CampaignDialog(props: {
   )
   const [preview, setPreview] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
+  const groupsQuery = useQuery({
+    queryKey: ['marketing', 'user-groups'],
+    queryFn: fetchMarketingUserGroups,
+    enabled: props.open,
+  })
+  const groupOptions = useMemo(
+    () => buildMarketingGroupOptions(groupsQuery.data ?? [], groups),
+    [groupsQuery.data, groups]
+  )
   const audienceRule = useMemo<MarketingAudienceRule>(() => {
     const rule: MarketingAudienceRule = {}
-    const parsedGroups = groups
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean)
-    if (parsedGroups.length > 0) rule.groups = parsedGroups
+    if (groups.length > 0) rule.groups = groups
     if (Number(inactiveDays) > 0) rule.inactive_days = Number(inactiveDays)
     if (topUpMin !== '') rule.topup_count_min = Number(topUpMin)
     if (topUpMax !== '') rule.topup_count_max = Number(topUpMax)
@@ -729,12 +742,24 @@ function CampaignDialog(props: {
           <div className='space-y-4'>
             <Field
               label={t('User groups')}
-              hint={t('Separate multiple groups with commas')}
+              hint={
+                groupsQuery.isError
+                  ? t('Failed to load user groups')
+                  : t('Options stay synchronized with current system groups')
+              }
             >
-              <Input
-                value={groups}
-                placeholder='default, vip'
-                onChange={(event) => setGroups(event.target.value)}
+              <MultiSelect
+                id='marketing-user-groups'
+                options={groupOptions}
+                selected={groups}
+                onChange={setGroups}
+                placeholder={
+                  groupsQuery.isLoading
+                    ? t('Loading...')
+                    : t('Select user groups...')
+                }
+                disabled={groupsQuery.isLoading}
+                maxVisibleChips={3}
               />
             </Field>
             <Field label={t('Inactive days')}>

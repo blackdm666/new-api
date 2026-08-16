@@ -126,7 +126,15 @@ export interface UserFormData {
   quota?: number // Only used when updating user
   group?: string // Only used when updating user
   remark?: string // Only used when updating user
+  inviter_id?: number // Only used when updating user; 0 clears the relationship
   admin_permissions?: AdminPermissionMatrix
+}
+
+export interface UserInviterOption {
+  id: number
+  username: string
+  display_name: string
+  status: number
 }
 
 export type ManageUserAction =

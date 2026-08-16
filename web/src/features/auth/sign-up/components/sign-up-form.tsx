@@ -49,6 +49,7 @@ import {
   getAffiliateCode,
   saveAffiliateCode,
 } from '@/features/auth/lib/storage'
+import { runTurnstileProtectedAuthAttempt } from '@/features/auth/lib/turnstile-auth-attempt'
 import { useStatus } from '@/hooks/use-status'
 import { isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
@@ -117,6 +118,7 @@ export function SignUpForm({
       setTurnstileWidgetKey((current) => current + 1)
     }
   }
+  const clearTurnstileToken = () => setTurnstileToken('')
 
   const wechatQrCodeUrl = useMemo(() => {
     return (
@@ -168,27 +170,31 @@ export function SignUpForm({
     if (!validateTurnstile()) return
 
     const submittedTurnstileToken = turnstileToken
-    if (isTurnstileEnabled) {
-      resetTurnstile()
-    }
 
     setIsLoading(true)
     try {
-      const res = await register({
-        username: data.username,
-        password: data.password,
-        email: data.email || undefined,
-        verification_code: verificationCode || undefined,
-        aff_code: getAffiliateCode(),
-        turnstile: submittedTurnstileToken,
-      })
+      await runTurnstileProtectedAuthAttempt(
+        async () => {
+          const res = await register({
+            username: data.username,
+            password: data.password,
+            email: data.email || undefined,
+            verification_code: verificationCode || undefined,
+            aff_code: getAffiliateCode(),
+            turnstile: submittedTurnstileToken,
+          })
 
-      if (res?.success) {
-        toast.success(t('Account created! Please sign in'))
-        redirectToLogin()
-      } else {
-        toast.error(res?.message || t('Failed to create account'))
-      }
+          if (res?.success) {
+            toast.success(t('Account created! Please sign in'))
+            redirectToLogin()
+            return true
+          }
+
+          toast.error(res?.message || t('Failed to create account'))
+          return false
+        },
+        isTurnstileEnabled ? resetTurnstile : undefined
+      )
     } catch {
       // Errors are handled by global interceptor
     } finally {
@@ -369,7 +375,7 @@ export function SignUpForm({
               key={turnstileWidgetKey}
               siteKey={turnstileSiteKey}
               onVerify={setTurnstileToken}
-              onExpire={resetTurnstile}
+              onExpire={clearTurnstileToken}
             />
           </div>
         )}
