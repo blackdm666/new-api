@@ -132,6 +132,15 @@ func TestMarketingQuotaReservationIncludesCrossDayBacklog(t *testing.T) {
 	assert.True(t, reserved)
 }
 
+func TestEmailDeliveryStatsUseZeroTimestampsForAnEmptyQueue(t *testing.T) {
+	truncateTables(t)
+	now := common.GetTimestamp()
+	stats, err := GetEmailDeliveryStats(now, now-3600)
+	require.NoError(t, err)
+	assert.Zero(t, stats.OldestPendingTime)
+	assert.Zero(t, stats.LastDeliveredTime)
+}
+
 func TestMarketingDailyQuotaStopsCrossDayBacklogAtExactLimit(t *testing.T) {
 	truncateTables(t)
 	now := common.GetTimestamp()

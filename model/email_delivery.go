@@ -490,8 +490,12 @@ func GetEmailDeliveryStats(now int64, dayStart int64) (EmailDeliveryStats, error
 	if denominator > 0 {
 		stats.FailureRate24h = float64(stats.Failed24h) / float64(denominator)
 	}
-	_ = DB.Model(&EmailDelivery{}).Where("delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0").Select("MIN(created_time)").Scan(&stats.OldestPendingTime).Error
-	_ = DB.Model(&EmailDelivery{}).Select("MAX(delivered_time)").Scan(&stats.LastDeliveredTime).Error
+	if err := DB.Model(&EmailDelivery{}).Where("delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0").Select("COALESCE(MIN(created_time), 0)").Scan(&stats.OldestPendingTime).Error; err != nil {
+		return stats, err
+	}
+	if err := DB.Model(&EmailDelivery{}).Select("COALESCE(MAX(delivered_time), 0)").Scan(&stats.LastDeliveredTime).Error; err != nil {
+		return stats, err
+	}
 	return stats, nil
 }
 
