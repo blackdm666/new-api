@@ -88,6 +88,43 @@ func GetAffiliateAccount(userId int) (*AffiliateAccount, error) {
 	return account, nil
 }
 
+// populateAffiliateLifetimeEarningsTx attaches the authoritative cumulative
+// cash commission to a page of users with one query. Legacy users.aff_history
+// is API quota and must never be presented as referral cash commission.
+func populateAffiliateLifetimeEarningsTx(tx *gorm.DB, users []*User) error {
+	if tx == nil || len(users) == 0 {
+		return nil
+	}
+
+	userIds := make([]int, 0, len(users))
+	for _, user := range users {
+		if user != nil && user.Id > 0 {
+			userIds = append(userIds, user.Id)
+		}
+	}
+	if len(userIds) == 0 {
+		return nil
+	}
+
+	accounts := make([]AffiliateAccount, 0, len(userIds))
+	if err := tx.Select("user_id", "lifetime_earned_cents").
+		Where("user_id IN ?", userIds).
+		Find(&accounts).Error; err != nil {
+		return err
+	}
+
+	lifetimeByUser := make(map[int]int64, len(accounts))
+	for _, account := range accounts {
+		lifetimeByUser[account.UserId] = account.LifetimeEarnedCents
+	}
+	for _, user := range users {
+		if user != nil {
+			user.AffEarnedCents = lifetimeByUser[user.Id]
+		}
+	}
+	return nil
+}
+
 // backfillAffiliateAccounts migrates preview/early-build referral data into
 // the independent cash ledger. It never imports users.aff_quota, because that
 // column contains legacy API rewards and is intentionally outside this ledger.

@@ -116,6 +116,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/subscriptions': { section: 'admin', module: 'subscription' },
   '/admin-affiliates': { section: 'admin', module: 'subscription' },
   '/admin-invoices': { section: 'admin', module: 'subscription' },
+  '/admin-marketing': { section: 'admin', module: 'setting' },
   '/system-settings': { section: 'admin', module: 'setting' },
   '/system-settings/site': { section: 'admin', module: 'setting' },
 }

@@ -874,6 +874,9 @@ func PurgeInvoiceRequest(id int) error {
 		if err := tx.Where("invoice_request_id = ?", request.Id).Delete(&InvoiceRequestEvent{}).Error; err != nil {
 			return err
 		}
+		if err := deleteInvoiceEmailDeliveriesTx(tx, request.Id); err != nil {
+			return err
+		}
 		if err := tx.Where("invoice_request_id = ?", request.Id).Delete(&InvoiceNotificationDelivery{}).Error; err != nil {
 			return err
 		}
@@ -935,6 +938,9 @@ func RedactExpiredInvoiceRequests(cutoff int64, limit int) (int, error) {
 				return err
 			}
 			if err := tx.Where("invoice_request_id = ?", request.Id).Delete(&InvoiceSearchTerm{}).Error; err != nil {
+				return err
+			}
+			if err := expireInvoiceEmailDeliveriesTx(tx, request.Id, now); err != nil {
 				return err
 			}
 			if err := tx.Model(&InvoiceNotificationDelivery{}).Where("invoice_request_id = ? AND delivered_time = 0", request.Id).Updates(map[string]interface{}{

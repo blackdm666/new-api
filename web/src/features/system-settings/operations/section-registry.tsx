@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { SystemBehaviorSection } from '../general/system-behavior-section'
+import { EmailQueueSection } from '../integrations/email-queue-section'
 import { EmailSettingsSection } from '../integrations/email-settings-section'
 import { EmailTemplateSettingsSection } from '../integrations/email-template-section'
 import { InvoiceSettingsSection } from '../integrations/invoice-section'
@@ -79,6 +80,11 @@ const OPERATIONS_SECTIONS = [
         }}
       />
     ),
+  },
+  {
+    id: 'email-queue',
+    titleKey: 'Email Queue',
+    build: () => <EmailQueueSection />,
   },
   {
     id: 'email-templates',

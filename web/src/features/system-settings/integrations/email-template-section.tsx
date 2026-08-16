@@ -75,7 +75,6 @@ import { cn } from '@/lib/utils'
 
 import { SettingsPageActionsPortal } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
-import { EmailDeliveryFailures } from './email-delivery-failures'
 
 type TemplateVariable = {
   name: string
@@ -689,8 +688,6 @@ export function EmailTemplateSettingsSection() {
           ) : null}
         </div>
       ) : null}
-
-      <EmailDeliveryFailures />
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className='sm:max-w-4xl'>

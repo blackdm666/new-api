@@ -119,6 +119,9 @@ func NotifyUser(userId int, userEmail string, userSetting dto.UserSetting, data 
 func sendEmailNotify(userId int, userEmail string, lang string, data dto.Notify) error {
 	subject, content := BuildSystemAlertEmail(lang, data)
 	templateKey := NotificationEmailTemplateKey(data.Type)
+	if templateKey == "quota_warning_user" && model.HasRecentMarketingBalanceRecipient(userId, common.GetTimestamp()-model.MarketingUserCooldownDays*86400) {
+		return nil
+	}
 	_, err := QueueSystemEmail(templateKey+":"+common.NewRequestId(), templateKey, 0, userId, userEmail, subject, content, 0)
 	return err
 }

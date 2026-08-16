@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestInvoiceNotificationDeliveryIsIdempotentAndLeaseProtected(t *testing.T) {
+func TestInvoiceNotificationDeliveryIsIdempotentAndUsesSharedOutbox(t *testing.T) {
 	truncateTables(t)
 	delivery, created, err := EnqueueInvoiceNotification(&InvoiceNotificationDelivery{
 		DeliveryKey:      "invoice-notification-key",
@@ -32,17 +32,17 @@ func TestInvoiceNotificationDeliveryIsIdempotentAndLeaseProtected(t *testing.T) 
 	require.NoError(t, err)
 	assert.False(t, created)
 	assert.Equal(t, delivery.Id, duplicate.Id)
+	assert.NotZero(t, delivery.EmailDeliveryId)
+	assert.Equal(t, delivery.EmailDeliveryId, duplicate.EmailDeliveryId)
 
-	now := common.GetTimestamp()
-	claimed, err := ClaimInvoiceNotification(delivery.Id, now, now+120)
+	queued, err := GetEmailDeliveryById(delivery.EmailDeliveryId)
 	require.NoError(t, err)
-	assert.True(t, claimed)
-	claimed, err = ClaimInvoiceNotification(delivery.Id, now, now+120)
-	require.NoError(t, err)
-	assert.False(t, claimed)
+	assert.Equal(t, "invoice_admin_email", queued.Category)
+	assert.Equal(t, delivery.Id, queued.InvoiceDeliveryId)
+	assert.Equal(t, EmailPriorityBusiness, queued.Priority)
 }
 
-func TestInvoiceNotificationDeliveryRetriesAndClearsPayloadAfterSuccess(t *testing.T) {
+func TestInvoiceNotificationDeliveryMirrorsRetryAndClearsPayloadAfterSuccess(t *testing.T) {
 	truncateTables(t)
 	delivery, _, err := EnqueueInvoiceNotification(&InvoiceNotificationDelivery{
 		DeliveryKey:      "invoice-notification-retry",
@@ -56,19 +56,16 @@ func TestInvoiceNotificationDeliveryRetriesAndClearsPayloadAfterSuccess(t *testi
 	require.NoError(t, err)
 
 	now := common.GetTimestamp()
-	claimed, err := ClaimInvoiceNotification(delivery.Id, now, now+120)
+	require.NoError(t, RecordEmailDeliveryFailure(delivery.EmailDeliveryId, "smtp unavailable", now+60))
+	queued, err := GetEmailDeliveryById(delivery.EmailDeliveryId)
 	require.NoError(t, err)
-	require.True(t, claimed)
-	require.NoError(t, RecordInvoiceNotificationFailure(delivery.Id, "smtp unavailable", now+60))
+	require.NoError(t, SyncInvoiceNotificationFromEmailDelivery(queued))
+	var mirrored InvoiceNotificationDelivery
+	require.NoError(t, DB.First(&mirrored, delivery.Id).Error)
+	assert.Equal(t, 1, mirrored.Attempts)
+	assert.Equal(t, "smtp unavailable", mirrored.LastError)
 
-	due, err := ListDueInvoiceNotifications(10, now)
-	require.NoError(t, err)
-	assert.Empty(t, due)
-	due, err = ListDueInvoiceNotifications(10, now+61)
-	require.NoError(t, err)
-	require.Len(t, due, 1)
-	assert.Equal(t, 1, due[0].Attempts)
-
+	require.NoError(t, CompleteEmailDelivery(delivery.EmailDeliveryId))
 	require.NoError(t, CompleteInvoiceNotification(delivery.Id))
 	var completed InvoiceNotificationDelivery
 	require.NoError(t, DB.First(&completed, delivery.Id).Error)
@@ -76,9 +73,14 @@ func TestInvoiceNotificationDeliveryRetriesAndClearsPayloadAfterSuccess(t *testi
 	assert.Empty(t, completed.Recipient)
 	assert.Empty(t, completed.Subject)
 	assert.Empty(t, completed.Body)
+	queued, err = GetEmailDeliveryById(delivery.EmailDeliveryId)
+	require.NoError(t, err)
+	assert.Empty(t, queued.Recipient)
+	assert.Empty(t, queued.Subject)
+	assert.Empty(t, queued.Body)
 }
 
-func TestInvoiceNotificationCanBeRetriedManually(t *testing.T) {
+func TestInvoiceNotificationCanBeRetriedManuallyThroughSharedOutbox(t *testing.T) {
 	truncateTables(t)
 	delivery, _, err := EnqueueInvoiceNotification(&InvoiceNotificationDelivery{
 		DeliveryKey: "invoice-notification-manual-retry", InvoiceRequestId: 44,
@@ -87,12 +89,18 @@ func TestInvoiceNotificationCanBeRetriedManually(t *testing.T) {
 	})
 	require.NoError(t, err)
 	now := common.GetTimestamp()
-	require.NoError(t, RecordInvoiceNotificationFailure(delivery.Id, "smtp unavailable", now+3600))
+	for attempt := 0; attempt < EmailDeliveryMaxAttempts; attempt++ {
+		require.NoError(t, RecordEmailDeliveryFailure(delivery.EmailDeliveryId, "smtp unavailable", now+3600))
+	}
 
 	retried, err := RetryInvoiceNotification(delivery.Id)
 	require.NoError(t, err)
 	assert.Zero(t, retried.LockedUntil)
 	assert.LessOrEqual(t, retried.NextAttemptTime, common.GetTimestamp())
+	queued, err := GetEmailDeliveryById(delivery.EmailDeliveryId)
+	require.NoError(t, err)
+	assert.Zero(t, queued.Attempts)
+	assert.Zero(t, queued.DeadLetterTime)
 	pending, err := ListPendingInvoiceNotifications(10)
 	require.NoError(t, err)
 	require.Len(t, pending, 1)

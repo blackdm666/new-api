@@ -22,6 +22,7 @@ type InvoiceNotificationDelivery struct {
 	InvoiceRequestId int    `json:"invoice_request_id" gorm:"index;not null"`
 	Kind             string `json:"kind" gorm:"type:varchar(32);not null"`
 	UserId           int    `json:"user_id" gorm:"index"`
+	EmailDeliveryId  int    `json:"email_delivery_id" gorm:"index"`
 	Recipient        string `json:"recipient" gorm:"type:varchar(320)"`
 	Subject          string `json:"subject" gorm:"type:varchar(512);not null"`
 	Body             string `json:"body" gorm:"type:text;not null"`
@@ -63,33 +64,137 @@ func enqueueInvoiceNotification(tx *gorm.DB, delivery *InvoiceNotificationDelive
 		return nil, false, result.Error
 	}
 	if result.RowsAffected == 1 {
+		if err := ensureInvoiceEmailDeliveryTx(tx, delivery); err != nil {
+			return nil, false, err
+		}
 		return delivery, true, nil
 	}
 	var existing InvoiceNotificationDelivery
 	if err := tx.Where("delivery_key = ?", delivery.DeliveryKey).First(&existing).Error; err != nil {
 		return nil, false, err
 	}
+	if err := ensureInvoiceEmailDeliveryTx(tx, &existing); err != nil {
+		return nil, false, err
+	}
 	return &existing, false, nil
 }
 
-func ListDueInvoiceNotifications(limit int, now int64) ([]*InvoiceNotificationDelivery, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 100
+func ensureInvoiceEmailDeliveryTx(tx *gorm.DB, delivery *InvoiceNotificationDelivery) error {
+	if delivery == nil || delivery.Id <= 0 {
+		return gorm.ErrInvalidData
 	}
-	var deliveries []*InvoiceNotificationDelivery
-	err := DB.Where("delivered_time = 0 AND next_attempt_time <= ? AND locked_until <= ?", now, now).
-		Order("id ASC").Limit(limit).Find(&deliveries).Error
-	return deliveries, err
+	if delivery.EmailDeliveryId > 0 {
+		var count int64
+		if err := tx.Model(&EmailDelivery{}).Where("id = ?", delivery.EmailDeliveryId).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 1 {
+			return nil
+		}
+		delivery.EmailDeliveryId = 0
+	}
+	category := "invoice_admin_email"
+	if delivery.Kind == InvoiceNotificationKindUserEmail || delivery.Kind == InvoiceNotificationKindUserLegacy {
+		category = "invoice_user_email"
+	}
+	recipient := strings.TrimSpace(delivery.Recipient)
+	if recipient == "" && delivery.UserId > 0 {
+		user := &User{}
+		if err := tx.Select("email").First(user, delivery.UserId).Error; err != nil {
+			return err
+		}
+		recipient = strings.TrimSpace(user.Email)
+	}
+	queued, _, err := enqueueEmailDelivery(tx, &EmailDelivery{
+		DeliveryKey:       "invoice:" + delivery.DeliveryKey,
+		Category:          category,
+		RelatedId:         delivery.InvoiceRequestId,
+		UserId:            delivery.UserId,
+		InvoiceDeliveryId: delivery.Id,
+		Recipient:         recipient,
+		Subject:           delivery.Subject,
+		Body:              delivery.Body,
+		Priority:          EmailPriorityBusiness,
+	})
+	if err != nil {
+		return err
+	}
+	if err := tx.Model(delivery).Update("email_delivery_id", queued.Id).Error; err != nil {
+		return err
+	}
+	delivery.EmailDeliveryId = queued.Id
+	return nil
 }
 
-func ClaimInvoiceNotification(id int, now int64, lockedUntil int64) (bool, error) {
-	result := DB.Model(&InvoiceNotificationDelivery{}).
-		Where("id = ? AND delivered_time = 0 AND next_attempt_time <= ? AND locked_until <= ?", id, now, now).
-		Updates(map[string]interface{}{
-			"locked_until": lockedUntil,
-			"updated_time": now,
-		})
-	return result.RowsAffected == 1, result.Error
+func EnsureInvoiceEmailDelivery(delivery *InvoiceNotificationDelivery) (*EmailDelivery, error) {
+	if delivery == nil || delivery.Id <= 0 {
+		return nil, gorm.ErrInvalidData
+	}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		current := &InvoiceNotificationDelivery{}
+		if err := lockForUpdate(tx).First(current, delivery.Id).Error; err != nil {
+			return err
+		}
+		if err := ensureInvoiceEmailDeliveryTx(tx, current); err != nil {
+			return err
+		}
+		*delivery = *current
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return GetEmailDeliveryById(delivery.EmailDeliveryId)
+}
+
+func GetInvoiceNotificationDelivery(id int) (*InvoiceNotificationDelivery, error) {
+	delivery := &InvoiceNotificationDelivery{}
+	err := DB.First(delivery, id).Error
+	return delivery, err
+}
+
+func SyncInvoiceNotificationFromEmailDelivery(delivery *EmailDelivery) error {
+	if delivery == nil || delivery.InvoiceDeliveryId <= 0 {
+		return nil
+	}
+	return DB.Model(&InvoiceNotificationDelivery{}).Where("id = ?", delivery.InvoiceDeliveryId).Updates(map[string]any{
+		"attempts":          delivery.Attempts,
+		"last_error":        delivery.LastError,
+		"next_attempt_time": delivery.NextAttemptTime,
+		"locked_until":      delivery.LockedUntil,
+		"delivered_time":    delivery.DeliveredTime,
+		"updated_time":      delivery.UpdatedTime,
+	}).Error
+}
+
+func deleteInvoiceEmailDeliveriesTx(tx *gorm.DB, requestId int) error {
+	if tx == nil || requestId <= 0 {
+		return gorm.ErrInvalidData
+	}
+	return tx.Where("invoice_delivery_id IN (?)",
+		tx.Model(&InvoiceNotificationDelivery{}).Select("id").Where("invoice_request_id = ?", requestId),
+	).Delete(&EmailDelivery{}).Error
+}
+
+func expireInvoiceEmailDeliveriesTx(tx *gorm.DB, requestId int, now int64) error {
+	if tx == nil || requestId <= 0 {
+		return gorm.ErrInvalidData
+	}
+	return tx.Model(&EmailDelivery{}).
+		Where("invoice_delivery_id IN (?) AND delivered_time = 0 AND expired_time = 0",
+			tx.Model(&InvoiceNotificationDelivery{}).Select("id").Where("invoice_request_id = ?", requestId),
+		).
+		Updates(map[string]any{
+			"recipient":         "",
+			"subject":           "",
+			"body":              "",
+			"last_error":        "invoice request data retention expired",
+			"locked_until":      int64(0),
+			"next_attempt_time": int64(0),
+			"dead_letter_time":  int64(0),
+			"expired_time":      now,
+			"updated_time":      now,
+		}).Error
 }
 
 func CompleteInvoiceNotification(id int) error {
@@ -103,20 +208,6 @@ func CompleteInvoiceNotification(id int) error {
 		"delivered_time":    now,
 		"updated_time":      now,
 		"next_attempt_time": now,
-	}).Error
-}
-
-func RecordInvoiceNotificationFailure(id int, message string, nextAttemptTime int64) error {
-	message = strings.TrimSpace(message)
-	if len(message) > 2000 {
-		message = message[:2000]
-	}
-	return DB.Model(&InvoiceNotificationDelivery{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"attempts":          gorm.Expr("attempts + ?", 1),
-		"last_error":        message,
-		"next_attempt_time": nextAttemptTime,
-		"locked_until":      int64(0),
-		"updated_time":      common.GetTimestamp(),
 	}).Error
 }
 
@@ -141,25 +232,33 @@ func ListInvoiceNotificationsForRequest(requestId int) ([]*InvoiceNotificationDe
 
 func RetryInvoiceNotification(id int) (*InvoiceNotificationDelivery, error) {
 	var delivery InvoiceNotificationDelivery
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		if err := lockForUpdate(tx).First(&delivery, "id = ?", id).Error; err != nil {
-			return err
-		}
-		if delivery.DeliveredTime != 0 {
-			return errors.New("invoice notification was already delivered")
-		}
-		now := common.GetTimestamp()
-		if err := tx.Model(&delivery).Updates(map[string]interface{}{
-			"next_attempt_time": now,
-			"locked_until":      int64(0),
-			"updated_time":      now,
-		}).Error; err != nil {
-			return err
-		}
-		delivery.NextAttemptTime = now
-		delivery.LockedUntil = 0
-		delivery.UpdatedTime = now
-		return nil
-	})
-	return &delivery, err
+	if err := DB.First(&delivery, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	if delivery.DeliveredTime != 0 {
+		return nil, errors.New("invoice notification was already delivered")
+	}
+	queued, err := EnsureInvoiceEmailDelivery(&delivery)
+	if err != nil {
+		return nil, err
+	}
+	if err := RetryEmailDelivery(queued.Id); err != nil {
+		return nil, err
+	}
+	now := common.GetTimestamp()
+	if err := DB.Model(&delivery).Updates(map[string]any{
+		"attempts":          0,
+		"last_error":        "",
+		"next_attempt_time": now,
+		"locked_until":      int64(0),
+		"updated_time":      now,
+	}).Error; err != nil {
+		return nil, err
+	}
+	delivery.Attempts = 0
+	delivery.LastError = ""
+	delivery.NextAttemptTime = now
+	delivery.LockedUntil = 0
+	delivery.UpdatedTime = now
+	return &delivery, nil
 }

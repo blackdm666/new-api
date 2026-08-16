@@ -30,7 +30,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { formatQuota, formatTimestamp } from '@/lib/format'
+import { formatLocalCurrencyAmount } from '@/lib/currency'
+import { formatTimestamp } from '@/lib/format'
 
 import {
   USER_STATUS,
@@ -224,7 +225,8 @@ export function useUsersColumns(): ColumnDef<User>[] {
       cell: ({ row }) => {
         const user = row.original
         const affCount = user.aff_count || 0
-        const affHistoryQuota = user.aff_history_quota || 0
+        const lifetimeCommissionCents =
+          user.affiliate_lifetime_earned_cents || 0
         const inviterId = user.inviter_id || 0
 
         return (
@@ -248,7 +250,7 @@ export function useUsersColumns(): ColumnDef<User>[] {
               <TooltipTrigger
                 render={
                   <StatusBadge
-                    label={`${t('Revenue')}: ${formatQuota(affHistoryQuota)}`}
+                    label={`${t('Revenue')}: ${formatLocalCurrencyAmount(lifetimeCommissionCents / 100, { digitsLarge: 2, digitsSmall: 2 })}`}
                     variant='neutral'
                     copyable={false}
                     className='cursor-help'
@@ -256,7 +258,7 @@ export function useUsersColumns(): ColumnDef<User>[] {
                 }
               />
               <TooltipContent>
-                <p className='text-xs'>{t('Total invitation revenue')}</p>
+                <p className='text-xs'>{t('Total commission')}</p>
               </TooltipContent>
             </Tooltip>
             {inviterId > 0 && (

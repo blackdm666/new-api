@@ -100,6 +100,7 @@ type User struct {
 	AffCount         int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
 	AffQuota         int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
 	AffHistoryQuota  int                        `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
+	AffEarnedCents   int64                      `json:"affiliate_lifetime_earned_cents" gorm:"-"`                       // 新版推广计划累计现金佣金（仅列表响应）
 	InviterId        int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
 	DeletedAt        gorm.DeletedAt             `gorm:"index"`
 	LinuxDOId        string                     `json:"linux_do_id" gorm:"column:linux_do_id;index"`
@@ -412,6 +413,10 @@ func GetAllUsers(pageInfo *common.PageInfo, sortOptions ...UserSortOptions) (use
 		tx.Rollback()
 		return nil, 0, err
 	}
+	if err = populateAffiliateLifetimeEarningsTx(tx, users); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 
 	// Commit transaction
 	if err = tx.Commit().Error; err != nil {
@@ -478,6 +483,10 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	order := resolveUserSortOptions(sortOptions)
 	err = order.Apply(query.Omit("password", "access_token")).Limit(num).Offset(startIdx).Find(&users).Error
 	if err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err = populateAffiliateLifetimeEarningsTx(tx, users); err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}

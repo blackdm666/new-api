@@ -37,6 +37,7 @@ import { Route as authUserResetRouteImport } from './routes/(auth)/user/reset'
 import { Route as AuthenticatedAdminAffiliatesIndexRouteImport } from './routes/_authenticated/admin-affiliates/index'
 import { Route as AuthenticatedAdminInvoicesIndexRouteImport } from './routes/_authenticated/admin-invoices/index'
 import { Route as AuthenticatedAdminInvoicesIdRouteImport } from './routes/_authenticated/admin-invoices/$id'
+import { Route as AuthenticatedAdminMarketingIndexRouteImport } from './routes/_authenticated/admin-marketing/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedChatChatIdRouteImport } from './routes/_authenticated/chat/$chatId'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
@@ -214,6 +215,12 @@ const AuthenticatedAdminInvoicesIdRoute =
   AuthenticatedAdminInvoicesIdRouteImport.update({
     id: '/admin-invoices/$id',
     path: '/admin-invoices/$id',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAdminMarketingIndexRoute =
+  AuthenticatedAdminMarketingIndexRouteImport.update({
+    id: '/admin-marketing/',
+    path: '/admin-marketing/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedChannelsIndexRoute =
@@ -461,6 +468,7 @@ export interface FileRoutesByFullPath {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/admin-affiliates/': typeof AuthenticatedAdminAffiliatesIndexRoute
   '/admin-invoices/': typeof AuthenticatedAdminInvoicesIndexRoute
+  '/admin-marketing/': typeof AuthenticatedAdminMarketingIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/invoices/': typeof AuthenticatedInvoicesIndexRoute
@@ -524,6 +532,7 @@ export interface FileRoutesByTo {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/admin-affiliates': typeof AuthenticatedAdminAffiliatesIndexRoute
   '/admin-invoices': typeof AuthenticatedAdminInvoicesIndexRoute
+  '/admin-marketing': typeof AuthenticatedAdminMarketingIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/invoices': typeof AuthenticatedInvoicesIndexRoute
@@ -591,6 +600,7 @@ export interface FileRoutesById {
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/admin-affiliates/': typeof AuthenticatedAdminAffiliatesIndexRoute
   '/_authenticated/admin-invoices/': typeof AuthenticatedAdminInvoicesIndexRoute
+  '/_authenticated/admin-marketing/': typeof AuthenticatedAdminMarketingIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/invoices/': typeof AuthenticatedInvoicesIndexRoute
@@ -657,6 +667,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/admin-affiliates/'
     | '/admin-invoices/'
+    | '/admin-marketing/'
     | '/channels/'
     | '/dashboard/'
     | '/invoices/'
@@ -720,6 +731,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/admin-affiliates'
     | '/admin-invoices'
+    | '/admin-marketing'
     | '/channels'
     | '/dashboard'
     | '/invoices'
@@ -786,6 +798,7 @@ export interface FileRouteTypes {
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/admin-affiliates/'
     | '/_authenticated/admin-invoices/'
+    | '/_authenticated/admin-marketing/'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/invoices/'
@@ -1033,6 +1046,13 @@ declare module '@tanstack/react-router' {
       path: '/admin-invoices/$id'
       fullPath: '/admin-invoices/$id'
       preLoaderRoute: typeof AuthenticatedAdminInvoicesIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/admin-marketing/': {
+      id: '/_authenticated/admin-marketing/'
+      path: '/admin-marketing'
+      fullPath: '/admin-marketing/'
+      preLoaderRoute: typeof AuthenticatedAdminMarketingIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/channels/': {
@@ -1385,6 +1405,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedAdminAffiliatesIndexRoute: typeof AuthenticatedAdminAffiliatesIndexRoute
   AuthenticatedAdminInvoicesIndexRoute: typeof AuthenticatedAdminInvoicesIndexRoute
+  AuthenticatedAdminMarketingIndexRoute: typeof AuthenticatedAdminMarketingIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedInvoicesIndexRoute: typeof AuthenticatedInvoicesIndexRoute
@@ -1415,6 +1436,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAdminAffiliatesIndexRoute:
     AuthenticatedAdminAffiliatesIndexRoute,
   AuthenticatedAdminInvoicesIndexRoute: AuthenticatedAdminInvoicesIndexRoute,
+  AuthenticatedAdminMarketingIndexRoute: AuthenticatedAdminMarketingIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedInvoicesIndexRoute: AuthenticatedInvoicesIndexRoute,

@@ -21,6 +21,8 @@ import { test } from 'node:test'
 
 import type { TFunction } from 'i18next'
 
+import { ROLE } from '@/lib/roles'
+
 import { buildSidebarData } from '../use-sidebar-data'
 import { buildTopNavLinks, INFINITE_CANVAS_URL } from '../use-top-nav-links'
 
@@ -117,4 +119,19 @@ test('places invoice management immediately after subscriptions', () => {
       url: '/admin-invoices',
     }
   )
+})
+
+test('shows email marketing only as a Root administration entry', () => {
+  const sidebar = buildSidebarData(translate)
+  const adminItems = sidebar.navGroups.find(
+    (group) => group.id === 'admin'
+  )?.items
+
+  assert.ok(adminItems)
+  const marketing = adminItems.find(
+    (item) => 'url' in item && item.url === '/admin-marketing'
+  )
+  assert.ok(marketing)
+  assert.equal(marketing.title, 'Email Marketing')
+  assert.equal(marketing.requiredRole, ROLE.SUPER_ADMIN)
 })

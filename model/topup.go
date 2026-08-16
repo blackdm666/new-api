@@ -13,17 +13,17 @@ import (
 
 type TopUp struct {
 	Id              int     `json:"id"`
-	UserId          int     `json:"user_id" gorm:"index"`
+	UserId          int     `json:"user_id" gorm:"index;index:idx_topups_marketing_audience,priority:3"`
 	Amount          int64   `json:"amount"`
 	Money           float64 `json:"money"`
 	CreditedQuota   int     `json:"credited_quota" gorm:"type:int;default:0"`
 	Currency        string  `json:"currency" gorm:"type:varchar(16);default:''"`
 	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
-	PaymentProvider string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	PaymentProvider string  `json:"payment_provider" gorm:"type:varchar(50);default:'';index:idx_topups_marketing_audience,priority:2"`
 	CreateTime      int64   `json:"create_time"`
-	CompleteTime    int64   `json:"complete_time"`
-	Status          string  `json:"status"`
+	CompleteTime    int64   `json:"complete_time" gorm:"index:idx_topups_marketing_audience,priority:4"`
+	Status          string  `json:"status" gorm:"index:idx_topups_marketing_audience,priority:1"`
 }
 
 const (
@@ -180,6 +180,12 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, paidMoney float64,
 			common.SysError("epay topup failed: " + err.Error())
 		}
 		return false, err
+	}
+	// Marketing attribution is deliberately outside the payment transaction.
+	// A reporting-table failure must never roll back a successful recharge;
+	// the unique conversion event makes duplicate callbacks safe to retry.
+	if attributionErr := AttributeMarketingConversion(topUp); attributionErr != nil {
+		common.SysError("marketing conversion attribution skipped: " + attributionErr.Error())
 	}
 	if alreadyDone {
 		return true, nil

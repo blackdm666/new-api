@@ -47,6 +47,12 @@ func TestMain(m *testing.M) {
 		&model.Channel{},
 		&model.Midjourney{},
 		&model.TopUp{},
+		&model.EmailDelivery{},
+		&model.MarketingCampaign{},
+		&model.MarketingRecipient{},
+		&model.MarketingAutomation{},
+		&model.MarketingSuppression{},
+		&model.MarketingEvent{},
 		&model.UserSubscription{},
 		&model.SystemTask{},
 		&model.SystemTaskLock{},
@@ -64,6 +70,12 @@ func TestMain(m *testing.M) {
 func truncate(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
+		model.DB.Exec("DELETE FROM marketing_events")
+		model.DB.Exec("DELETE FROM marketing_recipients")
+		model.DB.Exec("DELETE FROM marketing_campaigns")
+		model.DB.Exec("DELETE FROM marketing_automations")
+		model.DB.Exec("DELETE FROM marketing_suppressions")
+		model.DB.Exec("DELETE FROM email_deliveries")
 		model.DB.Exec("DELETE FROM tasks")
 		model.DB.Exec("DELETE FROM users")
 		model.DB.Exec("DELETE FROM tokens")

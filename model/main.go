@@ -287,6 +287,11 @@ func migrateDB() error {
 		&InvoiceFileCleanup{},
 		&InvoiceNotificationDelivery{},
 		&EmailDelivery{},
+		&MarketingCampaign{},
+		&MarketingRecipient{},
+		&MarketingAutomation{},
+		&MarketingSuppression{},
+		&MarketingEvent{},
 		&QuotaData{},
 		&Task{},
 		&Model{},
@@ -312,6 +317,9 @@ func migrateDB() error {
 		return err
 	}
 	if err := backfillAffiliateAccounts(); err != nil {
+		return err
+	}
+	if err := EnsureMarketingAutomations(); err != nil {
 		return err
 	}
 	if err := ensureInvoiceCleanupCompositeIndex(); err != nil {
@@ -377,6 +385,11 @@ func migrateDBFast() error {
 		{&InvoiceFileCleanup{}, "InvoiceFileCleanup"},
 		{&InvoiceNotificationDelivery{}, "InvoiceNotificationDelivery"},
 		{&EmailDelivery{}, "EmailDelivery"},
+		{&MarketingCampaign{}, "MarketingCampaign"},
+		{&MarketingRecipient{}, "MarketingRecipient"},
+		{&MarketingAutomation{}, "MarketingAutomation"},
+		{&MarketingSuppression{}, "MarketingSuppression"},
+		{&MarketingEvent{}, "MarketingEvent"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
 		{&Model{}, "Model"},
@@ -420,6 +433,9 @@ func migrateDBFast() error {
 		}
 	}
 	if err := backfillAffiliateAccounts(); err != nil {
+		return err
+	}
+	if err := EnsureMarketingAutomations(); err != nil {
 		return err
 	}
 	if err := ensureInvoiceCleanupCompositeIndex(); err != nil {

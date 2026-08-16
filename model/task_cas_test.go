@@ -56,6 +56,11 @@ func TestMain(m *testing.M) {
 		&AffiliatePayout{},
 		&AffiliateTransfer{},
 		&EmailDelivery{},
+		&MarketingCampaign{},
+		&MarketingRecipient{},
+		&MarketingAutomation{},
+		&MarketingSuppression{},
+		&MarketingEvent{},
 		&InvoiceRequest{},
 		&InvoiceOrderClaim{},
 		&InvoiceStorageProfile{},
@@ -86,6 +91,11 @@ func TestMain(m *testing.M) {
 func truncateTables(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
+		DB.Exec("DELETE FROM marketing_events")
+		DB.Exec("DELETE FROM marketing_recipients")
+		DB.Exec("DELETE FROM marketing_campaigns")
+		DB.Exec("DELETE FROM marketing_automations")
+		DB.Exec("DELETE FROM marketing_suppressions")
 		DB.Exec("DELETE FROM affiliate_transfers")
 		DB.Exec("DELETE FROM affiliate_accounts")
 		DB.Exec("DELETE FROM email_deliveries")

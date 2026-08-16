@@ -27,6 +27,7 @@ import {
   Key,
   LayoutDashboard,
   ListTodo,
+  MailPlus,
   MessageSquare,
   PanelsTopLeft,
   Radio,
@@ -173,6 +174,12 @@ export function buildSidebarData(t: TFunction): SidebarData {
             url: '/admin-affiliates',
             icon: Share2,
             requiredRole: ROLE.ADMIN,
+          },
+          {
+            title: t('Email Marketing'),
+            url: '/admin-marketing',
+            icon: MailPlus,
+            requiredRole: ROLE.SUPER_ADMIN,
           },
           {
             title: t('System Info'),

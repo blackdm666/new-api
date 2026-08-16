@@ -15,7 +15,6 @@ import (
 
 const (
 	invoiceNotificationInterval = time.Minute
-	invoiceNotificationLease    = 10 * time.Minute
 	invoiceEmailAttachmentLimit = 25 * 1024 * 1024
 )
 
@@ -24,11 +23,11 @@ func StartInvoiceNotificationDelivery() {
 		return
 	}
 	gopool.Go(func() {
-		deliverPendingInvoiceNotifications()
+		bridgePendingInvoiceNotifications()
 		ticker := time.NewTicker(invoiceNotificationInterval)
 		defer ticker.Stop()
 		for range ticker.C {
-			deliverPendingInvoiceNotifications()
+			bridgePendingInvoiceNotifications()
 		}
 	})
 }
@@ -37,65 +36,76 @@ func ScheduleInvoiceNotification(delivery *model.InvoiceNotificationDelivery) {
 	if delivery == nil || delivery.DeliveredTime != 0 {
 		return
 	}
-	gopool.Go(func() { deliverInvoiceNotification(delivery) })
+	queued, err := model.EnsureInvoiceEmailDelivery(delivery)
+	if err != nil {
+		common.SysError(fmt.Sprintf("failed to queue invoice notification %d: %s", delivery.Id, err.Error()))
+		return
+	}
+	ScheduleSystemEmail(queued)
 }
 
-func deliverPendingInvoiceNotifications() {
-	deliveries, err := model.ListDueInvoiceNotifications(100, common.GetTimestamp())
+// bridgePendingInvoiceNotifications migrates legacy invoice notifications
+// into the shared durable email outbox. New records are linked atomically when
+// they are created, so this path only remains for upgrades from older builds.
+func bridgePendingInvoiceNotifications() {
+	deliveries, err := model.ListPendingInvoiceNotifications(100)
 	if err != nil {
 		common.SysError("failed to list pending invoice notifications: " + err.Error())
 		return
 	}
 	for _, delivery := range deliveries {
-		deliverInvoiceNotification(delivery)
+		if delivery.EmailDeliveryId != 0 {
+			queued, getErr := model.GetEmailDeliveryById(delivery.EmailDeliveryId)
+			if getErr == nil {
+				if queued.DeliveredTime > 0 {
+					_ = model.CompleteInvoiceNotification(delivery.Id)
+				} else {
+					_ = model.SyncInvoiceNotificationFromEmailDelivery(queued)
+				}
+				continue
+			}
+			delivery.EmailDeliveryId = 0
+			if _, ensureErr := model.EnsureInvoiceEmailDelivery(delivery); ensureErr != nil {
+				common.SysError(fmt.Sprintf("failed to restore invoice notification %d: %s", delivery.Id, ensureErr.Error()))
+			}
+			continue
+		}
+		ScheduleInvoiceNotification(delivery)
 	}
 }
 
-func deliverInvoiceNotification(delivery *model.InvoiceNotificationDelivery) {
-	now := common.GetTimestamp()
-	claimed, err := model.ClaimInvoiceNotification(delivery.Id, now, time.Now().Add(invoiceNotificationLease).Unix())
-	if err != nil || !claimed {
-		if err != nil {
-			common.SysError(fmt.Sprintf("failed to claim invoice notification %d: %s", delivery.Id, err.Error()))
-		}
-		return
+func sendInvoiceEmailDelivery(emailDelivery *model.EmailDelivery) error {
+	if emailDelivery == nil || emailDelivery.InvoiceDeliveryId <= 0 {
+		return fmt.Errorf("invoice email delivery is invalid")
 	}
-
+	delivery, err := model.GetInvoiceNotificationDelivery(emailDelivery.InvoiceDeliveryId)
+	if err != nil {
+		return err
+	}
+	delivery.Recipient = emailDelivery.Recipient
+	delivery.Subject = emailDelivery.Subject
+	delivery.Body = emailDelivery.Body
 	switch delivery.Kind {
 	case model.InvoiceNotificationKindAdminEmail:
-		err = common.SendEmail(delivery.Subject, delivery.Recipient, delivery.Body)
+		return common.SendEmail(delivery.Subject, delivery.Recipient, delivery.Body)
 	case model.InvoiceNotificationKindUserEmail, model.InvoiceNotificationKindUserLegacy:
-		err = sendIssuedInvoiceEmail(delivery)
+		return sendIssuedInvoiceEmail(delivery)
 	default:
-		err = fmt.Errorf("unsupported invoice notification kind: %s", delivery.Kind)
-	}
-	if err == nil {
-		if completeErr := model.CompleteInvoiceNotification(delivery.Id); completeErr != nil {
-			common.SysError(fmt.Sprintf("failed to complete invoice notification %d: %s", delivery.Id, completeErr.Error()))
-		}
-		return
-	}
-
-	delay := invoiceNotificationInterval
-	for attempt := 0; attempt < delivery.Attempts && delay < 24*time.Hour; attempt++ {
-		delay *= 2
-	}
-	if delay > 24*time.Hour {
-		delay = 24 * time.Hour
-	}
-	if recordErr := model.RecordInvoiceNotificationFailure(delivery.Id, err.Error(), time.Now().Add(delay).Unix()); recordErr != nil {
-		common.SysError(fmt.Sprintf("failed to record invoice notification failure %d: %s", delivery.Id, recordErr.Error()))
+		return fmt.Errorf("unsupported invoice notification kind: %s", delivery.Kind)
 	}
 }
 
 func sendIssuedInvoiceEmail(delivery *model.InvoiceNotificationDelivery) error {
-	user, err := model.GetUserById(delivery.UserId, false)
-	if err != nil {
-		return err
-	}
-	recipient := strings.TrimSpace(user.Email)
+	recipient := strings.TrimSpace(delivery.Recipient)
 	if recipient == "" {
-		return fmt.Errorf("invoice user %d has no registered email", user.Id)
+		user, err := model.GetUserById(delivery.UserId, false)
+		if err != nil {
+			return err
+		}
+		recipient = strings.TrimSpace(user.Email)
+	}
+	if recipient == "" {
+		return fmt.Errorf("invoice user %d has no registered email", delivery.UserId)
 	}
 	files, err := model.ListInvoiceFiles(delivery.InvoiceRequestId)
 	if err != nil {
