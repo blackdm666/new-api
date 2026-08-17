@@ -39,6 +39,15 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type SMTPTestResponse = {
+  success: boolean
+  message: string
+  data?: {
+    recipient: string
+    channel: 'primary' | 'backup'
+  }
+}
+
 export type InvoiceSettingsPayload = {
   InvoiceApplicationNotifyAdminEnabled: boolean
   InvoiceIssuedNotifyUserEnabled: boolean
@@ -397,6 +406,16 @@ export type OperationsSettings = {
   SMTPStartTLSEnabled: boolean
   SMTPInsecureSkipVerify: boolean
   SMTPForceAuthLogin: boolean
+  SMTPBackupEnabled: boolean
+  SMTPBackupServer: string
+  SMTPBackupPort: string
+  SMTPBackupAccount: string
+  SMTPBackupFrom: string
+  SMTPBackupToken: string
+  SMTPBackupSSLEnabled: boolean
+  SMTPBackupStartTLSEnabled: boolean
+  SMTPBackupInsecureSkipVerify: boolean
+  SMTPBackupForceAuthLogin: boolean
   InvoiceApplicationNotifyAdminEnabled: boolean
   InvoiceIssuedNotifyUserEnabled: boolean
   InvoiceAdminEmail: string

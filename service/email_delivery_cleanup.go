@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 )
 
 const emailDeliveryCleanupBatchSize = 500
@@ -19,6 +20,7 @@ func (emailDeliveryCleanupHandler) NewPayload() any         { return nil }
 
 func (emailDeliveryCleanupHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
 	now := common.GetTimestamp()
+	rules := setting.GetEmailDeliveryRules()
 	total := int64(0)
 	for {
 		select {
@@ -27,7 +29,11 @@ func (emailDeliveryCleanupHandler) Run(ctx context.Context, task *model.SystemTa
 			return
 		default:
 		}
-		deleted, err := model.CleanupEmailDeliveries(now-30*86400, now-90*86400, emailDeliveryCleanupBatchSize)
+		deleted, err := model.CleanupEmailDeliveries(
+			now-int64(rules.DeliveredRetentionDays)*86400,
+			now-int64(rules.TerminalRetentionDays)*86400,
+			emailDeliveryCleanupBatchSize,
+		)
 		if err != nil {
 			failSystemTask(task, runnerID, err)
 			return

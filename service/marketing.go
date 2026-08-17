@@ -9,15 +9,23 @@ import (
 	"html"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"gorm.io/gorm"
 )
 
 const marketingDispatchExpiry = 7 * 24 * time.Hour
+
+var marketingDeliveryMinuteQuota = struct {
+	sync.Mutex
+	minute int64
+	used   int
+}{}
 
 type marketingDispatchHandler struct{}
 
@@ -296,16 +304,17 @@ func createMarketingRecipient(campaign *model.MarketingCampaign, audience *model
 }
 
 func dispatchPendingMarketingRecipients(ctx context.Context, now int64) error {
+	rules := setting.GetEmailDeliveryRules()
 	dayStart := marketingDayStart(time.Now())
 	stats, err := model.GetEmailDeliveryStats(now, dayStart)
 	if err != nil {
 		return err
 	}
-	remaining := model.MarketingDailyLimit - int(stats.MarketingSentToday)
+	remaining := rules.MarketingDailyLimit - int(stats.MarketingQuotaUsedToday)
 	if remaining <= 0 {
 		return nil
 	}
-	limit := model.MarketingPerMinuteLimit
+	limit := rules.MarketingPerMinuteLimit
 	if remaining < limit {
 		limit = remaining
 	}
@@ -331,12 +340,12 @@ func dispatchPendingMarketingRecipients(ctx context.Context, now int64) error {
 			_ = model.SkipMarketingRecipient(recipient.Id, "recipient is suppressed")
 			continue
 		}
-		if campaign.Automatic && model.UserMarketingCooldownActive(user.Id, recipient.Id, now-model.MarketingUserCooldownDays*86400) {
+		if campaign.Automatic && model.UserMarketingCooldownActive(user.Id, recipient.Id, now-int64(rules.MarketingUserCooldownDays)*86400) {
 			continue
 		}
 		if campaign.Automatic &&
 			(campaign.Scene == model.MarketingScenePaidLowBalance || campaign.Scene == model.MarketingSceneTrialLowBalance) &&
-			model.HasRecentEmailDelivery(user.Id, "quota_warning_user", now-model.MarketingUserCooldownDays*86400) {
+			model.HasRecentEmailDelivery(user.Id, "quota_warning_user", now-int64(rules.MarketingUserCooldownDays)*86400) {
 			_ = model.SkipMarketingRecipient(recipient.Id, "recent system quota warning already sent")
 			continue
 		}
@@ -415,6 +424,7 @@ func marketingEmailDeliveryAllowed(delivery *model.EmailDelivery) (bool, error) 
 		return true, nil
 	}
 	nowTime := time.Now()
+	rules := setting.GetEmailDeliveryRules()
 	campaign, err := model.GetMarketingCampaign(delivery.RelatedId)
 	if err != nil {
 		return expireMarketingEmailDelivery(delivery, nil, "marketing campaign is unavailable")
@@ -448,26 +458,44 @@ func marketingEmailDeliveryAllowed(delivery *model.EmailDelivery) (bool, error) 
 		return expireMarketingEmailDelivery(delivery, recipient, "recipient is suppressed")
 	}
 	now := nowTime.Unix()
-	if campaign.Automatic && model.UserMarketingCooldownActive(user.Id, recipient.Id, now-model.MarketingUserCooldownDays*86400) {
+	if campaign.Automatic && model.UserMarketingCooldownActive(user.Id, recipient.Id, now-int64(rules.MarketingUserCooldownDays)*86400) {
 		return false, model.DeferEmailDelivery(delivery.Id, now+3600)
 	}
 	if campaign.Automatic &&
 		(campaign.Scene == model.MarketingScenePaidLowBalance || campaign.Scene == model.MarketingSceneTrialLowBalance) &&
-		model.HasRecentEmailDelivery(user.Id, "quota_warning_user", now-model.MarketingUserCooldownDays*86400) {
+		model.HasRecentEmailDelivery(user.Id, "quota_warning_user", now-int64(rules.MarketingUserCooldownDays)*86400) {
 		return expireMarketingEmailDelivery(delivery, recipient, "recent system quota warning already sent")
 	}
 	if !marketingSendWindowOpen(nowTime) {
 		return false, model.DeferEmailDelivery(delivery.Id, nextMarketingSendWindow(nowTime).Unix())
 	}
 	dayStart := marketingDayStart(nowTime)
-	reserved, err := model.ReserveMarketingEmailQuota(delivery.Id, dayStart, now, model.MarketingDailyLimit)
+	reserved, err := model.ReserveMarketingEmailQuota(delivery.Id, dayStart, now, int64(rules.MarketingDailyLimit))
 	if err != nil {
 		return false, err
 	}
 	if !reserved {
 		return false, model.DeferEmailDelivery(delivery.Id, nextMarketingSendWindow(nowTime.Add(24*time.Hour)).Unix())
 	}
+	if !reserveMarketingDeliveryMinute(now, rules.MarketingPerMinuteLimit) {
+		return false, nil
+	}
 	return true, nil
+}
+
+func reserveMarketingDeliveryMinute(now int64, limit int) bool {
+	minute := now / 60
+	marketingDeliveryMinuteQuota.Lock()
+	defer marketingDeliveryMinuteQuota.Unlock()
+	if marketingDeliveryMinuteQuota.minute != minute {
+		marketingDeliveryMinuteQuota.minute = minute
+		marketingDeliveryMinuteQuota.used = 0
+	}
+	if marketingDeliveryMinuteQuota.used >= limit {
+		return false
+	}
+	marketingDeliveryMinuteQuota.used++
+	return true
 }
 
 func expireMarketingEmailDelivery(delivery *model.EmailDelivery, recipient *model.MarketingRecipient, reason string) (bool, error) {
@@ -588,7 +616,7 @@ func automationStage(scene string, user *model.MarketingAudienceUser, count int6
 	}
 	waitDays := int64(30)
 	if scene == model.MarketingSceneTrialLowBalance {
-		waitDays = model.MarketingUserCooldownDays
+		waitDays = int64(setting.GetEmailDeliveryRules().MarketingUserCooldownDays)
 	}
 	if count == 1 && (lastAttempt == 0 || lastAttempt > now-waitDays*86400) {
 		return "", false
@@ -608,7 +636,8 @@ func marketingSendWindowOpen(now time.Time) bool {
 		location = time.FixedZone("Asia/Shanghai", 8*60*60)
 	}
 	hour := now.In(location).Hour()
-	return hour >= 9 && hour < 20
+	rules := setting.GetEmailDeliveryRules()
+	return hour >= rules.MarketingSendStartHour && hour < rules.MarketingSendEndHour
 }
 
 func marketingDayStart(now time.Time) int64 {
@@ -626,7 +655,7 @@ func nextMarketingSendWindow(now time.Time) time.Time {
 		location = time.FixedZone("Asia/Shanghai", 8*60*60)
 	}
 	local := now.In(location)
-	start := time.Date(local.Year(), local.Month(), local.Day(), 9, 0, 0, 0, location)
+	start := time.Date(local.Year(), local.Month(), local.Day(), setting.GetEmailDeliveryRules().MarketingSendStartHour, 0, 0, 0, location)
 	if local.Before(start) {
 		return start
 	}

@@ -81,6 +81,19 @@ func TestMarketingSendWindowUsesShanghaiTime(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 8, 17, 9, 0, 0, 0, location).Unix(), nextMarketingSendWindow(time.Date(2026, 8, 16, 20, 0, 0, 0, location)).Unix())
 }
 
+func TestMarketingDeliveryMinuteQuotaIsExactAcrossPolls(t *testing.T) {
+	marketingDeliveryMinuteQuota.Lock()
+	marketingDeliveryMinuteQuota.minute = 0
+	marketingDeliveryMinuteQuota.used = 0
+	marketingDeliveryMinuteQuota.Unlock()
+
+	const minuteStart = int64(1_800_000_000)
+	assert.True(t, reserveMarketingDeliveryMinute(minuteStart, 2))
+	assert.True(t, reserveMarketingDeliveryMinute(minuteStart+30, 2))
+	assert.False(t, reserveMarketingDeliveryMinute(minuteStart+45, 2))
+	assert.True(t, reserveMarketingDeliveryMinute(minuteStart+60, 2))
+}
+
 func TestFixedMarketingTemplateEscapesCustomContentAndUsesFixedLink(t *testing.T) {
 	body := RenderFixedMarketingEmail(`<script>alert("x")</script>`, "<img src=x onerror=alert(1)>\nhello", "https://example.com/wallet", "Top up")
 	assert.NotContains(t, body, "<script>")

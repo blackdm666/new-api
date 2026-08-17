@@ -105,6 +105,19 @@ var SMTPAccount = ""
 var SMTPFrom = ""
 var SMTPToken = ""
 
+// Backup SMTP is only used after the primary channel returns an error before
+// delivery has been confirmed by the SMTP server.
+var SMTPBackupEnabled = false
+var SMTPBackupServer = ""
+var SMTPBackupPort = 587
+var SMTPBackupSSLEnabled = false
+var SMTPBackupStartTLSEnabled = false
+var SMTPBackupInsecureSkipVerify = false
+var SMTPBackupForceAuthLogin = false
+var SMTPBackupAccount = ""
+var SMTPBackupFrom = ""
+var SMTPBackupToken = ""
+
 // 发票邮件通知配置。
 var InvoiceApplicationNotifyAdminEnabled = false
 var InvoiceIssuedNotifyUserEnabled = false

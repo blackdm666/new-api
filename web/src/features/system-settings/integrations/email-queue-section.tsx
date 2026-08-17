@@ -27,7 +27,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { NativeSelect } from '@/components/ui/native-select'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -36,14 +43,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDebounce } from '@/hooks/use-debounce'
 import { api } from '@/lib/api'
 import { formatTimestampToDate } from '@/lib/format'
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error'
 import { cn } from '@/lib/utils'
 
+import { EmailQueueRulesCard, type EmailQueueRules } from './email-queue-rules'
+
 const PAGE_SIZE = 20
-const DAILY_MARKETING_LIMIT = 500
 
 type DeliveryStatus =
   | 'queued'
@@ -86,16 +95,16 @@ type EmailQueueStats = {
     failure_rate_24h: number
     oldest_pending_time: number
     last_delivered_time: number
-    marketing_sent_today: number
+    marketing_quota_used_today: number
   }
   categories: string[]
   smtp_configured: boolean
   marketing_daily_limit: number
-  marketing_daily_remaining: number
   marketing_circuit_breaker: {
     paused_campaigns: number
     last_reason: string
   }
+  rules: EmailQueueRules
 }
 
 const STATUS_META: Record<
@@ -231,294 +240,337 @@ export function EmailQueueSection() {
   return (
     <div className='space-y-5'>
       <header>
-        <h2 className='text-xl font-semibold'>{t('Email Queue')}</h2>
-        <p className='text-muted-foreground mt-1 text-sm'>
+        <p className='text-muted-foreground text-sm'>
           {t(
             'Monitor delivery, retries, and failures for system and marketing emails.'
           )}
         </p>
       </header>
 
-      <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-6'>
-        <QueueStat label={t('Queued')} value={stats?.queued ?? 0} />
-        <QueueStat label={t('Sending')} value={stats?.sending ?? 0} />
-        <QueueStat
-          label={t('Waiting for retry')}
-          value={stats?.retrying ?? 0}
-        />
-        <QueueStat label={t('Final failures')} value={stats?.failed ?? 0} />
-        <QueueStat
-          label={t('Sent in 24 hours')}
-          value={stats?.delivered_24h ?? 0}
-        />
-        <QueueStat
-          label={t('Failure rate in 24 hours')}
-          value={`${((stats?.failure_rate_24h ?? 0) * 100).toFixed(1)}%`}
-        />
-      </div>
+      <Tabs defaultValue='monitoring' className='space-y-5'>
+        <TabsList className='grid w-full max-w-md grid-cols-2'>
+          <TabsTrigger value='monitoring'>{t('Queue monitoring')}</TabsTrigger>
+          <TabsTrigger value='rules'>{t('Email queue rules')}</TabsTrigger>
+        </TabsList>
 
-      <Card data-card-hover='false'>
-        <CardContent className='grid gap-3 py-4 sm:grid-cols-2 xl:grid-cols-6'>
-          <HealthItem
-            label={t('SMTP status')}
-            value={
-              statsQuery.data?.smtp_configured
-                ? t('Configured')
-                : t('Not configured')
-            }
-          />
-          <HealthItem
-            label={t('Last successful delivery')}
-            value={
-              stats?.last_delivered_time
-                ? formatTimestampToDate(stats.last_delivered_time)
-                : '-'
-            }
-          />
-          <HealthItem
-            label={t('Oldest pending email')}
-            value={
-              stats?.oldest_pending_time
-                ? formatWaitingTime(stats.oldest_pending_time, t)
-                : '-'
-            }
-          />
-          <HealthItem
-            label={t('Queue health')}
-            value={queueHealthLabel(stats, t)}
-          />
-          <HealthItem
-            label={t('Marketing circuit breaker')}
-            value={
-              statsQuery.data?.marketing_circuit_breaker.paused_campaigns
-                ? `${t('{{count}} paused campaigns', { count: statsQuery.data.marketing_circuit_breaker.paused_campaigns })}: ${statsQuery.data.marketing_circuit_breaker.last_reason}`
-                : t('Not triggered')
-            }
-          />
-          <HealthItem
-            label={t('Marketing daily usage')}
-            value={`${stats?.marketing_sent_today ?? 0} / ${statsQuery.data?.marketing_daily_limit ?? DAILY_MARKETING_LIMIT} · ${t('{{count}} remaining', { count: statsQuery.data?.marketing_daily_remaining ?? DAILY_MARKETING_LIMIT })}`}
-          />
-        </CardContent>
-      </Card>
+        <TabsContent value='monitoring' className='space-y-5'>
+          <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-6'>
+            <QueueStat label={t('Queued')} value={stats?.queued ?? 0} />
+            <QueueStat label={t('Sending')} value={stats?.sending ?? 0} />
+            <QueueStat
+              label={t('Waiting for retry')}
+              value={stats?.retrying ?? 0}
+            />
+            <QueueStat label={t('Final failures')} value={stats?.failed ?? 0} />
+            <QueueStat
+              label={t('Sent in 24 hours')}
+              value={stats?.delivered_24h ?? 0}
+            />
+            <QueueStat
+              label={t('Failure rate in 24 hours')}
+              value={`${((stats?.failure_rate_24h ?? 0) * 100).toFixed(1)}%`}
+            />
+          </div>
 
-      <div className='flex flex-wrap items-center gap-3'>
-        <NativeSelect
-          value={status}
-          onChange={(event) => {
-            setStatus(event.target.value)
-            setPage(1)
-            setSelected([])
-          }}
-          aria-label={t('Email status')}
-          className='w-48'
-        >
-          <option value=''>{t('All statuses')}</option>
-          {Object.entries(STATUS_META).map(([key, meta]) => (
-            <option key={key} value={key}>
-              {t(meta.label)}
-            </option>
-          ))}
-        </NativeSelect>
-        <NativeSelect
-          value={category}
-          onChange={(event) => {
-            setCategory(event.target.value)
-            setPage(1)
-            setSelected([])
-          }}
-          aria-label={t('Email type')}
-          className='w-56'
-        >
-          <option value=''>{t('All email types')}</option>
-          {(statsQuery.data?.categories ?? []).map((item) => (
-            <option key={item} value={item}>
-              {emailCategoryLabel(item, t)}
-            </option>
-          ))}
-        </NativeSelect>
-        <div className='relative min-w-64 flex-1'>
-          <Search className='text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2' />
-          <Input
-            value={keyword}
-            onChange={(event) => {
-              setKeyword(event.target.value)
-              setPage(1)
-            }}
-            placeholder={t(
-              'Search by email type, user, recipient, or related ID'
-            )}
-            className='pl-9'
-          />
-        </div>
-        {selected.length > 0 ? (
-          <Button
-            type='button'
-            variant='outline'
-            disabled={retrying}
-            onClick={() => void retry(selected)}
-          >
-            <RotateCcw className='size-4' />
-            {t('Retry selected')} ({selected.length})
-          </Button>
-        ) : null}
-        <Button
-          type='button'
-          variant='outline'
-          disabled={queueQuery.isFetching || statsQuery.isFetching}
-          onClick={() => void refresh()}
-        >
-          <RefreshCw
-            className={cn(
-              'size-4',
-              (queueQuery.isFetching || statsQuery.isFetching) && 'animate-spin'
-            )}
-          />
-          {t('Refresh')}
-        </Button>
-      </div>
+          <Card data-card-hover='false'>
+            <CardContent className='grid gap-3 py-4 sm:grid-cols-2 xl:grid-cols-6'>
+              <HealthItem
+                label={t('SMTP status')}
+                value={
+                  statsQuery.data?.smtp_configured
+                    ? t('Configured')
+                    : t('Not configured')
+                }
+              />
+              <HealthItem
+                label={t('Last successful delivery')}
+                value={
+                  stats?.last_delivered_time
+                    ? formatTimestampToDate(stats.last_delivered_time)
+                    : '-'
+                }
+              />
+              <HealthItem
+                label={t('Oldest pending email')}
+                value={
+                  stats?.oldest_pending_time
+                    ? formatWaitingTime(stats.oldest_pending_time, t)
+                    : '-'
+                }
+              />
+              <HealthItem
+                label={t('Queue health')}
+                value={queueHealthLabel(stats, t)}
+              />
+              <HealthItem
+                label={t('Marketing circuit breaker')}
+                value={
+                  statsQuery.data?.marketing_circuit_breaker.paused_campaigns
+                    ? `${t('{{count}} paused campaigns', { count: statsQuery.data.marketing_circuit_breaker.paused_campaigns })}: ${statsQuery.data.marketing_circuit_breaker.last_reason}`
+                    : t('Not triggered')
+                }
+              />
+              <HealthItem
+                label={t('Marketing daily usage')}
+                value={`${stats?.marketing_quota_used_today ?? 0} / ${statsQuery.data?.marketing_daily_limit ?? 0}`}
+              />
+            </CardContent>
+          </Card>
 
-      <div className='overflow-hidden rounded-xl border'>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className='w-10'>
-                <Checkbox
-                  checked={
-                    selectableIds.length > 0 &&
-                    selectableIds.every((id) => selected.includes(id))
-                  }
-                  onCheckedChange={(checked) =>
-                    setSelected(checked ? selectableIds : [])
-                  }
-                  aria-label={t('Select failed emails')}
-                />
-              </TableHead>
-              <TableHead>{t('Email type')}</TableHead>
-              <TableHead>{t('Recipient')}</TableHead>
-              <TableHead>{t('Status')}</TableHead>
-              <TableHead>{t('Attempts')}</TableHead>
-              <TableHead>{t('Next retry')}</TableHead>
-              <TableHead>{t('Last error')}</TableHead>
-              <TableHead>{t('Created at')}</TableHead>
-              <TableHead>{t('Completed at')}</TableHead>
-              <TableHead className='text-right'>{t('Actions')}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((item) => {
-              const meta = STATUS_META[item.status]
-              return (
-                <TableRow key={item.id}>
-                  <TableCell>
-                    <Checkbox
-                      checked={selected.includes(item.id)}
-                      disabled={item.status !== 'failed'}
-                      onCheckedChange={(checked) =>
-                        setSelected((current) =>
-                          checked
-                            ? [...current, item.id]
-                            : current.filter((id) => id !== item.id)
-                        )
-                      }
-                      aria-label={t('Select email #{{id}}', { id: item.id })}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className='font-medium'>
-                      {emailCategoryLabel(item.category, t)}
-                    </div>
-                    <div className='text-muted-foreground text-xs'>
-                      #{item.id} · {t('Related ID')} {item.related_id || '-'}
-                    </div>
-                  </TableCell>
-                  <TableCell>{item.recipient_masked || '-'}</TableCell>
-                  <TableCell>
-                    <Badge variant='outline' className={meta.className}>
+          <div className='flex flex-wrap items-center gap-3'>
+            <Select
+              items={[
+                { value: 'all', label: t('All statuses') },
+                ...Object.entries(STATUS_META).map(([value, meta]) => ({
+                  value,
+                  label: t(meta.label),
+                })),
+              ]}
+              value={status || 'all'}
+              onValueChange={(value) => {
+                setStatus(value && value !== 'all' ? value : '')
+                setPage(1)
+                setSelected([])
+              }}
+            >
+              <SelectTrigger className='w-48' aria-label={t('Email status')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  <SelectItem value='all'>{t('All statuses')}</SelectItem>
+                  {Object.entries(STATUS_META).map(([key, meta]) => (
+                    <SelectItem key={key} value={key}>
                       {t(meta.label)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{item.attempts}</TableCell>
-                  <TableCell>
-                    {item.status === 'retrying' && item.next_attempt_time
-                      ? formatTimestampToDate(item.next_attempt_time)
-                      : '-'}
-                  </TableCell>
-                  <TableCell className='max-w-72 whitespace-normal'>
-                    <span className='line-clamp-2' title={item.last_error}>
-                      {item.last_error || '-'}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    {formatTimestampToDate(item.created_time)}
-                  </TableCell>
-                  <TableCell>
-                    {item.delivered_time ||
-                    item.dead_letter_time ||
-                    item.expired_time
-                      ? formatTimestampToDate(
-                          item.delivered_time ||
-                            item.dead_letter_time ||
-                            item.expired_time
-                        )
-                      : '-'}
-                  </TableCell>
-                  <TableCell className='text-right'>
-                    {item.status === 'failed' ? (
-                      <Button
-                        type='button'
-                        size='sm'
-                        variant='outline'
-                        disabled={retrying}
-                        onClick={() => void retry([item.id])}
-                      >
-                        <RotateCcw className='size-4' />
-                        {t('Retry')}
-                      </Button>
-                    ) : null}
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-            {!queueQuery.isLoading && items.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={10}
-                  className='text-muted-foreground h-28 text-center'
-                >
-                  {t('No email queue records')}
-                </TableCell>
-              </TableRow>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <Select
+              items={[
+                { value: 'all', label: t('All email types') },
+                ...(statsQuery.data?.categories ?? []).map((item) => ({
+                  value: item,
+                  label: emailCategoryLabel(item, t),
+                })),
+              ]}
+              value={category || 'all'}
+              onValueChange={(value) => {
+                setCategory(value && value !== 'all' ? value : '')
+                setPage(1)
+                setSelected([])
+              }}
+            >
+              <SelectTrigger className='w-56' aria-label={t('Email type')}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  <SelectItem value='all'>{t('All email types')}</SelectItem>
+                  {(statsQuery.data?.categories ?? []).map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {emailCategoryLabel(item, t)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <div className='relative min-w-64 flex-1'>
+              <Search className='text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2' />
+              <Input
+                value={keyword}
+                onChange={(event) => {
+                  setKeyword(event.target.value)
+                  setPage(1)
+                }}
+                placeholder={t(
+                  'Search by email type, user, recipient, or related ID'
+                )}
+                className='pl-9'
+              />
+            </div>
+            {selected.length > 0 ? (
+              <Button
+                type='button'
+                variant='outline'
+                disabled={retrying}
+                onClick={() => void retry(selected)}
+              >
+                <RotateCcw className='size-4' />
+                {t('Retry selected')} ({selected.length})
+              </Button>
             ) : null}
-          </TableBody>
-        </Table>
-      </div>
+            <Button
+              type='button'
+              variant='outline'
+              disabled={queueQuery.isFetching || statsQuery.isFetching}
+              onClick={() => void refresh()}
+            >
+              <RefreshCw
+                className={cn(
+                  'size-4',
+                  (queueQuery.isFetching || statsQuery.isFetching) &&
+                    'animate-spin'
+                )}
+              />
+              {t('Refresh')}
+            </Button>
+          </div>
 
-      <div className='flex items-center justify-between'>
-        <span className='text-muted-foreground text-sm'>
-          {t('{{count}} records', { count: total })}
-        </span>
-        <div className='flex gap-2'>
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            disabled={page <= 1}
-            onClick={() => setPage((current) => current - 1)}
-          >
-            {t('Previous')}
-          </Button>
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            disabled={page >= totalPages}
-            onClick={() => setPage((current) => current + 1)}
-          >
-            {t('Next')}
-          </Button>
-        </div>
-      </div>
+          <div className='overflow-hidden rounded-xl border'>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className='w-10'>
+                    <Checkbox
+                      checked={
+                        selectableIds.length > 0 &&
+                        selectableIds.every((id) => selected.includes(id))
+                      }
+                      onCheckedChange={(checked) =>
+                        setSelected(checked ? selectableIds : [])
+                      }
+                      aria-label={t('Select failed emails')}
+                    />
+                  </TableHead>
+                  <TableHead>{t('Email type')}</TableHead>
+                  <TableHead>{t('Recipient')}</TableHead>
+                  <TableHead>{t('Status')}</TableHead>
+                  <TableHead>{t('Attempts')}</TableHead>
+                  <TableHead>{t('Next retry')}</TableHead>
+                  <TableHead>{t('Last error')}</TableHead>
+                  <TableHead>{t('Created at')}</TableHead>
+                  <TableHead>{t('Completed at')}</TableHead>
+                  <TableHead className='text-right'>{t('Actions')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map((item) => {
+                  const meta = STATUS_META[item.status]
+                  return (
+                    <TableRow key={item.id}>
+                      <TableCell>
+                        <Checkbox
+                          checked={selected.includes(item.id)}
+                          disabled={item.status !== 'failed'}
+                          onCheckedChange={(checked) =>
+                            setSelected((current) =>
+                              checked
+                                ? [...current, item.id]
+                                : current.filter((id) => id !== item.id)
+                            )
+                          }
+                          aria-label={t('Select email #{{id}}', {
+                            id: item.id,
+                          })}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div className='font-medium'>
+                          {emailCategoryLabel(item.category, t)}
+                        </div>
+                        <div className='text-muted-foreground text-xs'>
+                          #{item.id} · {t('Related ID')}{' '}
+                          {item.related_id || '-'}
+                        </div>
+                      </TableCell>
+                      <TableCell>{item.recipient_masked || '-'}</TableCell>
+                      <TableCell>
+                        <Badge variant='outline' className={meta.className}>
+                          {t(meta.label)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{item.attempts}</TableCell>
+                      <TableCell>
+                        {item.status === 'retrying' && item.next_attempt_time
+                          ? formatTimestampToDate(item.next_attempt_time)
+                          : '-'}
+                      </TableCell>
+                      <TableCell className='max-w-72 whitespace-normal'>
+                        <span className='line-clamp-2' title={item.last_error}>
+                          {item.last_error || '-'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {formatTimestampToDate(item.created_time)}
+                      </TableCell>
+                      <TableCell>
+                        {item.delivered_time ||
+                        item.dead_letter_time ||
+                        item.expired_time
+                          ? formatTimestampToDate(
+                              item.delivered_time ||
+                                item.dead_letter_time ||
+                                item.expired_time
+                            )
+                          : '-'}
+                      </TableCell>
+                      <TableCell className='text-right'>
+                        {item.status === 'failed' ? (
+                          <Button
+                            type='button'
+                            size='sm'
+                            variant='outline'
+                            disabled={retrying}
+                            onClick={() => void retry([item.id])}
+                          >
+                            <RotateCcw className='size-4' />
+                            {t('Retry')}
+                          </Button>
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+                {!queueQuery.isLoading && items.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={10}
+                      className='text-muted-foreground h-28 text-center'
+                    >
+                      {t('No email queue records')}
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className='flex items-center justify-between'>
+            <span className='text-muted-foreground text-sm'>
+              {t('{{count}} records', { count: total })}
+            </span>
+            <div className='flex gap-2'>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                disabled={page <= 1}
+                onClick={() => setPage((current) => current - 1)}
+              >
+                {t('Previous')}
+              </Button>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                disabled={page >= totalPages}
+                onClick={() => setPage((current) => current + 1)}
+              >
+                {t('Next')}
+              </Button>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value='rules'>
+          <EmailQueueRulesCard
+            rules={statsQuery.data?.rules}
+            onSaved={refresh}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

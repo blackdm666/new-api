@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -52,13 +53,19 @@ func GetEmailDeliveryStats(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	rules := setting.GetEmailDeliveryRules()
+	primarySMTPConfigured := strings.TrimSpace(common.SMTPServer) != "" && (strings.TrimSpace(common.SMTPFrom) != "" || strings.TrimSpace(common.SMTPAccount) != "")
+	backupSMTPConfigured := common.SMTPBackupEnabled && strings.TrimSpace(common.SMTPBackupServer) != "" && (strings.TrimSpace(common.SMTPBackupFrom) != "" || strings.TrimSpace(common.SMTPBackupAccount) != "")
 	common.ApiSuccess(c, gin.H{
 		"queue":                     stats,
 		"categories":                categories,
-		"smtp_configured":           strings.TrimSpace(common.SMTPServer) != "" && (strings.TrimSpace(common.SMTPFrom) != "" || strings.TrimSpace(common.SMTPAccount) != ""),
-		"marketing_daily_limit":     model.MarketingDailyLimit,
-		"marketing_daily_remaining": max(0, model.MarketingDailyLimit-int(stats.MarketingSentToday)),
+		"smtp_configured":           primarySMTPConfigured || backupSMTPConfigured,
+		"smtp_primary_configured":   primarySMTPConfigured,
+		"smtp_backup_configured":    backupSMTPConfigured,
+		"marketing_daily_limit":     rules.MarketingDailyLimit,
+		"marketing_daily_remaining": max(0, rules.MarketingDailyLimit-int(stats.MarketingQuotaUsedToday)),
 		"marketing_circuit_breaker": circuit,
+		"rules":                     rules,
 	})
 }
 

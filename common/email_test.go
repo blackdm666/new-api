@@ -329,6 +329,16 @@ func withSMTPSettings(t *testing.T) {
 	originalSMTPAccount := SMTPAccount
 	originalSMTPFrom := SMTPFrom
 	originalSMTPToken := SMTPToken
+	originalSMTPBackupEnabled := SMTPBackupEnabled
+	originalSMTPBackupServer := SMTPBackupServer
+	originalSMTPBackupPort := SMTPBackupPort
+	originalSMTPBackupSSLEnabled := SMTPBackupSSLEnabled
+	originalSMTPBackupStartTLSEnabled := SMTPBackupStartTLSEnabled
+	originalSMTPBackupInsecureSkipVerify := SMTPBackupInsecureSkipVerify
+	originalSMTPBackupForceAuthLogin := SMTPBackupForceAuthLogin
+	originalSMTPBackupAccount := SMTPBackupAccount
+	originalSMTPBackupFrom := SMTPBackupFrom
+	originalSMTPBackupToken := SMTPBackupToken
 	originalSystemName := SystemName
 
 	t.Cleanup(func() {
@@ -341,8 +351,105 @@ func withSMTPSettings(t *testing.T) {
 		SMTPAccount = originalSMTPAccount
 		SMTPFrom = originalSMTPFrom
 		SMTPToken = originalSMTPToken
+		SMTPBackupEnabled = originalSMTPBackupEnabled
+		SMTPBackupServer = originalSMTPBackupServer
+		SMTPBackupPort = originalSMTPBackupPort
+		SMTPBackupSSLEnabled = originalSMTPBackupSSLEnabled
+		SMTPBackupStartTLSEnabled = originalSMTPBackupStartTLSEnabled
+		SMTPBackupInsecureSkipVerify = originalSMTPBackupInsecureSkipVerify
+		SMTPBackupForceAuthLogin = originalSMTPBackupForceAuthLogin
+		SMTPBackupAccount = originalSMTPBackupAccount
+		SMTPBackupFrom = originalSMTPBackupFrom
+		SMTPBackupToken = originalSMTPBackupToken
 		SystemName = originalSystemName
 	})
+}
+
+func TestSendEmailFallsBackToBackupSMTPChannel(t *testing.T) {
+	backupServer := newFakeSMTPServerWithSTARTTLSAdvertisement(t, false)
+	defer backupServer.close()
+	withSMTPSettings(t)
+
+	SMTPServer = "127.0.0.1"
+	SMTPPort = 1
+	SMTPAccount = "primary@example.com"
+	SMTPFrom = "primary@example.com"
+	SMTPBackupEnabled = true
+	SMTPBackupServer = backupServer.host
+	SMTPBackupPort = backupServer.port
+	SMTPBackupAccount = "backup@example.com"
+	SMTPBackupFrom = "backup@example.com"
+	SystemName = "New API"
+
+	result, err := SendEmailWithResult("Failover test", "receiver@example.com", "<p>backup</p>")
+	require.NoError(t, err)
+	require.Equal(t, SMTPChannelBackup, result.Channel)
+
+	select {
+	case message := <-backupServer.messages:
+		require.Contains(t, message, `<backup@example.com>`)
+		require.Contains(t, message, "<p>backup</p>")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for backup SMTP DATA")
+	}
+}
+
+func TestSendEmailDoesNotUseBackupWhenPrimarySucceeds(t *testing.T) {
+	primaryServer := newFakeSMTPServerWithSTARTTLSAdvertisement(t, false)
+	defer primaryServer.close()
+	withSMTPSettings(t)
+
+	SMTPServer = primaryServer.host
+	SMTPPort = primaryServer.port
+	SMTPAccount = "primary@example.com"
+	SMTPFrom = "primary@example.com"
+	SMTPBackupEnabled = true
+	SMTPBackupServer = "127.0.0.1"
+	SMTPBackupPort = 1
+	SMTPBackupAccount = "backup@example.com"
+	SMTPBackupFrom = "backup@example.com"
+	SystemName = "New API"
+
+	result, err := SendEmailWithResult("Primary test", "receiver@example.com", "<p>primary</p>")
+	require.NoError(t, err)
+	require.Equal(t, SMTPChannelPrimary, result.Channel)
+
+	select {
+	case message := <-primaryServer.messages:
+		require.Contains(t, message, `<primary@example.com>`)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for primary SMTP DATA")
+	}
+}
+
+func TestSendEmailViaBackupChannelCanVerifyBeforeActivation(t *testing.T) {
+	backupServer := newFakeSMTPServerWithSTARTTLSAdvertisement(t, false)
+	defer backupServer.close()
+	withSMTPSettings(t)
+
+	SMTPBackupEnabled = false
+	SMTPBackupServer = backupServer.host
+	SMTPBackupPort = backupServer.port
+	SMTPBackupAccount = "backup@example.com"
+	SMTPBackupFrom = "backup@example.com"
+	SystemName = "New API"
+
+	result, err := SendEmailViaChannel(
+		"Backup verification",
+		"receiver@example.com",
+		"<p>verify backup</p>",
+		SMTPChannelBackup,
+	)
+	require.NoError(t, err)
+	require.Equal(t, SMTPChannelBackup, result.Channel)
+
+	select {
+	case message := <-backupServer.messages:
+		require.Contains(t, message, `<backup@example.com>`)
+		require.Contains(t, message, "<p>verify backup</p>")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for backup SMTP verification DATA")
+	}
 }
 
 func TestSendEmailUsesExplicitStartTLSWithInsecureCertificate(t *testing.T) {

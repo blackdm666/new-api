@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
@@ -59,7 +60,9 @@ func QueueSystemEmail(deliveryKey string, category string, relatedId int, userId
 // immediately bypassing campaign rate limits. The regular outbox poller will
 // deliver it after all due system and business messages.
 func QueueMarketingEmail(deliveryKey string, category string, relatedId int, userId int, recipient string, subject string, body string, expiresTime int64) (*model.EmailDelivery, error) {
-	delivery, _, err := model.EnqueueEmailDelivery(&model.EmailDelivery{
+	now := time.Now()
+	rules := setting.GetEmailDeliveryRules()
+	delivery, _, err := model.EnqueueMarketingEmailDelivery(&model.EmailDelivery{
 		DeliveryKey: deliveryKey,
 		Category:    category,
 		RelatedId:   relatedId,
@@ -69,7 +72,7 @@ func QueueMarketingEmail(deliveryKey string, category string, relatedId int, use
 		Body:        body,
 		Priority:    model.EmailPriorityMarketing,
 		ExpiresTime: expiresTime,
-	})
+	}, marketingDayStart(now), now.Unix(), int64(rules.MarketingDailyLimit))
 	return delivery, err
 }
 
@@ -90,14 +93,7 @@ func deliverDueSystemEmails() {
 		common.SysError("failed to list pending email deliveries: " + err.Error())
 		return
 	}
-	marketingCount := 0
 	for _, delivery := range deliveries {
-		if delivery.Priority == model.EmailPriorityMarketing {
-			if marketingCount >= model.MarketingPerMinuteLimit/2 {
-				continue
-			}
-			marketingCount++
-		}
 		deliverSystemEmail(delivery)
 	}
 }
@@ -131,12 +127,14 @@ func deliverSystemEmail(delivery *model.EmailDelivery) {
 		}
 		return
 	}
-	delay := emailDeliveryInterval
-	for attempt := 0; attempt < delivery.Attempts && delay < 24*time.Hour; attempt++ {
+	rules := setting.GetEmailDeliveryRules()
+	delay := time.Duration(rules.EmailRetryInitialSeconds) * time.Second
+	maxDelay := time.Duration(rules.EmailRetryMaxSeconds) * time.Second
+	for attempt := 0; attempt < delivery.Attempts && delay < maxDelay; attempt++ {
 		delay *= 2
 	}
-	if delay > 24*time.Hour {
-		delay = 24 * time.Hour
+	if delay > maxDelay {
+		delay = maxDelay
 	}
 	if recordErr := model.RecordEmailDeliveryFailure(delivery.Id, err.Error(), time.Now().Add(delay).Unix()); recordErr != nil {
 		common.SysError(fmt.Sprintf("failed to record email delivery %d failure: %s", delivery.Id, recordErr.Error()))

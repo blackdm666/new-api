@@ -56,6 +56,7 @@ func TestMain(m *testing.M) {
 		&AffiliatePayout{},
 		&AffiliateTransfer{},
 		&EmailDelivery{},
+		&MarketingEmailDailyQuota{},
 		&MarketingCampaign{},
 		&MarketingRecipient{},
 		&MarketingAutomation{},
@@ -99,6 +100,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM affiliate_transfers")
 		DB.Exec("DELETE FROM affiliate_accounts")
 		DB.Exec("DELETE FROM email_deliveries")
+		DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&MarketingEmailDailyQuota{})
 		DB.Exec("DELETE FROM tasks")
 		DB.Exec("DELETE FROM auth_flows")
 		DB.Exec("DELETE FROM external_identity_claims")

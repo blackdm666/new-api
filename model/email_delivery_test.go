@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -114,10 +115,6 @@ func TestMarketingQuotaReservationIncludesCrossDayBacklog(t *testing.T) {
 	truncateTables(t)
 	now := common.GetTimestamp()
 	dayStart := now - 3600
-	current, _, err := EnqueueEmailDelivery(&EmailDelivery{
-		DeliveryKey: "marketing-quota-current", Category: "marketing_custom", Recipient: "current@example.com", Subject: "current", Body: "current", Priority: EmailPriorityMarketing,
-	})
-	require.NoError(t, err)
 	backlog, _, err := EnqueueEmailDelivery(&EmailDelivery{
 		DeliveryKey: "marketing-quota-backlog", Category: "marketing_custom", Recipient: "backlog@example.com", Subject: "backlog", Body: "backlog", Priority: EmailPriorityMarketing,
 	})
@@ -125,11 +122,102 @@ func TestMarketingQuotaReservationIncludesCrossDayBacklog(t *testing.T) {
 	require.NoError(t, DB.Model(backlog).Update("marketing_quota_time", dayStart-1).Error)
 	reserved, err := ReserveMarketingEmailQuota(backlog.Id, dayStart, now, 1)
 	require.NoError(t, err)
-	assert.False(t, reserved)
-	require.NoError(t, DB.Model(current).Update("marketing_quota_time", dayStart-1).Error)
-	reserved, err = ReserveMarketingEmailQuota(backlog.Id, dayStart, now, 1)
-	require.NoError(t, err)
 	assert.True(t, reserved)
+
+	second, _, err := EnqueueEmailDelivery(&EmailDelivery{
+		DeliveryKey: "marketing-quota-second", Category: "marketing_custom", Recipient: "second@example.com", Subject: "second", Body: "second", Priority: EmailPriorityMarketing,
+	})
+	require.NoError(t, err)
+	reserved, err = ReserveMarketingEmailQuota(second.Id, dayStart, now, 1)
+	require.NoError(t, err)
+	assert.False(t, reserved)
+}
+
+func TestMarketingEmailEnqueueReservesQuotaAtomically(t *testing.T) {
+	truncateTables(t)
+	now := common.GetTimestamp()
+	dayStart := now - 1
+
+	first, created, err := EnqueueMarketingEmailDelivery(&EmailDelivery{
+		DeliveryKey: "marketing-atomic-first", Category: "marketing_custom", Recipient: "first@example.com", Subject: "first", Body: "first", Priority: EmailPriorityMarketing,
+	}, dayStart, now, 1)
+	require.NoError(t, err)
+	assert.True(t, created)
+	assert.GreaterOrEqual(t, first.MarketingQuotaTime, dayStart)
+
+	_, _, err = EnqueueMarketingEmailDelivery(&EmailDelivery{
+		DeliveryKey: "marketing-atomic-second", Category: "marketing_custom", Recipient: "second@example.com", Subject: "second", Body: "second", Priority: EmailPriorityMarketing,
+	}, dayStart, now, 1)
+	assert.ErrorIs(t, err, ErrMarketingEmailDailyLimitReached)
+
+	var deliveries int64
+	require.NoError(t, DB.Model(&EmailDelivery{}).Count(&deliveries).Error)
+	assert.EqualValues(t, 1, deliveries)
+}
+
+func TestMarketingEmailStatsSeparateQuotaUsageFromDelivery(t *testing.T) {
+	truncateTables(t)
+	now := common.GetTimestamp()
+	dayStart := now - 1
+	delivery, _, err := EnqueueMarketingEmailDelivery(&EmailDelivery{
+		DeliveryKey: "marketing-stats", Category: "marketing_custom", Recipient: "stats@example.com", Subject: "stats", Body: "stats", Priority: EmailPriorityMarketing,
+	}, dayStart, now, 10)
+	require.NoError(t, err)
+
+	stats, err := GetEmailDeliveryStats(now, dayStart)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, stats.MarketingQuotaUsedToday)
+	assert.Zero(t, stats.MarketingSentToday)
+
+	require.NoError(t, CompleteEmailDelivery(delivery.Id))
+	stats, err = GetEmailDeliveryStats(common.GetTimestamp(), dayStart)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, stats.MarketingQuotaUsedToday)
+	assert.EqualValues(t, 1, stats.MarketingSentToday)
+}
+
+func TestMarketingEmailQuotaHasExactWinnerCountAcrossConcurrentEnqueues(t *testing.T) {
+	truncateTables(t)
+	now := common.GetTimestamp()
+	dayStart := now - 1
+	const dailyLimit = 5
+	const candidates = 20
+
+	results := make(chan error, candidates)
+	var wg sync.WaitGroup
+	wg.Add(candidates)
+	for index := 0; index < candidates; index++ {
+		go func() {
+			defer wg.Done()
+			_, _, err := EnqueueMarketingEmailDelivery(&EmailDelivery{
+				DeliveryKey: fmt.Sprintf("marketing-concurrent-%d", index),
+				Category:    "marketing_custom",
+				Recipient:   fmt.Sprintf("concurrent-%d@example.com", index),
+				Subject:     "concurrent",
+				Body:        "concurrent",
+				Priority:    EmailPriorityMarketing,
+			}, dayStart, now, dailyLimit)
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	winners := 0
+	limited := 0
+	for err := range results {
+		if err == nil {
+			winners++
+			continue
+		}
+		if errors.Is(err, ErrMarketingEmailDailyLimitReached) {
+			limited++
+			continue
+		}
+		require.NoError(t, err)
+	}
+	assert.Equal(t, dailyLimit, winners)
+	assert.Equal(t, candidates-dailyLimit, limited)
 }
 
 func TestEmailDeliveryStatsUseZeroTimestampsForAnEmptyQueue(t *testing.T) {
@@ -147,20 +235,21 @@ func TestMarketingDailyQuotaStopsCrossDayBacklogAtExactLimit(t *testing.T) {
 	dayStart := now - 1
 
 	for i := 0; i < MarketingDailyLimit; i++ {
-		_, _, err := EnqueueEmailDelivery(&EmailDelivery{
+		_, _, err := EnqueueMarketingEmailDelivery(&EmailDelivery{
 			DeliveryKey: fmt.Sprintf("marketing-daily-limit-%d", i),
 			Category:    "marketing_custom",
 			Recipient:   fmt.Sprintf("recipient-%d@example.com", i),
 			Subject:     "quota test",
 			Body:        "quota test",
 			Priority:    EmailPriorityMarketing,
-		})
+		}, dayStart, now, MarketingDailyLimit)
 		require.NoError(t, err)
 	}
 
 	stats, err := GetEmailDeliveryStats(now, dayStart)
 	require.NoError(t, err)
-	assert.EqualValues(t, MarketingDailyLimit, stats.MarketingSentToday)
+	assert.EqualValues(t, MarketingDailyLimit, stats.MarketingQuotaUsedToday)
+	assert.Zero(t, stats.MarketingSentToday)
 
 	backlog, _, err := EnqueueEmailDelivery(&EmailDelivery{
 		DeliveryKey: "marketing-daily-limit-backlog",

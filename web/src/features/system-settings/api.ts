@@ -30,6 +30,7 @@ import type {
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
+  SMTPTestResponse,
   UpdateOptionRequest,
   UpdateOptionResponse,
   UpstreamChannelsResponse,
@@ -43,6 +44,23 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function testSMTPEmail(
+  email: string,
+  channel: 'primary' | 'backup'
+) {
+  const res = await api.post<SMTPTestResponse>(
+    '/api/option/smtp-test',
+    { email, channel },
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  if (!res.data.success) {
+    throw new UserFacingError(
+      res.data.message?.trim() || t('SMTP test email failed')
+    )
+  }
   return res.data
 }
 

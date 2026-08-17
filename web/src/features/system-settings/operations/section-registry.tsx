@@ -77,6 +77,16 @@ const OPERATIONS_SECTIONS = [
           SMTPStartTLSEnabled: settings.SMTPStartTLSEnabled,
           SMTPInsecureSkipVerify: settings.SMTPInsecureSkipVerify,
           SMTPForceAuthLogin: settings.SMTPForceAuthLogin,
+          SMTPBackupEnabled: settings.SMTPBackupEnabled,
+          SMTPBackupServer: settings.SMTPBackupServer,
+          SMTPBackupPort: settings.SMTPBackupPort,
+          SMTPBackupAccount: settings.SMTPBackupAccount,
+          SMTPBackupFrom: settings.SMTPBackupFrom,
+          SMTPBackupToken: settings.SMTPBackupToken,
+          SMTPBackupSSLEnabled: settings.SMTPBackupSSLEnabled,
+          SMTPBackupStartTLSEnabled: settings.SMTPBackupStartTLSEnabled,
+          SMTPBackupInsecureSkipVerify: settings.SMTPBackupInsecureSkipVerify,
+          SMTPBackupForceAuthLogin: settings.SMTPBackupForceAuthLogin,
         }}
       />
     ),

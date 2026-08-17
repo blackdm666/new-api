@@ -7,13 +7,17 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 const EmailDeliveryMaxAttempts = 8
 
-var ErrEmailDeliveryIdInvalid = errors.New("email delivery id is invalid")
+var (
+	ErrEmailDeliveryIdInvalid          = errors.New("email delivery id is invalid")
+	ErrMarketingEmailDailyLimitReached = errors.New("marketing email daily limit reached")
+)
 
 type EmailDeliveryQueryOptions struct {
 	Keyword  string
@@ -60,16 +64,17 @@ type EmailDeliveryListItem struct {
 }
 
 type EmailDeliveryStats struct {
-	Queued             int64   `json:"queued"`
-	Sending            int64   `json:"sending"`
-	Retrying           int64   `json:"retrying"`
-	Failed             int64   `json:"failed"`
-	Delivered24h       int64   `json:"delivered_24h"`
-	Failed24h          int64   `json:"failed_24h"`
-	FailureRate24h     float64 `json:"failure_rate_24h"`
-	OldestPendingTime  int64   `json:"oldest_pending_time"`
-	LastDeliveredTime  int64   `json:"last_delivered_time"`
-	MarketingSentToday int64   `json:"marketing_sent_today"`
+	Queued                  int64   `json:"queued"`
+	Sending                 int64   `json:"sending"`
+	Retrying                int64   `json:"retrying"`
+	Failed                  int64   `json:"failed"`
+	Delivered24h            int64   `json:"delivered_24h"`
+	Failed24h               int64   `json:"failed_24h"`
+	FailureRate24h          float64 `json:"failure_rate_24h"`
+	OldestPendingTime       int64   `json:"oldest_pending_time"`
+	LastDeliveredTime       int64   `json:"last_delivered_time"`
+	MarketingSentToday      int64   `json:"marketing_sent_today"`
+	MarketingQuotaUsedToday int64   `json:"marketing_quota_used_today"`
 }
 
 // EmailDelivery is the shared durable SMTP outbox for NewAPI system emails.
@@ -98,6 +103,15 @@ type EmailDelivery struct {
 	ExpiredTime        int64  `json:"expired_time" gorm:"bigint;not null;default:0;index"`
 	CreatedTime        int64  `json:"created_time" gorm:"bigint;autoCreateTime;index"`
 	UpdatedTime        int64  `json:"updated_time" gorm:"bigint;autoUpdateTime"`
+}
+
+// MarketingEmailDailyQuota serializes quota reservations for one Shanghai
+// calendar day. The counter is separate from delivery state so multiple app
+// instances cannot all pass a count-then-insert check at the daily boundary.
+type MarketingEmailDailyQuota struct {
+	DayStart    int64 `json:"day_start" gorm:"primaryKey;autoIncrement:false"`
+	Reserved    int64 `json:"reserved" gorm:"not null;default:0"`
+	UpdatedTime int64 `json:"updated_time" gorm:"bigint;not null"`
 }
 
 func EnqueueEmailDelivery(delivery *EmailDelivery) (*EmailDelivery, bool, error) {
@@ -129,9 +143,6 @@ func enqueueEmailDelivery(tx *gorm.DB, delivery *EmailDelivery) (*EmailDelivery,
 	delivery.CreatedTime = now
 	delivery.UpdatedTime = now
 	delivery.NextAttemptTime = now
-	if delivery.Priority == EmailPriorityMarketing || strings.HasPrefix(delivery.Category, "marketing_") {
-		delivery.MarketingQuotaTime = now
-	}
 	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(delivery)
 	if result.Error != nil {
 		return nil, false, result.Error
@@ -144,6 +155,36 @@ func enqueueEmailDelivery(tx *gorm.DB, delivery *EmailDelivery) (*EmailDelivery,
 		return nil, false, err
 	}
 	return existing, false, nil
+}
+
+// EnqueueMarketingEmailDelivery persists a marketing message only after it
+// acquires one slot from the day's allowance. Both operations share one
+// transaction, so a rejected message never leaks into the deliverable queue.
+func EnqueueMarketingEmailDelivery(delivery *EmailDelivery, dayStart int64, now int64, limit int64) (*EmailDelivery, bool, error) {
+	if delivery == nil || dayStart <= 0 || now < dayStart || now >= dayStart+86400 || limit <= 0 {
+		return nil, false, ErrEmailDeliveryIdInvalid
+	}
+	var queued *EmailDelivery
+	created := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		queued, created, err = enqueueEmailDelivery(tx, delivery)
+		if err != nil {
+			return err
+		}
+		reserved, err := reserveMarketingEmailQuotaTx(tx, queued, dayStart, now, limit)
+		if err != nil {
+			return err
+		}
+		if !reserved {
+			return ErrMarketingEmailDailyLimitReached
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return queued, created, nil
 }
 
 func ListDueEmailDeliveries(limit int, now int64) ([]*EmailDelivery, error) {
@@ -168,7 +209,7 @@ func ClaimEmailDelivery(id int, now int64, lockedUntil int64) (bool, error) {
 // are already reserved at enqueue time. The transaction keeps cross-day
 // backlog and manual retries from bypassing the daily cap.
 func ReserveMarketingEmailQuota(id int, dayStart int64, now int64, limit int64) (bool, error) {
-	if id <= 0 || dayStart <= 0 || limit <= 0 {
+	if id <= 0 || dayStart <= 0 || now < dayStart || now >= dayStart+86400 || limit <= 0 {
 		return false, ErrEmailDeliveryIdInvalid
 	}
 	reserved := false
@@ -177,33 +218,55 @@ func ReserveMarketingEmailQuota(id int, dayStart int64, now int64, limit int64) 
 		if err := lockForUpdate(tx).First(delivery, id).Error; err != nil {
 			return err
 		}
-		if delivery.Priority != EmailPriorityMarketing && !strings.HasPrefix(delivery.Category, "marketing_") {
-			reserved = true
-			return nil
-		}
-		if delivery.MarketingQuotaTime >= dayStart {
-			reserved = true
-			return nil
-		}
-		var used int64
-		if err := tx.Model(&EmailDelivery{}).
-			Where("category LIKE ? AND marketing_quota_time >= ?", "marketing_%", dayStart).
-			Count(&used).Error; err != nil {
-			return err
-		}
-		if used >= limit {
-			return nil
-		}
-		result := tx.Model(delivery).
-			Where("marketing_quota_time < ?", dayStart).
-			Updates(map[string]any{"marketing_quota_time": now, "updated_time": now})
-		if result.Error != nil {
-			return result.Error
-		}
-		reserved = result.RowsAffected == 1
-		return nil
+		var err error
+		reserved, err = reserveMarketingEmailQuotaTx(tx, delivery, dayStart, now, limit)
+		return err
 	})
 	return reserved, err
+}
+
+func reserveMarketingEmailQuotaTx(tx *gorm.DB, delivery *EmailDelivery, dayStart int64, now int64, limit int64) (bool, error) {
+	if delivery.Priority != EmailPriorityMarketing && !strings.HasPrefix(delivery.Category, "marketing_") {
+		return true, nil
+	}
+	dayEnd := dayStart + 86400
+	if delivery.MarketingQuotaTime >= dayStart && delivery.MarketingQuotaTime < dayEnd {
+		return true, nil
+	}
+	quota := &MarketingEmailDailyQuota{DayStart: dayStart, UpdatedTime: now}
+	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(quota)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected == 1 {
+		var existing int64
+		if err := tx.Model(&EmailDelivery{}).
+			Where("category LIKE ? AND marketing_quota_time >= ? AND marketing_quota_time < ?", "marketing_%", dayStart, dayEnd).
+			Count(&existing).Error; err != nil {
+			return false, err
+		}
+		if err := tx.Model(quota).Updates(map[string]any{"reserved": existing, "updated_time": now}).Error; err != nil {
+			return false, err
+		}
+	}
+	if err := lockForUpdate(tx).Where("day_start = ?", dayStart).First(quota).Error; err != nil {
+		return false, err
+	}
+	if quota.Reserved >= limit {
+		return false, nil
+	}
+	result = tx.Model(&MarketingEmailDailyQuota{}).
+		Where("day_start = ? AND reserved < ?", dayStart, limit).
+		Updates(map[string]any{"reserved": gorm.Expr("reserved + 1"), "updated_time": now})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return false, nil
+	}
+	result = tx.Model(delivery).
+		Updates(map[string]any{"marketing_quota_time": now, "updated_time": now})
+	return result.RowsAffected == 1, result.Error
 }
 
 func CompleteEmailDelivery(id int) error {
@@ -265,7 +328,7 @@ func RecordEmailDeliveryFailure(id int, message string, nextAttemptTime int64) e
 			"locked_until":      int64(0),
 			"updated_time":      common.GetTimestamp(),
 		}
-		if delivery.Attempts+1 >= EmailDeliveryMaxAttempts {
+		if delivery.Attempts+1 >= setting.GetEmailDeliveryRules().EmailMaxAttempts {
 			updates["dead_letter_time"] = common.GetTimestamp()
 			updates["next_attempt_time"] = int64(0)
 		}
@@ -461,6 +524,7 @@ func RetryEmailDeliveries(ids []int) (int64, error) {
 
 func GetEmailDeliveryStats(now int64, dayStart int64) (EmailDeliveryStats, error) {
 	stats := EmailDeliveryStats{}
+	dayEnd := dayStart + 86400
 	type countRow struct {
 		Count int64
 	}
@@ -475,10 +539,8 @@ func GetEmailDeliveryStats(now int64, dayStart int64) (EmailDeliveryStats, error
 		{&stats.Failed, "delivered_time = 0 AND dead_letter_time > 0", nil},
 		{&stats.Delivered24h, "delivered_time >= ?", []any{now - 86400}},
 		{&stats.Failed24h, "dead_letter_time >= ?", []any{now - 86400}},
-		// Reserve the daily allowance when a marketing email enters the queue,
-		// not only after SMTP accepts it. Otherwise a slow or broken SMTP server
-		// could allow every minute-long scheduler run to exceed the daily cap.
-		{&stats.MarketingSentToday, "category LIKE ? AND marketing_quota_time >= ?", []any{"marketing_%", dayStart}},
+		{&stats.MarketingSentToday, "category LIKE ? AND delivered_time >= ? AND delivered_time < ?", []any{"marketing_%", dayStart, dayEnd}},
+		{&stats.MarketingQuotaUsedToday, "category LIKE ? AND marketing_quota_time >= ? AND marketing_quota_time < ?", []any{"marketing_%", dayStart, dayEnd}},
 	}
 	for _, item := range queries {
 		query := DB.Model(&EmailDelivery{}).Where(item.where, item.args...)

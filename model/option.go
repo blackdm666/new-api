@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -66,6 +67,17 @@ func InitOptionMap() {
 	common.OptionMap["SMTPStartTLSEnabled"] = strconv.FormatBool(common.SMTPStartTLSEnabled)
 	common.OptionMap["SMTPInsecureSkipVerify"] = strconv.FormatBool(common.SMTPInsecureSkipVerify)
 	common.OptionMap["SMTPForceAuthLogin"] = strconv.FormatBool(common.SMTPForceAuthLogin)
+	common.OptionMap["SMTPBackupEnabled"] = strconv.FormatBool(common.SMTPBackupEnabled)
+	common.OptionMap["SMTPBackupServer"] = ""
+	common.OptionMap["SMTPBackupFrom"] = ""
+	common.OptionMap["SMTPBackupPort"] = strconv.Itoa(common.SMTPBackupPort)
+	common.OptionMap["SMTPBackupAccount"] = ""
+	common.OptionMap["SMTPBackupToken"] = ""
+	common.OptionMap["SMTPBackupSSLEnabled"] = strconv.FormatBool(common.SMTPBackupSSLEnabled)
+	common.OptionMap["SMTPBackupStartTLSEnabled"] = strconv.FormatBool(common.SMTPBackupStartTLSEnabled)
+	common.OptionMap["SMTPBackupInsecureSkipVerify"] = strconv.FormatBool(common.SMTPBackupInsecureSkipVerify)
+	common.OptionMap["SMTPBackupForceAuthLogin"] = strconv.FormatBool(common.SMTPBackupForceAuthLogin)
+	common.OptionMap[setting.EmailDeliveryRulesOptionKey] = setting.EmailDeliveryRules2JSONString()
 	common.OptionMap["InvoiceApplicationNotifyAdminEnabled"] = strconv.FormatBool(common.InvoiceApplicationNotifyAdminEnabled)
 	common.OptionMap["InvoiceIssuedNotifyUserEnabled"] = strconv.FormatBool(common.InvoiceIssuedNotifyUserEnabled)
 	common.OptionMap["InvoiceAdminEmail"] = common.InvoiceAdminEmail
@@ -257,11 +269,20 @@ func validateOptionValue(key string, value string) error {
 	if err := ValidateAffiliateOptionValue(key, value); err != nil {
 		return err
 	}
+	if key == "SMTPPort" || key == "SMTPBackupPort" {
+		port, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf("%s must be between 1 and 65535", key)
+		}
+	}
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
 	}
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)
+	}
+	if key == setting.EmailDeliveryRulesOptionKey {
+		return setting.ValidateEmailDeliveryRulesJSONString(value)
 	}
 	return nil
 }
@@ -294,7 +315,44 @@ func validateRelatedOptionValues(values map[string]string) error {
 	return ValidateAffiliateUpgradeThresholds(advancedThreshold, goldThreshold, advancedAmountCents, goldAmountCents)
 }
 
+func isSMTPBackupConfigurationOption(key string) bool {
+	switch key {
+	case "SMTPBackupServer",
+		"SMTPBackupPort",
+		"SMTPBackupAccount",
+		"SMTPBackupFrom",
+		"SMTPBackupToken",
+		"SMTPBackupSSLEnabled",
+		"SMTPBackupStartTLSEnabled",
+		"SMTPBackupInsecureSkipVerify",
+		"SMTPBackupForceAuthLogin":
+		return true
+	default:
+		return false
+	}
+}
+
+func withSMTPBackupDeactivated(values map[string]string) map[string]string {
+	for key := range values {
+		if !isSMTPBackupConfigurationOption(key) {
+			continue
+		}
+		result := make(map[string]string, len(values)+1)
+		for optionKey, optionValue := range values {
+			result[optionKey] = optionValue
+		}
+		// A changed backup configuration must pass a fresh SMTP test before it
+		// is eligible for automatic failover again.
+		result["SMTPBackupEnabled"] = "false"
+		return result
+	}
+	return values
+}
+
 func UpdateOption(key string, value string) error {
+	if isSMTPBackupConfigurationOption(key) {
+		return UpdateOptionsBulk(map[string]string{key: value})
+	}
 	if err := validateOptionValue(key, value); err != nil {
 		return err
 	}
@@ -306,12 +364,16 @@ func UpdateOption(key string, value string) error {
 		Key: key,
 	}
 	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
+	if err := DB.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+		return err
+	}
 	option.Value = value
 	// Save is a combination function.
 	// If save value does not contain primary key, it will execute Create,
 	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
+	if err := DB.Save(&option).Error; err != nil {
+		return err
+	}
 	// Update OptionMap
 	return updateOptionMap(key, value)
 }
@@ -325,6 +387,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
+	values = withSMTPBackupDeactivated(values)
 	for key, value := range values {
 		if err := validateOptionValue(key, value); err != nil {
 			return err
@@ -387,7 +450,7 @@ func updateOptionMap(key string, value string) (err error) {
 			common.ImageDownloadPermission = intValue
 		}
 	}
-	if strings.HasSuffix(key, "Enabled") || key == "DefaultCollapseSidebar" || key == "DefaultUseAutoGroup" || key == "SMTPForceAuthLogin" || key == "SMTPInsecureSkipVerify" {
+	if strings.HasSuffix(key, "Enabled") || key == "DefaultCollapseSidebar" || key == "DefaultUseAutoGroup" || key == "SMTPForceAuthLogin" || key == "SMTPInsecureSkipVerify" || key == "SMTPBackupForceAuthLogin" || key == "SMTPBackupInsecureSkipVerify" {
 		boolValue := value == "true"
 		switch key {
 		case "PasswordRegisterEnabled":
@@ -468,6 +531,16 @@ func updateOptionMap(key string, value string) (err error) {
 			common.SMTPInsecureSkipVerify = boolValue
 		case "SMTPForceAuthLogin":
 			common.SMTPForceAuthLogin = boolValue
+		case "SMTPBackupEnabled":
+			common.SMTPBackupEnabled = boolValue
+		case "SMTPBackupSSLEnabled":
+			common.SMTPBackupSSLEnabled = boolValue
+		case "SMTPBackupStartTLSEnabled":
+			common.SMTPBackupStartTLSEnabled = boolValue
+		case "SMTPBackupInsecureSkipVerify":
+			common.SMTPBackupInsecureSkipVerify = boolValue
+		case "SMTPBackupForceAuthLogin":
+			common.SMTPBackupForceAuthLogin = boolValue
 		case "InvoiceApplicationNotifyAdminEnabled":
 			common.InvoiceApplicationNotifyAdminEnabled = boolValue
 		case "InvoiceIssuedNotifyUserEnabled":
@@ -496,6 +569,19 @@ func updateOptionMap(key string, value string) (err error) {
 		common.SMTPFrom = value
 	case "SMTPToken":
 		common.SMTPToken = value
+	case "SMTPBackupServer":
+		common.SMTPBackupServer = value
+	case "SMTPBackupPort":
+		intValue, _ := strconv.Atoi(value)
+		common.SMTPBackupPort = intValue
+	case "SMTPBackupAccount":
+		common.SMTPBackupAccount = value
+	case "SMTPBackupFrom":
+		common.SMTPBackupFrom = value
+	case "SMTPBackupToken":
+		common.SMTPBackupToken = value
+	case setting.EmailDeliveryRulesOptionKey:
+		err = setting.UpdateEmailDeliveryRulesByJSONString(value)
 	case "InvoiceAdminEmail":
 		common.InvoiceAdminEmail = value
 	case "InvoiceFileMaxSize":
