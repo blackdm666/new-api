@@ -75,7 +75,7 @@ func logQuotaDataCache(quotaData *QuotaData) {
 	CacheQuotaData[key] = quotaData
 }
 
-func LogQuotaData(params QuotaDataLogParams) {
+func logQuotaData(params QuotaDataLogParams, count int) {
 	// 只精确到小时
 	createdAt := params.CreatedAt - (params.CreatedAt % 3600)
 	quotaData := &QuotaData{
@@ -87,7 +87,7 @@ func LogQuotaData(params QuotaDataLogParams) {
 		TokenID:   params.TokenID,
 		ChannelID: params.ChannelID,
 		NodeName:  params.NodeName,
-		Count:     1,
+		Count:     count,
 		Quota:     params.Quota,
 		TokenUsed: params.TokenUsed,
 	}
@@ -95,6 +95,15 @@ func LogQuotaData(params QuotaDataLogParams) {
 	CacheQuotaDataLock.Lock()
 	defer CacheQuotaDataLock.Unlock()
 	logQuotaDataCache(quotaData)
+}
+
+func LogQuotaData(params QuotaDataLogParams) {
+	logQuotaData(params, 1)
+}
+
+// LogQuotaDataAdjustment adjusts exported quota without counting another request.
+func LogQuotaDataAdjustment(params QuotaDataLogParams) {
+	logQuotaData(params, 0)
 }
 
 func SaveQuotaDataCache() {

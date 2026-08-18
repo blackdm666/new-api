@@ -446,16 +446,21 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	if err != nil {
 		common.SysLog("failed to record task billing log: " + err.Error())
 	}
-	if params.LogType == LogTypeConsume && common.DataExportEnabled {
+	if common.DataExportEnabled && common.LogConsumeEnabled &&
+		(params.LogType == LogTypeConsume || params.LogType == LogTypeRefund) {
 		nodeName := params.NodeName
 		if nodeName == "" {
 			nodeName = common.NodeName
 		}
-		LogQuotaData(QuotaDataLogParams{
+		quotaForStats := params.Quota
+		if params.LogType == LogTypeRefund {
+			quotaForStats = -quotaForStats
+		}
+		LogQuotaDataAdjustment(QuotaDataLogParams{
 			UserID:    params.UserId,
 			Username:  username,
 			ModelName: params.ModelName,
-			Quota:     params.Quota,
+			Quota:     quotaForStats,
 			CreatedAt: createdAt,
 			UseGroup:  params.Group,
 			TokenID:   params.TokenId,

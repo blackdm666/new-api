@@ -216,3 +216,76 @@ func TestLogQuotaDataSplitsRowsByUseGroupTokenChannelAndNode(t *testing.T) {
 	require.Equal(t, "default", rows[1].UseGroup)
 	require.Equal(t, 25, rows[1].Quota)
 }
+
+func TestRecordTaskBillingLogExportsSignedAdjustmentsWithoutCountingRequests(t *testing.T) {
+	tests := []struct {
+		name          string
+		logType       int
+		adjustment    int
+		expectedQuota int
+	}{
+		{
+			name:          "additional consumption",
+			logType:       LogTypeConsume,
+			adjustment:    25,
+			expectedQuota: 125,
+		},
+		{
+			name:          "refund",
+			logType:       LogTypeRefund,
+			adjustment:    25,
+			expectedQuota: 75,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			truncateTables(t)
+			oldDataExportEnabled := common.DataExportEnabled
+			common.DataExportEnabled = true
+			t.Cleanup(func() {
+				common.DataExportEnabled = oldDataExportEnabled
+				CacheQuotaDataLock.Lock()
+				CacheQuotaData = make(map[string]*QuotaData)
+				CacheQuotaDataLock.Unlock()
+			})
+
+			CacheQuotaDataLock.Lock()
+			CacheQuotaData = make(map[string]*QuotaData)
+			CacheQuotaDataLock.Unlock()
+
+			require.NoError(t, DB.Create(&User{Id: 1, Username: "alice"}).Error)
+			createdAt := common.GetTimestamp()
+			LogQuotaData(QuotaDataLogParams{
+				UserID:    1,
+				Username:  "alice",
+				ModelName: "video-model",
+				Quota:     100,
+				CreatedAt: createdAt,
+				UseGroup:  "default",
+				ChannelID: 7,
+				NodeName:  "node-a",
+			})
+
+			RecordTaskBillingLog(RecordTaskBillingLogParams{
+				UserId:    1,
+				LogType:   tt.logType,
+				Content:   "task settlement",
+				ChannelId: 7,
+				ModelName: "video-model",
+				Quota:     tt.adjustment,
+				Group:     "default",
+				NodeName:  "node-a",
+			})
+
+			CacheQuotaDataLock.Lock()
+			defer CacheQuotaDataLock.Unlock()
+			require.Len(t, CacheQuotaData, 1)
+			for _, row := range CacheQuotaData {
+				require.Equal(t, 1, row.Count)
+				require.Equal(t, tt.expectedQuota, row.Quota)
+				require.Zero(t, row.TokenUsed)
+			}
+		})
+	}
+}
