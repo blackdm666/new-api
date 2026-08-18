@@ -25,14 +25,18 @@ type modelConfig struct {
 	defaultDuration   int
 	defaultRatio      string
 	defaultResolution string
+	ratios            map[string]struct{}
 	resolutions       map[string]struct{}
 }
+
+var grokVideoRatios = stringSet("16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3")
 
 var modelConfigs = map[string]modelConfig{
 	ModelGrokImagineVideo: {
 		defaultDuration:   8,
 		defaultRatio:      "16:9",
 		defaultResolution: "720p",
+		ratios:            grokVideoRatios,
 		resolutions:       stringSet("480p", "720p"),
 	},
 	ModelGrokImagineVideo15: {
@@ -40,6 +44,7 @@ var modelConfigs = map[string]modelConfig{
 		defaultDuration:   8,
 		defaultRatio:      "16:9",
 		defaultResolution: "720p",
+		ratios:            grokVideoRatios,
 		resolutions:       stringSet("480p", "720p"),
 	},
 	ModelGrokImagineVideo151080: {
@@ -47,6 +52,7 @@ var modelConfigs = map[string]modelConfig{
 		defaultDuration:   8,
 		defaultRatio:      "16:9",
 		defaultResolution: "1080p",
+		ratios:            grokVideoRatios,
 		resolutions:       stringSet("1080p"),
 	},
 }
@@ -122,6 +128,10 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	duration := requestDuration(req, cfg)
 	if duration < 1 || duration > 15 {
 		return localTaskError(fmt.Errorf("duration must be between 1 and 15 seconds"))
+	}
+	ratio := requestAspectRatio(req, cfg)
+	if _, ok := cfg.ratios[ratio]; !ok {
+		return localTaskError(fmt.Errorf("aspect ratio %s is not supported by model %s", ratio, req.Model))
 	}
 	resolution := requestResolution(req, cfg)
 	if _, ok := cfg.resolutions[resolution]; !ok {

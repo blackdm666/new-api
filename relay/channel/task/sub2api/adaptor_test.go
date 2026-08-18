@@ -59,6 +59,24 @@ func TestValidateVideo15RequiresImage(t *testing.T) {
 	assert.Contains(t, taskErr.Message, "requires exactly one input image")
 }
 
+func TestValidateGrokVideoDefaultsAndLimits(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"model":"grok-imagine-video","prompt":"test","size":"3:2","metadata":{"resolution":"480p"}}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	defer common.CleanupBodyStorage(c)
+
+	adaptor := &TaskAdaptor{}
+	info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{}}
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	info.OriginModelName = ModelGrokImagineVideo
+	info.UpstreamModelName = ModelGrokImagineVideo
+	body, err := adaptor.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	payload, err := io.ReadAll(body)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"grok-imagine-video","prompt":"test","duration":8,"aspect_ratio":"3:2","resolution":"480p"}`, string(payload))
+}
+
 func TestParseTaskResultHandlesSub2APIStatesAndRelativeContentURL(t *testing.T) {
 	adaptor := &TaskAdaptor{baseURL: "https://api.apikey.fun"}
 	pending, err := adaptor.ParseTaskResult([]byte(`{"request_id":"upstream-1","status":"pending","progress":75}`))
