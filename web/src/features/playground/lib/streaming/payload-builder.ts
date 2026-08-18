@@ -56,11 +56,14 @@ export function buildChatCompletionPayload(
     payload.max_tokens = config.max_tokens
   }
 
-  if (parameterEnabled.frequency_penalty) {
+  // Zero is the OpenAI-compatible default, so sending it has no semantic
+  // effect. Some reasoning providers (including current Grok models) reject
+  // the field merely for being present, even when its value is zero.
+  if (parameterEnabled.frequency_penalty && config.frequency_penalty !== 0) {
     payload.frequency_penalty = config.frequency_penalty
   }
 
-  if (parameterEnabled.presence_penalty) {
+  if (parameterEnabled.presence_penalty && config.presence_penalty !== 0) {
     payload.presence_penalty = config.presence_penalty
   }
 

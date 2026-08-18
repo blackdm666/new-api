@@ -122,12 +122,13 @@ func Distribute() func(c *gin.Context) {
 						common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 					}
 				}
+				requestPath := relayconstant.CanonicalRelayRequestPath(c.Request.URL.Path)
 
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
 					affinityUsable := false
 					preferred, err := model.CacheGetChannel(preferredChannelID)
 					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
-						channelSupportsRequestPath(preferred, c.Request.URL.Path, modelRequest.Model) {
+						channelSupportsRequestPath(preferred, requestPath, modelRequest.Model) {
 						if usingGroup == "auto" {
 							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 							autoGroups := service.GetRequestAutoGroups(c, userGroup)
@@ -158,7 +159,7 @@ func Distribute() func(c *gin.Context) {
 						Ctx:         c,
 						ModelName:   modelRequest.Model,
 						TokenGroup:  usingGroup,
-						RequestPath: c.Request.URL.Path,
+						RequestPath: requestPath,
 						Retry:       common.GetPointer(0),
 					})
 					if err != nil {
@@ -202,6 +203,7 @@ func channelSupportsRequestPath(channel *model.Channel, requestPath string, requ
 		return true
 	}
 	config := channel.GetOtherSettings().AdvancedCustom
+	requestPath = relayconstant.CanonicalRelayRequestPath(requestPath)
 	return config != nil && config.SupportsPathForModel(requestPath, requestModel)
 }
 

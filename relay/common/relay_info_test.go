@@ -157,6 +157,17 @@ func TestGenRelayInfoCapturesRequestReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestGenRelayInfoCanonicalizesPlaygroundRequestPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/pg/chat/completions?client=playground", nil)
+
+	info, err := GenRelayInfo(ctx, types.RelayFormatOpenAI, &dto.GeneralOpenAIRequest{Model: "gpt-test"}, nil)
+	require.NoError(t, err)
+	assert.True(t, info.IsPlayground)
+	assert.Equal(t, "/v1/chat/completions?client=playground", info.RequestURLPath)
+}
+
 func TestInitChannelMetaRestoresRequestReasoningEffortForRetry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
