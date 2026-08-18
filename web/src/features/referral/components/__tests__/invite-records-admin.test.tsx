@@ -20,11 +20,13 @@ import assert from 'node:assert/strict'
 
 import { describe, test } from 'vitest'
 
+import type { AdminAffiliateInviteRecord } from '../../types'
+
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
-const { AffiliateTransferTable } = await import('../../transfers-admin')
+const { AdminInviteRecordRow } = await import('../../invite-records-admin')
 
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
@@ -37,59 +39,46 @@ const reactTestGlobals = globalThis as typeof globalThis & {
 }
 reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 
-describe('affiliate transfer audit table', () => {
-  test('shows the user, balance snapshots, and idempotency request ID', async () => {
+describe('admin invitation records', () => {
+  test('shows a registered invitee even when no commission exists', async () => {
+    const item: AdminAffiliateInviteRecord = {
+      inviter_id: 42,
+      inviter_username: 'promoter_42',
+      inviter_display_name: 'Promoter Name',
+      invitee_id: 84,
+      invitee_username: 'invitee_84',
+      invitee_display_name: 'Invited Name',
+      created_at: 1_786_700_000,
+      is_new: false,
+      topup_count: 0,
+      topup_amount_cents: 0,
+      commission_cents: 0,
+      last_topup_time: 0,
+    }
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
     await act(async () => {
       root.render(
         <I18nextProvider i18n={i18n}>
-          <AffiliateTransferTable
-            loading={false}
-            items={[
-              {
-                id: 7,
-                user_id: 3,
-                username: 'invoice_demo',
-                display_name: 'Demo Promoter',
-                request_id: 'transfer-request-2026',
-                amount_cents: 100,
-                amount_quota: 500_000,
-                balance_cents_before: 1_000,
-                balance_cents_after: 900,
-                quota_before: 1_000_000,
-                quota_after: 1_500_000,
-                created_time: 1_786_700_800,
-              },
-            ]}
-          />
+          <table>
+            <tbody>
+              <AdminInviteRecordRow item={item} />
+            </tbody>
+          </table>
         </I18nextProvider>
       )
     })
 
     const text = container.textContent ?? ''
-    assert.match(text, /invoice_demoUID 3/)
-    assert.doesNotMatch(text, /Demo Promoter/)
-    assert.match(text, /transfer-request-2026/)
-    assert.match(text, /→/)
+    assert.match(text, /promoter_42UID 42/)
+    assert.match(text, /invitee_84UID 84/)
+    assert.doesNotMatch(text, /Promoter Name/)
+    assert.doesNotMatch(text, /Invited Name/)
+    const cells = container.querySelectorAll('td')
+    assert.equal(cells[3]?.textContent, '0')
+    assert.equal(cells[6]?.textContent, '-')
 
-    await act(async () => root.unmount())
-    container.remove()
-  })
-
-  test('shows an explicit empty state', async () => {
-    const container = document.createElement('div')
-    document.body.append(container)
-    const root = createRoot(container)
-    await act(async () => {
-      root.render(
-        <I18nextProvider i18n={i18n}>
-          <AffiliateTransferTable loading={false} items={[]} />
-        </I18nextProvider>
-      )
-    })
-    assert.match(container.textContent ?? '', /No balance transfer records/)
     await act(async () => root.unmount())
     container.remove()
   })

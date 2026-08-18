@@ -63,7 +63,9 @@ function commissionFixture(
     created_time: 1_786_700_800,
     updated_time: 1_786_704_400,
     inviter_username: `promoter_${id}`,
+    inviter_display_name: `Promoter note ${id}`,
     invitee_username: `invitee_${id}`,
+    invitee_display_name: `Invitee note ${id}`,
   }
 }
 
@@ -95,6 +97,10 @@ describe('affiliate commission ledger', () => {
     assert.match(text, /Pending review/)
     assert.match(text, /Approved/)
     assert.match(text, /Rejected/)
+    assert.match(text, /promoter_1UID 1/)
+    assert.match(text, /invitee_1UID 101/)
+    assert.doesNotMatch(text, /Promoter note/)
+    assert.doesNotMatch(text, /Invitee note/)
     assert.equal(container.querySelectorAll('button').length, 0)
 
     const badges = [...container.querySelectorAll('[data-slot="badge"]')]

@@ -67,6 +67,7 @@ import { formatNumber, formatTimestampToDate } from '@/lib/format'
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error'
 import { cn } from '@/lib/utils'
 
+import { AdminUserIdentity } from './admin-user-identity'
 import {
   approveAffiliatePayout,
   fetchAffiliateAlipayPayoutProviderStatus,
@@ -460,12 +461,10 @@ export function PayoutAdminRow(props: {
     <TableRow>
       <TableCell>{props.item.id}</TableCell>
       <TableCell>
-        <div className='font-medium'>
-          {props.item.display_name || props.item.username || props.item.user_id}
-        </div>
-        <div className='text-muted-foreground text-xs'>
-          UID {props.item.user_id} · {props.item.username}
-        </div>
+        <AdminUserIdentity
+          id={props.item.user_id}
+          username={props.item.username}
+        />
       </TableCell>
       <TableCell className='font-semibold'>
         {formatCents(props.item.amount_cents)}

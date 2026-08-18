@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -61,6 +62,16 @@ func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total 
 }
 
 func SearchRedemptions(keyword string, status string, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
+	return searchRedemptions(keyword, "", "", status, true, startIdx, num)
+}
+
+// SearchRedemptionsByFields searches each field independently. Name uses a
+// prefix match, while redemption code and ID use exact matches.
+func SearchRedemptionsByFields(name string, code string, id string, status string, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
+	return searchRedemptions(name, code, id, status, false, startIdx, num)
+}
+
+func searchRedemptions(name string, code string, id string, status string, legacyKeyword bool, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -72,12 +83,31 @@ func SearchRedemptions(keyword string, status string, startIdx int, num int) (re
 	}()
 
 	query := tx.Model(&Redemption{})
+	name = strings.TrimSpace(name)
+	code = strings.TrimSpace(code)
+	id = strings.TrimSpace(id)
 
-	if keyword != "" {
-		if id, err := strconv.Atoi(keyword); err == nil {
-			query = query.Where("id = ? OR name LIKE ?", id, keyword+"%")
-		} else {
-			query = query.Where("name LIKE ?", keyword+"%")
+	if legacyKeyword {
+		if name != "" {
+			if parsedID, parseErr := strconv.Atoi(name); parseErr == nil {
+				query = query.Where("id = ? OR name LIKE ? OR "+commonKeyCol+" = ?", parsedID, name+"%", name)
+			} else {
+				query = query.Where("name LIKE ? OR "+commonKeyCol+" = ?", name+"%", name)
+			}
+		}
+	} else {
+		if name != "" {
+			query = query.Where("name LIKE ?", name+"%")
+		}
+		if code != "" {
+			query = query.Where(commonKeyCol+" = ?", code)
+		}
+		if id != "" {
+			if parsedID, parseErr := strconv.Atoi(id); parseErr == nil {
+				query = query.Where("id = ?", parsedID)
+			} else {
+				query = query.Where("1 = 0")
+			}
 		}
 	}
 

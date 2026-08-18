@@ -2278,9 +2278,10 @@
     "Filter by MjProxy task ID": "Filtrer par ID de tâche MjProxy",
     "Filter by model name...": "Filtrer par nom du modèle...",
     "Filter by model...": "Filtrer par modèle...",
-    "Filter by name or ID...": "Filtrer par nom ou ID...",
     "Filter by name, ID, or key...": "Filtrer par nom, ID ou clé...",
     "Filter by name...": "Filtrer par nom...",
+    "Filter by redemption code...": "Filtrer par code d’échange...",
+    "Filter by ID...": "Filtrer par ID...",
     "Filter by node": "Filtrer par nœud",
     "Filter by price field": "Filtrer par champ de prix",
     "Filter by ratio type": "Filtrer par type de ratio",
@@ -6000,6 +6001,13 @@
     "The default branded layout already adapts to the selected language. Edit HTML only when you need a custom structure or style.": "La mise en page de marque s’adapte déjà à la langue choisie. Modifiez le HTML uniquement pour une structure ou un style personnalisé.",
     "Click to insert at the cursor": "Cliquer pour insérer au curseur",
     "Automatic subjects follow the recipient language and keep dynamic business details.": "Les objets automatiques suivent la langue du destinataire et conservent les données métier dynamiques.",
-    "Use automatic subject": "Utiliser l’objet automatique"
+    "Use automatic subject": "Utiliser l’objet automatique",
+    "Invitation records": "Historique des invitations",
+    "No invitation records": "Aucune invitation enregistrée",
+    "Search by promoter, invited user, or UID": "Rechercher par promoteur, utilisateur invité ou UID",
+    "Total invited users": "Total des utilisateurs invités",
+    "Top-ups": "Recharges",
+    "Updated at": "Mis à jour le",
+    "View all invitation relationships and manage promoter commission operations.": "Consultez toutes les relations d’invitation et gérez les commissions des promoteurs."
   }
 }

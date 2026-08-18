@@ -169,6 +169,7 @@ func SetApiRouter(router *gin.Engine) {
 		affiliateAdminRoute.Use(middleware.DisableCache(), middleware.AdminAuth())
 		{
 			affiliateAdminRoute.GET("/summary", controller.GetAdminAffiliateSummary)
+			affiliateAdminRoute.GET("/invitees", controller.GetAdminAffiliateInviteRecords)
 			affiliateAdminRoute.GET("/commissions", controller.GetAdminAffiliateCommissions)
 			affiliateAdminRoute.GET("/transfers", controller.GetAdminAffiliateTransfers)
 			affiliateAdminRoute.POST("/commissions/:id/approve", middleware.CriticalRateLimit(), controller.ApproveAffiliateCommission)

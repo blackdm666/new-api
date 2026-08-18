@@ -97,10 +97,26 @@ export type AffiliateInviteeStats = {
   last_topup_time: number
 }
 
+export type AdminAffiliateInviteRecord = {
+  inviter_id: number
+  inviter_username: string
+  inviter_display_name: string
+  invitee_id: number
+  invitee_username: string
+  invitee_display_name: string
+  created_at: number
+  is_new: boolean
+  topup_count: number
+  topup_amount_cents: number
+  commission_cents: number
+  last_topup_time: number
+}
+
 export type AffiliateAdminSummary = {
   pending_count: number
   pending_cents: number
   approved_cents: number
+  total_invitee_count: number
   effective_invitee_count: number
   topup_cents: number
   commission_record_count: number
@@ -139,6 +155,7 @@ export type AffiliateUpgradeCandidate = {
 export type AffiliateUpgradeNotice = {
   id: number
   inviter_id: number
+  inviter_username?: string
   threshold: number
   effective_invitee_count: number
   top_up_amount_threshold_cents: number

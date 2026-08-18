@@ -83,6 +83,7 @@ type AffiliateCommission struct {
 type AffiliateUpgradeNotice struct {
 	Id                        int    `json:"id"`
 	InviterId                 int    `json:"inviter_id" gorm:"uniqueIndex:idx_affiliate_upgrade_notice;not null"`
+	InviterUsername           string `json:"inviter_username" gorm:"->;-:migration"`
 	Threshold                 int    `json:"threshold" gorm:"uniqueIndex:idx_affiliate_upgrade_notice;not null"`
 	EffectiveInviteeCount     int    `json:"effective_invitee_count" gorm:"not null;default:0"`
 	TopUpAmountThresholdCents int64  `json:"top_up_amount_threshold_cents" gorm:"bigint;not null;default:0"`
@@ -144,6 +145,7 @@ type AffiliateAdminSummary struct {
 	PendingCount          int64 `json:"pending_count"`
 	PendingCents          int64 `json:"pending_cents"`
 	ApprovedCents         int64 `json:"approved_cents"`
+	TotalInviteeCount     int64 `json:"total_invitee_count"`
 	EffectiveInviteeCount int64 `json:"effective_invitee_count"`
 	TopUpCents            int64 `json:"topup_cents"`
 	CommissionRecordCount int64 `json:"commission_record_count"`
@@ -662,13 +664,20 @@ func RetryAffiliateUpgradeNotice(id int) error {
 }
 
 func ListFailedAffiliateUpgradeNotices(pageInfo *common.PageInfo) ([]*AffiliateUpgradeNotice, int64, error) {
-	query := DB.Model(&AffiliateUpgradeNotice{}).Where("sent_time = 0 AND last_error <> ''")
+	query := DB.Model(&AffiliateUpgradeNotice{}).
+		Joins("LEFT JOIN users ON users.id = affiliate_upgrade_notices.inviter_id").
+		Where("affiliate_upgrade_notices.sent_time = 0 AND affiliate_upgrade_notices.last_error <> ''")
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	rows := []*AffiliateUpgradeNotice{}
-	if err := query.Order("dead_letter_time DESC, id DESC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&rows).Error; err != nil {
+	if err := query.
+		Select("affiliate_upgrade_notices.*, COALESCE(users.username, '') AS inviter_username").
+		Order("affiliate_upgrade_notices.dead_letter_time DESC, affiliate_upgrade_notices.id DESC").
+		Limit(pageInfo.GetPageSize()).
+		Offset(pageInfo.GetStartIdx()).
+		Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	return rows, total, nil
@@ -867,6 +876,9 @@ func ListAffiliateInviteeStats(inviterId int, pageInfo *common.PageInfo) ([]*Aff
 
 func GetAffiliateAdminSummary() (*AffiliateAdminSummary, error) {
 	summary := &AffiliateAdminSummary{}
+	if err := DB.Unscoped().Model(&User{}).Where("inviter_id > 0").Count(&summary.TotalInviteeCount).Error; err != nil {
+		return nil, err
+	}
 	if err := DB.Model(&AffiliateCommission{}).Where("status = ?", AffiliateCommissionStatusPending).Count(&summary.PendingCount).Error; err != nil {
 		return nil, err
 	}

@@ -226,6 +226,18 @@ func GetAdminAffiliateCommissions(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
+func GetAdminAffiliateInviteRecords(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	rows, total, err := model.ListAdminAffiliateInviteRecords(strings.TrimSpace(c.Query("keyword")), pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetItems(rows)
+	pageInfo.SetTotal(int(total))
+	common.ApiSuccess(c, pageInfo)
+}
+
 func GetAdminAffiliateTransfers(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	rows, total, err := model.ListAffiliateTransfers(model.AffiliateTransferQueryOptions{

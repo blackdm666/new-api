@@ -48,6 +48,7 @@ import { formatNumber, formatTimestampToDate } from '@/lib/format'
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error'
 import { cn } from '@/lib/utils'
 
+import { AdminUserIdentity } from './admin-user-identity'
 import {
   approveAffiliateCommission,
   approveAffiliateUpgrade,
@@ -59,6 +60,7 @@ import {
   retryAffiliateNotification,
 } from './api'
 import { AffiliateCommissionLedger } from './commission-ledger-admin'
+import { AdminInviteRecords } from './invite-records-admin'
 import {
   AFFILIATE_STATUS_META,
   formatCents,
@@ -183,11 +185,11 @@ export function AdminAffiliatePage() {
           </h1>
           <p className='text-muted-foreground mt-1 text-sm'>
             {t(
-              'Review top-up commission records before adding rewards to promoter balances.'
+              'View all invitation relationships and manage promoter commission operations.'
             )}
           </p>
         </header>
-        <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
+        <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-5'>
           <AdminStat
             label={t('Pending review')}
             value={formatNumber(summaryQuery.data?.pending_count ?? 0)}
@@ -201,14 +203,21 @@ export function AdminAffiliatePage() {
             value={formatCents(summaryQuery.data?.approved_cents ?? 0)}
           />
           <AdminStat
+            label={t('Total invited users')}
+            value={formatNumber(summaryQuery.data?.total_invitee_count ?? 0)}
+          />
+          <AdminStat
             label={t('Effective top-up users')}
             value={formatNumber(
               summaryQuery.data?.effective_invitee_count ?? 0
             )}
           />
         </div>
-        <Tabs defaultValue='ledger' className='gap-4'>
+        <Tabs defaultValue='invitees' className='gap-4'>
           <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
+            <TabsTrigger value='invitees'>
+              {t('Invitation records')}
+            </TabsTrigger>
             <TabsTrigger value='ledger'>{t('Commission ledger')}</TabsTrigger>
             <TabsTrigger value='commissions'>
               {t('Commission review')}
@@ -218,6 +227,9 @@ export function AdminAffiliatePage() {
             </TabsTrigger>
             <TabsTrigger value='upgrades'>{t('Upgrade review')}</TabsTrigger>
           </TabsList>
+          <TabsContent value='invitees'>
+            <AdminInviteRecords />
+          </TabsContent>
           <TabsContent value='ledger'>
             <AffiliateCommissionLedger />
           </TabsContent>
@@ -269,12 +281,10 @@ export function AdminAffiliatePage() {
                       {(upgradeQuery.data?.items ?? []).map((item) => (
                         <TableRow key={item.inviter_id}>
                           <TableCell>
-                            <div className='font-medium'>
-                              {item.display_name || item.username}
-                            </div>
-                            <div className='text-muted-foreground text-xs'>
-                              UID {item.inviter_id} · {item.username}
-                            </div>
+                            <AdminUserIdentity
+                              id={item.inviter_id}
+                              username={item.username}
+                            />
                           </TableCell>
                           <TableCell>
                             <Badge
@@ -396,7 +406,7 @@ export function AdminAffiliatePage() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>UID</TableHead>
+                          <TableHead>{t('Promoter')}</TableHead>
                           <TableHead>{t('Attempts')}</TableHead>
                           <TableHead>{t('Last error')}</TableHead>
                           <TableHead>{t('Next retry')}</TableHead>
@@ -409,7 +419,12 @@ export function AdminAffiliatePage() {
                         {(notificationFailureQuery.data?.items ?? []).map(
                           (item) => (
                             <TableRow key={item.id}>
-                              <TableCell>{item.inviter_id}</TableCell>
+                              <TableCell>
+                                <AdminUserIdentity
+                                  id={item.inviter_id}
+                                  username={item.inviter_username}
+                                />
+                              </TableCell>
                               <TableCell>{item.attempt_count}</TableCell>
                               <TableCell className='max-w-md text-xs break-words'>
                                 {item.last_error}
@@ -632,14 +647,16 @@ function AdminCommissionRow(props: {
     <TableRow>
       <TableCell className='font-mono'>{props.item.id}</TableCell>
       <TableCell>
-        {props.item.inviter_display_name ||
-          props.item.inviter_username ||
-          props.item.inviter_id}
+        <AdminUserIdentity
+          id={props.item.inviter_id}
+          username={props.item.inviter_username}
+        />
       </TableCell>
       <TableCell>
-        {props.item.invitee_display_name ||
-          props.item.invitee_username ||
-          props.item.invitee_id}
+        <AdminUserIdentity
+          id={props.item.invitee_id}
+          username={props.item.invitee_username}
+        />
       </TableCell>
       <TableCell className='font-mono text-xs'>{props.item.trade_no}</TableCell>
       <TableCell className='text-right font-medium'>

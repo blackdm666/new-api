@@ -16,22 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-// ============================================================================
-// Utility Functions
-// ============================================================================
-export {
-  isRedemptionExpired,
-  isTimestampExpired,
-  redemptionCodesToClipboard,
-} from './utils'
 
-// ============================================================================
-// Form Utilities
-// ============================================================================
-export {
-  getRedemptionFormSchema,
-  type RedemptionFormValues,
-  REDEMPTION_FORM_DEFAULT_VALUES,
-  transformFormDataToPayload,
-  transformRedemptionToFormDefaults,
-} from './redemption-form'
+export function AdminUserIdentity(props: { id: number; username?: string }) {
+  return (
+    <div className='min-w-36'>
+      <div className='font-medium'>{props.username || '-'}</div>
+      <div className='text-muted-foreground text-xs'>UID {props.id}</div>
+    </div>
+  )
+}

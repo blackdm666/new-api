@@ -2278,9 +2278,10 @@
     "Filter by MjProxy task ID": "MjProxyタスクIDでフィルター",
     "Filter by model name...": "モデル名でフィルター...",
     "Filter by model...": "モデルでフィルタリング...",
-    "Filter by name or ID...": "名前またはIDでフィルター...",
     "Filter by name, ID, or key...": "名前、ID、またはキーでフィルター...",
     "Filter by name...": "名前でフィルター...",
+    "Filter by redemption code...": "交換コードでフィルター...",
+    "Filter by ID...": "IDでフィルター...",
     "Filter by node": "ノードでフィルター",
     "Filter by price field": "価格フィールドでフィルター",
     "Filter by ratio type": "倍率タイプで絞り込み",
@@ -6000,6 +6001,13 @@
     "The default branded layout already adapts to the selected language. Edit HTML only when you need a custom structure or style.": "標準のブランドレイアウトは選択言語に自動対応します。独自の構造やスタイルが必要な場合のみ HTML を編集してください。",
     "Click to insert at the cursor": "クリックしてカーソル位置に挿入",
     "Automatic subjects follow the recipient language and keep dynamic business details.": "自動件名は受信者の言語に合わせ、注文番号などの動的な業務情報を保持します。",
-    "Use automatic subject": "自動件名を使用"
+    "Use automatic subject": "自動件名を使用",
+    "Invitation records": "招待履歴",
+    "No invitation records": "招待履歴はありません",
+    "Search by promoter, invited user, or UID": "紹介者、招待ユーザー、またはUIDで検索",
+    "Total invited users": "招待ユーザー総数",
+    "Top-ups": "チャージ回数",
+    "Updated at": "更新日時",
+    "View all invitation relationships and manage promoter commission operations.": "すべての招待関係を確認し、紹介者のコミッション業務を管理します。"
   }
 }

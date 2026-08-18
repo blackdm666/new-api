@@ -2278,9 +2278,10 @@
     "Filter by MjProxy task ID": "Lọc theo ID nhiệm vụ MjProxy",
     "Filter by model name...": "Lọc theo tên mô hình...",
     "Filter by model...": "Lọc theo mẫu...",
-    "Filter by name or ID...": "Lọc theo tên hoặc ID...",
     "Filter by name, ID, or key...": "Lọc theo tên, ID hoặc khóa...",
     "Filter by name...": "Lọc theo tên...",
+    "Filter by redemption code...": "Lọc theo mã đổi thưởng...",
+    "Filter by ID...": "Lọc theo ID...",
     "Filter by node": "Lọc theo nút",
     "Filter by price field": "Lọc theo trường giá",
     "Filter by ratio type": "Lọc theo loại tỷ lệ",
@@ -6000,6 +6001,13 @@
     "The default branded layout already adapts to the selected language. Edit HTML only when you need a custom structure or style.": "Bố cục thương hiệu mặc định đã thích ứng với ngôn ngữ đã chọn. Chỉ chỉnh HTML khi cần cấu trúc hoặc kiểu riêng.",
     "Click to insert at the cursor": "Nhấp để chèn tại vị trí con trỏ",
     "Automatic subjects follow the recipient language and keep dynamic business details.": "Tiêu đề tự động theo ngôn ngữ người nhận và giữ các dữ liệu động như mã đơn hàng.",
-    "Use automatic subject": "Dùng tiêu đề tự động"
+    "Use automatic subject": "Dùng tiêu đề tự động",
+    "Invitation records": "Lịch sử lời mời",
+    "No invitation records": "Không có lịch sử lời mời",
+    "Search by promoter, invited user, or UID": "Tìm theo người giới thiệu, người được mời hoặc UID",
+    "Total invited users": "Tổng số người dùng được mời",
+    "Top-ups": "Lần nạp tiền",
+    "Updated at": "Cập nhật lúc",
+    "View all invitation relationships and manage promoter commission operations.": "Xem toàn bộ quan hệ mời và quản lý nghiệp vụ hoa hồng của người giới thiệu."
   }
 }

@@ -37,6 +37,7 @@ import { useDebounce } from '@/hooks/use-debounce'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+import { AdminUserIdentity } from './admin-user-identity'
 import { fetchAdminAffiliateTransfers } from './api'
 import { formatCents } from './lib'
 import type { AffiliateTransfer } from './types'
@@ -158,15 +159,10 @@ export function AffiliateTransferTable(props: {
                 <TableRow key={item.id}>
                   <TableCell className='font-mono'>{item.id}</TableCell>
                   <TableCell>
-                    <div className='font-medium'>
-                      {item.display_name ||
-                        item.username ||
-                        `UID ${item.user_id}`}
-                    </div>
-                    <div className='text-muted-foreground text-xs'>
-                      UID {item.user_id}
-                      {item.username ? ` · ${item.username}` : ''}
-                    </div>
+                    <AdminUserIdentity
+                      id={item.user_id}
+                      username={item.username}
+                    />
                   </TableCell>
                   <TableCell className='text-right font-semibold tabular-nums'>
                     {formatCents(item.amount_cents)}

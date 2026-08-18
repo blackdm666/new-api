@@ -2278,9 +2278,10 @@
     "Filter by MjProxy task ID": "Фильтр по ID задачи MjProxy",
     "Filter by model name...": "Фильтр по имени модели...",
     "Filter by model...": "Фильтровать по модели...",
-    "Filter by name or ID...": "Фильтр по имени или ID...",
     "Filter by name, ID, or key...": "Фильтровать по имени, ID или ключу...",
     "Filter by name...": "Фильтр по имени...",
+    "Filter by redemption code...": "Фильтр по коду активации...",
+    "Filter by ID...": "Фильтр по ID...",
     "Filter by node": "Фильтр по узлу",
     "Filter by price field": "Фильтр по полю цены",
     "Filter by ratio type": "Фильтровать по типу коэффициента",
@@ -6000,6 +6001,13 @@
     "The default branded layout already adapts to the selected language. Edit HTML only when you need a custom structure or style.": "Фирменный шаблон уже адаптируется к выбранному языку. Изменяйте HTML только для собственной структуры или стиля.",
     "Click to insert at the cursor": "Нажмите, чтобы вставить в позицию курсора",
     "Automatic subjects follow the recipient language and keep dynamic business details.": "Автоматическая тема учитывает язык получателя и сохраняет динамические данные, например номер заказа.",
-    "Use automatic subject": "Использовать автоматическую тему"
+    "Use automatic subject": "Использовать автоматическую тему",
+    "Invitation records": "История приглашений",
+    "No invitation records": "Записей о приглашениях нет",
+    "Search by promoter, invited user, or UID": "Поиск по рефереру, приглашённому пользователю или UID",
+    "Total invited users": "Всего приглашённых пользователей",
+    "Top-ups": "Пополнения",
+    "Updated at": "Обновлено",
+    "View all invitation relationships and manage promoter commission operations.": "Просматривайте все связи приглашений и управляйте комиссионными операциями рефереров."
   }
 }

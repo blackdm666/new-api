@@ -18,20 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { RefreshCw, Search } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -42,40 +35,30 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useDebounce } from '@/hooks/use-debounce'
-import { formatTimestampToDate } from '@/lib/format'
+import { formatNumber, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { AdminUserIdentity } from './admin-user-identity'
-import { fetchAdminAffiliateCommissions } from './api'
-import {
-  AFFILIATE_STATUS_META,
-  formatCents,
-  formatRate,
-  promoterTierBadgeClassName,
-  promoterTierLabelKey,
-} from './lib'
-import { OverflowNote } from './overflow-note'
-import type { AffiliateCommission, AffiliateCommissionStatus } from './types'
+import { fetchAdminAffiliateInviteRecords } from './api'
+import { formatCents } from './lib'
+import type { AdminAffiliateInviteRecord } from './types'
 
 const PAGE_SIZE = 10
 
-export function AffiliateCommissionLedger() {
+export function AdminInviteRecords() {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
-  const [status, setStatus] = useState<'all' | AffiliateCommissionStatus>('all')
   const [keyword, setKeyword] = useState('')
   const debouncedKeyword = useDebounce(keyword, 300)
   const params = useMemo(
-    () => ({ page, pageSize: PAGE_SIZE, status, keyword: debouncedKeyword }),
-    [debouncedKeyword, page, status]
+    () => ({ page, pageSize: PAGE_SIZE, keyword: debouncedKeyword }),
+    [debouncedKeyword, page]
   )
   const query = useQuery({
-    queryKey: ['admin-affiliate', 'ledger', params],
-    queryFn: () => fetchAdminAffiliateCommissions(params),
+    queryKey: ['admin-affiliate', 'invitees', params],
+    queryFn: () => fetchAdminAffiliateInviteRecords(params),
     placeholderData: keepPreviousData,
   })
-  useEffect(() => setPage(1), [debouncedKeyword, status])
-
   const items = query.data?.items ?? []
   const total = query.data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -89,48 +72,22 @@ export function AffiliateCommissionLedger() {
           />
           {t('Refresh')}
         </Button>
-        <Label htmlFor='affiliate-ledger-status' className='sr-only'>
-          {t('Filter by status')}
-        </Label>
-        <Select
-          value={String(status)}
-          onValueChange={(value) =>
-            setStatus(
-              value === 'all'
-                ? 'all'
-                : (Number(value) as AffiliateCommissionStatus)
-            )
-          }
-        >
-          <SelectTrigger id='affiliate-ledger-status' className='w-[150px]'>
-            <SelectValue>
-              {status === 'all'
-                ? t('All statuses')
-                : t(AFFILIATE_STATUS_META[status].labelKey)}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent alignItemWithTrigger={false}>
-            <SelectItem value='all'>{t('All statuses')}</SelectItem>
-            {Object.entries(AFFILIATE_STATUS_META).map(([value, meta]) => (
-              <SelectItem key={value} value={value}>
-                {t(meta.labelKey)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         <div className='relative min-w-[280px] flex-1 md:max-w-[560px]'>
-          <Label htmlFor='affiliate-ledger-search' className='sr-only'>
-            {t('Search by order number, promoter, or invited user')}
+          <Label htmlFor='affiliate-invite-search' className='sr-only'>
+            {t('Search by promoter, invited user, or UID')}
           </Label>
           <Search
             className='text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2'
             aria-hidden='true'
           />
           <Input
-            id='affiliate-ledger-search'
+            id='affiliate-invite-search'
             value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder={t('Search by order number, promoter, or invited user')}
+            onChange={(event) => {
+              setKeyword(event.target.value)
+              setPage(1)
+            }}
+            placeholder={t('Search by promoter, invited user, or UID')}
             className='pl-9'
           />
         </div>
@@ -139,34 +96,32 @@ export function AffiliateCommissionLedger() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>ID</TableHead>
               <TableHead>{t('Promoter')}</TableHead>
               <TableHead>{t('Invited user')}</TableHead>
-              <TableHead>{t('Order No.')}</TableHead>
+              <TableHead>{t('Invited At')}</TableHead>
+              <TableHead className='text-right'>{t('Top-ups')}</TableHead>
               <TableHead className='text-right'>{t('Top-up amount')}</TableHead>
-              <TableHead>{t('Rate')}</TableHead>
-              <TableHead>{t('Promoter tier')}</TableHead>
-              <TableHead className='text-right'>{t('Commission')}</TableHead>
-              <TableHead>{t('Status')}</TableHead>
-              <TableHead>{t('Created at')}</TableHead>
-              <TableHead>{t('Updated at')}</TableHead>
+              <TableHead className='text-right'>
+                {t('Generated commission')}
+              </TableHead>
+              <TableHead>{t('Last top-up')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {query.isLoading ? <LedgerSkeletonRows /> : null}
+            {query.isLoading ? <InviteRecordSkeletonRows /> : null}
             {!query.isLoading && items.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={11}
+                  colSpan={7}
                   className='text-muted-foreground py-12 text-center'
                 >
-                  {t('No commission ledger entries')}
+                  {t('No invitation records')}
                 </TableCell>
               </TableRow>
             ) : null}
             {!query.isLoading
               ? items.map((item) => (
-                  <CommissionLedgerRow key={item.id} item={item} />
+                  <AdminInviteRecordRow key={item.invitee_id} item={item} />
                 ))
               : null}
           </TableBody>
@@ -202,73 +157,53 @@ export function AffiliateCommissionLedger() {
   )
 }
 
-export function CommissionLedgerRow(props: { item: AffiliateCommission }) {
+export function AdminInviteRecordRow(props: {
+  item: AdminAffiliateInviteRecord
+}) {
   const { t } = useTranslation()
-  const meta = AFFILIATE_STATUS_META[props.item.status]
+  const item = props.item
   return (
     <TableRow>
-      <TableCell className='font-mono'>{props.item.id}</TableCell>
       <TableCell>
         <AdminUserIdentity
-          id={props.item.inviter_id}
-          username={props.item.inviter_username}
+          id={item.inviter_id}
+          username={item.inviter_username}
         />
       </TableCell>
       <TableCell>
-        <AdminUserIdentity
-          id={props.item.invitee_id}
-          username={props.item.invitee_username}
-        />
-      </TableCell>
-      <TableCell className='font-mono text-xs'>{props.item.trade_no}</TableCell>
-      <TableCell className='text-right font-medium'>
-        {formatCents(props.item.topup_amount_cents)}
-      </TableCell>
-      <TableCell>{formatRate(props.item.rate_basis_points)}</TableCell>
-      <TableCell>
-        <Badge
-          variant='outline'
-          className={cn(
-            'font-normal',
-            promoterTierBadgeClassName(props.item.tier_name)
-          )}
-        >
-          {t(promoterTierLabelKey(props.item.tier_name))}
-        </Badge>
-      </TableCell>
-      <TableCell className='text-right font-semibold'>
-        {formatCents(props.item.commission_cents)}
-      </TableCell>
-      <TableCell>
-        <div className='flex min-w-0 items-center gap-2'>
-          <Badge
-            variant='outline'
-            className={cn('shrink-0 font-normal', meta.className)}
-          >
-            {t(meta.labelKey)}
-          </Badge>
-          {props.item.reject_reason ? (
-            <OverflowNote
-              text={props.item.reject_reason}
-              className='text-muted-foreground max-w-48 text-xs'
-            />
-          ) : null}
+        <div className='flex items-center gap-2'>
+          <AdminUserIdentity
+            id={item.invitee_id}
+            username={item.invitee_username}
+          />
+          {item.is_new ? <Badge variant='secondary'>{t('New')}</Badge> : null}
         </div>
       </TableCell>
       <TableCell className='text-muted-foreground text-xs whitespace-nowrap'>
-        {formatTimestampToDate(props.item.created_time)}
+        {formatTimestampToDate(item.created_at)}
+      </TableCell>
+      <TableCell className='text-right tabular-nums'>
+        {formatNumber(item.topup_count)}
+      </TableCell>
+      <TableCell className='text-right font-medium'>
+        {formatCents(item.topup_amount_cents)}
+      </TableCell>
+      <TableCell className='text-right font-medium'>
+        {formatCents(item.commission_cents)}
       </TableCell>
       <TableCell className='text-muted-foreground text-xs whitespace-nowrap'>
-        {formatTimestampToDate(props.item.updated_time)}
+        {item.last_topup_time > 0
+          ? formatTimestampToDate(item.last_topup_time)
+          : '-'}
       </TableCell>
     </TableRow>
   )
 }
 
-function LedgerSkeletonRows() {
+function InviteRecordSkeletonRows() {
   return ['one', 'two', 'three', 'four', 'five'].map((row) => (
     <TableRow key={row}>
-      {Array.from({ length: 11 }, (_, index) => (
+      {Array.from({ length: 7 }, (_, index) => (
         <TableCell key={`${row}-${index}`}>
           <Skeleton className='h-4 w-full' />
         </TableCell>

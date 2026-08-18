@@ -22,6 +22,7 @@ import { api } from '@/lib/api'
 import { UserFacingError } from '@/lib/user-facing-error'
 
 import type {
+  AdminAffiliateInviteRecord,
   AffiliateAdminSummary,
   AffiliateCommission,
   AffiliateCommissionStatus,
@@ -113,6 +114,19 @@ export async function fetchAdminAffiliateSummary(): Promise<AffiliateAdminSummar
   const response = await api.get<ApiResponse<AffiliateAdminSummary>>(
     '/api/affiliate/admin/summary'
   )
+  return unwrap(response.data)
+}
+
+export async function fetchAdminAffiliateInviteRecords(params: {
+  page: number
+  pageSize: number
+  keyword?: string
+}): Promise<PaginatedResponse<AdminAffiliateInviteRecord>> {
+  const query = pageQuery(params.page, params.pageSize)
+  if (params.keyword?.trim()) query.set('keyword', params.keyword.trim())
+  const response = await api.get<
+    ApiResponse<PaginatedResponse<AdminAffiliateInviteRecord>>
+  >(`/api/affiliate/admin/invitees?${query.toString()}`)
   return unwrap(response.data)
 }
 

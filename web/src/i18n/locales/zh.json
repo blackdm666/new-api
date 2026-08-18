@@ -2278,9 +2278,10 @@
     "Filter by MjProxy task ID": "按 MjProxy 任务 ID 筛选",
     "Filter by model name...": "按模型名称筛选...",
     "Filter by model...": "按模型筛选...",
-    "Filter by name or ID...": "按名称或 ID 筛选...",
     "Filter by name, ID, or key...": "按名称、ID 或密钥筛选...",
     "Filter by name...": "按名称筛选...",
+    "Filter by redemption code...": "按兑换码筛选...",
+    "Filter by ID...": "按 ID 筛选...",
     "Filter by node": "按节点筛选",
     "Filter by price field": "按价格字段筛选",
     "Filter by ratio type": "按倍率类型筛选",
@@ -6000,6 +6001,13 @@
     "The default branded layout already adapts to the selected language. Edit HTML only when you need a custom structure or style.": "默认品牌样式会自动适配所选语言；仅在需要自定义结构或样式时编辑 HTML。",
     "Click to insert at the cursor": "点击后插入到光标位置",
     "Automatic subjects follow the recipient language and keep dynamic business details.": "自动主题会跟随收件人语言，并保留订单号等动态业务信息。",
-    "Use automatic subject": "使用自动主题"
+    "Use automatic subject": "使用自动主题",
+    "Invitation records": "邀请记录",
+    "No invitation records": "暂无邀请记录",
+    "Search by promoter, invited user, or UID": "按推广人、受邀用户或 UID 搜索",
+    "Total invited users": "总受邀用户",
+    "Top-ups": "有效充值次数",
+    "Updated at": "更新时间",
+    "View all invitation relationships and manage promoter commission operations.": "查看全部邀请关系并管理推广佣金业务。"
   }
 }

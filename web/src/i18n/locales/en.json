@@ -2278,9 +2278,10 @@
     "Filter by MjProxy task ID": "Filter by MjProxy task ID",
     "Filter by model name...": "Filter by model name...",
     "Filter by model...": "Filter by model...",
-    "Filter by name or ID...": "Filter by name or ID...",
     "Filter by name, ID, or key...": "Filter by name, ID, or key...",
     "Filter by name...": "Filter by name...",
+    "Filter by redemption code...": "Filter by redemption code...",
+    "Filter by ID...": "Filter by ID...",
     "Filter by node": "Filter by node",
     "Filter by price field": "Filter by price field",
     "Filter by ratio type": "Filter by ratio type",
@@ -6000,6 +6001,13 @@
     "The default branded layout already adapts to the selected language. Edit HTML only when you need a custom structure or style.": "The default branded layout already adapts to the selected language. Edit HTML only when you need a custom structure or style.",
     "Click to insert at the cursor": "Click to insert at the cursor",
     "Automatic subjects follow the recipient language and keep dynamic business details.": "Automatic subjects follow the recipient language and keep dynamic business details.",
-    "Use automatic subject": "Use automatic subject"
+    "Use automatic subject": "Use automatic subject",
+    "Invitation records": "Invitation records",
+    "No invitation records": "No invitation records",
+    "Search by promoter, invited user, or UID": "Search by promoter, invited user, or UID",
+    "Total invited users": "Total invited users",
+    "Top-ups": "Top-ups",
+    "Updated at": "Updated at",
+    "View all invitation relationships and manage promoter commission operations.": "View all invitation relationships and manage promoter commission operations."
   }
 }

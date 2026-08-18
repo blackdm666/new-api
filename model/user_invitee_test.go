@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -51,4 +52,73 @@ func TestGetUserInviteesScopesIncludesDeletedAndPaginates(t *testing.T) {
 	require.Len(t, pageTwo, 1)
 	assert.Equal(t, invitees[1].Id, pageTwo[0].Id)
 	assert.False(t, pageTwo[0].IsNew)
+}
+
+func TestListAdminAffiliateInviteRecordsIncludesUsersWithoutCommission(t *testing.T) {
+	truncateTables(t)
+
+	inviter := User{Username: "global-invite-owner", DisplayName: "Global Owner", Email: "global-owner@example.com", AffCode: "global-invite-owner-code", Status: common.UserStatusEnabled}
+	require.NoError(t, DB.Create(&inviter).Error)
+	otherInviter := User{Username: "other-invite-owner", DisplayName: "Other Owner", Email: "other-owner@example.com", AffCode: "other-invite-owner-code", Status: common.UserStatusEnabled}
+	require.NoError(t, DB.Create(&otherInviter).Error)
+
+	withCommission := User{Username: "global-invite-paid", DisplayName: "Paid Invitee", Email: "paid-invitee@example.com", AffCode: "global-invite-paid-code", Status: common.UserStatusEnabled, InviterId: inviter.Id, CreatedAt: 1_786_700_100}
+	withoutCommission := User{Username: "global-invite-free", DisplayName: "Free Invitee", Email: "free-invitee@example.com", AffCode: "global-invite-free-code", Status: common.UserStatusEnabled, InviterId: inviter.Id, CreatedAt: 1_786_700_200}
+	otherInvitee := User{Username: "other-invite-user", DisplayName: "Other Invitee", Email: "other-invitee@example.com", AffCode: "other-invite-user-code", Status: common.UserStatusEnabled, InviterId: otherInviter.Id, CreatedAt: 1_786_700_300}
+	require.NoError(t, DB.Create(&withCommission).Error)
+	require.NoError(t, DB.Create(&withoutCommission).Error)
+	require.NoError(t, DB.Create(&otherInvitee).Error)
+	require.NoError(t, DB.Delete(&withoutCommission).Error)
+
+	require.NoError(t, DB.Create(&AffiliateCommission{
+		InviterId:        inviter.Id,
+		InviteeId:        withCommission.Id,
+		TopUpId:          101,
+		TradeNo:          "GLOBAL-INVITE-PAID-1",
+		TopUpAmountCents: 10_000,
+		RateBasisPoints:  500,
+		CommissionCents:  500,
+		CommissionQuota:  500_000,
+		Status:           AffiliateCommissionStatusApproved,
+		CreatedTime:      1_786_700_400,
+	}).Error)
+	require.NoError(t, DB.Create(&AffiliateCommission{
+		InviterId:        inviter.Id,
+		InviteeId:        withCommission.Id,
+		TopUpId:          102,
+		TradeNo:          "GLOBAL-INVITE-PAID-2",
+		TopUpAmountCents: 20_000,
+		RateBasisPoints:  500,
+		CommissionCents:  1_000,
+		CommissionQuota:  1_000_000,
+		Status:           AffiliateCommissionStatusPending,
+		CreatedTime:      1_786_700_500,
+	}).Error)
+
+	allRows, total, err := ListAdminAffiliateInviteRecords("", &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+	require.Len(t, allRows, 3)
+	adminSummary, err := GetAffiliateAdminSummary()
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), adminSummary.TotalInviteeCount)
+
+	filteredRows, total, err := ListAdminAffiliateInviteRecords("global-invite-owner", &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	require.Len(t, filteredRows, 2)
+	assert.Equal(t, withoutCommission.Id, filteredRows[0].InviteeId)
+	assert.Zero(t, filteredRows[0].TopUpCount)
+	assert.Zero(t, filteredRows[0].TopUpAmountCents)
+	assert.Equal(t, withCommission.Id, filteredRows[1].InviteeId)
+	assert.Equal(t, int64(2), filteredRows[1].TopUpCount)
+	assert.Equal(t, int64(30_000), filteredRows[1].TopUpAmountCents)
+	assert.Equal(t, int64(1_500), filteredRows[1].CommissionCents)
+	assert.Equal(t, int64(1_786_700_500), filteredRows[1].LastTopUpTime)
+
+	byUid, total, err := ListAdminAffiliateInviteRecords(strconv.Itoa(withoutCommission.Id), &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, byUid, 1)
+	assert.Equal(t, withoutCommission.Id, byUid[0].InviteeId)
 }
