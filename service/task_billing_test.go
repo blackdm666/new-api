@@ -635,6 +635,17 @@ func TestRefundMidjourneyQuotaUsesLegacyChannelFallbackWithoutTokenAdjustment(t 
 func TestRefundTaskQuota_Wallet(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()
+	oldDataExportEnabled := common.DataExportEnabled
+	common.DataExportEnabled = true
+	model.CacheQuotaDataLock.Lock()
+	model.CacheQuotaData = make(map[string]*model.QuotaData)
+	model.CacheQuotaDataLock.Unlock()
+	t.Cleanup(func() {
+		common.DataExportEnabled = oldDataExportEnabled
+		model.CacheQuotaDataLock.Lock()
+		model.CacheQuotaData = make(map[string]*model.QuotaData)
+		model.CacheQuotaDataLock.Unlock()
+	})
 
 	const userID, tokenID, channelID = 1, 1, 1
 	const initQuota, preConsumed = 10000, 3000
@@ -646,6 +657,7 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	seedChargedAccounting(t, userID, channelID, tokenID, preConsumed, 1)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.NodeName = "submit-node"
 	require.NoError(t, model.DB.Create(task).Error)
 
 	assert.True(t, RefundTaskQuota(ctx, task, "task failed: upstream error"))
@@ -669,6 +681,17 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	assert.Equal(t, "test-model", log.ModelName)
 	assert.Zero(t, task.Quota)
 	assert.Zero(t, getTaskQuota(t, task.ID))
+
+	model.CacheQuotaDataLock.Lock()
+	quotaRows := make([]*model.QuotaData, 0, len(model.CacheQuotaData))
+	for _, row := range model.CacheQuotaData {
+		quotaRows = append(quotaRows, row)
+	}
+	model.CacheQuotaDataLock.Unlock()
+	require.Len(t, quotaRows, 1)
+	assert.Equal(t, "submit-node", quotaRows[0].NodeName)
+	assert.Equal(t, -preConsumed, quotaRows[0].Quota)
+	assert.Zero(t, quotaRows[0].Count)
 }
 
 func TestRefundTaskQuota_Subscription(t *testing.T) {
