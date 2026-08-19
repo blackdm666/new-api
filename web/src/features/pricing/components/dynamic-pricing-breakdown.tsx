@@ -43,11 +43,8 @@ import {
   type RequestCondition,
   type RequestRuleGroup,
   type RequestRuleTrace,
+  type TierCondition,
 } from '../lib/billing-expr'
-import {
-  formatTierConditionSummary,
-  formatTierLabel,
-} from '../lib/tier-display'
 
 type DynamicPricingBreakdownProps = {
   billingExpr: string | null | undefined
@@ -73,12 +70,49 @@ type DynamicPricingBreakdownProps = {
   compact?: boolean
 }
 
+const VAR_LABELS: Record<string, string> = {
+  p: 'Input',
+  c: 'Output',
+  len: 'Length',
+}
+const OP_LABELS: Record<string, string> = {
+  '<': '<',
+  '<=': '≤',
+  '>': '>',
+  '>=': '≥',
+}
 const TIME_FUNC_LABELS: Record<string, string> = {
   hour: 'Hour',
   minute: 'Minute',
   weekday: 'Weekday',
   month: 'Month',
   day: 'Day',
+}
+
+function formatTokenHint(value: string | number): string {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n === 0) return ''
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`
+  }
+  if (n >= 1000) {
+    return `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}K`
+  }
+  return String(n)
+}
+
+function formatConditionSummary(
+  conditions: TierCondition[],
+  t: (key: string) => string
+): string {
+  return conditions
+    .map((c) => {
+      const varLabel = t(VAR_LABELS[c.var] || c.var)
+      const hint = formatTokenHint(c.value)
+      return `${varLabel} ${OP_LABELS[c.op] || c.op} ${hint || c.value}`
+    })
+    .filter(Boolean)
+    .join(' && ')
 }
 
 function describeCondition(
@@ -140,9 +174,8 @@ export function DynamicPricingBreakdown({
   hideCacheColumns = false,
   compact = false,
 }: DynamicPricingBreakdownProps) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const expr = billingExpr || ''
-  const language = i18n.resolvedLanguage || i18n.language
   const currency = useSystemConfigStore((s) => s.config.currency)
 
   const { symbol, rate } = useMemo(() => {
@@ -248,11 +281,7 @@ export function DynamicPricingBreakdown({
           </div>
           <div className='space-y-1.5 sm:hidden'>
             {tiers.map((tier) => {
-              const condSummary = formatTierConditionSummary(
-                tier.conditions,
-                t,
-                language
-              )
+              const condSummary = formatConditionSummary(tier.conditions, t)
               const isMatched =
                 matchedTierLabel != null &&
                 matchedTierLabel !== '' &&
@@ -274,7 +303,7 @@ export function DynamicPricingBreakdown({
                       variant='secondary'
                       className='bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300'
                     >
-                      {formatTierLabel(tier.label, t)}
+                      {tier.label || t('Default')}
                     </Badge>
                     {isMatched && (
                       <Badge
@@ -347,11 +376,7 @@ export function DynamicPricingBreakdown({
                 ),
                 cellClassName: cn('align-top', compact ? 'py-2' : 'py-2.5'),
                 cell: (tier) => {
-                  const condSummary = formatTierConditionSummary(
-                    tier.conditions,
-                    t,
-                    language
-                  )
+                  const condSummary = formatConditionSummary(tier.conditions, t)
                   const isMatched =
                     normalizedMatchedTierLabel !== '' &&
                     normalizeTierLabel(tier.label) ===
@@ -363,7 +388,7 @@ export function DynamicPricingBreakdown({
                           variant='secondary'
                           className='bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300'
                         >
-                          {formatTierLabel(tier.label, t)}
+                          {tier.label || t('Default')}
                         </Badge>
                         {isMatched && (
                           <Badge
