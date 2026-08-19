@@ -872,7 +872,7 @@
     "Base input price only": "基本入力価格のみ",
     "Base Limits": "基本枠",
     "Base multipliers applied when users select specific groups.": "ユーザーが特定のグループを選択したときに適用される基本乗数。",
-    "Base Price": "基本価格",
+    "Base Price": "公式価格",
     "Base rate limit windows for this account.": "このアカウント向けの基本レート制限ウィンドウ。",
     "Base URL": "ベースURL",
     "Base URL is required for this channel type": "このチャネルタイプには Base URL が必要です",

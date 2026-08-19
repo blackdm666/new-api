@@ -76,6 +76,7 @@ import type {
   TokenUnit,
 } from '../types'
 import { DynamicPricingBreakdown } from './dynamic-pricing-breakdown'
+import { GroupPricingMeta } from './group-pricing-meta'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelDetailsApi } from './model-details-api'
 import { ModelDetailsPerformance } from './model-details-performance'
@@ -852,7 +853,7 @@ function getDynamicFormattedPricesByTier(
 function GroupPricingSection(props: {
   model: PricingModel
   groupRatio: Record<string, number>
-  usableGroup: Record<string, { desc: string; ratio: number }>
+  usableGroup: Record<string, string>
   autoGroups: string[]
   priceRate: number
   usdExchangeRate: number
@@ -976,11 +977,13 @@ function GroupPricingSection(props: {
 
             return (
               <div key={group} className='overflow-hidden rounded-lg border'>
-                <div className='bg-muted/20 flex items-center justify-between gap-3 border-b px-3 py-2'>
+                <div className='bg-muted/20 flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 sm:flex-nowrap'>
                   <GroupBadge group={group} size='sm' />
-                  <span className='text-muted-foreground font-mono text-xs'>
-                    {ratio}x
-                  </span>
+                  <GroupPricingMeta
+                    group={group}
+                    ratio={ratio}
+                    description={props.usableGroup[group]}
+                  />
                 </div>
                 <StaticDataTable
                   className='rounded-none border-0'
@@ -1064,8 +1067,14 @@ function GroupPricingSection(props: {
             id: 'ratio',
             header: t('Ratio'),
             className: thClass,
-            cellClassName: 'text-muted-foreground py-2.5 font-mono',
-            cell: (group) => `${props.groupRatio[group] || 1}x`,
+            cellClassName: 'py-2.5',
+            cell: (group) => (
+              <GroupPricingMeta
+                group={group}
+                ratio={props.groupRatio[group] || 1}
+                description={props.usableGroup[group]}
+              />
+            ),
           },
           ...(isTokenBased
             ? [
@@ -1128,7 +1137,7 @@ const TAB_META: Record<
 export interface ModelDetailsContentProps {
   model: PricingModel
   groupRatio: Record<string, number>
-  usableGroup: Record<string, { desc: string; ratio: number }>
+  usableGroup: Record<string, string>
   endpointMap: Record<string, { path?: string; method?: string }>
   autoGroups: string[]
   priceRate: number

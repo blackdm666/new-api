@@ -872,7 +872,7 @@
     "Base input price only": "仅基础输入价格",
     "Base Limits": "基础额度",
     "Base multipliers applied when users select specific groups.": "当用户选择特定分组时应用的基础乘数。",
-    "Base Price": "基础价格",
+    "Base Price": "官方价格",
     "Base rate limit windows for this account.": "当前账号的基础额度窗口。",
     "Base URL": "API 地址",
     "Base URL is required for this channel type": "此渠道类型需要填写 Base URL",
