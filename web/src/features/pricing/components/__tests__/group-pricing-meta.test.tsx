@@ -22,7 +22,7 @@ import { describe, expect, test } from 'vitest'
 import { GroupPricingMeta } from '../group-pricing-meta'
 
 describe('GroupPricingMeta', () => {
-  test('renders the ratio and configured discount description together', () => {
+  test('renders the description before the ratio as separate labels', () => {
     render(
       <GroupPricingMeta
         group='Claude Max池'
@@ -36,6 +36,10 @@ describe('GroupPricingMeta', () => {
       'title',
       '官方价1折，优惠90%'
     )
+    expect(screen.getByText('官方价1折，优惠90%').nextElementSibling).toBe(
+      screen.getByText('0.1x')
+    )
+    expect(screen.queryByText('·')).not.toBeInTheDocument()
   })
 
   test('hides empty and redundant descriptions', () => {

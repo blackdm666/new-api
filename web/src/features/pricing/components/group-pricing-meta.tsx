@@ -45,29 +45,21 @@ export function GroupPricingMeta(props: GroupPricingMetaProps) {
   return (
     <span
       className={cn(
-        'inline-flex max-w-full flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1 text-emerald-700 shadow-sm dark:border-emerald-400/35 dark:bg-emerald-400/10 dark:text-emerald-300',
+        'ml-auto inline-flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2',
         props.className
       )}
     >
-      <span className='font-mono text-xs leading-none font-extrabold tracking-tight tabular-nums'>
+      {description && (
+        <span
+          className='max-w-full rounded-md border border-amber-500/35 bg-amber-500/10 px-2.5 py-1 text-xs leading-tight font-semibold break-words text-amber-700 shadow-sm dark:border-amber-400/35 dark:bg-amber-400/10 dark:text-amber-300'
+          title={description}
+        >
+          {description}
+        </span>
+      )}
+      <span className='rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1 font-mono text-xs leading-none font-extrabold tracking-tight text-emerald-700 tabular-nums shadow-sm dark:border-emerald-400/35 dark:bg-emerald-400/10 dark:text-emerald-300'>
         {props.ratio}x
       </span>
-      {description && (
-        <>
-          <span
-            aria-hidden='true'
-            className='text-emerald-500/70 dark:text-emerald-300/60'
-          >
-            ·
-          </span>
-          <span
-            className='max-w-full text-xs leading-tight font-semibold break-words'
-            title={description}
-          >
-            {description}
-          </span>
-        </>
-      )}
     </span>
   )
 }
