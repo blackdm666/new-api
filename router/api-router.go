@@ -267,6 +267,11 @@ func SetApiRouter(router *gin.Engine) {
 		optionRoute.Use(middleware.DisableCache(), middleware.RootAuth())
 		{
 			optionRoute.GET("/", controller.GetOptions)
+			// Compatibility for administration pages that were opened before the
+			// option update endpoint changed from POST /api/option to PUT
+			// /api/option/. Keep the same RootAuth middleware and handler so stale
+			// tabs can save safely until they are refreshed.
+			optionRoute.POST("", controller.UpdateOption)
 			optionRoute.PUT("/", controller.UpdateOption)
 			optionRoute.POST("/smtp-test", middleware.CriticalRateLimit(), controller.TestSMTPEmail)
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)

@@ -20,7 +20,11 @@ func TestRetiredFrontendAPIRoutes(t *testing.T) {
 	_, hasAsyncCleanup := routes[http.MethodPost+" /api/system-task/log-cleanup"]
 	_, hasDirectDelete := routes[http.MethodDelete+" /api/log/"]
 	_, hasConsoleMigration := routes[http.MethodPost+" /api/option/migrate_console_setting"]
+	_, hasLegacyOptionUpdate := routes[http.MethodPost+" /api/option"]
+	_, hasCurrentOptionUpdate := routes[http.MethodPut+" /api/option/"]
 	assert.True(t, hasAsyncCleanup)
 	assert.False(t, hasDirectDelete)
 	assert.False(t, hasConsoleMigration)
+	assert.True(t, hasLegacyOptionUpdate)
+	assert.True(t, hasCurrentOptionUpdate)
 }
