@@ -27,17 +27,10 @@ import {
 } from '@/components/ai-elements/prompt-input'
 
 import { getSubmittableInputText } from '../../lib'
-import type {
-  ModelOption,
-  GroupOption,
-  ParameterEnabled,
-  PlaygroundConfig,
-} from '../../types'
+import type { ModelOption, GroupOption } from '../../types'
 import { PlaygroundInputControls } from './playground-input-controls'
-import { PlaygroundInputTools } from './playground-input-tools'
 
 interface PlaygroundInputProps {
-  config: PlaygroundConfig
   onSubmit: (text: string) => void
   onStop?: () => void
   disabled?: boolean
@@ -49,21 +42,9 @@ interface PlaygroundInputProps {
   groups: GroupOption[]
   groupValue: string
   onGroupChange: (value: string) => void
-  hasMessages?: boolean
-  onConfigChange: <K extends keyof PlaygroundConfig>(
-    key: K,
-    value: PlaygroundConfig[K]
-  ) => void
-  onClearMessages?: () => void
-  onParameterEnabledChange: (
-    key: keyof ParameterEnabled,
-    value: boolean
-  ) => void
-  parameterEnabled: ParameterEnabled
 }
 
 export function PlaygroundInput({
-  config,
   onSubmit,
   onStop,
   disabled,
@@ -75,11 +56,6 @@ export function PlaygroundInput({
   groups,
   groupValue,
   onGroupChange,
-  hasMessages = false,
-  onConfigChange,
-  onClearMessages,
-  onParameterEnabledChange,
-  parameterEnabled,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
@@ -124,17 +100,7 @@ export function PlaygroundInput({
             onModelChange={onModelChange}
             onStop={onStop}
             text={text}
-            tools={
-              <PlaygroundInputTools
-                config={config}
-                disabled={disabled}
-                hasMessages={hasMessages}
-                onConfigChange={onConfigChange}
-                onClearMessages={onClearMessages}
-                onParameterEnabledChange={onParameterEnabledChange}
-                parameterEnabled={parameterEnabled}
-              />
-            }
+            tools={null}
           />
         </PromptInputFooter>
       </PromptInput>

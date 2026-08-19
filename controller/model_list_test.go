@@ -34,6 +34,11 @@ type userModelsResponse struct {
 	Data    []string `json:"data"`
 }
 
+type userModelDetailsResponse struct {
+	Success bool                    `json:"success"`
+	Data    []playgroundModelDetail `json:"data"`
+}
+
 func setupModelListControllerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -213,6 +218,50 @@ func TestGetUserModelsFiltersByRequestedGroup(t *testing.T) {
 	GetUserModels(vipContext)
 
 	require.Empty(t, decodeUserModelsResponse(t, vipRecorder))
+}
+
+func TestGetUserModelsReturnsPlaygroundModesWhenRequested(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	model.InvalidatePricingCache()
+	t.Cleanup(model.InvalidatePricingCache)
+
+	require.NoError(t, db.Create(&model.User{
+		Id:       1004,
+		Username: "playground-mode-user",
+		Password: "password",
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&[]model.Channel{
+		{Id: 31, Name: "chat-and-image", Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled},
+		{Id: 32, Name: "global-video", Type: constant.ChannelTypeGlobalAiOpc, Status: common.ChannelStatusEnabled},
+	}).Error)
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "default", Model: "gpt-4o", ChannelId: 31, Enabled: true},
+		{Group: "default", Model: "gpt-image-1", ChannelId: 31, Enabled: true},
+		{Group: "default", Model: "seedance-2.5", ChannelId: 32, Enabled: true},
+		{Group: "default", Model: "digitalHuman", ChannelId: 32, Enabled: true},
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/user/models?group=default&details=true", nil)
+	context.Set("id", 1004)
+
+	GetUserModels(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload userModelDetailsResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.True(t, payload.Success)
+	modes := make(map[string]string, len(payload.Data))
+	for _, item := range payload.Data {
+		modes[item.Model] = item.Mode
+	}
+	assert.Equal(t, "chat", modes["gpt-4o"])
+	assert.Equal(t, "image", modes["gpt-image-1"])
+	assert.Equal(t, "video", modes["seedance-2.5"])
+	assert.Equal(t, "unsupported", modes["digitalHuman"])
 }
 
 func TestGetUserModelsExpandsAutoGroupsInConfiguredOrder(t *testing.T) {

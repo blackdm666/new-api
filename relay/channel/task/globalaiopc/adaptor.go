@@ -285,6 +285,16 @@ func (a *TaskAdaptor) GetModelList() []string {
 	return append([]string(nil), supportedModels...)
 }
 
+func (a *TaskAdaptor) SupportsPromptOnlyVideo(modelName string) bool {
+	cfg, ok := modelConfigs[modelName]
+	return ok &&
+		!cfg.digitalHuman &&
+		cfg.minReferenceImages == 0 &&
+		cfg.minReferenceVideos == 0 &&
+		!cfg.requireFirstImage &&
+		!cfg.requireLastImage
+}
+
 func (a *TaskAdaptor) GetChannelName() string {
 	return ChannelName
 }

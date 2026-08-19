@@ -60,8 +60,8 @@ describe('email queue rule editor', () => {
   })
 
   test('persists the complete rule set through the protected option API', async () => {
-    const post = vi
-      .spyOn(api, 'post')
+    const put = vi
+      .spyOn(api, 'put')
       .mockResolvedValue({ data: { success: true } })
     const onSaved = vi.fn()
     render(<EmailQueueRulesCard rules={rules} onSaved={onSaved} />)
@@ -72,8 +72,8 @@ describe('email queue rule editor', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: 'Save queue rules' }))
 
-    await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
-    expect(post).toHaveBeenCalledWith('/api/option', {
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1))
+    expect(put).toHaveBeenCalledWith('/api/option/', {
       key: 'EmailDeliveryRules',
       value: JSON.stringify({ ...rules, marketing_daily_limit: 750 }),
     })

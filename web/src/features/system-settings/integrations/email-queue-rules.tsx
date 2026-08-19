@@ -30,8 +30,9 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { api } from '@/lib/api'
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error'
+
+import { updateSystemOption } from '../api'
 
 export type EmailQueueRules = {
   marketing_daily_limit: number
@@ -96,12 +97,12 @@ export function EmailQueueRulesCard(props: EmailQueueRulesCardProps) {
     if (error || saving) return
     setSaving(true)
     try {
-      const response = await api.post('/api/option', {
+      const response = await updateSystemOption({
         key: 'EmailDeliveryRules',
         value: JSON.stringify(draft),
       })
-      if (!response.data?.success) {
-        throw new Error(response.data?.message || 'Failed to save queue rules')
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to save queue rules')
       }
       toast.success(t('Queue rules saved'))
       localChanges.current = false

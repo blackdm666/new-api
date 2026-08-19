@@ -18,17 +18,28 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundInput } from './components/input/playground-input'
+import { PlaygroundMediaResult } from './components/media/playground-media-result'
 import {
   useChatHandler,
+  useMediaTest,
   usePlaygroundConversation,
   usePlaygroundOptions,
   usePlaygroundState,
 } from './hooks'
+import type { ParameterEnabled } from './types'
+
+const SIMPLE_PARAMETER_ENABLED: ParameterEnabled = {
+  temperature: false,
+  top_p: false,
+  max_tokens: false,
+  frequency_penalty: false,
+  presence_penalty: false,
+  seed: false,
+}
 
 export function Playground() {
   const {
     config,
-    parameterEnabled,
     messages,
     isLoadingMessages,
     models,
@@ -37,13 +48,15 @@ export function Playground() {
     setModels,
     setGroups,
     updateConfig,
-    updateParameterEnabled,
-    clearMessages,
   } = usePlaygroundState()
 
-  const { sendChat, stopGeneration, isGenerating } = useChatHandler({
+  const {
+    sendChat,
+    stopGeneration: stopChatGeneration,
+    isGenerating: isChatGenerating,
+  } = useChatHandler({
     config,
-    parameterEnabled,
+    parameterEnabled: SIMPLE_PARAMETER_ENABLED,
     onMessageUpdate: updateMessages,
   })
 
@@ -61,11 +74,6 @@ export function Playground() {
     sendChat,
   })
 
-  const handleClearMessages = () => {
-    handleEditOpenChange(false)
-    clearMessages()
-  }
-
   const { isLoadingModels } = usePlaygroundOptions({
     currentGroup: config.group,
     currentModel: config.model,
@@ -74,29 +82,57 @@ export function Playground() {
     updateConfig,
   })
 
+  const selectedMode =
+    models.find((model) => model.value === config.model)?.mode ?? 'chat'
+  const isMediaMode = selectedMode !== 'chat'
+  const mediaTest = useMediaTest(config.model, config.group)
+  const isGenerating = isMediaMode ? mediaTest.isGenerating : isChatGenerating
+
+  const handleSubmit = (text: string) => {
+    if (!isMediaMode) {
+      handleSendMessage(text)
+      return
+    }
+    void mediaTest.run(text, selectedMode, config)
+  }
+
+  const handleStop = () => {
+    if (isMediaMode) {
+      mediaTest.stop()
+      return
+    }
+    stopChatGeneration()
+  }
+
   return (
     <div className='relative flex size-full min-h-0 flex-col overflow-hidden'>
       {/* Full-width scroll container: scrolling works even over side whitespace */}
       <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
-        <PlaygroundChat
-          messages={messages}
-          isLoadingMessages={isLoadingMessages}
-          onRegenerateMessage={handleRegenerateMessage}
-          onEditMessage={handleEditMessage}
-          onDeleteMessage={handleDeleteMessage}
-          onSelectPrompt={handleSendMessage}
-          isGenerating={isGenerating}
-          editingKey={editingMessageKey}
-          onCancelEdit={handleEditOpenChange}
-          onSaveEdit={(newContent) => applyEdit(newContent, false)}
-          onSaveEditAndSubmit={(newContent) => applyEdit(newContent, true)}
-        />
+        {isMediaMode ? (
+          <PlaygroundMediaResult
+            mode={selectedMode}
+            result={mediaTest.result}
+          />
+        ) : (
+          <PlaygroundChat
+            messages={messages}
+            isLoadingMessages={isLoadingMessages}
+            onRegenerateMessage={handleRegenerateMessage}
+            onEditMessage={handleEditMessage}
+            onDeleteMessage={handleDeleteMessage}
+            onSelectPrompt={handleSendMessage}
+            isGenerating={isGenerating}
+            editingKey={editingMessageKey}
+            onCancelEdit={handleEditOpenChange}
+            onSaveEdit={(newContent) => applyEdit(newContent, false)}
+            onSaveEditAndSubmit={(newContent) => applyEdit(newContent, true)}
+          />
+        )}
       </div>
 
       {/* Input area: center content and constrain to the same container width */}
       <div className='mx-auto w-full max-w-4xl'>
         <PlaygroundInput
-          config={config}
           disabled={isGenerating}
           groups={groups}
           groupValue={config.group}
@@ -105,14 +141,9 @@ export function Playground() {
           modelValue={config.model}
           models={models}
           onGroupChange={(value) => updateConfig('group', value)}
-          onConfigChange={updateConfig}
-          onClearMessages={handleClearMessages}
           onModelChange={(value) => updateConfig('model', value)}
-          onParameterEnabledChange={updateParameterEnabled}
-          onStop={stopGeneration}
-          onSubmit={handleSendMessage}
-          parameterEnabled={parameterEnabled}
-          hasMessages={messages.length > 0}
+          onStop={handleStop}
+          onSubmit={handleSubmit}
         />
       </div>
     </div>

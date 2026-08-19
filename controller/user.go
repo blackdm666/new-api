@@ -15,6 +15,8 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay"
+	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
@@ -716,11 +718,87 @@ func GetUserModels(c *gin.Context) {
 			groupsToQuery = []string{group}
 		}
 	}
+	models := service.GetGroupsEnabledModels(groupsToQuery)
+	data := any(models)
+	if c.Query("details") == "true" {
+		data = getPlaygroundModelDetails(models, groupsToQuery)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    service.GetGroupsEnabledModels(groupsToQuery),
+		"data":    data,
 	})
+}
+
+type playgroundModelDetail struct {
+	Model string `json:"model"`
+	Mode  string `json:"mode"`
+}
+
+func getPlaygroundModelDetails(models []string, groups []string) []playgroundModelDetail {
+	const (
+		modeChat        = "chat"
+		modeImage       = "image"
+		modeVideo       = "video"
+		modeUnsupported = "unsupported"
+	)
+
+	// Ensure endpoint metadata is populated before classifying image and
+	// Advanced Custom video routes.
+	model.GetPricing()
+	modes := make(map[string]string, len(models))
+	for _, modelName := range models {
+		modes[modelName] = modeChat
+		for _, endpoint := range model.GetModelSupportEndpointTypes(modelName) {
+			switch endpoint {
+			case constant.EndpointTypeImageGeneration:
+				modes[modelName] = modeImage
+			case constant.EndpointTypeOpenAIVideo:
+				if modes[modelName] != modeImage {
+					modes[modelName] = modeVideo
+				}
+			}
+		}
+	}
+
+	groupSet := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		groupSet[group] = struct{}{}
+	}
+	abilities, err := model.GetAllEnableAbilityWithChannels()
+	if err == nil {
+		for _, ability := range abilities {
+			if _, ok := groupSet[ability.Group]; !ok || modes[ability.Model] == modeImage {
+				continue
+			}
+			adaptor := relay.GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(ability.ChannelType)))
+			if adaptor == nil || !stringSliceContains(adaptor.GetModelList(), ability.Model) {
+				continue
+			}
+			if tester, ok := adaptor.(channel.PromptOnlyVideoTester); ok && !tester.SupportsPromptOnlyVideo(ability.Model) {
+				if modes[ability.Model] == modeChat {
+					modes[ability.Model] = modeUnsupported
+				}
+				continue
+			}
+			modes[ability.Model] = modeVideo
+		}
+	}
+
+	details := make([]playgroundModelDetail, 0, len(models))
+	for _, modelName := range models {
+		details = append(details, playgroundModelDetail{Model: modelName, Mode: modes[modelName]})
+	}
+	return details
+}
+
+func stringSliceContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 type updateUserRequest struct {
