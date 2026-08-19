@@ -69,6 +69,7 @@ import {
 import { parseTags } from '../lib/filters'
 import { getAvailableGroups, isTokenBasedModel } from '../lib/model-helpers'
 import { formatFixedPrice, formatGroupPrice } from '../lib/price'
+import { formatTierLabel } from '../lib/tier-display'
 import type {
   ModelCapability,
   PriceType,
@@ -996,7 +997,7 @@ function GroupPricingSection(props: {
                       header: t('Tier'),
                       className: thClass,
                       cellClassName: 'text-muted-foreground py-2.5',
-                      cell: (tier) => tier.label || t('Default'),
+                      cell: (tier) => formatTierLabel(tier.label, t),
                     },
                     ...priceFields.map((fieldEntry) => ({
                       id: fieldEntry.field,

@@ -76,6 +76,12 @@ export const STATIC_I18N_KEYS = [
   'All Tags',
   'More...',
   'Less',
+  'Base tier',
+  'Length',
+  'Long-context tier',
+  'Over 200K tokens',
+  'Standard tier',
+  'Up to 200K tokens',
 
   // Roles
   'Super Admin',
