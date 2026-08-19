@@ -134,6 +134,21 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	return nil
 }
 
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	cfg, ok := modelConfigs[info.OriginModelName]
+	if !ok {
+		cfg, ok = modelConfigs[strings.TrimSpace(req.Model)]
+	}
+	if !ok {
+		return nil
+	}
+	return map[string]float64{"seconds": float64(requestDuration(req, cfg))}
+}
+
 func localTaskError(err error) *dto.TaskError {
 	return &dto.TaskError{Code: "invalid_request", Message: err.Error(), StatusCode: http.StatusBadRequest, LocalError: true, Error: err}
 }

@@ -233,6 +233,7 @@ func TestEstimateBillingDistinguishesPerSecondAndPerCallModels(t *testing.T) {
 		want     map[string]float64
 	}{
 		{name: "seedance per second", model: ModelSeedance25, want: map[string]float64{"seconds": 6}},
+		{name: "minimax h3 per second", model: ModelMiniMaxH3, want: map[string]float64{"seconds": 6}},
 		{name: "videos fixed per call", model: ModelVideosStable, want: nil},
 		{name: "seedance 2 video reference surcharge", model: "seedance-2.0-720p", metadata: map[string]interface{}{"reference_videos": []interface{}{"https://example.com/ref.mp4"}}, want: map[string]float64{"seconds": 6, "video_reference": 1.27 / 0.58}},
 	}
@@ -248,6 +249,16 @@ func TestEstimateBillingDistinguishesPerSecondAndPerCallModels(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestEstimateBillingMiniMaxH3UsesDefaultDuration(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set("task_request", relaycommon.TaskSubmitReq{Prompt: "test", Model: ModelMiniMaxH3})
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: ModelMiniMaxH3}}
+
+	got := (&TaskAdaptor{}).EstimateBilling(c, info)
+
+	assert.Equal(t, map[string]float64{"seconds": 5}, got)
 }
 
 func TestConvertToRequestPayloadRejectsInvalidDuration(t *testing.T) {

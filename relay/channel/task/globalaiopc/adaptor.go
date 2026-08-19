@@ -604,7 +604,7 @@ func buildModelConfigs() ([]string, map[string]modelConfig) {
 		allowedRatioList: []string{"16:9", "9:16", "1:1"}, allowedResolutionList: []string{"720p"},
 	})
 	add(ModelMiniMaxH3, modelConfig{
-		upstreamModel: ModelMiniMaxH3, perCallBilling: true, defaultDuration: 5, minDuration: 5, maxDuration: 15,
+		upstreamModel: ModelMiniMaxH3, defaultDuration: 5, minDuration: 5, maxDuration: 15,
 		defaultRatio: "16:9", defaultResolution: "2k", lockResolution: true,
 		requirePrompt: true, maxPromptLength: 2000, maxReferenceImages: 5, maxReferenceAudios: 1, requireVisualWithAudio: true,
 		allowedRatioList: []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}, allowedResolutionList: []string{"2k"},

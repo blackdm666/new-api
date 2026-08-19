@@ -80,6 +80,37 @@ func TestValidateGrokVideoDefaultsAndLimits(t *testing.T) {
 	assert.JSONEq(t, `{"model":"grok-imagine-video","prompt":"test","duration":8,"aspect_ratio":"3:2","resolution":"480p"}`, string(payload))
 }
 
+func TestEstimateBillingUsesGrokVideoDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    string
+		body     string
+		expected float64
+	}{
+		{name: "base four seconds", model: ModelGrokImagineVideo, body: `{"model":"grok-imagine-video","prompt":"test","duration":4}`, expected: 4},
+		{name: "1.5 six seconds", model: ModelGrokImagineVideo15, body: `{"model":"grok-imagine-video-1.5","prompt":"test","duration":6}`, expected: 6},
+		{name: "1.5 1080p fifteen seconds", model: ModelGrokImagineVideo151080, body: `{"model":"grok-imagine-video-1.5-1080p","prompt":"test","duration":15}`, expected: 15},
+		{name: "default eight seconds", model: ModelGrokImagineVideo15, body: `{"model":"grok-imagine-video-1.5","prompt":"test"}`, expected: 8},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(tt.body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			defer common.CleanupBodyStorage(c)
+
+			adaptor := &TaskAdaptor{}
+			info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{}}
+			require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+			info.OriginModelName = tt.model
+
+			got := adaptor.EstimateBilling(c, info)
+
+			assert.Equal(t, map[string]float64{"seconds": tt.expected}, got)
+		})
+	}
+}
+
 func TestParseTaskResultHandlesSub2APIStatesAndRelativeContentURL(t *testing.T) {
 	adaptor := &TaskAdaptor{baseURL: "https://api.apikey.fun"}
 	pending, err := adaptor.ParseTaskResult([]byte(`{"request_id":"upstream-1","status":"pending","progress":75}`))
