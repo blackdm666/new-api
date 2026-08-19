@@ -21,7 +21,6 @@ import (
 )
 
 type modelConfig struct {
-	requireImage      bool
 	defaultDuration   int
 	defaultRatio      string
 	defaultResolution string
@@ -40,7 +39,6 @@ var modelConfigs = map[string]modelConfig{
 		resolutions:       stringSet("480p", "720p"),
 	},
 	ModelGrokImagineVideo15: {
-		requireImage:      true,
 		defaultDuration:   8,
 		defaultRatio:      "16:9",
 		defaultResolution: "720p",
@@ -48,7 +46,6 @@ var modelConfigs = map[string]modelConfig{
 		resolutions:       stringSet("480p", "720p"),
 	},
 	ModelGrokImagineVideo151080: {
-		requireImage:      true,
 		defaultDuration:   8,
 		defaultRatio:      "16:9",
 		defaultResolution: "1080p",
@@ -121,9 +118,6 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	images := requestImages(req)
 	if len(images) > 1 {
 		return localTaskError(fmt.Errorf("Grok video accepts at most one input image"))
-	}
-	if cfg.requireImage && len(images) != 1 {
-		return localTaskError(fmt.Errorf("model %s requires exactly one input image", req.Model))
 	}
 	duration := requestDuration(req, cfg)
 	if duration < 1 || duration > 15 {

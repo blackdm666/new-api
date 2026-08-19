@@ -2,6 +2,7 @@ package sub2api
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +19,7 @@ import (
 func TestBuildRequestBodyNormalizesCanvasPayload(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{
-		"model":"grok-imagine-video-1.5-1080",
+		"model":"grok-imagine-video-1.5-1080p",
 		"prompt":"animate this",
 		"duration":5,
 		"size":"9:16",
@@ -47,16 +48,18 @@ func TestBuildRequestBodyNormalizesCanvasPayload(t *testing.T) {
 	}`, string(payload))
 }
 
-func TestValidateVideo15RequiresImage(t *testing.T) {
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"model":"grok-imagine-video-1.5","prompt":"test","duration":5}`))
-	c.Request.Header.Set("Content-Type", "application/json")
-	defer common.CleanupBodyStorage(c)
+func TestValidateVideo15AllowsTextToVideo(t *testing.T) {
+	for _, modelName := range []string{ModelGrokImagineVideo15, ModelGrokImagineVideo151080} {
+		t.Run(modelName, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(fmt.Sprintf(`{"model":%q,"prompt":"test","duration":5}`, modelName)))
+			c.Request.Header.Set("Content-Type", "application/json")
+			defer common.CleanupBodyStorage(c)
 
-	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}})
-	require.NotNil(t, taskErr)
-	assert.True(t, taskErr.LocalError)
-	assert.Contains(t, taskErr.Message, "requires exactly one input image")
+			taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}})
+			require.Nil(t, taskErr)
+		})
+	}
 }
 
 func TestValidateGrokVideoDefaultsAndLimits(t *testing.T) {
