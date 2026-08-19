@@ -26,6 +26,7 @@ import type {
   ImageGenerationResponse,
   ModelOption,
   PlaygroundModelMode,
+  PlaygroundModelTransport,
   PlaygroundVideo,
 } from './types'
 
@@ -58,11 +59,15 @@ export async function getUserModels(group: string): Promise<ModelOption[]> {
 
   return data.data.flatMap((item: unknown): ModelOption[] => {
     if (typeof item === 'string') {
-      return [{ label: item, value: item, mode: 'chat' }]
+      return [{ label: item, value: item, mode: 'chat', transport: 'chat' }]
     }
     if (!item || typeof item !== 'object') return []
 
-    const candidate = item as { model?: unknown; mode?: unknown }
+    const candidate = item as {
+      model?: unknown
+      mode?: unknown
+      transport?: unknown
+    }
     if (typeof candidate.model !== 'string') return []
     if (!isPlaygroundModelMode(candidate.mode)) return []
 
@@ -71,9 +76,18 @@ export async function getUserModels(group: string): Promise<ModelOption[]> {
         label: candidate.model,
         value: candidate.model,
         mode: candidate.mode,
+        transport: isPlaygroundModelTransport(candidate.transport)
+          ? candidate.transport
+          : candidate.mode,
       },
     ]
   })
+}
+
+function isPlaygroundModelTransport(
+  value: unknown
+): value is PlaygroundModelTransport {
+  return value === 'chat' || value === 'image' || value === 'video'
 }
 
 function isPlaygroundModelMode(value: unknown): value is PlaygroundModelMode {

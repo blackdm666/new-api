@@ -82,8 +82,9 @@ export function Playground() {
     updateConfig,
   })
 
-  const selectedMode =
-    models.find((model) => model.value === config.model)?.mode ?? 'chat'
+  const selectedModel = models.find((model) => model.value === config.model)
+  const selectedMode = selectedModel?.mode ?? 'chat'
+  const selectedTransport = selectedModel?.transport ?? 'chat'
   const isMediaMode = selectedMode !== 'chat'
   const mediaTest = useMediaTest(config.model, config.group)
   const isGenerating = isMediaMode ? mediaTest.isGenerating : isChatGenerating
@@ -93,7 +94,7 @@ export function Playground() {
       handleSendMessage(text)
       return
     }
-    void mediaTest.run(text, selectedMode, config)
+    void mediaTest.run(text, selectedMode, selectedTransport, config)
   }
 
   const handleStop = () => {

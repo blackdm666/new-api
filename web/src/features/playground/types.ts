@@ -139,11 +139,13 @@ export interface ParameterEnabled {
 
 // Model and group options
 export type PlaygroundModelMode = 'chat' | 'image' | 'video'
+export type PlaygroundModelTransport = 'chat' | 'image' | 'video'
 
 export interface ModelOption {
   label: string
   value: string
   mode: PlaygroundModelMode
+  transport: PlaygroundModelTransport
 }
 
 export interface GroupOption {

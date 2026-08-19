@@ -22,17 +22,20 @@ import { useTranslation } from 'react-i18next'
 import {
   generatePlaygroundImage,
   getPlaygroundVideo,
+  sendChatCompletion,
   submitPlaygroundVideo,
 } from '../api'
 import { ERROR_MESSAGES } from '../constants'
 import {
   getPlaygroundRequestErrorMessage,
+  extractChatImageSources,
   parseRequestErrorDetails,
 } from '../lib'
 import type {
   MediaTestState,
   PlaygroundConfig,
   PlaygroundModelMode,
+  PlaygroundModelTransport,
   PlaygroundVideo,
 } from '../types'
 
@@ -100,6 +103,7 @@ export function useMediaTest(model: string, group: string) {
     async (
       prompt: string,
       mode: Exclude<PlaygroundModelMode, 'chat'>,
+      transport: PlaygroundModelTransport,
       config: PlaygroundConfig
     ) => {
       const generation = generationRef.current + 1
@@ -117,14 +121,28 @@ export function useMediaTest(model: string, group: string) {
 
       try {
         if (mode === 'image') {
-          const response = await generatePlaygroundImage(
-            config.model,
-            config.group,
-            prompt,
-            abortController.signal
-          )
+          const images =
+            transport === 'chat'
+              ? extractChatImageSources(
+                  await sendChatCompletion(
+                    {
+                      model: config.model,
+                      group: config.group,
+                      messages: [{ role: 'user', content: prompt }],
+                      stream: false,
+                    },
+                    abortController.signal
+                  )
+                )
+              : (
+                  await generatePlaygroundImage(
+                    config.model,
+                    config.group,
+                    prompt,
+                    abortController.signal
+                  )
+                ).data.map(imageSource).filter(Boolean)
           if (generationRef.current !== generation) return
-          const images = (response.data ?? []).map(imageSource).filter(Boolean)
           if (images.length === 0) {
             throw new Error(t('Image not available'))
           }

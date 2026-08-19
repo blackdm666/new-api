@@ -731,8 +731,9 @@ func GetUserModels(c *gin.Context) {
 }
 
 type playgroundModelDetail struct {
-	Model string `json:"model"`
-	Mode  string `json:"mode"`
+	Model     string `json:"model"`
+	Mode      string `json:"mode"`
+	Transport string `json:"transport"`
 }
 
 func getPlaygroundModelDetails(models []string, groups []string) []playgroundModelDetail {
@@ -741,23 +742,40 @@ func getPlaygroundModelDetails(models []string, groups []string) []playgroundMod
 		modeImage       = "image"
 		modeVideo       = "video"
 		modeUnsupported = "unsupported"
+		transportChat   = "chat"
+		transportImage  = "image"
+		transportVideo  = "video"
 	)
 
 	// Ensure endpoint metadata is populated before classifying image and
 	// Advanced Custom video routes.
 	model.GetPricing()
 	modes := make(map[string]string, len(models))
+	transports := make(map[string]string, len(models))
 	for _, modelName := range models {
 		modes[modelName] = modeChat
+		transports[modelName] = transportChat
 		for _, endpoint := range model.GetModelSupportEndpointTypes(modelName) {
 			switch endpoint {
 			case constant.EndpointTypeImageGeneration:
 				modes[modelName] = modeImage
+				transports[modelName] = transportImage
 			case constant.EndpointTypeOpenAIVideo:
 				if modes[modelName] != modeImage {
 					modes[modelName] = modeVideo
+					transports[modelName] = transportVideo
 				}
 			}
+		}
+		// Gemini image models generate through Chat Completions, while Grok
+		// image models use the OpenAI Images endpoint. Both still render as
+		// images in the prompt-only Playground.
+		if isPlaygroundChatImageModel(modelName) {
+			modes[modelName] = modeImage
+			transports[modelName] = transportChat
+		} else if isPlaygroundImageEndpointModel(modelName) {
+			modes[modelName] = modeImage
+			transports[modelName] = transportImage
 		}
 	}
 
@@ -782,14 +800,31 @@ func getPlaygroundModelDetails(models []string, groups []string) []playgroundMod
 				continue
 			}
 			modes[ability.Model] = modeVideo
+			transports[ability.Model] = transportVideo
 		}
 	}
 
 	details := make([]playgroundModelDetail, 0, len(models))
 	for _, modelName := range models {
-		details = append(details, playgroundModelDetail{Model: modelName, Mode: modes[modelName]})
+		details = append(details, playgroundModelDetail{
+			Model:     modelName,
+			Mode:      modes[modelName],
+			Transport: transports[modelName],
+		})
 	}
 	return details
+}
+
+func isPlaygroundChatImageModel(modelName string) bool {
+	modelName = strings.ToLower(modelName)
+	return strings.Contains(modelName, "nano-banana") ||
+		(strings.HasPrefix(modelName, "gemini-") &&
+			(strings.Contains(modelName, "-image") || strings.Contains(modelName, "image-generation")))
+}
+
+func isPlaygroundImageEndpointModel(modelName string) bool {
+	modelName = strings.ToLower(modelName)
+	return strings.HasPrefix(modelName, "grok-imagine-image") || modelName == "grok-2-image-1212"
 }
 
 func stringSliceContains(values []string, target string) bool {
