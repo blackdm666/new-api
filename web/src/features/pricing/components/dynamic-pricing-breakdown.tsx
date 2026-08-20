@@ -49,6 +49,12 @@ import {
 type DynamicPricingBreakdownProps = {
   billingExpr: string | null | undefined
   /**
+   * Multiplier applied to every displayed tier price. Usage-log details pass
+   * the effective ratio recorded for that request so the table matches the
+   * actual billing prices. Defaults to 1 for model-pricing views.
+   */
+  groupRatioMultiplier?: number
+  /**
    * Label of the tier that fired for the current request. When provided,
    * the corresponding row is highlighted and tagged as "Matched". Used by
    * the usage-log details dialog to show which tier the engine selected.
@@ -169,6 +175,7 @@ function nextOccurrenceKey(
 
 export function DynamicPricingBreakdown({
   billingExpr,
+  groupRatioMultiplier = 1,
   matchedTierLabel,
   requestRules,
   hideCacheColumns = false,
@@ -209,6 +216,9 @@ export function DynamicPricingBreakdown({
   const normalizedMatchedTierLabel = normalizeTierLabel(
     matchedTierLabel ?? undefined
   )
+  const effectivePriceMultiplier = Number.isFinite(groupRatioMultiplier)
+    ? groupRatioMultiplier
+    : 1
 
   if (!expr) return null
 
@@ -336,7 +346,11 @@ export function DynamicPricingBreakdown({
                             )}
                           >
                             {value > 0
-                              ? `${symbol}${(value * rate).toFixed(4)}`
+                              ? `${symbol}${(
+                                  value *
+                                  rate *
+                                  effectivePriceMultiplier
+                                ).toFixed(4)}`
                               : '-'}
                           </div>
                         </div>
@@ -425,7 +439,11 @@ export function DynamicPricingBreakdown({
                   )
                   return value > 0 ? (
                     <span className={cn(!compact && 'font-semibold')}>
-                      {`${symbol}${(value * rate).toFixed(4)}`}
+                      {`${symbol}${(
+                        value *
+                        rate *
+                        effectivePriceMultiplier
+                      ).toFixed(4)}`}
                     </span>
                   ) : (
                     '-'

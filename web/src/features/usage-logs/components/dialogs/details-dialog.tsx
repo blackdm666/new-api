@@ -48,6 +48,7 @@ import {
   buildBillingBreakdownRows,
   getUsageBillingPathLabel,
 } from '../../lib/billing-breakdown'
+import { getEffectiveGroupRatio } from '../../lib/billing-display'
 import {
   parseLogOther,
   getParamOverrideActionLabel,
@@ -855,6 +856,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
             <DynamicPricingBreakdown
               compact
               billingExpr={decodeBillingExprB64(other.expr_b64)}
+              groupRatioMultiplier={getEffectiveGroupRatio(other)}
               matchedTierLabel={other.matched_tier}
               requestRules={other.request_rules}
               hideCacheColumns={!hasAnyCacheTokens(other)}
