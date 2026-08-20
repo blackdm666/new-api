@@ -416,6 +416,11 @@ func canManageTargetRole(myRole int, targetRole int) bool {
 	return myRole == common.RoleRootUser || myRole > targetRole
 }
 
+type managedUserDetail struct {
+	*model.User
+	InviterUsername string `json:"inviter_username,omitempty"`
+}
+
 func GetUser(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -433,10 +438,21 @@ func GetUser(c *gin.Context) {
 		return
 	}
 	user.AdminPermissions = authz.Capabilities(user.Id, user.Role)
+	responseData := managedUserDetail{User: user}
+	if user.InviterId > 0 {
+		inviter, inviterErr := model.GetUserById(user.InviterId, false)
+		if inviterErr != nil && !errors.Is(inviterErr, gorm.ErrRecordNotFound) {
+			common.ApiError(c, inviterErr)
+			return
+		}
+		if inviterErr == nil {
+			responseData.InviterUsername = inviter.Username
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    user,
+		"data":    responseData,
 	})
 	return
 }

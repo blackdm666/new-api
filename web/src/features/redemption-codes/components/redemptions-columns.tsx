@@ -16,26 +16,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 
 import { MaskedValueDisplay } from '@/components/masked-value-display'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
 import { REDEMPTION_FILTER_EXPIRED, REDEMPTION_STATUSES } from '../constants'
 import { isRedemptionExpired, isTimestampExpired } from '../lib'
-import { type Redemption } from '../types'
+import type { Redemption } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
+import { RedemptionUserLink } from './redemption-user-link'
 
-export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
+export function useRedemptionsColumns(
+  onUserClick: (userId: number) => void
+): ColumnDef<Redemption>[] {
   const { t } = useTranslation()
   return [
     {
@@ -218,36 +216,12 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
         const userId = row.getValue('used_user_id') as number
         const redemption = row.original
 
-        if (userId === 0) {
-          return <span className='text-muted-foreground text-sm'>-</span>
-        }
-
         return (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <StatusBadge
-                  label={t('User {{id}}', { id: userId })}
-                  variant='neutral'
-                  copyable={false}
-                  className='cursor-help'
-                />
-              }
-            ></TooltipTrigger>
-            <TooltipContent>
-              <div className='space-y-1 text-xs'>
-                <div>
-                  {t('User ID:')} {userId}
-                </div>
-                {redemption.redeemed_time > 0 && (
-                  <div>
-                    {t('Redeemed:')}{' '}
-                    {formatTimestampToDate(redemption.redeemed_time)}
-                  </div>
-                )}
-              </div>
-            </TooltipContent>
-          </Tooltip>
+          <RedemptionUserLink
+            userId={userId}
+            redeemedTime={redemption.redeemed_time}
+            onUserClick={onUserClick}
+          />
         )
       },
       size: 140,

@@ -406,12 +406,15 @@ export interface UserInfo {
   id: number
   username: string
   display_name?: string
+  created_at: number
+  last_login_at: number
   quota: number
   used_quota: number
   request_count: number
   group?: string
-  aff_code?: string
-  aff_count?: number
+  inviter_id: number
+  inviter_username?: string
+  aff_count: number
   aff_quota?: number
   remark?: string
 }

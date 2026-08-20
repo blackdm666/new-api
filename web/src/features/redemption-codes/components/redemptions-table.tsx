@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
-import { useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -29,6 +29,7 @@ import {
   useDataTable,
 } from '@/components/data-table'
 import { Input } from '@/components/ui/input'
+import { UserInfoDialog } from '@/components/user-info-dialog'
 import { useDebounce, useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 
@@ -56,9 +57,16 @@ function isDisabledRedemptionRow(redemption: Redemption) {
 
 export function RedemptionsTable() {
   const { t } = useTranslation()
-  const columns = useRedemptionsColumns()
   const { refreshTrigger } = useRedemptions()
   const isMobile = useMediaQuery('(max-width: 640px)')
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
+  const [userInfoDialogOpen, setUserInfoDialogOpen] = useState(false)
+
+  const handleUserClick = useCallback((userId: number) => {
+    setSelectedUserId(userId)
+    setUserInfoDialogOpen(true)
+  }, [])
+  const columns = useRedemptionsColumns(handleUserClick)
 
   const {
     globalFilter,
@@ -176,62 +184,75 @@ export function RedemptionsTable() {
   )
 
   return (
-    <DataTablePage
-      table={table}
-      columns={columns}
-      isLoading={isLoading}
-      isFetching={isFetching}
-      emptyTitle={t('No Redemption Codes Found')}
-      emptyDescription={t(
-        'No redemption codes available. Create your first redemption code to get started.'
-      )}
-      skeletonKeyPrefix='redemptions-skeleton'
-      applyHeaderSize
-      toolbarProps={{
-        searchKey: 'name',
-        searchPlaceholder: t('Filter by name...'),
-        searchDebounceMs: 500,
-        additionalSearch: (
-          <>
-            <Input
-              inputMode='text'
-              autoComplete='off'
-              aria-label={t('Filter by redemption code...')}
-              placeholder={t('Filter by redemption code...')}
-              value={codeFilter}
-              onChange={(event) =>
-                table.getColumn('code')?.setFilterValue(event.target.value)
-              }
-              className='w-full sm:w-[230px] lg:w-[280px]'
-            />
-            <Input
-              inputMode='numeric'
-              autoComplete='off'
-              aria-label={t('Filter by ID...')}
-              placeholder={t('Filter by ID...')}
-              value={idFilter}
-              onChange={(event) =>
-                table.getColumn('id')?.setFilterValue(event.target.value)
-              }
-              className='w-full sm:w-[130px] lg:w-[150px]'
-            />
-          </>
-        ),
-        filters: [
-          {
-            columnId: 'status',
-            title: t('Status'),
-            options: redemptionStatusOptions,
-            singleSelect: true,
-          },
-        ],
-      }}
-      mobile={<RedemptionsMobileList table={table} isLoading={isLoading} />}
-      getRowClassName={(row, { isMobile }) => {
-        if (!isDisabledRedemptionRow(row.original)) return undefined
-        return isMobile ? DISABLED_ROW_MOBILE : DISABLED_ROW_DESKTOP
-      }}
-      bulkActions={<DataTableBulkActions table={table} />}
-    />
+    <>
+      <DataTablePage
+        table={table}
+        columns={columns}
+        isLoading={isLoading}
+        isFetching={isFetching}
+        emptyTitle={t('No Redemption Codes Found')}
+        emptyDescription={t(
+          'No redemption codes available. Create your first redemption code to get started.'
+        )}
+        skeletonKeyPrefix='redemptions-skeleton'
+        applyHeaderSize
+        toolbarProps={{
+          searchKey: 'name',
+          searchPlaceholder: t('Filter by name...'),
+          searchDebounceMs: 500,
+          additionalSearch: (
+            <>
+              <Input
+                inputMode='text'
+                autoComplete='off'
+                aria-label={t('Filter by redemption code...')}
+                placeholder={t('Filter by redemption code...')}
+                value={codeFilter}
+                onChange={(event) =>
+                  table.getColumn('code')?.setFilterValue(event.target.value)
+                }
+                className='w-full sm:w-[230px] lg:w-[280px]'
+              />
+              <Input
+                inputMode='numeric'
+                autoComplete='off'
+                aria-label={t('Filter by ID...')}
+                placeholder={t('Filter by ID...')}
+                value={idFilter}
+                onChange={(event) =>
+                  table.getColumn('id')?.setFilterValue(event.target.value)
+                }
+                className='w-full sm:w-[130px] lg:w-[150px]'
+              />
+            </>
+          ),
+          filters: [
+            {
+              columnId: 'status',
+              title: t('Status'),
+              options: redemptionStatusOptions,
+              singleSelect: true,
+            },
+          ],
+        }}
+        mobile={
+          <RedemptionsMobileList
+            table={table}
+            isLoading={isLoading}
+            onUserClick={handleUserClick}
+          />
+        }
+        getRowClassName={(row, { isMobile }) => {
+          if (!isDisabledRedemptionRow(row.original)) return undefined
+          return isMobile ? DISABLED_ROW_MOBILE : DISABLED_ROW_DESKTOP
+        }}
+        bulkActions={<DataTableBulkActions table={table} />}
+      />
+      <UserInfoDialog
+        userId={selectedUserId}
+        open={userInfoDialogOpen}
+        onOpenChange={setUserInfoDialogOpen}
+      />
+    </>
   )
 }
