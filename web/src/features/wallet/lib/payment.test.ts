@@ -21,6 +21,8 @@ import { describe, expect, test } from 'vitest'
 import { PAYMENT_TYPES } from '../constants'
 import {
   dispatchSelectedPayment,
+  getPaymentMethodDisplayName,
+  isAntomPayment,
   isStripePayment,
   isWaffoPayment,
   isWaffoPancakePayment,
@@ -33,6 +35,26 @@ describe('payment type classification', () => {
     expect(isWaffoPancakePayment(PAYMENT_TYPES.WAFFO_PANCAKE)).toBe(true)
     expect(isWaffoPancakePayment(PAYMENT_TYPES.WAFFO)).toBe(false)
     expect(isStripePayment(PAYMENT_TYPES.STRIPE)).toBe(true)
+    expect(isAntomPayment(PAYMENT_TYPES.ANTOM)).toBe(true)
+  })
+})
+
+describe('payment method display name', () => {
+  test('translates the default Antom name but preserves a custom admin name', () => {
+    const translate = (key: string) => `translated:${key}`
+
+    expect(
+      getPaymentMethodDisplayName(
+        { name: 'Global Wallet Payment', type: PAYMENT_TYPES.ANTOM },
+        translate
+      )
+    ).toBe('translated:Global Wallet Payment')
+    expect(
+      getPaymentMethodDisplayName(
+        { name: '88API Global Pay', type: PAYMENT_TYPES.ANTOM },
+        translate
+      )
+    ).toBe('88API Global Pay')
   })
 })
 
@@ -81,5 +103,25 @@ describe('payment dispatch', () => {
 
     expect(success).toBe(false)
     expect(called).toBe(false)
+  })
+
+  test('routes Antom through the regular processor with its dedicated type', async () => {
+    const calls: string[] = []
+    const success = await dispatchSelectedPayment(
+      { name: 'Global Wallet Payment', type: PAYMENT_TYPES.ANTOM },
+      10,
+      null,
+      {
+        regular: async (amount, paymentType) => {
+          calls.push(`${paymentType}:${amount}`)
+          return true
+        },
+        waffo: async () => false,
+        waffoPancake: async () => false,
+      }
+    )
+
+    expect(success).toBe(true)
+    expect(calls).toEqual(['antom:10'])
   })
 })

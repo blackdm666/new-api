@@ -29,6 +29,8 @@ import type {
   AmountResponse,
   PaymentResponse,
   StripePaymentResponse,
+  AntomPaymentResponse,
+  AntomQueryResponse,
   AffiliateCodeResponse,
   AffiliateTransferResponse,
   InviteeHistoryResponse,
@@ -129,6 +131,32 @@ export async function requestStripePayment(
   request: PaymentRequest
 ): Promise<StripePaymentResponse> {
   const res = await api.post('/api/user/stripe/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Create an Antom hosted checkout session.
+ */
+export async function requestAntomPayment(
+  request: PaymentRequest
+): Promise<AntomPaymentResponse> {
+  const res = await api.post(
+    '/api/user/antom/pay',
+    { amount: request.amount },
+    { skipBusinessError: true } as Record<string, unknown>
+  )
+  return res.data
+}
+
+/**
+ * Synchronize one Antom payment result for the current user.
+ */
+export async function queryAntomPayment(
+  tradeNo: string
+): Promise<AntomQueryResponse> {
+  const res = await api.post('/api/user/antom/query', { trade_no: tradeNo }, {
     skipBusinessError: true,
   } as Record<string, unknown>)
   return res.data

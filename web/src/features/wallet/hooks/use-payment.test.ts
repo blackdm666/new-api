@@ -46,4 +46,20 @@ describe('payment amount routing', () => {
     expect(amount).toBe(18.75)
     expect(calls).toEqual(['waffo:120'])
   })
+
+  test('uses the NewAPI regular amount calculator for Antom', async () => {
+    const calls: string[] = []
+    const amount = await requestPaymentAmount(10, PAYMENT_TYPES.ANTOM, {
+      regular: async (request) => {
+        calls.push(`regular:${request.amount}`)
+        return { success: true, data: '10.00' }
+      },
+      stripe: async () => ({ success: true, data: '0' }),
+      waffo: async () => ({ success: true, data: '0' }),
+      waffoPancake: async () => ({ success: true, data: '0' }),
+    })
+
+    expect(amount).toBe(10)
+    expect(calls).toEqual(['regular:10'])
+  })
 })

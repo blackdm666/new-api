@@ -366,6 +366,16 @@ export type BillingSettings = {
   CreemWebhookSecret: string
   CreemTestMode: boolean
   CreemProducts: string
+  AntomEnabled: boolean
+  AntomDisplayName: string
+  AntomGateway: string
+  AntomClientId: string
+  AntomMerchantPrivateKey: string
+  AntomPublicKey: string
+  AntomMerchantPrivateKeyConfigured: boolean
+  AntomPublicKeyConfigured: boolean
+  AntomNotifyURL: string
+  AntomRedirectURL: string
   WaffoEnabled: boolean
   WaffoApiKey: string
   WaffoPrivateKey: string

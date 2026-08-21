@@ -204,6 +204,14 @@ const BILLING_SECTIONS = [
           CreemWebhookSecret: settings.CreemWebhookSecret,
           CreemTestMode: settings.CreemTestMode,
           CreemProducts: settings.CreemProducts,
+          AntomEnabled: settings.AntomEnabled,
+          AntomDisplayName: settings.AntomDisplayName,
+          AntomGateway: settings.AntomGateway,
+          AntomClientId: settings.AntomClientId,
+          AntomMerchantPrivateKey: settings.AntomMerchantPrivateKey,
+          AntomPublicKey: settings.AntomPublicKey,
+          AntomNotifyURL: settings.AntomNotifyURL,
+          AntomRedirectURL: settings.AntomRedirectURL,
         }}
         waffoDefaultValues={{
           WaffoEnabled: settings.WaffoEnabled ?? false,
@@ -235,6 +243,11 @@ const BILLING_SECTIONS = [
             settings['payment_setting.compliance_terms_version'] ?? '',
           confirmedAt: settings['payment_setting.compliance_confirmed_at'] ?? 0,
           confirmedBy: settings['payment_setting.compliance_confirmed_by'] ?? 0,
+        }}
+        antomCredentialStatus={{
+          privateKeyConfigured:
+            settings.AntomMerchantPrivateKeyConfigured ?? false,
+          publicKeyConfigured: settings.AntomPublicKeyConfigured ?? false,
         }}
       />
     ),

@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -16,6 +17,7 @@ type TopUp struct {
 	UserId          int     `json:"user_id" gorm:"index;index:idx_topups_marketing_audience,priority:3"`
 	Amount          int64   `json:"amount"`
 	Money           float64 `json:"money"`
+	MoneyMinor      int64   `json:"money_minor" gorm:"type:bigint;default:0"`
 	CreditedQuota   int     `json:"credited_quota" gorm:"type:int;default:0"`
 	Currency        string  `json:"currency" gorm:"type:varchar(16);default:''"`
 	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
@@ -32,6 +34,7 @@ const (
 	PaymentMethodWaffo        = "waffo"
 	PaymentMethodWaffoPancake = "waffo_pancake"
 	PaymentMethodBalance      = "balance"
+	PaymentMethodAntom        = "antom"
 )
 
 const (
@@ -41,13 +44,55 @@ const (
 	PaymentProviderWaffo        = "waffo"
 	PaymentProviderWaffoPancake = "waffo_pancake"
 	PaymentProviderBalance      = "balance"
+	PaymentProviderAntom        = "antom"
 )
+
+func isPromotionalTopUpProvider(provider string) bool {
+	return provider == PaymentProviderEpay || provider == PaymentProviderAntom
+}
+
+func validateAntomTopUpPayment(topUp *TopUp, paidAmountMinor int64, currency string) error {
+	if topUp == nil {
+		return ErrTopUpNotFound
+	}
+	if topUp.PaymentProvider != PaymentProviderAntom {
+		return ErrPaymentMethodMismatch
+	}
+	if strings.ToUpper(strings.TrimSpace(topUp.Currency)) != strings.ToUpper(strings.TrimSpace(currency)) {
+		return ErrTopUpCurrencyMismatch
+	}
+	if topUp.MoneyMinor <= 0 || topUp.MoneyMinor != paidAmountMinor {
+		return ErrTopUpAmountMismatch
+	}
+	return nil
+}
+
+// ValidateAntomTopUpPayment verifies the immutable order identity, provider,
+// amount and currency before a non-final notification is acknowledged. The
+// final settlement path repeats these checks while holding the database lock.
+func ValidateAntomTopUpPayment(tradeNo string, paidAmountMinor int64, currency string) error {
+	if strings.TrimSpace(tradeNo) == "" {
+		return ErrTopUpNotFound
+	}
+	if paidAmountMinor <= 0 {
+		return ErrTopUpAmountMismatch
+	}
+	if strings.TrimSpace(currency) == "" {
+		return ErrTopUpCurrencyMismatch
+	}
+	topUp := &TopUp{}
+	if err := DB.Where("trade_no = ?", tradeNo).First(topUp).Error; err != nil {
+		return ErrTopUpNotFound
+	}
+	return validateAntomTopUpPayment(topUp, paidAmountMinor, currency)
+}
 
 var (
 	ErrPaymentMethodMismatch   = errors.New("payment method mismatch")
 	ErrTopUpNotFound           = errors.New("topup not found")
 	ErrTopUpStatusInvalid      = errors.New("topup status invalid")
 	ErrTopUpAmountMismatch     = errors.New("topup paid amount mismatch")
+	ErrTopUpCurrencyMismatch   = errors.New("topup paid currency mismatch")
 	ErrInvalidTopUpQuota       = errors.New("invalid top-up quota")
 	ErrTopUpQuotaLimitExceeded = errors.New("top-up quota limit exceeded")
 )
@@ -253,6 +298,85 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, paidMoney float64,
 
 	common.SysLog(fmt.Sprintf("易支付充值成功 trade_no=%s user_id=%d quota_to_add=%d money=%.2f", topUp.TradeNo, topUp.UserId, quotaToAdd, topUp.Money))
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentProviderEpay)
+	return false, nil
+}
+
+// RechargeAntom atomically completes an Antom order after a signed webhook or
+// inquiry response confirms the exact amount and currency that NewAPI quoted.
+func RechargeAntom(tradeNo string, actualPaymentMethod string, paidAmountMinor int64, currency string, callerIp string) (alreadyDone bool, err error) {
+	if tradeNo == "" {
+		return false, errors.New("未提供支付单号")
+	}
+	if paidAmountMinor <= 0 {
+		return false, errors.New("无效的实付金额")
+	}
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if currency == "" {
+		return false, ErrTopUpCurrencyMismatch
+	}
+
+	refCol := "`trade_no`"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		refCol = `"trade_no"`
+	}
+
+	var quotaToAdd int
+	topUp := &TopUp{}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if validationErr := validateAntomTopUpPayment(topUp, paidAmountMinor, currency); validationErr != nil {
+			return validationErr
+		}
+		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyDone = true
+			tryCreateAffiliateCommissionForTopUpTx(tx, topUp)
+			return nil
+		}
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+
+		quotaToAdd = topUp.CreditedQuota
+		if quotaToAdd <= 0 {
+			var quotaErr error
+			quotaToAdd, quotaErr = common.QuotaFromDecimalStrict(
+				decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+			)
+			if quotaErr != nil || quotaToAdd <= 0 {
+				return ErrInvalidTopUpQuota
+			}
+			topUp.CreditedQuota = quotaToAdd
+		}
+		if actualPaymentMethod != "" {
+			topUp.PaymentMethod = actualPaymentMethod
+		}
+		topUp.Money = decimal.NewFromInt(paidAmountMinor).Div(decimal.NewFromInt(100)).InexactFloat64()
+		topUp.CompleteTime = common.GetTimestamp()
+		topUp.Status = common.TopUpStatusSuccess
+		if err := tx.Save(topUp).Error; err != nil {
+			return err
+		}
+		if err := creditTopUpQuota(tx, topUp.UserId, quotaToAdd, nil); err != nil {
+			return err
+		}
+		tryCreateAffiliateCommissionForTopUpTx(tx, topUp)
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	if attributionErr := AttributeMarketingConversion(topUp); attributionErr != nil {
+		common.SysError("marketing conversion attribution skipped: " + attributionErr.Error())
+	}
+	if alreadyDone {
+		return true, nil
+	}
+
+	syncCreditUserQuotaCache(topUp.UserId, quotaToAdd, "Antom topup")
+	common.SysLog(fmt.Sprintf("Antom充值成功 trade_no=%s user_id=%d quota_to_add=%d money=%.2f currency=%s", topUp.TradeNo, topUp.UserId, quotaToAdd, topUp.Money, topUp.Currency))
+	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用Antom充值成功，充值金额: %v，支付金额：%.2f %s", logger.LogQuota(quotaToAdd), topUp.Money, topUp.Currency), callerIp, topUp.PaymentMethod, PaymentProviderAntom)
 	return false, nil
 }
 

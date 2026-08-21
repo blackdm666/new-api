@@ -191,7 +191,7 @@ export function AffiliateSettingsSection(props: {
                     <FormLabel>{t('Enable top-up commission')}</FormLabel>
                     <FormDescription>
                       {t(
-                        'Create one commission ledger entry when an invited user completes an Epay wallet top-up. Stripe, subscriptions, balance transfers, redemption codes, and manual balance changes are excluded.'
+                        'Create one commission ledger entry when an invited user completes an eligible Epay or Antom wallet top-up. Stripe, subscriptions, balance transfers, redemption codes, and manual balance changes are excluded.'
                       )}
                     </FormDescription>
                   </SettingsSwitchContent>
@@ -217,7 +217,7 @@ export function AffiliateSettingsSection(props: {
                     </FormLabel>
                     <FormDescription>
                       {t(
-                        'When enabled, valid Epay top-up commissions are credited immediately and still appear in the commission ledger. When disabled, new commissions wait for manual review.'
+                        'When enabled, valid wallet top-up commissions are credited immediately and still appear in the commission ledger. When disabled, new commissions wait for manual review.'
                       )}
                     </FormDescription>
                   </SettingsSwitchContent>

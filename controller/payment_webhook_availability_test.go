@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/stretchr/testify/require"
 )
 
@@ -166,4 +167,42 @@ func TestEpayWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 
 	operation_setting.PayMethods = nil
 	require.False(t, isEpayWebhookEnabled())
+}
+
+func TestAntomWebhookEnabledRequiresCompleteConfigAndCurrency(t *testing.T) {
+	confirmPaymentComplianceForTest(t)
+	originalEnabled := setting.AntomEnabled
+	originalGateway := setting.AntomGateway
+	originalClientID := setting.AntomClientId
+	originalPrivateKey := setting.AntomMerchantPrivateKey
+	originalPublicKey := setting.AntomPublicKey
+	originalServerAddress := system_setting.ServerAddress
+	originalDisplayType := operation_setting.GetGeneralSetting().QuotaDisplayType
+	t.Cleanup(func() {
+		setting.AntomEnabled = originalEnabled
+		setting.AntomGateway = originalGateway
+		setting.AntomClientId = originalClientID
+		setting.AntomMerchantPrivateKey = originalPrivateKey
+		setting.AntomPublicKey = originalPublicKey
+		system_setting.ServerAddress = originalServerAddress
+		operation_setting.GetGeneralSetting().QuotaDisplayType = originalDisplayType
+	})
+
+	setting.AntomEnabled = true
+	setting.AntomGateway = setting.DefaultAntomGateway
+	setting.AntomClientId = "SANDBOX_CLIENT"
+	setting.AntomMerchantPrivateKey = "private"
+	setting.AntomPublicKey = "public"
+	system_setting.ServerAddress = "https://merchant.example"
+	operation_setting.GetGeneralSetting().QuotaDisplayType = operation_setting.QuotaDisplayTypeCNY
+	require.True(t, isAntomWebhookEnabled())
+
+	setting.AntomPublicKey = ""
+	require.False(t, isAntomWebhookEnabled())
+	setting.AntomPublicKey = "public"
+	operation_setting.GetGeneralSetting().QuotaDisplayType = operation_setting.QuotaDisplayTypeTokens
+	require.False(t, isAntomWebhookEnabled())
+	operation_setting.GetGeneralSetting().QuotaDisplayType = operation_setting.QuotaDisplayTypeUSD
+	setting.AntomEnabled = false
+	require.False(t, isAntomWebhookEnabled())
 }
