@@ -432,9 +432,19 @@ func localMoneyCents(value float64) int64 {
 	return decimal.NewFromFloat(value).Mul(decimal.NewFromInt(100)).Round(0).IntPart()
 }
 
+func topUpMoneyCents(topUp *TopUp) int64 {
+	if topUp == nil {
+		return 0
+	}
+	if topUp.PaymentProvider == PaymentProviderAntom && topUp.MoneyMinor > 0 {
+		return topUp.MoneyMinor
+	}
+	return localMoneyCents(topUp.Money)
+}
+
 func createAffiliateCommissionForTopUpTx(tx *gorm.DB, topUp *TopUp) (bool, int, error) {
 	policy := getAffiliatePolicy()
-	if !policy.Enabled || topUp == nil || topUp.Id <= 0 || topUp.UserId <= 0 || topUp.Money <= 0 || topUp.Status != common.TopUpStatusSuccess || topUp.PaymentProvider != PaymentProviderEpay {
+	if !policy.Enabled || topUp == nil || topUp.Id <= 0 || topUp.UserId <= 0 || topUp.Money <= 0 || topUp.Status != common.TopUpStatusSuccess || !isPromotionalTopUpProvider(topUp.PaymentProvider) {
 		return false, 0, nil
 	}
 	completedAt := topUp.CompleteTime
@@ -464,7 +474,7 @@ func createAffiliateCommissionForTopUpTx(tx *gorm.DB, topUp *TopUp) (bool, int, 
 		return false, inviter.Id, nil
 	}
 
-	topUpCents := localMoneyCents(topUp.Money)
+	topUpCents := topUpMoneyCents(topUp)
 	if topUpCents <= 0 {
 		return false, 0, nil
 	}
@@ -707,7 +717,7 @@ func CompleteAffiliateCommission(id int, operatorId int, approve bool, reason st
 				}
 				return err
 			}
-			if topUp.Status != common.TopUpStatusSuccess || topUp.PaymentProvider != PaymentProviderEpay || topUp.UserId != record.InviteeId || topUp.TradeNo != record.TradeNo || localMoneyCents(topUp.Money) != record.TopUpAmountCents {
+			if topUp.Status != common.TopUpStatusSuccess || !isPromotionalTopUpProvider(topUp.PaymentProvider) || topUp.UserId != record.InviteeId || topUp.TradeNo != record.TradeNo || topUpMoneyCents(topUp) != record.TopUpAmountCents {
 				return ErrAffiliateTopUpInvalid
 			}
 			record.Status = AffiliateCommissionStatusApproved

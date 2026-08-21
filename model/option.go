@@ -140,6 +140,16 @@ func InitOptionMap() {
 	common.OptionMap["CustomCallbackAddress"] = ""
 	common.OptionMap["EpayId"] = ""
 	common.OptionMap["EpayKey"] = ""
+	common.OptionMap["AntomEnabled"] = strconv.FormatBool(setting.AntomEnabled)
+	common.OptionMap["AntomDisplayName"] = setting.AntomDisplayName
+	common.OptionMap["AntomGateway"] = setting.AntomGateway
+	common.OptionMap["AntomClientId"] = setting.AntomClientId
+	common.OptionMap["AntomMerchantPrivateKey"] = setting.AntomMerchantPrivateKey
+	common.OptionMap["AntomPublicKey"] = setting.AntomPublicKey
+	common.OptionMap["AntomMerchantPrivateKeyConfigured"] = strconv.FormatBool(strings.TrimSpace(setting.AntomMerchantPrivateKey) != "")
+	common.OptionMap["AntomPublicKeyConfigured"] = strconv.FormatBool(strings.TrimSpace(setting.AntomPublicKey) != "")
+	common.OptionMap["AntomNotifyURL"] = setting.AntomNotifyURL
+	common.OptionMap["AntomRedirectURL"] = setting.AntomRedirectURL
 	common.OptionMap["Price"] = strconv.FormatFloat(operation_setting.Price, 'f', -1, 64)
 	common.OptionMap["USDExchangeRate"] = strconv.FormatFloat(operation_setting.USDExchangeRate, 'f', -1, 64)
 	common.OptionMap["MinTopUp"] = strconv.Itoa(operation_setting.MinTopUp)
@@ -675,6 +685,24 @@ func updateOptionMap(key string, value string) (err error) {
 		operation_setting.EpayId = value
 	case "EpayKey":
 		operation_setting.EpayKey = value
+	case "AntomEnabled":
+		setting.AntomEnabled = value == "true"
+	case "AntomDisplayName":
+		setting.AntomDisplayName = value
+	case "AntomGateway":
+		setting.AntomGateway = value
+	case "AntomClientId":
+		setting.AntomClientId = value
+	case "AntomMerchantPrivateKey":
+		setting.AntomMerchantPrivateKey = value
+		common.OptionMap["AntomMerchantPrivateKeyConfigured"] = strconv.FormatBool(strings.TrimSpace(value) != "")
+	case "AntomPublicKey":
+		setting.AntomPublicKey = value
+		common.OptionMap["AntomPublicKeyConfigured"] = strconv.FormatBool(strings.TrimSpace(value) != "")
+	case "AntomNotifyURL":
+		setting.AntomNotifyURL = value
+	case "AntomRedirectURL":
+		setting.AntomRedirectURL = value
 	case "Price":
 		operation_setting.Price, _ = strconv.ParseFloat(value, 64)
 	case "USDExchangeRate":

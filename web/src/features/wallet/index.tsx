@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
 import { useStatus } from '@/hooks/use-status'
@@ -44,6 +45,7 @@ import {
   getMinTopupAmount,
   dispatchSelectedPayment,
 } from './lib'
+import { watchAntomPaymentOnResume } from './lib/antom-resume'
 import type {
   UserWalletData,
   PaymentMethod,
@@ -54,6 +56,7 @@ import type {
 
 interface WalletProps {
   initialShowHistory?: boolean
+  initialAntomTradeNo?: string
 }
 
 export function Wallet(props: WalletProps) {
@@ -75,6 +78,7 @@ export function Wallet(props: WalletProps) {
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
   const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(true)
+  const initialAntomTradeNoRef = useRef<string | null>(null)
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
@@ -92,6 +96,8 @@ export function Wallet(props: WalletProps) {
     processing,
     calculatePaymentAmount,
     processPayment,
+    pendingAntomTradeNo,
+    syncAntomPayment,
   } = usePayment()
   const { redeeming, redeemCode } = useRedemption()
   const { processing: creemProcessing, processCreemPayment } = useCreemPayment()
@@ -118,6 +124,47 @@ export function Wallet(props: WalletProps) {
   useEffect(() => {
     fetchUser()
   }, [fetchUser])
+
+  const refreshAntomStatus = useCallback(
+    async (tradeNo?: string) => {
+      const paymentStatus = await syncAntomPayment(tradeNo)
+      if (paymentStatus === 'success') {
+        toast.success(t('Payment confirmed and balance updated'))
+        await fetchUser()
+      } else if (paymentStatus === 'failed' || paymentStatus === 'expired') {
+        toast.error(t('Payment was not completed'))
+      }
+    },
+    [fetchUser, syncAntomPayment, t]
+  )
+
+  useEffect(() => {
+    if (
+      !props.initialAntomTradeNo ||
+      initialAntomTradeNoRef.current === props.initialAntomTradeNo
+    ) {
+      return
+    }
+    initialAntomTradeNoRef.current = props.initialAntomTradeNo
+    void refreshAntomStatus(props.initialAntomTradeNo)
+    window.history.replaceState({}, '', window.location.pathname)
+  }, [props.initialAntomTradeNo, refreshAntomStatus])
+
+  useEffect(() => {
+    if (!pendingAntomTradeNo) return
+
+    return watchAntomPaymentOnResume({
+      tradeNo: pendingAntomTradeNo,
+      syncPayment: syncAntomPayment,
+      onSuccess: async () => {
+        toast.success(t('Payment confirmed and balance updated'))
+        await fetchUser()
+      },
+      onFailure: () => {
+        toast.error(t('Payment was not completed'))
+      },
+    })
+  }, [fetchUser, pendingAntomTradeNo, syncAntomPayment, t])
 
   useEffect(() => {
     if (props.initialShowHistory) {
@@ -197,7 +244,9 @@ export function Wallet(props: WalletProps) {
 
     if (success) {
       setConfirmDialogOpen(false)
-      await fetchUser()
+      if (selectedPaymentMethod.type !== PAYMENT_TYPES.ANTOM) {
+        await fetchUser()
+      }
     }
   }
 

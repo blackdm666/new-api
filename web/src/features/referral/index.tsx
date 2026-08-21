@@ -163,10 +163,10 @@ export function ReferralProgram() {
                   <p className='text-muted-foreground mt-1 text-sm'>
                     {summaryQuery.data?.auto_approve
                       ? t(
-                          'Invited users earn commission automatically after a successful Epay top-up. Commission is added to your available balance immediately.'
+                          'Invited users earn commission automatically after a successful eligible wallet top-up. Commission is added to your available balance immediately.'
                         )
                       : t(
-                          'Invited users generate pending commission after a successful Epay top-up. Commission is added to your available balance after administrator approval.'
+                          'Invited users generate pending commission after a successful eligible wallet top-up. Commission is added to your available balance after administrator approval.'
                         )}
                   </p>
                 </div>

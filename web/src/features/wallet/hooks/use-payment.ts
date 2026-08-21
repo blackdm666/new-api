@@ -27,15 +27,31 @@ import {
   calculateWaffoPancakeAmount,
   requestPayment,
   requestStripePayment,
+  requestAntomPayment,
+  queryAntomPayment,
   isApiSuccess,
 } from '../api'
 import {
   isStripePayment,
   isWaffoPayment,
   isWaffoPancakePayment,
+  isAntomPayment,
   submitPaymentForm,
 } from '../lib'
-import type { AmountRequest, AmountResponse } from '../types'
+import type { AmountRequest, AmountResponse, TopupStatus } from '../types'
+
+export const antomCheckoutNavigation = {
+  assignCurrent(url: string) {
+    window.location.assign(url)
+  },
+}
+
+export function shouldUseCurrentTabForAntom(userAgent: string) {
+  return (
+    /Safari/i.test(userAgent) &&
+    !/(Chrome|Chromium|CriOS|FxiOS|Edg|OPiOS|Android)/i.test(userAgent)
+  )
+}
 
 // ============================================================================
 // Payment Hook
@@ -83,6 +99,9 @@ export function usePayment() {
   const [amount, setAmount] = useState<number>(0)
   const [calculating, setCalculating] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [pendingAntomTradeNo, setPendingAntomTradeNo] = useState<string | null>(
+    null
+  )
 
   // Calculate payment amount
   const calculatePaymentAmount = useCallback(
@@ -108,11 +127,51 @@ export function usePayment() {
   // Process payment
   const processPayment = useCallback(
     async (topupAmount: number, paymentType: string) => {
+      let checkoutWindow: Window | null = null
       try {
         setProcessing(true)
 
         const isStripe = isStripePayment(paymentType)
+        const isAntom = isAntomPayment(paymentType)
         const amount = Math.floor(topupAmount)
+
+        if (isAntom) {
+          if (!shouldUseCurrentTabForAntom(window.navigator.userAgent)) {
+            checkoutWindow = window.open('', '_blank')
+          }
+          if (checkoutWindow) {
+            checkoutWindow.document.title = i18next.t(
+              'Preparing secure checkout...'
+            )
+            if (checkoutWindow.document.body) {
+              checkoutWindow.document.body.textContent = i18next.t(
+                'Preparing secure checkout...'
+              )
+            }
+          }
+          const response = await requestAntomPayment({
+            amount,
+            payment_method: paymentType,
+          })
+          if (
+            !isApiSuccess(response) ||
+            !response.data?.normal_url ||
+            !response.data.trade_no
+          ) {
+            checkoutWindow?.close()
+            toast.error(response.message || i18next.t('Payment request failed'))
+            return false
+          }
+          setPendingAntomTradeNo(response.data.trade_no)
+          if (checkoutWindow && !checkoutWindow.closed) {
+            checkoutWindow.opener = null
+            checkoutWindow.location.replace(response.data.normal_url)
+          } else {
+            antomCheckoutNavigation.assignCurrent(response.data.normal_url)
+          }
+          toast.success(i18next.t('Redirecting to payment page...'))
+          return true
+        }
 
         const response = isStripe
           ? await requestStripePayment({
@@ -129,14 +188,12 @@ export function usePayment() {
           return false
         }
 
-        // Handle Stripe payment
         if (isStripe && response.data?.pay_link) {
           window.open(response.data.pay_link as string, '_blank')
           toast.success(i18next.t('Redirecting to payment page...'))
           return true
         }
 
-        // Handle non-Stripe payment
         if (!isStripe && response.data) {
           const url = (response as unknown as { url?: string }).url
           if (url) {
@@ -148,6 +205,7 @@ export function usePayment() {
 
         return false
       } catch {
+        checkoutWindow?.close()
         toast.error(i18next.t('Payment request failed'))
         return false
       } finally {
@@ -157,12 +215,36 @@ export function usePayment() {
     []
   )
 
+  const syncAntomPayment = useCallback(
+    async (tradeNo?: string): Promise<TopupStatus | null> => {
+      const targetTradeNo = tradeNo || pendingAntomTradeNo
+      if (!targetTradeNo) return null
+
+      try {
+        const response = await queryAntomPayment(targetTradeNo)
+        if (!isApiSuccess(response) || !response.data) {
+          return null
+        }
+        const status = response.data.status
+        if (status !== 'pending') {
+          setPendingAntomTradeNo(null)
+        }
+        return status
+      } catch {
+        return null
+      }
+    },
+    [pendingAntomTradeNo]
+  )
+
   return {
     amount,
     calculating,
     processing,
     calculatePaymentAmount,
     processPayment,
+    pendingAntomTradeNo,
+    syncAntomPayment,
     setAmount,
   }
 }

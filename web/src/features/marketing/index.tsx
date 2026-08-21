@@ -1337,7 +1337,7 @@ function dateInputToTimestamp(value: string) {
 function automationDescription(scene: string): string {
   const descriptions: Record<string, string> = {
     single_topup_winback:
-      'Users with exactly one Epay top-up and no repeat top-up for 30 days.',
+      'Users with exactly one eligible wallet top-up and no repeat top-up for 30 days.',
     paid_low_balance:
       'Paying users whose displayed balance falls to 1.0 or below.',
     trial_low_balance:

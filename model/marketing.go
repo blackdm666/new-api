@@ -520,7 +520,7 @@ func ListMarketingAudience(rule MarketingAudienceRule, limit int, offset int) ([
 	}
 	topUpStats := DB.Model(&TopUp{}).
 		Select("user_id, COUNT(*) AS top_up_count, MAX(complete_time) AS last_top_up_time, MAX(id) AS last_top_up_id").
-		Where("status = ? AND payment_provider = ?", common.TopUpStatusSuccess, PaymentProviderEpay).
+		Where("status = ? AND payment_provider IN ?", common.TopUpStatusSuccess, []string{PaymentProviderEpay, PaymentProviderAntom}).
 		Group("user_id")
 	query := DB.Table("users").
 		Select("users.id, users.username, users.email, users.setting, users.quota, users.used_quota, users.created_at, users.last_login_at, COALESCE(marketing_topups.top_up_count, 0) AS top_up_count, COALESCE(marketing_topups.last_top_up_time, 0) AS last_top_up_time, COALESCE(marketing_topups.last_top_up_id, 0) AS last_top_up_id").
@@ -794,7 +794,7 @@ func RecordMarketingClick(recipient *MarketingRecipient) error {
 }
 
 func AttributeMarketingConversionTx(tx *gorm.DB, topUp *TopUp) error {
-	if tx == nil || topUp == nil || topUp.Id <= 0 || topUp.UserId <= 0 || topUp.Status != common.TopUpStatusSuccess || topUp.PaymentProvider != PaymentProviderEpay {
+	if tx == nil || topUp == nil || topUp.Id <= 0 || topUp.UserId <= 0 || topUp.Status != common.TopUpStatusSuccess || !isPromotionalTopUpProvider(topUp.PaymentProvider) {
 		return nil
 	}
 	recipient := &MarketingRecipient{}
@@ -812,7 +812,7 @@ func AttributeMarketingConversionTx(tx *gorm.DB, topUp *TopUp) error {
 	if recipient.ConvertedTime > 0 {
 		return nil
 	}
-	event := &MarketingEvent{EventKey: "conversion:topup:" + strconv.Itoa(topUp.Id), CampaignId: recipient.CampaignId, RecipientId: recipient.Id, UserId: topUp.UserId, EventType: MarketingEventConversion, TopUpId: topUp.Id, AmountCents: localMoneyCents(topUp.Money), CreatedTime: topUp.CompleteTime}
+	event := &MarketingEvent{EventKey: "conversion:topup:" + strconv.Itoa(topUp.Id), CampaignId: recipient.CampaignId, RecipientId: recipient.Id, UserId: topUp.UserId, EventType: MarketingEventConversion, TopUpId: topUp.Id, AmountCents: topUpMoneyCents(topUp), CreatedTime: topUp.CompleteTime}
 	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(event)
 	if result.Error != nil || result.RowsAffected == 0 {
 		return result.Error
