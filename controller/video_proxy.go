@@ -55,6 +55,26 @@ func VideoProxy(c *gin.Context) {
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+
+	if reader, mimeType, cached, cacheErr := service.OpenTaskVideoCache(ctx, task); cached && cacheErr == nil {
+		defer reader.Close()
+		c.Writer.Header().Set("Content-Type", mimeType)
+		c.Writer.Header().Set("Content-Disposition", "inline")
+		c.Writer.Header().Set("Cache-Control", "private, max-age=86400")
+		c.Writer.Header().Set("X-Video-Cache", "HIT")
+		c.Writer.WriteHeader(http.StatusOK)
+		if _, copyErr := io.Copy(c.Writer, reader); copyErr != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream cached video for task %s: %s", taskID, copyErr.Error()))
+		}
+		return
+	} else if cached && cacheErr != nil {
+		// A transient object-storage problem should not make a completed task
+		// unreadable. Fall back to the existing provider proxy path.
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to read cached video for task %s, falling back upstream: %s", taskID, cacheErr.Error()))
+	}
+
 	channel, err := model.CacheGetChannel(task.ChannelId)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to get channel for task %s: %s", taskID, err.Error()))
@@ -80,8 +100,6 @@ func VideoProxy(c *gin.Context) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "", nil)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to create request: %s", err.Error()))

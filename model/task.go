@@ -101,9 +101,12 @@ func (m Properties) Value() (driver.Value, error) {
 }
 
 type TaskPrivateData struct {
-	Key            string `json:"key,omitempty"`
-	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
-	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	Key               string `json:"key,omitempty"`
+	UpstreamTaskID    string `json:"upstream_task_id,omitempty"`    // 上游真实 task ID
+	ResultURL         string `json:"result_url,omitempty"`          // 任务成功后的结果 URL（视频地址等）
+	ResultStorageKind string `json:"result_storage_kind,omitempty"` // 成品缓存后端（当前为 s3，可兼容 R2）
+	ResultStorageKey  string `json:"result_storage_key,omitempty"`  // 成品缓存对象键
+	ResultMimeType    string `json:"result_mime_type,omitempty"`    // 成品 MIME 类型
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
 	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
 	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
@@ -371,13 +374,16 @@ func (Task *Task) Insert() error {
 }
 
 type taskSnapshot struct {
-	Status     TaskStatus
-	Progress   string
-	StartTime  int64
-	FinishTime int64
-	FailReason string
-	ResultURL  string
-	Data       json.RawMessage
+	Status            TaskStatus
+	Progress          string
+	StartTime         int64
+	FinishTime        int64
+	FailReason        string
+	ResultURL         string
+	ResultStorageKind string
+	ResultStorageKey  string
+	ResultMimeType    string
+	Data              json.RawMessage
 }
 
 func (s taskSnapshot) Equal(other taskSnapshot) bool {
@@ -387,18 +393,24 @@ func (s taskSnapshot) Equal(other taskSnapshot) bool {
 		s.FinishTime == other.FinishTime &&
 		s.FailReason == other.FailReason &&
 		s.ResultURL == other.ResultURL &&
+		s.ResultStorageKind == other.ResultStorageKind &&
+		s.ResultStorageKey == other.ResultStorageKey &&
+		s.ResultMimeType == other.ResultMimeType &&
 		bytes.Equal(s.Data, other.Data)
 }
 
 func (t *Task) Snapshot() taskSnapshot {
 	return taskSnapshot{
-		Status:     t.Status,
-		Progress:   t.Progress,
-		StartTime:  t.StartTime,
-		FinishTime: t.FinishTime,
-		FailReason: t.FailReason,
-		ResultURL:  t.PrivateData.ResultURL,
-		Data:       t.Data,
+		Status:            t.Status,
+		Progress:          t.Progress,
+		StartTime:         t.StartTime,
+		FinishTime:        t.FinishTime,
+		FailReason:        t.FailReason,
+		ResultURL:         t.PrivateData.ResultURL,
+		ResultStorageKind: t.PrivateData.ResultStorageKind,
+		ResultStorageKey:  t.PrivateData.ResultStorageKey,
+		ResultMimeType:    t.PrivateData.ResultMimeType,
+		Data:              t.Data,
 	}
 }
 

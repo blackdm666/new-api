@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,9 +13,9 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
-	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -391,7 +392,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	)
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
-	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
+	if realtimeResp := tryRealtimeFetch(c.Request.Context(), originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
 		respBody = realtimeResp
 		return
 	}
@@ -430,7 +431,10 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 // tryRealtimeFetch 尝试从上游实时拉取 Gemini/Vertex 任务状态。
 // 仅当渠道类型为 Gemini 或 Vertex 时触发；其他渠道或出错时返回 nil。
 // 当非 OpenAI Video API 时，还会构建自定义格式的响应体。
-func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
+func tryRealtimeFetch(ctx context.Context, task *model.Task, isOpenAIVideoAPI bool) []byte {
+	if task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
+		return nil
+	}
 	channelModel, err := model.GetChannelById(task.ChannelId, true)
 	if err != nil {
 		return nil
@@ -449,7 +453,11 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		return nil
 	}
 
-	resp, err := adaptor.FetchTask(baseURL, channelModel.Key, map[string]any{
+	key := channelModel.Key
+	if task.PrivateData.Key != "" {
+		key = task.PrivateData.Key
+	}
+	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
 	}, proxy)
@@ -467,26 +475,9 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		return nil
 	}
 
-	snap := task.Snapshot()
-
-	// 将上游最新状态更新到 task
-	if ti.Status != "" {
-		task.Status = model.TaskStatus(ti.Status)
-	}
-	if ti.Progress != "" {
-		task.Progress = ti.Progress
-	}
-	if strings.HasPrefix(ti.Url, "data:") {
-		// data: URI — kept in Data, not ResultURL
-	} else if ti.Url != "" {
-		task.PrivateData.ResultURL = ti.Url
-	} else if task.Status == model.TaskStatusSuccess {
-		// No URL from adaptor — construct proxy URL using public task ID
-		task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
-	}
-
-	if !snap.Equal(task.Snapshot()) {
-		_, _ = task.UpdateWithStatus(snap.Status)
+	if err := service.FinalizeVideoTaskResult(ctx, adaptor, task, ti, body); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("Realtime task finalization failed for task %s: %v", task.TaskID, err))
+		return nil
 	}
 
 	// OpenAI Video API 由调用者的 ConvertToOpenAIVideo 分支处理

@@ -130,6 +130,51 @@ func (a *taskPollingFetchAdaptor) fetchedTaskIDs() []string {
 	return append([]string(nil), a.taskIDs...)
 }
 
+func TestFinalizeVideoTaskResultFailureRefundsExactlyOnce(t *testing.T) {
+	truncate(t)
+	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "false")
+	const userID, tokenID, channelID = 71, 71, 71
+	const initialQuota, chargedQuota, tokenRemain = 10_000, 900, 5_000
+	seedUser(t, userID, initialQuota)
+	seedToken(t, tokenID, userID, "sk-vertex", tokenRemain)
+	seedChannel(t, channelID)
+	seedChargedAccounting(t, userID, channelID, tokenID, chargedQuota, 1)
+	task := makeTask(userID, channelID, chargedQuota, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_vertex_realtime_failure"
+	require.NoError(t, model.DB.Create(task).Error)
+	result := &relaycommon.TaskInfo{Status: model.TaskStatusFailure, Reason: "vertex operation failed"}
+
+	require.NoError(t, FinalizeVideoTaskResult(context.Background(), &taskPollingFetchAdaptor{}, task, result, []byte(`{"status":"FAILURE"}`)))
+	assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), task.Status)
+	assert.Equal(t, "100%", task.Progress)
+	assert.NotZero(t, task.FinishTime)
+	assert.Zero(t, task.Quota)
+	assert.Equal(t, initialQuota+chargedQuota, getUserQuota(t, userID))
+	assert.Equal(t, int64(1), countLogs(t))
+
+	// A second request-time refresh of the same terminal result must not refund
+	// or write another billing log.
+	require.NoError(t, FinalizeVideoTaskResult(context.Background(), &taskPollingFetchAdaptor{}, task, result, []byte(`{"status":"FAILURE"}`)))
+	assert.Equal(t, initialQuota+chargedQuota, getUserQuota(t, userID))
+	assert.Equal(t, int64(1), countLogs(t))
+}
+
+func TestFinalizeVideoTaskResultSuccessPersistsFinishTime(t *testing.T) {
+	truncate(t)
+	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "false")
+	task := &model.Task{TaskID: "task_vertex_realtime_success", Status: model.TaskStatusInProgress, Progress: "50%"}
+	require.NoError(t, model.DB.Create(task).Error)
+
+	require.NoError(t, FinalizeVideoTaskResult(context.Background(), &taskPollingFetchAdaptor{}, task, &relaycommon.TaskInfo{Status: model.TaskStatusSuccess, Url: "https://cdn.example/video.mp4"}, []byte(`{"status":"SUCCESS"}`)))
+
+	var stored model.Task
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), stored.Status)
+	assert.Equal(t, "100%", stored.Progress)
+	assert.NotZero(t, stored.FinishTime)
+	assert.Equal(t, "https://cdn.example/video.mp4", stored.GetResultURL())
+}
+
 func seedTaskPollingChannel(t *testing.T, id int, disableSleep bool) {
 	t.Helper()
 	ch := &model.Channel{
