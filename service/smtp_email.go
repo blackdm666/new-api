@@ -23,7 +23,7 @@ func SendSMTPTestEmail(userId int, requestedRecipient string, requestedChannel s
 	if channel == "" {
 		channel = common.SMTPChannelPrimary
 	}
-	if channel != common.SMTPChannelPrimary && channel != common.SMTPChannelBackup {
+	if channel != common.SMTPChannelPrimary && channel != common.SMTPChannelBackup && channel != common.SMTPChannelSecurity && channel != common.SMTPChannelMarketing {
 		return "", common.SMTPDeliveryResult{}, ErrSMTPTestChannelInvalid
 	}
 
@@ -57,6 +57,16 @@ func SendSMTPTestEmail(userId int, requestedRecipient string, requestedChannel s
 	if channel == common.SMTPChannelBackup {
 		if err := model.UpdateOption("SMTPBackupEnabled", "true"); err != nil {
 			return "", common.SMTPDeliveryResult{}, fmt.Errorf("activate backup SMTP channel: %w", err)
+		}
+	}
+	if channel == common.SMTPChannelSecurity {
+		if err := model.UpdateOption("SMTPSecurityEnabled", "true"); err != nil {
+			return "", common.SMTPDeliveryResult{}, fmt.Errorf("activate security SMTP channel: %w", err)
+		}
+	}
+	if channel == common.SMTPChannelMarketing {
+		if err := model.UpdateOption("SMTPMarketingEnabled", "true"); err != nil {
+			return "", common.SMTPDeliveryResult{}, fmt.Errorf("activate marketing SMTP channel: %w", err)
 		}
 	}
 	return recipient, result, nil

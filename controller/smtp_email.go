@@ -45,6 +45,7 @@ func TestSMTPEmail(c *gin.Context) {
 
 	common.ApiSuccess(c, gin.H{
 		"recipient": recipient,
+		"profile":   result.Profile,
 		"channel":   result.Channel,
 	})
 }

@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -108,6 +109,45 @@ func TestWriteEmailMessageUsesConfiguredSystemNameAsSender(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, message.String(), `From: "88API" <api@88fk.org>`)
 	require.NotContains(t, message.String(), "YMeng CC")
+}
+
+func TestSecuritySMTPProfileUsesDedicatedSenderAndMultipartAlternative(t *testing.T) {
+	withSMTPSettings(t)
+	server := newFakeSMTPServer(t)
+	defer server.close()
+
+	SMTPSecurityEnabled = true
+	SMTPSecurityServer = server.host
+	SMTPSecurityPort = server.port
+	SMTPSecurityAccount = "security@example.com"
+	SMTPSecurityFrom = "security@example.com"
+	SMTPSecurityToken = ""
+	SystemName = "New API"
+	t.Cleanup(func() {
+		SMTPSecurityEnabled = false
+		SMTPSecurityServer = ""
+		SMTPSecurityPort = 587
+		SMTPSecurityAccount = ""
+		SMTPSecurityFrom = ""
+		SMTPSecurityToken = ""
+	})
+
+	result, err := SendEmailWithProfileResult(SMTPProfileSecurity, "Verification", "receiver@example.com", "<p>Your code is <strong>123456</strong></p>")
+	require.NoError(t, err)
+	assert.Equal(t, SMTPProfileSecurity, result.Profile)
+	assert.Equal(t, SMTPChannelSecurity, result.Channel)
+	assert.NotEmpty(t, result.MessageID)
+
+	select {
+	case message := <-server.messages:
+		assert.Contains(t, message, `<security@example.com>`)
+		assert.Contains(t, message, "Content-Type: multipart/alternative")
+		assert.Contains(t, message, "Content-Type: text/plain; charset=UTF-8")
+		assert.Contains(t, message, "Content-Type: text/html; charset=UTF-8")
+		assert.Contains(t, message, "Your code is 123456")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for security SMTP DATA")
+	}
 }
 
 func newFakeSMTPServer(t *testing.T) *fakeSMTPServer {

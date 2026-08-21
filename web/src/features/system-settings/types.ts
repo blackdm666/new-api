@@ -44,7 +44,8 @@ export type SMTPTestResponse = {
   message: string
   data?: {
     recipient: string
-    channel: 'primary' | 'backup'
+    profile: 'security' | 'notification' | 'marketing'
+    channel: 'security' | 'primary' | 'marketing' | 'backup'
   }
 }
 
@@ -427,6 +428,26 @@ export type OperationsSettings = {
   SMTPBackupStartTLSEnabled: boolean
   SMTPBackupInsecureSkipVerify: boolean
   SMTPBackupForceAuthLogin: boolean
+  SMTPSecurityEnabled: boolean
+  SMTPSecurityServer: string
+  SMTPSecurityPort: string
+  SMTPSecurityAccount: string
+  SMTPSecurityFrom: string
+  SMTPSecurityToken: string
+  SMTPSecuritySSLEnabled: boolean
+  SMTPSecurityStartTLSEnabled: boolean
+  SMTPSecurityInsecureSkipVerify: boolean
+  SMTPSecurityForceAuthLogin: boolean
+  SMTPMarketingEnabled: boolean
+  SMTPMarketingServer: string
+  SMTPMarketingPort: string
+  SMTPMarketingAccount: string
+  SMTPMarketingFrom: string
+  SMTPMarketingToken: string
+  SMTPMarketingSSLEnabled: boolean
+  SMTPMarketingStartTLSEnabled: boolean
+  SMTPMarketingInsecureSkipVerify: boolean
+  SMTPMarketingForceAuthLogin: boolean
   InvoiceApplicationNotifyAdminEnabled: boolean
   InvoiceIssuedNotifyUserEnabled: boolean
   InvoiceAdminEmail: string

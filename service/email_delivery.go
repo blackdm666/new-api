@@ -16,6 +16,17 @@ const (
 	emailDeliveryLease    = 10 * time.Minute
 )
 
+func smtpProfileForCategory(category string) string {
+	switch strings.TrimSpace(category) {
+	case "email_verification", "password_reset":
+		return common.SMTPProfileSecurity
+	case "marketing_custom", "email_preview":
+		return common.SMTPProfileMarketing
+	default:
+		return common.SMTPProfileNotification
+	}
+}
+
 func StartEmailDelivery() {
 	if !common.IsMasterNode {
 		return
@@ -39,6 +50,7 @@ func QueueSystemEmail(deliveryKey string, category string, relatedId int, userId
 	delivery, created, err := model.EnqueueEmailDelivery(&model.EmailDelivery{
 		DeliveryKey: deliveryKey,
 		Category:    category,
+		SMTPProfile: smtpProfileForCategory(category),
 		RelatedId:   relatedId,
 		UserId:      userId,
 		Recipient:   strings.TrimSpace(recipient),
@@ -65,6 +77,7 @@ func QueueMarketingEmail(deliveryKey string, category string, relatedId int, use
 	delivery, _, err := model.EnqueueMarketingEmailDelivery(&model.EmailDelivery{
 		DeliveryKey: deliveryKey,
 		Category:    category,
+		SMTPProfile: common.SMTPProfileMarketing,
 		RelatedId:   relatedId,
 		UserId:      userId,
 		Recipient:   recipient,
@@ -99,6 +112,9 @@ func deliverDueSystemEmails() {
 }
 
 func deliverSystemEmail(delivery *model.EmailDelivery) {
+	if strings.TrimSpace(delivery.SMTPProfile) == "" {
+		delivery.SMTPProfile = smtpProfileForCategory(delivery.Category)
+	}
 	allowed, err := marketingEmailDeliveryAllowed(delivery)
 	if err != nil {
 		common.SysError(fmt.Sprintf("failed to validate email delivery %d: %s", delivery.Id, err.Error()))
@@ -115,13 +131,14 @@ func deliverSystemEmail(delivery *model.EmailDelivery) {
 		}
 		return
 	}
+	result := common.SMTPDeliveryResult{Profile: delivery.SMTPProfile}
 	if delivery.InvoiceDeliveryId > 0 {
 		err = sendInvoiceEmailDelivery(delivery)
 	} else {
-		err = common.SendEmail(delivery.Subject, delivery.Recipient, delivery.Body)
+		result, err = common.SendEmailWithProfileResult(delivery.SMTPProfile, delivery.Subject, delivery.Recipient, delivery.Body)
 	}
 	if err == nil {
-		if completeErr := model.CompleteEmailDelivery(delivery.Id); completeErr != nil {
+		if completeErr := model.CompleteEmailDelivery(delivery.Id, result.Profile, result.Channel, result.MessageID); completeErr != nil {
 			common.SysError(fmt.Sprintf("failed to complete email delivery %d: %s", delivery.Id, completeErr.Error()))
 			return
 		}

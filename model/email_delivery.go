@@ -84,6 +84,9 @@ type EmailDelivery struct {
 	Id                 int    `json:"id"`
 	DeliveryKey        string `json:"delivery_key" gorm:"type:varchar(160);uniqueIndex;not null"`
 	Category           string `json:"category" gorm:"type:varchar(48);not null;index"`
+	SMTPProfile        string `json:"smtp_profile" gorm:"type:varchar(24);not null;default:'notification';index"`
+	SMTPChannel        string `json:"smtp_channel" gorm:"type:varchar(24);not null;default:'';index"`
+	MessageID          string `json:"message_id" gorm:"column:message_id;type:varchar(191);not null;default:'';index"`
 	RelatedId          int    `json:"related_id" gorm:"index"`
 	UserId             int    `json:"user_id" gorm:"index"`
 	InvoiceDeliveryId  int    `json:"invoice_delivery_id" gorm:"index"`
@@ -131,6 +134,10 @@ func enqueueEmailDelivery(tx *gorm.DB, delivery *EmailDelivery) (*EmailDelivery,
 	}
 	delivery.DeliveryKey = strings.TrimSpace(delivery.DeliveryKey)
 	delivery.Category = strings.TrimSpace(delivery.Category)
+	delivery.SMTPProfile = strings.TrimSpace(delivery.SMTPProfile)
+	if delivery.SMTPProfile == "" {
+		delivery.SMTPProfile = "notification"
+	}
 	delivery.Recipient = strings.TrimSpace(delivery.Recipient)
 	if delivery.DeliveryKey == "" || delivery.Category == "" || delivery.Recipient == "" || strings.TrimSpace(delivery.Subject) == "" || strings.TrimSpace(delivery.Body) == "" {
 		return nil, false, gorm.ErrInvalidData
@@ -269,7 +276,19 @@ func reserveMarketingEmailQuotaTx(tx *gorm.DB, delivery *EmailDelivery, dayStart
 	return result.RowsAffected == 1, result.Error
 }
 
-func CompleteEmailDelivery(id int) error {
+func CompleteEmailDelivery(id int, smtpMetadata ...string) error {
+	smtpProfile := ""
+	smtpChannel := ""
+	messageID := ""
+	if len(smtpMetadata) > 0 {
+		smtpProfile = smtpMetadata[0]
+	}
+	if len(smtpMetadata) > 1 {
+		smtpChannel = smtpMetadata[1]
+	}
+	if len(smtpMetadata) > 2 {
+		messageID = smtpMetadata[2]
+	}
 	now := common.GetTimestamp()
 	return DB.Transaction(func(tx *gorm.DB) error {
 		delivery := &EmailDelivery{}
@@ -290,6 +309,9 @@ func CompleteEmailDelivery(id int) error {
 			"locked_until":      int64(0),
 			"next_attempt_time": now,
 			"delivered_time":    now,
+			"smtp_profile":      strings.TrimSpace(smtpProfile),
+			"smtp_channel":      strings.TrimSpace(smtpChannel),
+			"message_id":        strings.TrimSpace(messageID),
 			"dead_letter_time":  int64(0),
 			"updated_time":      now,
 		}).Error; err != nil {
@@ -490,7 +512,7 @@ func ListEmailDeliveries(options EmailDeliveryQueryOptions, pageInfo *common.Pag
 		return nil, 0, err
 	}
 	rows := []*EmailDeliveryListItem{}
-	if err := query.Select("id, category, related_id, user_id, invoice_delivery_id, recipient, recipient_masked, priority, attempts, last_error, next_attempt_time, locked_until, expires_time, delivered_time, dead_letter_time, expired_time, created_time, updated_time").Order("id DESC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&rows).Error; err != nil {
+	if err := query.Select("id, category, smtp_profile, smtp_channel, message_id, related_id, user_id, invoice_delivery_id, recipient, recipient_masked, priority, attempts, last_error, next_attempt_time, locked_until, expires_time, delivered_time, dead_letter_time, expired_time, created_time, updated_time").Order("id DESC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	for _, row := range rows {

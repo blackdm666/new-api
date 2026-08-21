@@ -49,7 +49,7 @@ export async function updateSystemOption(request: UpdateOptionRequest) {
 
 export async function testSMTPEmail(
   email: string,
-  channel: 'primary' | 'backup'
+  channel: 'security' | 'primary' | 'marketing' | 'backup'
 ) {
   const res = await api.post<SMTPTestResponse>(
     '/api/option/smtp-test',

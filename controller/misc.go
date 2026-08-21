@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -297,14 +298,27 @@ func SendEmailVerification(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
 		return
 	}
-	code := common.GenerateVerificationCode(6)
-	common.RegisterVerificationCodeWithKey(email, code, common.EmailVerificationPurpose)
-	subject, content := service.BuildAccountVerificationEmail(i18n.GetLangFromContext(c), code)
-	_, err := service.QueueSystemEmail("email-verification:"+common.NewRequestId(), "email_verification", 0, 0, email, subject, content, common.GetTimestamp()+int64(common.VerificationValidMinutes*60))
+	reserved, err := common.ReserveVerificationSend(email, common.EmailVerificationPurpose, common.VerificationResendCooldownSeconds*time.Second)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	if !reserved {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"success": false,
+			"message": "验证码发送过于频繁，请稍后重试",
+		})
+		return
+	}
+	code := common.GenerateVerificationCode(6)
+	subject, content := service.BuildAccountVerificationEmail(i18n.GetLangFromContext(c), code)
+	_, err = service.QueueSystemEmail("email-verification:"+common.NewRequestId(), "email_verification", 0, 0, email, subject, content, common.GetTimestamp()+int64(common.VerificationValidMinutes*60))
+	if err != nil {
+		common.ReleaseVerificationSend(email, common.EmailVerificationPurpose)
+		common.ApiError(c, err)
+		return
+	}
+	common.RegisterVerificationCodeWithKey(email, code, common.EmailVerificationPurpose)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

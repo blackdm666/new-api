@@ -47,6 +47,26 @@ const settings: EmailFormValues = {
   SMTPBackupStartTLSEnabled: false,
   SMTPBackupInsecureSkipVerify: false,
   SMTPBackupForceAuthLogin: false,
+  SMTPSecurityEnabled: false,
+  SMTPSecurityServer: 'smtp.security.example',
+  SMTPSecurityPort: '465',
+  SMTPSecurityAccount: 'security@example.com',
+  SMTPSecurityFrom: 'security@example.com',
+  SMTPSecurityToken: '',
+  SMTPSecuritySSLEnabled: true,
+  SMTPSecurityStartTLSEnabled: false,
+  SMTPSecurityInsecureSkipVerify: false,
+  SMTPSecurityForceAuthLogin: false,
+  SMTPMarketingEnabled: false,
+  SMTPMarketingServer: 'smtp.marketing.example',
+  SMTPMarketingPort: '465',
+  SMTPMarketingAccount: 'marketing@example.com',
+  SMTPMarketingFrom: 'marketing@example.com',
+  SMTPMarketingToken: '',
+  SMTPMarketingSSLEnabled: true,
+  SMTPMarketingStartTLSEnabled: false,
+  SMTPMarketingInsecureSkipVerify: false,
+  SMTPMarketingForceAuthLogin: false,
 }
 
 function renderSection() {
@@ -72,6 +92,39 @@ describe('SMTP settings', () => {
     expect(screen.getByText('Pending test')).toBeInTheDocument()
   })
 
+  test('tests the dedicated security profile from the default tab', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue({
+      data: {
+        success: true,
+        message: '',
+        data: {
+          recipient: 'admin@example.com',
+          profile: 'security',
+          channel: 'security',
+        },
+      },
+    })
+    renderSection()
+
+    expect(screen.getByRole('tab', { name: 'Security mail' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(screen.getByRole('textbox', { name: 'From Address' })).toHaveValue(
+      'security@example.com'
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Test and enable selected profile' })
+    )
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+    expect(post).toHaveBeenCalledWith(
+      '/api/option/smtp-test',
+      { email: '', channel: 'security' },
+      expect.any(Object)
+    )
+  })
+
   test('sends a blank recipient so the server uses the current administrator email', async () => {
     const post = vi.spyOn(api, 'post').mockResolvedValue({
       data: {
@@ -81,6 +134,8 @@ describe('SMTP settings', () => {
       },
     })
     renderSection()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Notification mail' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Send test email' }))
 
@@ -104,7 +159,7 @@ describe('SMTP settings', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Backup channel' }))
     fireEvent.click(
-      screen.getByRole('button', { name: 'Test and enable backup channel' })
+      screen.getByRole('button', { name: 'Test and enable selected profile' })
     )
 
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
@@ -134,7 +189,7 @@ describe('SMTP settings', () => {
       target: { value: 'smtp.backup-updated.example' },
     })
     fireEvent.click(
-      screen.getByRole('button', { name: 'Test and enable backup channel' })
+      screen.getByRole('button', { name: 'Test and enable selected profile' })
     )
 
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1))

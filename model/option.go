@@ -77,6 +77,26 @@ func InitOptionMap() {
 	common.OptionMap["SMTPBackupStartTLSEnabled"] = strconv.FormatBool(common.SMTPBackupStartTLSEnabled)
 	common.OptionMap["SMTPBackupInsecureSkipVerify"] = strconv.FormatBool(common.SMTPBackupInsecureSkipVerify)
 	common.OptionMap["SMTPBackupForceAuthLogin"] = strconv.FormatBool(common.SMTPBackupForceAuthLogin)
+	common.OptionMap["SMTPSecurityEnabled"] = strconv.FormatBool(common.SMTPSecurityEnabled)
+	common.OptionMap["SMTPSecurityServer"] = ""
+	common.OptionMap["SMTPSecurityFrom"] = ""
+	common.OptionMap["SMTPSecurityPort"] = strconv.Itoa(common.SMTPSecurityPort)
+	common.OptionMap["SMTPSecurityAccount"] = ""
+	common.OptionMap["SMTPSecurityToken"] = ""
+	common.OptionMap["SMTPSecuritySSLEnabled"] = strconv.FormatBool(common.SMTPSecuritySSLEnabled)
+	common.OptionMap["SMTPSecurityStartTLSEnabled"] = strconv.FormatBool(common.SMTPSecurityStartTLSEnabled)
+	common.OptionMap["SMTPSecurityInsecureSkipVerify"] = strconv.FormatBool(common.SMTPSecurityInsecureSkipVerify)
+	common.OptionMap["SMTPSecurityForceAuthLogin"] = strconv.FormatBool(common.SMTPSecurityForceAuthLogin)
+	common.OptionMap["SMTPMarketingEnabled"] = strconv.FormatBool(common.SMTPMarketingEnabled)
+	common.OptionMap["SMTPMarketingServer"] = ""
+	common.OptionMap["SMTPMarketingFrom"] = ""
+	common.OptionMap["SMTPMarketingPort"] = strconv.Itoa(common.SMTPMarketingPort)
+	common.OptionMap["SMTPMarketingAccount"] = ""
+	common.OptionMap["SMTPMarketingToken"] = ""
+	common.OptionMap["SMTPMarketingSSLEnabled"] = strconv.FormatBool(common.SMTPMarketingSSLEnabled)
+	common.OptionMap["SMTPMarketingStartTLSEnabled"] = strconv.FormatBool(common.SMTPMarketingStartTLSEnabled)
+	common.OptionMap["SMTPMarketingInsecureSkipVerify"] = strconv.FormatBool(common.SMTPMarketingInsecureSkipVerify)
+	common.OptionMap["SMTPMarketingForceAuthLogin"] = strconv.FormatBool(common.SMTPMarketingForceAuthLogin)
 	common.OptionMap[setting.EmailDeliveryRulesOptionKey] = setting.EmailDeliveryRules2JSONString()
 	common.OptionMap["InvoiceApplicationNotifyAdminEnabled"] = strconv.FormatBool(common.InvoiceApplicationNotifyAdminEnabled)
 	common.OptionMap["InvoiceIssuedNotifyUserEnabled"] = strconv.FormatBool(common.InvoiceIssuedNotifyUserEnabled)
@@ -279,7 +299,7 @@ func validateOptionValue(key string, value string) error {
 	if err := ValidateAffiliateOptionValue(key, value); err != nil {
 		return err
 	}
-	if key == "SMTPPort" || key == "SMTPBackupPort" {
+	if key == "SMTPPort" || key == "SMTPBackupPort" || key == "SMTPSecurityPort" || key == "SMTPMarketingPort" {
 		port, err := strconv.Atoi(strings.TrimSpace(value))
 		if err != nil || port < 1 || port > 65535 {
 			return fmt.Errorf("%s must be between 1 and 65535", key)
@@ -345,25 +365,51 @@ func isSMTPBackupConfigurationOption(key string) bool {
 	}
 }
 
+func smtpProfileEnabledOption(key string) string {
+	for _, profile := range []string{"Security", "Marketing"} {
+		prefix := "SMTP" + profile
+		if !strings.HasPrefix(key, prefix) || key == prefix+"Enabled" {
+			continue
+		}
+		return prefix + "Enabled"
+	}
+	return ""
+}
+
 func withSMTPBackupDeactivated(values map[string]string) map[string]string {
+	result := values
+	copied := false
 	for key := range values {
+		enabledKey := smtpProfileEnabledOption(key)
+		if enabledKey != "" {
+			if !copied {
+				result = make(map[string]string, len(values)+3)
+				for optionKey, optionValue := range values {
+					result[optionKey] = optionValue
+				}
+				copied = true
+			}
+			result[enabledKey] = "false"
+		}
 		if !isSMTPBackupConfigurationOption(key) {
 			continue
 		}
-		result := make(map[string]string, len(values)+1)
-		for optionKey, optionValue := range values {
-			result[optionKey] = optionValue
+		if !copied {
+			result = make(map[string]string, len(values)+3)
+			for optionKey, optionValue := range values {
+				result[optionKey] = optionValue
+			}
+			copied = true
 		}
 		// A changed backup configuration must pass a fresh SMTP test before it
 		// is eligible for automatic failover again.
 		result["SMTPBackupEnabled"] = "false"
-		return result
 	}
-	return values
+	return result
 }
 
 func UpdateOption(key string, value string) error {
-	if isSMTPBackupConfigurationOption(key) {
+	if isSMTPBackupConfigurationOption(key) || smtpProfileEnabledOption(key) != "" {
 		return UpdateOptionsBulk(map[string]string{key: value})
 	}
 	if err := validateOptionValue(key, value); err != nil {
@@ -463,7 +509,7 @@ func updateOptionMap(key string, value string) (err error) {
 			common.ImageDownloadPermission = intValue
 		}
 	}
-	if strings.HasSuffix(key, "Enabled") || key == "DefaultCollapseSidebar" || key == "DefaultUseAutoGroup" || key == "SMTPForceAuthLogin" || key == "SMTPInsecureSkipVerify" || key == "SMTPBackupForceAuthLogin" || key == "SMTPBackupInsecureSkipVerify" {
+	if strings.HasSuffix(key, "Enabled") || key == "DefaultCollapseSidebar" || key == "DefaultUseAutoGroup" || key == "SMTPForceAuthLogin" || key == "SMTPInsecureSkipVerify" || key == "SMTPBackupForceAuthLogin" || key == "SMTPBackupInsecureSkipVerify" || key == "SMTPSecurityForceAuthLogin" || key == "SMTPSecurityInsecureSkipVerify" || key == "SMTPMarketingForceAuthLogin" || key == "SMTPMarketingInsecureSkipVerify" {
 		boolValue := value == "true"
 		switch key {
 		case "PasswordRegisterEnabled":
@@ -554,6 +600,26 @@ func updateOptionMap(key string, value string) (err error) {
 			common.SMTPBackupInsecureSkipVerify = boolValue
 		case "SMTPBackupForceAuthLogin":
 			common.SMTPBackupForceAuthLogin = boolValue
+		case "SMTPSecurityEnabled":
+			common.SMTPSecurityEnabled = boolValue
+		case "SMTPSecuritySSLEnabled":
+			common.SMTPSecuritySSLEnabled = boolValue
+		case "SMTPSecurityStartTLSEnabled":
+			common.SMTPSecurityStartTLSEnabled = boolValue
+		case "SMTPSecurityInsecureSkipVerify":
+			common.SMTPSecurityInsecureSkipVerify = boolValue
+		case "SMTPSecurityForceAuthLogin":
+			common.SMTPSecurityForceAuthLogin = boolValue
+		case "SMTPMarketingEnabled":
+			common.SMTPMarketingEnabled = boolValue
+		case "SMTPMarketingSSLEnabled":
+			common.SMTPMarketingSSLEnabled = boolValue
+		case "SMTPMarketingStartTLSEnabled":
+			common.SMTPMarketingStartTLSEnabled = boolValue
+		case "SMTPMarketingInsecureSkipVerify":
+			common.SMTPMarketingInsecureSkipVerify = boolValue
+		case "SMTPMarketingForceAuthLogin":
+			common.SMTPMarketingForceAuthLogin = boolValue
 		case "InvoiceApplicationNotifyAdminEnabled":
 			common.InvoiceApplicationNotifyAdminEnabled = boolValue
 		case "InvoiceIssuedNotifyUserEnabled":
@@ -593,6 +659,26 @@ func updateOptionMap(key string, value string) (err error) {
 		common.SMTPBackupFrom = value
 	case "SMTPBackupToken":
 		common.SMTPBackupToken = value
+	case "SMTPSecurityServer":
+		common.SMTPSecurityServer = value
+	case "SMTPSecurityPort":
+		common.SMTPSecurityPort, _ = strconv.Atoi(value)
+	case "SMTPSecurityAccount":
+		common.SMTPSecurityAccount = value
+	case "SMTPSecurityFrom":
+		common.SMTPSecurityFrom = value
+	case "SMTPSecurityToken":
+		common.SMTPSecurityToken = value
+	case "SMTPMarketingServer":
+		common.SMTPMarketingServer = value
+	case "SMTPMarketingPort":
+		common.SMTPMarketingPort, _ = strconv.Atoi(value)
+	case "SMTPMarketingAccount":
+		common.SMTPMarketingAccount = value
+	case "SMTPMarketingFrom":
+		common.SMTPMarketingFrom = value
+	case "SMTPMarketingToken":
+		common.SMTPMarketingToken = value
 	case setting.EmailDeliveryRulesOptionKey:
 		err = setting.UpdateEmailDeliveryRulesByJSONString(value)
 	case "InvoiceAdminEmail":

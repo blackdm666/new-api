@@ -118,6 +118,34 @@ var SMTPBackupAccount = ""
 var SMTPBackupFrom = ""
 var SMTPBackupToken = ""
 
+// Security SMTP is reserved for account verification, email binding and
+// password reset. When disabled or unavailable, delivery falls back to the
+// default notification SMTP pair to preserve account access.
+var SMTPSecurityEnabled = false
+var SMTPSecurityServer = ""
+var SMTPSecurityPort = 587
+var SMTPSecuritySSLEnabled = false
+var SMTPSecurityStartTLSEnabled = false
+var SMTPSecurityInsecureSkipVerify = false
+var SMTPSecurityForceAuthLogin = false
+var SMTPSecurityAccount = ""
+var SMTPSecurityFrom = ""
+var SMTPSecurityToken = ""
+
+// Marketing SMTP isolates bulk and campaign mail from security and
+// transactional notification sender reputation. It falls back to the default
+// SMTP pair only when it has not been activated by a successful test.
+var SMTPMarketingEnabled = false
+var SMTPMarketingServer = ""
+var SMTPMarketingPort = 587
+var SMTPMarketingSSLEnabled = false
+var SMTPMarketingStartTLSEnabled = false
+var SMTPMarketingInsecureSkipVerify = false
+var SMTPMarketingForceAuthLogin = false
+var SMTPMarketingAccount = ""
+var SMTPMarketingFrom = ""
+var SMTPMarketingToken = ""
+
 // 发票邮件通知配置。
 var InvoiceApplicationNotifyAdminEnabled = false
 var InvoiceIssuedNotifyUserEnabled = false

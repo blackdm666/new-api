@@ -56,12 +56,16 @@ func GetEmailDeliveryStats(c *gin.Context) {
 	rules := setting.GetEmailDeliveryRules()
 	primarySMTPConfigured := strings.TrimSpace(common.SMTPServer) != "" && (strings.TrimSpace(common.SMTPFrom) != "" || strings.TrimSpace(common.SMTPAccount) != "")
 	backupSMTPConfigured := common.SMTPBackupEnabled && strings.TrimSpace(common.SMTPBackupServer) != "" && (strings.TrimSpace(common.SMTPBackupFrom) != "" || strings.TrimSpace(common.SMTPBackupAccount) != "")
+	securitySMTPConfigured := common.SMTPSecurityEnabled && strings.TrimSpace(common.SMTPSecurityServer) != "" && (strings.TrimSpace(common.SMTPSecurityFrom) != "" || strings.TrimSpace(common.SMTPSecurityAccount) != "")
+	marketingSMTPConfigured := common.SMTPMarketingEnabled && strings.TrimSpace(common.SMTPMarketingServer) != "" && (strings.TrimSpace(common.SMTPMarketingFrom) != "" || strings.TrimSpace(common.SMTPMarketingAccount) != "")
 	common.ApiSuccess(c, gin.H{
 		"queue":                     stats,
 		"categories":                categories,
 		"smtp_configured":           primarySMTPConfigured || backupSMTPConfigured,
 		"smtp_primary_configured":   primarySMTPConfigured,
 		"smtp_backup_configured":    backupSMTPConfigured,
+		"smtp_security_configured":  securitySMTPConfigured,
+		"smtp_marketing_configured": marketingSMTPConfigured,
 		"marketing_daily_limit":     rules.MarketingDailyLimit,
 		"marketing_daily_remaining": max(0, rules.MarketingDailyLimit-int(stats.MarketingQuotaUsedToday)),
 		"marketing_circuit_breaker": circuit,

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"html"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -13,18 +14,27 @@ import (
 	"net/smtp"
 	"net/textproto"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
 )
 
 const (
-	SMTPChannelPrimary = "primary"
-	SMTPChannelBackup  = "backup"
+	SMTPChannelPrimary   = "primary"
+	SMTPChannelBackup    = "backup"
+	SMTPChannelSecurity  = "security"
+	SMTPChannelMarketing = "marketing"
+
+	SMTPProfileNotification = "notification"
+	SMTPProfileSecurity     = "security"
+	SMTPProfileMarketing    = "marketing"
 )
 
 type SMTPDeliveryResult struct {
-	Channel string `json:"channel"`
+	Profile   string `json:"profile"`
+	Channel   string `json:"channel"`
+	MessageID string `json:"message_id"`
 }
 
 type smtpChannelConfig struct {
@@ -75,6 +85,56 @@ func backupSMTPChannel() smtpChannelConfig {
 		insecureSkipVerify: SMTPBackupInsecureSkipVerify,
 		forceAuthLogin:     SMTPBackupForceAuthLogin,
 	}
+}
+
+func securitySMTPChannel() smtpChannelConfig {
+	OptionMapRWMutex.RLock()
+	defer OptionMapRWMutex.RUnlock()
+	return smtpChannelConfig{
+		name:               SMTPChannelSecurity,
+		enabled:            SMTPSecurityEnabled,
+		server:             SMTPSecurityServer,
+		port:               SMTPSecurityPort,
+		account:            SMTPSecurityAccount,
+		from:               SMTPSecurityFrom,
+		token:              SMTPSecurityToken,
+		sslEnabled:         SMTPSecuritySSLEnabled,
+		startTLSEnabled:    SMTPSecurityStartTLSEnabled,
+		insecureSkipVerify: SMTPSecurityInsecureSkipVerify,
+		forceAuthLogin:     SMTPSecurityForceAuthLogin,
+	}
+}
+
+func marketingSMTPChannel() smtpChannelConfig {
+	OptionMapRWMutex.RLock()
+	defer OptionMapRWMutex.RUnlock()
+	return smtpChannelConfig{
+		name:               SMTPChannelMarketing,
+		enabled:            SMTPMarketingEnabled,
+		server:             SMTPMarketingServer,
+		port:               SMTPMarketingPort,
+		account:            SMTPMarketingAccount,
+		from:               SMTPMarketingFrom,
+		token:              SMTPMarketingToken,
+		sslEnabled:         SMTPMarketingSSLEnabled,
+		startTLSEnabled:    SMTPMarketingStartTLSEnabled,
+		insecureSkipVerify: SMTPMarketingInsecureSkipVerify,
+		forceAuthLogin:     SMTPMarketingForceAuthLogin,
+	}
+}
+
+func smtpChannelForProfile(profile string) smtpChannelConfig {
+	switch profile {
+	case SMTPProfileSecurity:
+		if channel := securitySMTPChannel(); channel.enabled {
+			return channel
+		}
+	case SMTPProfileMarketing:
+		if channel := marketingSMTPChannel(); channel.enabled {
+			return channel
+		}
+	}
+	return primarySMTPChannel()
 }
 
 func (config smtpChannelConfig) fromAddress() string {
@@ -215,12 +275,21 @@ func readEmailAttachments(attachments []EmailAttachment) ([]emailAttachmentData,
 }
 
 func SendEmail(subject string, receiver string, content string) error {
-	_, err := SendEmailWithResult(subject, receiver, content)
+	_, err := SendEmailWithProfileResult(SMTPProfileNotification, subject, receiver, content)
 	return err
 }
 
 func SendEmailWithResult(subject string, receiver string, content string) (SMTPDeliveryResult, error) {
-	return sendEmailWithAttachments(subject, receiver, content, nil)
+	return SendEmailWithProfileResult(SMTPProfileNotification, subject, receiver, content)
+}
+
+func SendEmailWithProfile(profile string, subject string, receiver string, content string) error {
+	_, err := SendEmailWithProfileResult(profile, subject, receiver, content)
+	return err
+}
+
+func SendEmailWithProfileResult(profile string, subject string, receiver string, content string) (SMTPDeliveryResult, error) {
+	return sendEmailWithAttachmentsProfile(profile, subject, receiver, content, nil)
 }
 
 // SendEmailViaChannel sends a message through exactly one SMTP channel. It is
@@ -233,103 +302,143 @@ func SendEmailViaChannel(subject string, receiver string, content string, channe
 		config = primarySMTPChannel()
 	case SMTPChannelBackup:
 		config = backupSMTPChannel()
+	case SMTPChannelSecurity:
+		config = securitySMTPChannel()
+	case SMTPChannelMarketing:
+		config = marketingSMTPChannel()
 	default:
 		return SMTPDeliveryResult{}, fmt.Errorf("invalid SMTP channel: %s", channel)
 	}
-	if err := sendEmailThroughChannel(config, subject, receiver, content, nil); err != nil {
+	messageID, err := sendEmailThroughChannel(config, subject, receiver, content, nil)
+	if err != nil {
 		return SMTPDeliveryResult{}, err
 	}
-	return SMTPDeliveryResult{Channel: channel}, nil
+	return SMTPDeliveryResult{Profile: channelProfile(channel), Channel: channel, MessageID: messageID}, nil
 }
 
 func SendEmailWithAttachments(subject string, receiver string, content string, attachments []EmailAttachment) error {
-	_, err := sendEmailWithAttachments(subject, receiver, content, attachments)
+	_, err := SendEmailWithAttachmentsProfileResult(SMTPProfileNotification, subject, receiver, content, attachments)
 	return err
 }
 
-func sendEmailWithAttachments(subject string, receiver string, content string, attachments []EmailAttachment) (SMTPDeliveryResult, error) {
+func SendEmailWithAttachmentsProfileResult(profile string, subject string, receiver string, content string, attachments []EmailAttachment) (SMTPDeliveryResult, error) {
+	return sendEmailWithAttachmentsProfile(profile, subject, receiver, content, attachments)
+}
+
+func channelProfile(channel string) string {
+	switch channel {
+	case SMTPChannelSecurity:
+		return SMTPProfileSecurity
+	case SMTPChannelMarketing:
+		return SMTPProfileMarketing
+	default:
+		return SMTPProfileNotification
+	}
+}
+
+func sendEmailWithAttachmentsProfile(profile string, subject string, receiver string, content string, attachments []EmailAttachment) (SMTPDeliveryResult, error) {
+	if profile != SMTPProfileNotification && profile != SMTPProfileSecurity && profile != SMTPProfileMarketing {
+		return SMTPDeliveryResult{}, fmt.Errorf("invalid SMTP profile: %s", profile)
+	}
 	attachmentData, err := readEmailAttachments(attachments)
 	if err != nil {
 		return SMTPDeliveryResult{}, err
 	}
 
-	primary := primarySMTPChannel()
-	if err := sendEmailThroughChannel(primary, subject, receiver, content, attachmentData); err == nil {
-		return SMTPDeliveryResult{Channel: SMTPChannelPrimary}, nil
-	} else {
+	primary := smtpChannelForProfile(profile)
+	messageID, primaryErr := sendEmailThroughChannel(primary, subject, receiver, content, attachmentData)
+	if primaryErr == nil {
+		return SMTPDeliveryResult{Profile: profile, Channel: primary.name, MessageID: messageID}, nil
+	}
+
+	// A dedicated sender may fail before SMTP accepts DATA. Fall back to the
+	// default transactional sender, then its existing backup, so account access
+	// and operational mail remain available during provider incidents.
+	if primary.name != SMTPChannelPrimary {
+		fallback := primarySMTPChannel()
+		messageID, fallbackErr := sendEmailThroughChannel(fallback, subject, receiver, content, attachmentData)
+		if fallbackErr == nil {
+			SysError(fmt.Sprintf("%s SMTP profile failed; used default primary: %v", profile, primaryErr))
+			return SMTPDeliveryResult{Profile: profile, Channel: SMTPChannelPrimary, MessageID: messageID}, nil
+		}
+		primaryErr = fmt.Errorf("dedicated %s SMTP failed: %v; default primary failed: %w", profile, primaryErr, fallbackErr)
+	}
+
+	{
 		backup := backupSMTPChannel()
 		if !backup.enabled {
-			return SMTPDeliveryResult{}, fmt.Errorf("primary SMTP channel failed: %w", err)
+			return SMTPDeliveryResult{}, fmt.Errorf("primary SMTP channel failed: %w", primaryErr)
 		}
-		SysError(fmt.Sprintf("primary SMTP channel failed; trying backup channel: %v", err))
-		if backupErr := sendEmailThroughChannel(backup, subject, receiver, content, attachmentData); backupErr != nil {
-			return SMTPDeliveryResult{}, fmt.Errorf("primary SMTP channel failed: %v; backup SMTP channel failed: %w", err, backupErr)
+		SysError(fmt.Sprintf("primary SMTP channel failed; trying backup channel: %v", primaryErr))
+		messageID, backupErr := sendEmailThroughChannel(backup, subject, receiver, content, attachmentData)
+		if backupErr != nil {
+			return SMTPDeliveryResult{}, fmt.Errorf("primary SMTP channel failed: %v; backup SMTP channel failed: %w", primaryErr, backupErr)
 		}
+		return SMTPDeliveryResult{Profile: profile, Channel: SMTPChannelBackup, MessageID: messageID}, nil
 	}
-	return SMTPDeliveryResult{Channel: SMTPChannelBackup}, nil
 }
 
-func sendEmailThroughChannel(config smtpChannelConfig, subject string, receiver string, content string, attachments []emailAttachmentData) error {
+func sendEmailThroughChannel(config smtpChannelConfig, subject string, receiver string, content string, attachments []emailAttachmentData) (string, error) {
 	from := config.fromAddress()
 	if strings.TrimSpace(config.server) == "" {
-		return fmt.Errorf("SMTP server is not configured")
+		return "", fmt.Errorf("SMTP server is not configured")
 	}
 	if config.port < 1 || config.port > 65535 {
-		return fmt.Errorf("invalid SMTP port")
+		return "", fmt.Errorf("invalid SMTP port")
 	}
 	if from == "" {
-		return fmt.Errorf("SMTP from address is not configured")
+		return "", fmt.Errorf("SMTP from address is not configured")
 	}
 	senderName := SystemNameOrDefault()
 	if strings.ContainsAny(subject+receiver+from+senderName, "\r\n") {
-		return fmt.Errorf("invalid email header")
+		return "", fmt.Errorf("invalid email header")
 	}
 	messageID, err := generateMessageIDFor(from)
 	if err != nil {
-		return err
+		return "", err
 	}
 	encodedSubject := fmt.Sprintf("=?UTF-8?B?%s?=", base64.StdEncoding.EncodeToString([]byte(subject)))
 	var message bytes.Buffer
 	if err := writeEmailMessageData(&message, messageID, encodedSubject, receiver, content, attachments, senderName, from); err != nil {
-		return err
+		return "", err
 	}
 
 	addr := net.JoinHostPort(config.server, fmt.Sprintf("%d", config.port))
 	client, err := config.newClient(addr)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer client.Close()
 	if config.shouldAuthenticate() {
 		if err = client.Auth(config.auth()); err != nil {
-			return err
+			return "", err
 		}
 	}
 	if err = client.Mail(from); err != nil {
-		return err
+		return "", err
 	}
 	for _, recipient := range strings.Split(receiver, ";") {
 		if err = client.Rcpt(strings.TrimSpace(recipient)); err != nil {
-			return err
+			return "", err
 		}
 	}
 	w, err := client.Data()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if _, err = w.Write(message.Bytes()); err != nil {
-		return err
+		return "", err
 	}
 	if err = w.Close(); err != nil {
-		return err
+		return "", err
 	}
 	if err = client.Quit(); err != nil {
 		SysError(fmt.Sprintf("SMTP QUIT failed after email delivery through %s channel: %v", config.name, err))
 		// DATA was already accepted by the server. Treat a failed QUIT as a
 		// connection-close problem so workers do not resend the same message.
-		return nil
+		return messageID, nil
 	}
-	return nil
+	return messageID, nil
 }
 
 func writeEmailMessage(w io.Writer, messageID string, encodedSubject string, receiver string, content string, attachments []EmailAttachment, senderName string) error {
@@ -343,9 +452,15 @@ func writeEmailMessage(w io.Writer, messageID string, encodedSubject string, rec
 func writeEmailMessageData(w io.Writer, messageID string, encodedSubject string, receiver string, content string, attachments []emailAttachmentData, senderName string, from string) error {
 	sender := (&mail.Address{Name: senderName, Address: from}).String()
 	if len(attachments) == 0 {
-		_, err := fmt.Fprintf(w, "To: %s\r\nFrom: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s\r\n",
-			receiver, sender, encodedSubject, time.Now().Format(time.RFC1123Z), messageID, content)
-		return err
+		alternative := multipart.NewWriter(w)
+		if _, err := fmt.Fprintf(w, "To: %s\r\nFrom: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: %s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=%q\r\n\r\n",
+			receiver, sender, encodedSubject, time.Now().Format(time.RFC1123Z), messageID, alternative.Boundary()); err != nil {
+			return err
+		}
+		if err := writeEmailAlternativeParts(alternative, content); err != nil {
+			return err
+		}
+		return alternative.Close()
 	}
 
 	mixed := multipart.NewWriter(w)
@@ -353,14 +468,22 @@ func writeEmailMessageData(w io.Writer, messageID string, encodedSubject string,
 		receiver, sender, encodedSubject, time.Now().Format(time.RFC1123Z), messageID, mixed.Boundary()); err != nil {
 		return err
 	}
+	var alternativeBody bytes.Buffer
+	alternative := multipart.NewWriter(&alternativeBody)
+	alternativeBoundary := alternative.Boundary()
+	if err := writeEmailAlternativeParts(alternative, content); err != nil {
+		return err
+	}
+	if err := alternative.Close(); err != nil {
+		return err
+	}
 	bodyHeader := make(textproto.MIMEHeader)
-	bodyHeader.Set("Content-Type", "text/html; charset=UTF-8")
-	bodyHeader.Set("Content-Transfer-Encoding", "8bit")
+	bodyHeader.Set("Content-Type", fmt.Sprintf("multipart/alternative; boundary=%q", alternativeBoundary))
 	bodyPart, err := mixed.CreatePart(bodyHeader)
 	if err != nil {
 		return err
 	}
-	if _, err := io.WriteString(bodyPart, content); err != nil {
+	if _, err := bodyPart.Write(alternativeBody.Bytes()); err != nil {
 		return err
 	}
 
@@ -386,6 +509,45 @@ func writeEmailMessageData(w io.Writer, messageID string, encodedSubject string,
 		}
 	}
 	return mixed.Close()
+}
+
+var (
+	emailBreakPattern = regexp.MustCompile(`(?i)<br\s*/?>|</p>|</div>|</tr>|</li>|</h[1-6]>`)
+	emailTagPattern   = regexp.MustCompile(`(?s)<[^>]*>`)
+	emailSpacePattern = regexp.MustCompile(`[ \t\r\f\v]+`)
+	emailBlankPattern = regexp.MustCompile(`\n{3,}`)
+)
+
+func emailPlainText(content string) string {
+	plain := emailBreakPattern.ReplaceAllString(content, "\n")
+	plain = emailTagPattern.ReplaceAllString(plain, "")
+	plain = html.UnescapeString(plain)
+	plain = emailSpacePattern.ReplaceAllString(plain, " ")
+	plain = emailBlankPattern.ReplaceAllString(plain, "\n\n")
+	return strings.TrimSpace(plain)
+}
+
+func writeEmailAlternativeParts(writer *multipart.Writer, content string) error {
+	plainHeader := make(textproto.MIMEHeader)
+	plainHeader.Set("Content-Type", "text/plain; charset=UTF-8")
+	plainHeader.Set("Content-Transfer-Encoding", "8bit")
+	plainPart, err := writer.CreatePart(plainHeader)
+	if err != nil {
+		return err
+	}
+	if _, err := io.WriteString(plainPart, emailPlainText(content)+"\r\n"); err != nil {
+		return err
+	}
+
+	htmlHeader := make(textproto.MIMEHeader)
+	htmlHeader.Set("Content-Type", "text/html; charset=UTF-8")
+	htmlHeader.Set("Content-Transfer-Encoding", "8bit")
+	htmlPart, err := writer.CreatePart(htmlHeader)
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(htmlPart, content+"\r\n")
+	return err
 }
 
 type mimeLineWriter struct {

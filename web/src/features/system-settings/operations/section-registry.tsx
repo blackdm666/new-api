@@ -87,6 +87,28 @@ const OPERATIONS_SECTIONS = [
           SMTPBackupStartTLSEnabled: settings.SMTPBackupStartTLSEnabled,
           SMTPBackupInsecureSkipVerify: settings.SMTPBackupInsecureSkipVerify,
           SMTPBackupForceAuthLogin: settings.SMTPBackupForceAuthLogin,
+          SMTPSecurityEnabled: settings.SMTPSecurityEnabled,
+          SMTPSecurityServer: settings.SMTPSecurityServer,
+          SMTPSecurityPort: settings.SMTPSecurityPort,
+          SMTPSecurityAccount: settings.SMTPSecurityAccount,
+          SMTPSecurityFrom: settings.SMTPSecurityFrom,
+          SMTPSecurityToken: settings.SMTPSecurityToken,
+          SMTPSecuritySSLEnabled: settings.SMTPSecuritySSLEnabled,
+          SMTPSecurityStartTLSEnabled: settings.SMTPSecurityStartTLSEnabled,
+          SMTPSecurityInsecureSkipVerify:
+            settings.SMTPSecurityInsecureSkipVerify,
+          SMTPSecurityForceAuthLogin: settings.SMTPSecurityForceAuthLogin,
+          SMTPMarketingEnabled: settings.SMTPMarketingEnabled,
+          SMTPMarketingServer: settings.SMTPMarketingServer,
+          SMTPMarketingPort: settings.SMTPMarketingPort,
+          SMTPMarketingAccount: settings.SMTPMarketingAccount,
+          SMTPMarketingFrom: settings.SMTPMarketingFrom,
+          SMTPMarketingToken: settings.SMTPMarketingToken,
+          SMTPMarketingSSLEnabled: settings.SMTPMarketingSSLEnabled,
+          SMTPMarketingStartTLSEnabled: settings.SMTPMarketingStartTLSEnabled,
+          SMTPMarketingInsecureSkipVerify:
+            settings.SMTPMarketingInsecureSkipVerify,
+          SMTPMarketingForceAuthLogin: settings.SMTPMarketingForceAuthLogin,
         }}
       />
     ),
