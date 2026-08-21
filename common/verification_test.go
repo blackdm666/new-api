@@ -50,3 +50,26 @@ func TestVerificationSendCooldownRequiresReleaseBeforeAnotherImmediateSend(t *te
 	require.NoError(t, err)
 	assert.True(t, allowed)
 }
+
+func TestPreviousEmailVerificationCodeRemainsValidForFiveMinutes(t *testing.T) {
+	useMemoryVerificationStore(t)
+	first := "123456"
+	second := "654321"
+	RegisterVerificationCodeWithKey("user@example.com", first, EmailVerificationPurpose)
+	RegisterVerificationCodeWithKey("user@example.com", second, EmailVerificationPurpose)
+
+	mapKey := normalizedVerificationKey("user@example.com", EmailVerificationPurpose)
+	verificationMutex.Lock()
+	value := verificationMap[mapKey]
+	value.previousTime = time.Now().Add(-4*time.Minute - 59*time.Second)
+	verificationMap[mapKey] = value
+	verificationMutex.Unlock()
+	assert.True(t, VerifyCodeWithKey("user@example.com", first, EmailVerificationPurpose))
+
+	verificationMutex.Lock()
+	value = verificationMap[mapKey]
+	value.previousTime = time.Now().Add(-5*time.Minute - time.Second)
+	verificationMap[mapKey] = value
+	verificationMutex.Unlock()
+	assert.False(t, VerifyCodeWithKey("user@example.com", first, EmailVerificationPurpose))
+}

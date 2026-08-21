@@ -26,7 +26,7 @@ const (
 	EmailVerificationPurpose          = "v"
 	PasswordResetPurpose              = "r"
 	VerificationResendCooldownSeconds = 60
-	verificationPreviousValidSeconds  = 120
+	verificationPreviousValidSeconds  = 5 * 60
 )
 
 var verificationMutex sync.Mutex
