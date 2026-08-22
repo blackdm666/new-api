@@ -43,7 +43,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { useDebounce } from '@/hooks/use-debounce'
 import { api } from '@/lib/api'
 import { formatTimestampToDate } from '@/lib/format'
@@ -248,11 +248,6 @@ export function EmailQueueSection() {
       </header>
 
       <Tabs defaultValue='monitoring' className='space-y-5'>
-        <TabsList className='grid w-full max-w-md grid-cols-2'>
-          <TabsTrigger value='monitoring'>{t('Queue monitoring')}</TabsTrigger>
-          <TabsTrigger value='rules'>{t('Email queue rules')}</TabsTrigger>
-        </TabsList>
-
         <TabsContent value='monitoring' className='space-y-5'>
           <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-6'>
             <QueueStat label={t('Queued')} value={stats?.queued ?? 0} />
@@ -563,15 +558,24 @@ export function EmailQueueSection() {
             </div>
           </div>
         </TabsContent>
-
-        <TabsContent value='rules'>
-          <EmailQueueRulesCard
-            rules={statsQuery.data?.rules}
-            onSaved={refresh}
-          />
-        </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+export function EmailQueueRulesSection() {
+  const statsQuery = useQuery({
+    queryKey: ['email-queue', 'stats'],
+    queryFn: fetchStats,
+  })
+
+  return (
+    <EmailQueueRulesCard
+      rules={statsQuery.data?.rules}
+      onSaved={async () => {
+        await statsQuery.refetch()
+      }}
+    />
   )
 }
 

@@ -37,9 +37,27 @@ function renderMarketingPage() {
       case '/api/marketing/overview':
         return successfulResponse({})
       case '/api/marketing/campaigns':
-        return successfulResponse({ items: [], total: 0 })
+        return successfulResponse({
+          items: [
+            {
+              id: 2,
+              name: 'Marketing launch',
+              scene: 'custom',
+              status: 'completed',
+              created_time: 1,
+              recipient_count: 1,
+              delivered_count: 1,
+              clicked_count: 0,
+              converted_count: 0,
+              converted_cents: 0,
+            },
+          ],
+          total: 1,
+        })
       case '/api/marketing/automations':
         return successfulResponse([])
+      case '/api/marketing/campaigns/2/recipients':
+        return successfulResponse({ items: [], total: 0 })
       case '/api/option/email_deliveries':
         return successfulResponse({ items: [], total: 0 })
       case '/api/option/email_deliveries/stats':
@@ -92,7 +110,7 @@ function renderMarketingPage() {
 }
 
 describe('email marketing navigation', () => {
-  test('opens the email queue inside marketing and removes its settings entry', async () => {
+  test('shows queue monitoring and queue rules as separate marketing tabs', async () => {
     renderMarketingPage()
 
     expect(OPERATIONS_SECTION_IDS).not.toContain('email-queue')
@@ -103,10 +121,40 @@ describe('email marketing navigation', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Email Queue' }))
 
     expect(
-      await screen.findByRole('tab', { name: 'Queue monitoring' })
+      await screen.findByPlaceholderText(
+        'Search by email type, user, recipient, or related ID'
+      )
     ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('tab', { name: 'Queue monitoring' })
+    ).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Create campaign' })
     ).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Email queue rules' }))
+
+    expect(
+      await screen.findByRole('button', { name: 'Save queue rules' })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByPlaceholderText(
+        'Search by email type, user, recipient, or related ID'
+      )
+    ).not.toBeInTheDocument()
+  })
+
+  test('opens campaign choices in the themed select popup', async () => {
+    renderMarketingPage()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Sending records' }))
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Campaign' }))
+
+    expect(
+      await screen.findByRole('option', { name: 'Select campaign' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('option', { name: '#2 Marketing launch' })
+    ).toBeInTheDocument()
   })
 })

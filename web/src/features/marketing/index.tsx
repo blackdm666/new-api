@@ -54,6 +54,14 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import {
   Table,
@@ -65,7 +73,10 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { EmailQueueSection } from '@/features/system-settings/integrations/email-queue-section'
+import {
+  EmailQueueRulesSection,
+  EmailQueueSection,
+} from '@/features/system-settings/integrations/email-queue-section'
 import { useStatus } from '@/hooks/use-status'
 import { formatLocalCurrencyAmount } from '@/lib/currency'
 import { formatTimestampToDate } from '@/lib/format'
@@ -162,6 +173,8 @@ export function MarketingAdminPage() {
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['marketing'] })
   }
+  const isEmailOperationsTab =
+    activeTab === 'email-queue' || activeTab === 'email-queue-rules'
 
   return (
     <div className='h-full overflow-y-auto px-4 py-6 sm:px-8'>
@@ -177,7 +190,7 @@ export function MarketingAdminPage() {
               )}
             </p>
           </div>
-          {activeTab !== 'email-queue' ? (
+          {!isEmailOperationsTab ? (
             <div className='flex gap-2'>
               <Button
                 type='button'
@@ -201,7 +214,7 @@ export function MarketingAdminPage() {
           ) : null}
         </header>
 
-        {activeTab !== 'email-queue' ? (
+        {!isEmailOperationsTab ? (
           <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7'>
             <Stat
               label={t('Campaigns')}
@@ -243,6 +256,9 @@ export function MarketingAdminPage() {
               {t('Suppression list')}
             </TabsTrigger>
             <TabsTrigger value='email-queue'>{t('Email Queue')}</TabsTrigger>
+            <TabsTrigger value='email-queue-rules'>
+              {t('Email queue rules')}
+            </TabsTrigger>
           </TabsList>
           <TabsContent value='campaigns'>
             <CampaignTable
@@ -277,6 +293,9 @@ export function MarketingAdminPage() {
           </TabsContent>
           <TabsContent value='email-queue'>
             <EmailQueueSection />
+          </TabsContent>
+          <TabsContent value='email-queue-rules'>
+            <EmailQueueRulesSection />
           </TabsContent>
         </Tabs>
       </div>
@@ -1056,21 +1075,34 @@ function RecipientRecords(props: { campaigns: MarketingCampaign[] }) {
   })
   return (
     <div className='space-y-4'>
-      <NativeSelect
-        value={campaignId}
-        onChange={(event) => {
-          setCampaignId(Number(event.target.value))
+      <Select
+        items={[
+          { value: '0', label: t('Select campaign') },
+          ...props.campaigns.map((campaign) => ({
+            value: String(campaign.id),
+            label: `#${campaign.id} ${campaign.name}`,
+          })),
+        ]}
+        value={String(campaignId)}
+        onValueChange={(value) => {
+          setCampaignId(Number(value))
           setPage(1)
         }}
-        aria-label={t('Campaign')}
       >
-        <option value={0}>{t('Select campaign')}</option>
-        {props.campaigns.map((campaign) => (
-          <option key={campaign.id} value={campaign.id}>
-            #{campaign.id} {campaign.name}
-          </option>
-        ))}
-      </NativeSelect>
+        <SelectTrigger className='w-64' aria-label={t('Campaign')}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent alignItemWithTrigger={false}>
+          <SelectGroup>
+            <SelectItem value='0'>{t('Select campaign')}</SelectItem>
+            {props.campaigns.map((campaign) => (
+              <SelectItem key={campaign.id} value={String(campaign.id)}>
+                #{campaign.id} {campaign.name}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
       <div className='overflow-hidden rounded-xl border'>
         <Table>
           <TableHeader>
