@@ -65,6 +65,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { EmailQueueSection } from '@/features/system-settings/integrations/email-queue-section'
 import { useStatus } from '@/hooks/use-status'
 import { formatLocalCurrencyAmount } from '@/lib/currency'
 import { formatTimestampToDate } from '@/lib/format'
@@ -139,6 +140,7 @@ const MARKETING_LANGUAGES = [
 export function MarketingAdminPage() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const [activeTab, setActiveTab] = useState('campaigns')
   const [campaignOpen, setCampaignOpen] = useState(false)
   const [campaignTarget, setCampaignTarget] =
     useState<MarketingCampaign | null>(null)
@@ -175,51 +177,64 @@ export function MarketingAdminPage() {
               )}
             </p>
           </div>
-          <div className='flex gap-2'>
-            <Button
-              type='button'
-              variant='outline'
-              onClick={() => void refresh()}
-            >
-              <RefreshCw className='size-4' />
-              {t('Refresh')}
-            </Button>
-            <Button
-              type='button'
-              onClick={() => {
-                setCampaignTarget(null)
-                setCampaignOpen(true)
-              }}
-            >
-              <MailPlus className='size-4' />
-              {t('Create campaign')}
-            </Button>
-          </div>
+          {activeTab !== 'email-queue' ? (
+            <div className='flex gap-2'>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => void refresh()}
+              >
+                <RefreshCw className='size-4' />
+                {t('Refresh')}
+              </Button>
+              <Button
+                type='button'
+                onClick={() => {
+                  setCampaignTarget(null)
+                  setCampaignOpen(true)
+                }}
+              >
+                <MailPlus className='size-4' />
+                {t('Create campaign')}
+              </Button>
+            </div>
+          ) : null}
         </header>
 
-        <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7'>
-          <Stat
-            label={t('Campaigns')}
-            value={overviewQuery.data?.campaigns ?? 0}
-          />
-          <Stat label={t('Waiting')} value={overviewQuery.data?.queued ?? 0} />
-          <Stat label={t('Sent')} value={overviewQuery.data?.delivered ?? 0} />
-          <Stat label={t('Failed')} value={overviewQuery.data?.failed ?? 0} />
-          <Stat label={t('Clicked')} value={overviewQuery.data?.clicked ?? 0} />
-          <Stat
-            label={t('Converted')}
-            value={overviewQuery.data?.converted ?? 0}
-          />
-          <Stat
-            label={t('Attributed top-up')}
-            value={formatLocalCurrencyAmount(
-              (overviewQuery.data?.converted_cents ?? 0) / 100,
-              { digitsLarge: 2, digitsSmall: 2 }
-            )}
-          />
-        </div>
+        {activeTab !== 'email-queue' ? (
+          <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7'>
+            <Stat
+              label={t('Campaigns')}
+              value={overviewQuery.data?.campaigns ?? 0}
+            />
+            <Stat
+              label={t('Waiting')}
+              value={overviewQuery.data?.queued ?? 0}
+            />
+            <Stat
+              label={t('Sent')}
+              value={overviewQuery.data?.delivered ?? 0}
+            />
+            <Stat label={t('Failed')} value={overviewQuery.data?.failed ?? 0} />
+            <Stat
+              label={t('Clicked')}
+              value={overviewQuery.data?.clicked ?? 0}
+            />
+            <Stat
+              label={t('Converted')}
+              value={overviewQuery.data?.converted ?? 0}
+            />
+            <Stat
+              label={t('Attributed top-up')}
+              value={formatLocalCurrencyAmount(
+                (overviewQuery.data?.converted_cents ?? 0) / 100,
+                { digitsLarge: 2, digitsSmall: 2 }
+              )}
+            />
+          </div>
+        ) : null}
 
-        <Tabs defaultValue='campaigns' className='gap-4'>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className='gap-4'>
           <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
             <TabsTrigger value='campaigns'>{t('Campaigns')}</TabsTrigger>
             <TabsTrigger value='automations'>{t('Automations')}</TabsTrigger>
@@ -227,6 +242,7 @@ export function MarketingAdminPage() {
             <TabsTrigger value='suppressions'>
               {t('Suppression list')}
             </TabsTrigger>
+            <TabsTrigger value='email-queue'>{t('Email Queue')}</TabsTrigger>
           </TabsList>
           <TabsContent value='campaigns'>
             <CampaignTable
@@ -258,6 +274,9 @@ export function MarketingAdminPage() {
           </TabsContent>
           <TabsContent value='suppressions'>
             <SuppressionList />
+          </TabsContent>
+          <TabsContent value='email-queue'>
+            <EmailQueueSection />
           </TabsContent>
         </Tabs>
       </div>
