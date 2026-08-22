@@ -11,6 +11,7 @@ import (
 const (
 	QuotaNotificationSourceWallet       = "wallet"
 	QuotaNotificationSourceSubscription = "subscription"
+	QuotaWarningRearmDelaySeconds       = int64(10 * 60)
 )
 
 // QuotaNotificationState records whether one funding source is currently
@@ -53,8 +54,15 @@ func ClaimQuotaWarning(userId int, source string, sourceId int64, threshold int6
 			return err
 		}
 		if remaining >= threshold {
+			belowThreshold := false
+			if state.BelowThreshold && state.NotifiedTime > 0 && now-state.NotifiedTime < QuotaWarningRearmDelaySeconds {
+				// Concurrent requests can temporarily restore available quota when a
+				// large pre-consume is settled and refunded. Require a minimum
+				// recovery window before rearming the warning.
+				belowThreshold = true
+			}
 			return tx.Model(state).Updates(map[string]any{
-				"below_threshold": false,
+				"below_threshold": belowThreshold,
 				"threshold":       threshold,
 				"last_remaining":  remaining,
 				"updated_time":    now,
@@ -65,6 +73,14 @@ func ClaimQuotaWarning(userId int, source string, sourceId int64, threshold int6
 				"threshold":      threshold,
 				"last_remaining": remaining,
 				"updated_time":   now,
+			}).Error
+		}
+		if state.NotifiedTime > 0 && now-state.NotifiedTime < QuotaWarningRearmDelaySeconds {
+			return tx.Model(state).Updates(map[string]any{
+				"below_threshold": true,
+				"threshold":       threshold,
+				"last_remaining":  remaining,
+				"updated_time":    now,
 			}).Error
 		}
 

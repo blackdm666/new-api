@@ -4,6 +4,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,10 +23,37 @@ func TestQuotaWarningIsClaimedOnlyWhenBalanceCrossesBelowThreshold(t *testing.T)
 	claimed, _, err = ClaimQuotaWarning(101, QuotaNotificationSourceWallet, 0, 1000, 1200)
 	require.NoError(t, err)
 	assert.False(t, claimed)
+	require.NoError(t, DB.Model(&QuotaNotificationState{}).
+		Where("user_id = ? AND source = ? AND source_id = ?", 101, QuotaNotificationSourceWallet, 0).
+		Update("notified_time", common.GetTimestamp()-QuotaWarningRearmDelaySeconds).Error)
+	claimed, _, err = ClaimQuotaWarning(101, QuotaNotificationSourceWallet, 0, 1000, 1200)
+	require.NoError(t, err)
+	assert.False(t, claimed)
 	claimed, version, err = ClaimQuotaWarning(101, QuotaNotificationSourceWallet, 0, 1000, 700)
 	require.NoError(t, err)
 	assert.True(t, claimed)
 	assert.Equal(t, int64(2), version)
+}
+
+func TestQuotaWarningRearmDelaySuppressesRapidDuplicate(t *testing.T) {
+	truncateTables(t)
+	claimed, version, err := ClaimQuotaWarning(303, QuotaNotificationSourceWallet, 0, 1000, 900)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.Equal(t, int64(1), version)
+
+	claimed, _, err = ClaimQuotaWarning(303, QuotaNotificationSourceWallet, 0, 1000, 1500)
+	require.NoError(t, err)
+	assert.False(t, claimed)
+
+	claimed, _, err = ClaimQuotaWarning(303, QuotaNotificationSourceWallet, 0, 1000, 800)
+	require.NoError(t, err)
+	assert.False(t, claimed)
+
+	state := &QuotaNotificationState{}
+	require.NoError(t, DB.First(state, "user_id = ? AND source = ? AND source_id = ?", 303, QuotaNotificationSourceWallet, 0).Error)
+	assert.True(t, state.BelowThreshold)
+	assert.Equal(t, int64(1), state.Version)
 }
 
 func TestConcurrentQuotaWarningClaimsProduceOneEvent(t *testing.T) {
