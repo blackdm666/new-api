@@ -1506,6 +1506,26 @@ func GetSubscriptionPlanInfoByUserSubscriptionId(userSubscriptionId int) (*Subsc
 	return info, nil
 }
 
+// GetUserSubscriptionRemainingQuota reads the settled balance for one
+// subscription. Callers that make state-transition decisions must not rely on
+// a request-start snapshot because concurrent requests may settle out of order.
+func GetUserSubscriptionRemainingQuota(userSubscriptionId int) (int64, error) {
+	if userSubscriptionId <= 0 {
+		return 0, errors.New("invalid userSubscriptionId")
+	}
+	var sub struct {
+		AmountTotal int64
+		AmountUsed  int64
+	}
+	if err := DB.Model(&UserSubscription{}).
+		Select("amount_total", "amount_used").
+		Where("id = ?", userSubscriptionId).
+		Take(&sub).Error; err != nil {
+		return 0, err
+	}
+	return sub.AmountTotal - sub.AmountUsed, nil
+}
+
 // Update subscription used amount by delta (positive consume more, negative refund).
 func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error {
 	if userSubscriptionId <= 0 {

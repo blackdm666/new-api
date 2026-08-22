@@ -459,14 +459,14 @@ func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, pre
 
 	if sendEmail {
 		if (quota + preConsumedQuota) != 0 {
-			checkAndSendQuotaNotify(relayInfo, quota, preConsumedQuota)
+			checkAndSendQuotaNotify(relayInfo)
 		}
 	}
 
 	return result, nil
 }
 
-func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int) {
+func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo) {
 	gopool.Go(func() {
 		userSetting := relayInfo.UserSetting
 		threshold := common.QuotaRemindThreshold
@@ -477,9 +477,7 @@ func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo, quota int, preCon
 			return
 		}
 
-		consumeQuota := quota + preConsumedQuota
-		remaining := relayInfo.UserQuota - consumeQuota
-		claimed, version, err := model.ClaimQuotaWarning(relayInfo.UserId, model.QuotaNotificationSourceWallet, 0, int64(threshold), int64(remaining))
+		claimed, version, remaining, err := claimQuotaWarningForCurrentBalance(relayInfo, model.QuotaNotificationSourceWallet, 0, int64(threshold))
 		if err != nil {
 			common.SysError(fmt.Sprintf("failed to claim quota notify for user %d: %s", relayInfo.UserId, err.Error()))
 			return
@@ -488,7 +486,7 @@ func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo, quota int, preCon
 			return
 		}
 		topUpLink := PaymentReturnURL("/wallet")
-		notification := buildQuotaWarningNotification(userSetting, remaining, topUpLink)
+		notification := buildQuotaWarningNotification(userSetting, int(remaining), topUpLink)
 		deliveryKey := model.QuotaWarningDeliveryKey(relayInfo.UserId, model.QuotaNotificationSourceWallet, 0, version)
 		if err := NotifyUserWithDeliveryKey(relayInfo.UserId, relayInfo.UserEmail, relayInfo.UserSetting, notification, deliveryKey); err != nil {
 			_ = model.ReleaseQuotaWarningClaim(relayInfo.UserId, model.QuotaNotificationSourceWallet, 0, version)
@@ -515,9 +513,7 @@ func checkAndSendSubscriptionQuotaNotify(relayInfo *relaycommon.RelayInfo) {
 			return
 		}
 
-		usedAfter := relayInfo.SubscriptionAmountUsedAfterPreConsume + relayInfo.SubscriptionPostDelta
-		remaining := relayInfo.SubscriptionAmountTotal - usedAfter
-		claimed, version, err := model.ClaimQuotaWarning(relayInfo.UserId, model.QuotaNotificationSourceSubscription, int64(relayInfo.SubscriptionId), int64(threshold), remaining)
+		claimed, version, remaining, err := claimQuotaWarningForCurrentBalance(relayInfo, model.QuotaNotificationSourceSubscription, int64(relayInfo.SubscriptionId), int64(threshold))
 		if err != nil {
 			common.SysError(fmt.Sprintf("failed to claim subscription quota notify for user %d: %s", relayInfo.UserId, err.Error()))
 			return
@@ -534,6 +530,33 @@ func checkAndSendSubscriptionQuotaNotify(relayInfo *relaycommon.RelayInfo) {
 			common.SysError(fmt.Sprintf("failed to send subscription quota notify to user %d: %s", relayInfo.UserId, err.Error()))
 		}
 	})
+}
+
+func claimQuotaWarningForCurrentBalance(relayInfo *relaycommon.RelayInfo, source string, sourceId int64, threshold int64) (bool, int64, int64, error) {
+	if relayInfo == nil {
+		return false, 0, 0, errors.New("relay info is nil")
+	}
+
+	var remaining int64
+	switch source {
+	case model.QuotaNotificationSourceWallet:
+		quota, err := model.GetUserQuota(relayInfo.UserId, false)
+		if err != nil {
+			return false, 0, 0, err
+		}
+		remaining = int64(quota)
+	case model.QuotaNotificationSourceSubscription:
+		quota, err := model.GetUserSubscriptionRemainingQuota(int(sourceId))
+		if err != nil {
+			return false, 0, 0, err
+		}
+		remaining = quota
+	default:
+		return false, 0, 0, fmt.Errorf("unsupported quota notification source: %s", source)
+	}
+
+	claimed, version, err := model.ClaimQuotaWarning(relayInfo.UserId, source, sourceId, threshold, remaining)
+	return claimed, version, remaining, err
 }
 
 func buildQuotaWarningNotification(userSetting dto.UserSetting, remainingQuota int, topUpLink string) dto.Notify {

@@ -48,6 +48,7 @@ func TestMain(m *testing.M) {
 		&model.Midjourney{},
 		&model.TopUp{},
 		&model.EmailDelivery{},
+		&model.QuotaNotificationState{},
 		&model.MarketingCampaign{},
 		&model.MarketingRecipient{},
 		&model.MarketingAutomation{},
@@ -76,6 +77,7 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM marketing_automations")
 		model.DB.Exec("DELETE FROM marketing_suppressions")
 		model.DB.Exec("DELETE FROM email_deliveries")
+		model.DB.Exec("DELETE FROM quota_notification_states")
 		model.DB.Exec("DELETE FROM tasks")
 		model.DB.Exec("DELETE FROM users")
 		model.DB.Exec("DELETE FROM tokens")
