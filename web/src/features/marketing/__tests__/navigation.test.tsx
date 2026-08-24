@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -31,7 +32,13 @@ function successfulResponse(data: unknown): ReturnType<typeof api.get> {
   >
 }
 
-function renderMarketingPage() {
+type MarketingPageOptions = {
+  automations?: Array<Record<string, unknown>>
+  latestAnnouncement?: Record<string, unknown> | null
+  preview?: { subject: string; body: string }
+}
+
+function renderMarketingPage(options: MarketingPageOptions = {}) {
   vi.spyOn(api, 'get').mockImplementation((url) => {
     switch (url) {
       case '/api/marketing/overview':
@@ -55,7 +62,9 @@ function renderMarketingPage() {
           total: 1,
         })
       case '/api/marketing/automations':
-        return successfulResponse([])
+        return successfulResponse(options.automations ?? [])
+      case '/api/marketing/announcements/latest':
+        return successfulResponse(options.latestAnnouncement ?? null)
       case '/api/marketing/campaigns/2/recipients':
         return successfulResponse({ items: [], total: 0 })
       case '/api/option/email_deliveries':
@@ -98,6 +107,18 @@ function renderMarketingPage() {
         throw new Error(`Unexpected GET ${url}`)
     }
   })
+  vi.spyOn(api, 'post').mockImplementation((url) => {
+    if (url === '/api/marketing/preview') {
+      return successfulResponse(
+        options.preview ?? {
+          subject: 'Preview subject',
+          body: '<div>Rendered marketing email</div>',
+        }
+      )
+    }
+    throw new Error(`Unexpected POST ${url}`)
+  })
+  vi.spyOn(api, 'put').mockImplementation(() => successfulResponse({}))
 
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -122,7 +143,7 @@ describe('email marketing navigation', () => {
 
     expect(
       await screen.findByPlaceholderText(
-        'Search by email type, user, recipient, or related ID'
+        'Search by email type, user, recipient, or queue ID'
       )
     ).toBeInTheDocument()
     expect(
@@ -139,7 +160,7 @@ describe('email marketing navigation', () => {
     ).toBeInTheDocument()
     expect(
       screen.queryByPlaceholderText(
-        'Search by email type, user, recipient, or related ID'
+        'Search by email type, user, recipient, or queue ID'
       )
     ).not.toBeInTheDocument()
   })
@@ -156,5 +177,271 @@ describe('email marketing navigation', () => {
     expect(
       screen.getByRole('option', { name: '#2 Marketing launch' })
     ).toBeInTheDocument()
+  })
+
+  test('filters sending records by clicked engagement on the server', async () => {
+    const user = userEvent.setup()
+    renderMarketingPage()
+
+    await screen.findByText('Marketing launch')
+    await user.click(screen.getByRole('tab', { name: 'Sending records' }))
+    await user.click(
+      await screen.findByRole('combobox', { name: 'Interaction status' })
+    )
+    await user.click(
+      await screen.findByRole('option', { name: 'Clicked recipients' })
+    )
+
+    await vi.waitFor(() => {
+      expect(api.get).toHaveBeenCalledWith(
+        '/api/marketing/campaigns/2/recipients',
+        expect.objectContaining({
+          params: expect.objectContaining({ engagement: 'clicked' }),
+        })
+      )
+    })
+  })
+
+  test('inserts the latest announcement into announcement email content', async () => {
+    const user = userEvent.setup()
+    renderMarketingPage({
+      automations: [
+        {
+          id: 5,
+          scene: 'announcement',
+          enabled: false,
+          apply_existing: false,
+          baseline_ready: true,
+          localized_content: JSON.stringify({
+            'zh-CN': { subject: 'New notice', body: 'Intro copy' },
+            en: { subject: 'New notice', body: 'Intro copy' },
+          }),
+          updated_time: 1,
+        },
+      ],
+      latestAnnouncement: {
+        id: 9,
+        content: 'Latest announcement',
+        extra: 'Additional details',
+        publish_date: '2026-08-23T08:00:00Z',
+      },
+    })
+
+    await screen.findByText('Marketing launch')
+    await user.click(screen.getByRole('tab', { name: 'Automations' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Configure automation' })
+    )
+    const body = screen.getByDisplayValue('Intro copy')
+    await user.click(
+      screen.getByRole('button', { name: 'Insert latest announcement' })
+    )
+
+    await vi.waitFor(() => {
+      expect(body).toHaveValue('Latest announcement\n\nAdditional details')
+    })
+  })
+
+  test('previews the actual rendered announcement email template', async () => {
+    const user = userEvent.setup()
+    renderMarketingPage({
+      automations: [
+        {
+          id: 5,
+          scene: 'announcement',
+          enabled: false,
+          apply_existing: false,
+          baseline_ready: true,
+          localized_content: JSON.stringify({
+            'zh-CN': { subject: 'New notice', body: 'Announcement body' },
+            en: { subject: 'New notice', body: 'Announcement body' },
+          }),
+          updated_time: 1,
+        },
+      ],
+      preview: {
+        subject: 'New notice',
+        body: '<div>Actual rendered announcement template</div>',
+      },
+    })
+
+    await screen.findByText('Marketing launch')
+    await user.click(screen.getByRole('tab', { name: 'Automations' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Configure automation' })
+    )
+    await user.click(screen.getByRole('button', { name: 'Preview email' }))
+
+    const preview = await screen.findByTitle('marketing-email-preview')
+    expect(preview).toHaveAttribute(
+      'srcdoc',
+      '<div>Actual rendered announcement template</div>'
+    )
+    expect(api.post).toHaveBeenCalledWith(
+      '/api/marketing/preview',
+      expect.objectContaining({
+        scene: 'announcement',
+        language: 'zh-CN',
+      })
+    )
+  })
+
+  test('hides retired balance automation scenes', async () => {
+    const automation = (scene: string) => ({
+      id: scene.length,
+      scene,
+      enabled: false,
+      apply_existing: false,
+      baseline_ready: true,
+      localized_content: JSON.stringify({
+        'zh-CN': { subject: scene, body: scene },
+        en: { subject: scene, body: scene },
+      }),
+      updated_time: 1,
+    })
+    renderMarketingPage({
+      automations: [
+        automation('registration_no_first_call'),
+        automation('single_topup_winback'),
+        automation('paid_low_balance'),
+        automation('trial_low_balance'),
+        automation('inactive_user'),
+        automation('affiliate_program_activation'),
+        automation('announcement'),
+      ],
+    })
+
+    await screen.findByText('Marketing launch')
+    fireEvent.click(screen.getByRole('tab', { name: 'Automations' }))
+
+    expect(
+      await screen.findByText('Single top-up win-back')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('Registration without first API request')
+    ).toBeInTheDocument()
+    expect(screen.getByText('Long-term inactive user')).toBeInTheDocument()
+    expect(screen.getByText('Referral program activation')).toBeInTheDocument()
+    expect(screen.getByText('New announcement')).toBeInTheDocument()
+    expect(screen.queryByText('Paid user low balance')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Trial balance almost depleted')
+    ).not.toBeInTheDocument()
+  })
+
+  test('saves customized runtime logic for a retained automation', async () => {
+    const user = userEvent.setup()
+    renderMarketingPage({
+      automations: [
+        {
+          id: 1,
+          scene: 'single_topup_winback',
+          enabled: false,
+          apply_existing: false,
+          baseline_ready: true,
+          trigger_config: JSON.stringify({
+            match_days: 30,
+            max_sends_per_user: 1,
+            repeat_interval_days: 30,
+          }),
+          localized_content: JSON.stringify({
+            'zh-CN': { subject: 'Win back', body: 'Come back' },
+            en: { subject: 'Win back', body: 'Come back' },
+          }),
+          updated_time: 1,
+        },
+      ],
+    })
+
+    await screen.findByText('Marketing launch')
+    await user.click(screen.getByRole('tab', { name: 'Automations' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Configure automation' })
+    )
+    expect(
+      screen.getByRole('combobox', { name: 'Current editing language' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Emails follow each recipient's language. If a template is missing, Simplified Chinese is used."
+      )
+    ).toBeInTheDocument()
+    const maxSends = screen.getByRole('spinbutton', {
+      name: 'Maximum sends per user',
+    })
+    await user.clear(maxSends)
+    await user.type(maxSends, '2')
+    await user.click(screen.getByRole('button', { name: 'Save automation' }))
+
+    await vi.waitFor(() => {
+      expect(api.put).toHaveBeenCalledWith(
+        '/api/marketing/automations/single_topup_winback',
+        expect.objectContaining({
+          trigger_config: expect.objectContaining({
+            match_days: 30,
+            max_sends_per_user: 2,
+            repeat_interval_days: 30,
+          }),
+        })
+      )
+    })
+  })
+
+  test('saves referral activation eligibility settings', async () => {
+    const user = userEvent.setup()
+    renderMarketingPage({
+      automations: [
+        {
+          id: 8,
+          scene: 'affiliate_program_activation',
+          enabled: false,
+          apply_existing: false,
+          baseline_ready: true,
+          trigger_config: JSON.stringify({
+            active_within_days: 30,
+            min_request_count: 10,
+            min_topup_count: 1,
+            max_sends_per_user: 1,
+            repeat_interval_days: 30,
+          }),
+          localized_content: JSON.stringify({
+            'zh-CN': { subject: 'Referral', body: 'Earn commission' },
+            en: { subject: 'Referral', body: 'Earn commission' },
+          }),
+          updated_time: 1,
+        },
+      ],
+    })
+
+    await screen.findByText('Marketing launch')
+    await user.click(screen.getByRole('tab', { name: 'Automations' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Configure automation' })
+    )
+    expect(
+      screen.getByText(
+        'This automation only runs while the referral commission program is enabled.'
+      )
+    ).toBeInTheDocument()
+    const activeDays = screen.getByRole('spinbutton', {
+      name: 'Active API use within (days)',
+    })
+    await user.clear(activeDays)
+    await user.type(activeDays, '14')
+    await user.click(screen.getByRole('button', { name: 'Save automation' }))
+
+    await vi.waitFor(() => {
+      expect(api.put).toHaveBeenCalledWith(
+        '/api/marketing/automations/affiliate_program_activation',
+        expect.objectContaining({
+          trigger_config: expect.objectContaining({
+            active_within_days: 14,
+            min_request_count: 10,
+            min_topup_count: 1,
+            max_sends_per_user: 1,
+          }),
+        })
+      )
+    })
   })
 })

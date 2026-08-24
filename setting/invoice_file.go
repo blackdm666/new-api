@@ -7,6 +7,7 @@ var (
 	InvoiceFileMaxSize        int64 = 5 * 1024 * 1024
 	InvoiceFileMaxCount             = 5
 	InvoiceMinimumAmountCents int64 = 50000
+	InvoiceTaxRateBasisPoints       = 300
 	InvoiceDataRetentionDays        = 0
 	InvoicePendingExpiryDays        = 30
 

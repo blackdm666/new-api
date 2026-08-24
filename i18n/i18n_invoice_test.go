@@ -30,6 +30,7 @@ func TestInvoiceErrorsUseAllFrontendLanguages(t *testing.T) {
 func TestInvoiceOperationalErrorsAreTranslatedInEveryLanguage(t *testing.T) {
 	require.NoError(t, Init())
 	keys := []string{
+		MsgInvoiceTaxFeeInsufficient,
 		MsgInvoiceOperationFailed,
 		MsgInvoiceLoadFailed,
 		MsgInvoiceSubmitFailed,

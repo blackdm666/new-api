@@ -42,7 +42,7 @@ func TestInvoiceNotificationDeliveryIsIdempotentAndUsesSharedOutbox(t *testing.T
 	assert.Equal(t, EmailPriorityBusiness, queued.Priority)
 }
 
-func TestInvoiceNotificationDeliveryMirrorsRetryAndClearsPayloadAfterSuccess(t *testing.T) {
+func TestInvoiceNotificationDeliveryMirrorsRetryAndRetainsOutboxRecipientAfterSuccess(t *testing.T) {
 	truncateTables(t)
 	delivery, _, err := EnqueueInvoiceNotification(&InvoiceNotificationDelivery{
 		DeliveryKey:      "invoice-notification-retry",
@@ -75,7 +75,7 @@ func TestInvoiceNotificationDeliveryMirrorsRetryAndClearsPayloadAfterSuccess(t *
 	assert.Empty(t, completed.Body)
 	queued, err = GetEmailDeliveryById(delivery.EmailDeliveryId)
 	require.NoError(t, err)
-	assert.Empty(t, queued.Recipient)
+	assert.Equal(t, "user@example.com", queued.Recipient)
 	assert.Empty(t, queued.Subject)
 	assert.Empty(t, queued.Body)
 }

@@ -22,6 +22,7 @@ const (
 
 var batchUpdateStores []map[int]int
 var batchUpdateLocks []sync.Mutex
+var batchUpdateRunMutex sync.Mutex
 
 func init() {
 	for i := 0; i < BatchUpdateTypeCount; i++ {
@@ -50,6 +51,9 @@ func addNewRecord(type_ int, id int, value int) {
 }
 
 func batchUpdate() {
+	batchUpdateRunMutex.Lock()
+	defer batchUpdateRunMutex.Unlock()
+
 	// check if there's any data to update
 	hasData := false
 	for i := 0; i < BatchUpdateTypeCount; i++ {

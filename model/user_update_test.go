@@ -144,6 +144,36 @@ func TestUsageAccountingSupportsSignedDirectAndBatchDeltas(t *testing.T) {
 	assert.Equal(t, int64(1150), gotChannel.UsedQuota)
 }
 
+func TestResetChannelUsedQuotaClearsPersistedAndPendingUsage(t *testing.T) {
+	setupUserUpdateTestState(t)
+	resetBatchUpdateTestState(t)
+	channel := Channel{
+		Name:      "usage-reset-channel",
+		Key:       "sk-reset",
+		Status:    common.ChannelStatusEnabled,
+		UsedQuota: 1000,
+	}
+	require.NoError(t, DB.Create(&channel).Error)
+
+	common.BatchUpdateEnabled = true
+	UpdateChannelUsedQuota(channel.Id, 300)
+	previous, err := ResetChannelUsedQuota(channel.Id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1300), previous)
+
+	var stored Channel
+	require.NoError(t, DB.Select("used_quota").First(&stored, channel.Id).Error)
+	assert.Zero(t, stored.UsedQuota)
+	batchUpdate()
+	require.NoError(t, DB.Select("used_quota").First(&stored, channel.Id).Error)
+	assert.Zero(t, stored.UsedQuota, "pre-reset batch usage must not reappear")
+
+	UpdateChannelUsedQuota(channel.Id, 50)
+	batchUpdate()
+	require.NoError(t, DB.Select("used_quota").First(&stored, channel.Id).Error)
+	assert.Equal(t, int64(50), stored.UsedQuota, "post-reset usage starts a new baseline")
+}
+
 func TestUpdateUserAccessTokenOnlyUpdatesAccessToken(t *testing.T) {
 	setupUserUpdateTestState(t)
 

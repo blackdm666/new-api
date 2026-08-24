@@ -65,9 +65,8 @@ type DeliveryStatus =
 type EmailDelivery = {
   id: number
   category: string
-  related_id: number
   user_id: number
-  recipient_masked: string
+  recipient: string
   priority: number
   status: DeliveryStatus
   attempts: number
@@ -380,7 +379,7 @@ export function EmailQueueSection() {
                   setPage(1)
                 }}
                 placeholder={t(
-                  'Search by email type, user, recipient, or related ID'
+                  'Search by email type, user, recipient, or queue ID'
                 )}
                 className='pl-9'
               />
@@ -466,11 +465,12 @@ export function EmailQueueSection() {
                           {emailCategoryLabel(item.category, t)}
                         </div>
                         <div className='text-muted-foreground text-xs'>
-                          #{item.id} · {t('Related ID')}{' '}
-                          {item.related_id || '-'}
+                          #{item.id}
                         </div>
                       </TableCell>
-                      <TableCell>{item.recipient_masked || '-'}</TableCell>
+                      <TableCell className='max-w-64 break-all'>
+                        {item.recipient || '-'}
+                      </TableCell>
                       <TableCell>
                         <Badge variant='outline' className={meta.className}>
                           {t(meta.label)}

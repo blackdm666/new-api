@@ -2,12 +2,14 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"net/mail"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -41,6 +43,7 @@ var (
 	ErrInvoiceOrderInvalid            = errors.New("invoice order invalid")
 	ErrInvoiceOrderDuplicate          = errors.New("invoice order duplicate")
 	ErrInvoiceAmountTooSmall          = errors.New("invoice amount too small")
+	ErrInvoiceTaxFeeInsufficient      = errors.New("invoice tax fee balance insufficient")
 	ErrInvoiceCompanyEmpty            = errors.New("invoice company empty")
 	ErrInvoiceCompanyInvalid          = errors.New("invoice company invalid")
 	ErrInvoiceTaxNumberEmpty          = errors.New("invoice tax number empty")
@@ -53,30 +56,46 @@ var (
 	ErrInvoiceFileRequired            = errors.New("invoice file required")
 )
 
+type InvoiceTaxFeeInsufficientError struct {
+	FeeCents       int64
+	AvailableCents int64
+}
+
+func (err *InvoiceTaxFeeInsufficientError) Error() string {
+	return ErrInvoiceTaxFeeInsufficient.Error()
+}
+
+func (err *InvoiceTaxFeeInsufficientError) Unwrap() error {
+	return ErrInvoiceTaxFeeInsufficient
+}
+
 type InvoiceRequest struct {
-	Id                int     `json:"id"`
-	UserId            int     `json:"user_id" gorm:"index;not null"`
-	Username          string  `json:"username" gorm:"type:varchar(64);index"`
-	CompanyName       string  `json:"company_name" gorm:"type:varchar(255);not null"`
-	TaxNumber         string  `json:"tax_number" gorm:"type:varchar(64);not null;index"`
-	BankName          string  `json:"bank_name" gorm:"type:varchar(255)"`
-	BankAccount       string  `json:"bank_account" gorm:"type:varchar(128)"`
-	CompanyAddress    string  `json:"company_address" gorm:"type:varchar(512)"`
-	CompanyPhone      string  `json:"company_phone" gorm:"type:varchar(32)"`
-	Email             string  `json:"-" gorm:"type:varchar(128);not null"`
-	Remark            string  `json:"remark" gorm:"type:text"`
-	TopUpOrderIds     string  `json:"topup_order_ids" gorm:"type:text;not null"`
-	OrderNumbers      string  `json:"-" gorm:"type:text"`
-	TotalMoney        float64 `json:"total_money"`
-	TotalMoneyCents   int64   `json:"total_money_cents" gorm:"bigint;default:0"`
-	Status            int     `json:"status" gorm:"type:int;index;default:1"`
-	RejectionReason   string  `json:"rejection_reason" gorm:"type:varchar(500)"`
-	IssuedTime        int64   `json:"issued_time" gorm:"bigint;default:0"`
-	RedactedTime      int64   `json:"redacted_time" gorm:"bigint;index;default:0"`
-	ExpiryWarningTime int64   `json:"expiry_warning_time" gorm:"bigint;index;default:0"`
-	ExpiresAt         int64   `json:"expires_at" gorm:"-"`
-	CreatedTime       int64   `json:"created_time" gorm:"bigint;index"`
-	UpdatedTime       int64   `json:"updated_time" gorm:"bigint;index"`
+	Id                 int     `json:"id"`
+	UserId             int     `json:"user_id" gorm:"index;not null"`
+	Username           string  `json:"username" gorm:"type:varchar(64);index"`
+	CompanyName        string  `json:"company_name" gorm:"type:varchar(255);not null"`
+	TaxNumber          string  `json:"tax_number" gorm:"type:varchar(64);not null;index"`
+	BankName           string  `json:"bank_name" gorm:"type:varchar(255)"`
+	BankAccount        string  `json:"bank_account" gorm:"type:varchar(128)"`
+	CompanyAddress     string  `json:"company_address" gorm:"type:varchar(512)"`
+	CompanyPhone       string  `json:"company_phone" gorm:"type:varchar(32)"`
+	Email              string  `json:"-" gorm:"type:varchar(128);not null"`
+	Remark             string  `json:"remark" gorm:"type:text"`
+	TopUpOrderIds      string  `json:"topup_order_ids" gorm:"type:text;not null"`
+	OrderNumbers       string  `json:"-" gorm:"type:text"`
+	TotalMoney         float64 `json:"total_money"`
+	TotalMoneyCents    int64   `json:"total_money_cents" gorm:"bigint;default:0"`
+	TaxRateBasisPoints int     `json:"tax_rate_basis_points" gorm:"default:0"`
+	TaxFeeCents        int64   `json:"tax_fee_cents" gorm:"bigint;default:0"`
+	TaxFeeQuota        int     `json:"tax_fee_quota" gorm:"default:0"`
+	Status             int     `json:"status" gorm:"type:int;index;default:1"`
+	RejectionReason    string  `json:"rejection_reason" gorm:"type:varchar(500)"`
+	IssuedTime         int64   `json:"issued_time" gorm:"bigint;default:0"`
+	RedactedTime       int64   `json:"redacted_time" gorm:"bigint;index;default:0"`
+	ExpiryWarningTime  int64   `json:"expiry_warning_time" gorm:"bigint;index;default:0"`
+	ExpiresAt          int64   `json:"expires_at" gorm:"-"`
+	CreatedTime        int64   `json:"created_time" gorm:"bigint;index"`
+	UpdatedTime        int64   `json:"updated_time" gorm:"bigint;index"`
 }
 
 type InvoiceOrderClaim struct {
@@ -135,6 +154,45 @@ type CreateInvoiceRequestParams struct {
 }
 
 type InvoiceNotificationFactory func(request *InvoiceRequest) ([]*InvoiceNotificationDelivery, error)
+
+func CalculateInvoiceTaxFee(totalCents int64, rateBasisPoints int) (int64, int, error) {
+	if totalCents < 0 || rateBasisPoints < 0 || rateBasisPoints > 10000 {
+		return 0, 0, errors.New("invalid invoice tax fee input")
+	}
+	feeCents := decimal.NewFromInt(totalCents).
+		Mul(decimal.NewFromInt(int64(rateBasisPoints))).
+		Div(decimal.NewFromInt(10000)).
+		Round(0).
+		IntPart()
+	if feeCents == 0 {
+		return 0, 0, nil
+	}
+	if common.QuotaPerUnit <= 0 || operation_setting.USDExchangeRate <= 0 {
+		return 0, 0, errors.New("invoice tax fee quota conversion is not configured")
+	}
+	feeCNY := decimal.NewFromInt(feeCents).Div(decimal.NewFromInt(100))
+	feeQuota, err := common.QuotaFromDecimalStrict(
+		feeCNY.
+			Div(decimal.NewFromFloat(operation_setting.USDExchangeRate)).
+			Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+	)
+	if err != nil {
+		return 0, 0, err
+	}
+	return feeCents, feeQuota, nil
+}
+
+func InvoiceQuotaToCNYCents(quota int) int64 {
+	if quota <= 0 || common.QuotaPerUnit <= 0 || operation_setting.USDExchangeRate <= 0 {
+		return 0
+	}
+	return decimal.NewFromInt(int64(quota)).
+		Div(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Mul(decimal.NewFromFloat(operation_setting.USDExchangeRate)).
+		Mul(decimal.NewFromInt(100)).
+		Round(0).
+		IntPart()
+}
 
 func (request *InvoiceRequest) BeforeCreate(tx *gorm.DB) error {
 	now := common.GetTimestamp()
@@ -405,25 +463,57 @@ func CreateInvoiceRequestWithNotifications(params CreateInvoiceRequestParams, no
 		if totalCents < setting.InvoiceMinimumAmountCents {
 			return ErrInvoiceAmountTooSmall
 		}
+		taxRateBasisPoints := setting.InvoiceTaxRateBasisPoints
+		taxFeeCents, taxFeeQuota, err := CalculateInvoiceTaxFee(totalCents, taxRateBasisPoints)
+		if err != nil {
+			return err
+		}
+		if taxFeeQuota > 0 {
+			var user User
+			if err := lockForUpdate(tx).Select("id", "quota").First(&user, params.UserId).Error; err != nil {
+				return err
+			}
+			if user.Quota < taxFeeQuota {
+				return &InvoiceTaxFeeInsufficientError{
+					FeeCents:       taxFeeCents,
+					AvailableCents: InvoiceQuotaToCNYCents(user.Quota),
+				}
+			}
+			result := tx.Model(&User{}).
+				Where("id = ? AND quota >= ?", params.UserId, taxFeeQuota).
+				Update("quota", gorm.Expr("quota - ?", taxFeeQuota))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return &InvoiceTaxFeeInsufficientError{
+					FeeCents:       taxFeeCents,
+					AvailableCents: InvoiceQuotaToCNYCents(user.Quota),
+				}
+			}
+		}
 
 		now := common.GetTimestamp()
 		request = &InvoiceRequest{
-			UserId:          params.UserId,
-			Username:        strings.TrimSpace(params.Username),
-			CompanyName:     companyName,
-			TaxNumber:       taxNumber,
-			BankName:        strings.TrimSpace(params.BankName),
-			BankAccount:     strings.TrimSpace(params.BankAccount),
-			CompanyAddress:  strings.TrimSpace(params.CompanyAddress),
-			CompanyPhone:    strings.TrimSpace(params.CompanyPhone),
-			Email:           email,
-			Remark:          strings.TrimSpace(params.Remark),
-			OrderNumbers:    invoiceOrderNumbers(orderedTopUps),
-			TotalMoney:      decimal.NewFromInt(totalCents).Div(decimal.NewFromInt(100)).InexactFloat64(),
-			TotalMoneyCents: totalCents,
-			Status:          InvoiceStatusPending,
-			CreatedTime:     now,
-			UpdatedTime:     now,
+			UserId:             params.UserId,
+			Username:           strings.TrimSpace(params.Username),
+			CompanyName:        companyName,
+			TaxNumber:          taxNumber,
+			BankName:           strings.TrimSpace(params.BankName),
+			BankAccount:        strings.TrimSpace(params.BankAccount),
+			CompanyAddress:     strings.TrimSpace(params.CompanyAddress),
+			CompanyPhone:       strings.TrimSpace(params.CompanyPhone),
+			Email:              email,
+			Remark:             strings.TrimSpace(params.Remark),
+			OrderNumbers:       invoiceOrderNumbers(orderedTopUps),
+			TotalMoney:         decimal.NewFromInt(totalCents).Div(decimal.NewFromInt(100)).InexactFloat64(),
+			TotalMoneyCents:    totalCents,
+			TaxRateBasisPoints: taxRateBasisPoints,
+			TaxFeeCents:        taxFeeCents,
+			TaxFeeQuota:        taxFeeQuota,
+			Status:             InvoiceStatusPending,
+			CreatedTime:        now,
+			UpdatedTime:        now,
 		}
 		if err := request.SetTopUpOrderIDs(orderIds); err != nil {
 			return err
@@ -461,6 +551,19 @@ func CreateInvoiceRequestWithNotifications(params CreateInvoiceRequestParams, no
 	})
 	if err != nil {
 		return nil, nil, err
+	}
+	if request.TaxFeeQuota > 0 {
+		if err := cacheDecrUserQuota(request.UserId, int64(request.TaxFeeQuota)); err != nil {
+			common.SysLog(fmt.Sprintf("failed to sync invoice tax fee debit to user quota cache: %v", err))
+			_ = invalidateUserCache(request.UserId)
+		}
+		RecordLog(request.UserId, LogTypeSystem, fmt.Sprintf(
+			"发票申请税费扣款：申请 #%d，开票金额 ¥%.2f，税率 %.2f%%，税费 ¥%.2f",
+			request.Id,
+			request.TotalMoney,
+			float64(request.TaxRateBasisPoints)/100,
+			float64(request.TaxFeeCents)/100,
+		))
 	}
 	return request, orderedTopUps, nil
 }

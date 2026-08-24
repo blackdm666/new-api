@@ -101,6 +101,7 @@ export type AdminAffiliateInviteRecord = {
   inviter_id: number
   inviter_username: string
   inviter_display_name: string
+  inviter_remark: string
   invitee_id: number
   invitee_username: string
   invitee_display_name: string

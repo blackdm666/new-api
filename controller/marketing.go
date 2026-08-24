@@ -27,9 +27,16 @@ type marketingTestPayload struct {
 	Language         string                                     `json:"language"`
 }
 
+type marketingPreviewPayload struct {
+	LocalizedContent map[string]model.MarketingLocalizedContent `json:"localized_content"`
+	Language         string                                     `json:"language"`
+	Scene            string                                     `json:"scene"`
+}
+
 type marketingAutomationPayload struct {
 	Enabled          bool                                       `json:"enabled"`
 	ApplyExisting    bool                                       `json:"apply_existing"`
+	TriggerConfig    model.MarketingAutomationTriggerConfig     `json:"trigger_config"`
 	LocalizedContent map[string]model.MarketingLocalizedContent `json:"localized_content"`
 }
 
@@ -196,6 +203,25 @@ func TestMarketingEmail(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"queued": true})
 }
 
+func PreviewMarketingEmail(c *gin.Context) {
+	payload := marketingPreviewPayload{}
+	if err := c.ShouldBindJSON(&payload); err != nil || !validMarketingContent(payload.LocalizedContent) {
+		common.ApiError(c, model.ErrMarketingInvalid)
+		return
+	}
+	content, err := common.Marshal(payload.LocalizedContent)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	subject, body, err := service.PreviewMarketingEmail(string(content), payload.Language, strings.TrimSpace(payload.Scene))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"subject": subject, "body": body})
+}
+
 func ListMarketingAutomations(c *gin.Context) {
 	if err := model.EnsureMarketingAutomations(); err != nil {
 		common.ApiError(c, err)
@@ -217,7 +243,8 @@ func UpdateMarketingAutomation(c *gin.Context) {
 		return
 	}
 	content, _ := common.Marshal(payload.LocalizedContent)
-	if err := model.UpdateMarketingAutomation(scene, payload.Enabled, payload.ApplyExisting, string(content)); err != nil {
+	triggerConfig, _ := common.Marshal(payload.TriggerConfig)
+	if err := model.UpdateMarketingAutomation(scene, payload.Enabled, payload.ApplyExisting, string(content), string(triggerConfig)); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -225,12 +252,16 @@ func UpdateMarketingAutomation(c *gin.Context) {
 }
 
 func PreviewMarketingAutomation(c *gin.Context) {
-	total, err := service.PreviewMarketingAutomation(strings.TrimSpace(c.Param("scene")))
+	total, err := service.PreviewMarketingAutomation(strings.TrimSpace(c.Param("scene")), strings.TrimSpace(c.Query("trigger_config")))
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, gin.H{"total": total})
+}
+
+func LatestMarketingAnnouncement(c *gin.Context) {
+	common.ApiSuccess(c, service.GetLatestMarketingAnnouncement(common.GetTimestamp()))
 }
 
 func ListMarketingRecipients(c *gin.Context) {
@@ -239,7 +270,7 @@ func ListMarketingRecipients(c *gin.Context) {
 		return
 	}
 	pageInfo := common.GetPageQuery(c)
-	rows, total, err := model.ListMarketingRecipients(id, pageInfo)
+	rows, total, err := model.ListMarketingRecipients(id, strings.TrimSpace(c.Query("engagement")), pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
 		return

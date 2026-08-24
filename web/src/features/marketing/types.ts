@@ -24,6 +24,11 @@ export type MarketingLocalizedContent = {
 export type MarketingAudienceRule = {
   groups?: string[]
   inactive_days?: number
+  created_before?: number
+  request_count_min?: number
+  request_count_max?: number
+  last_api_use_after?: number
+  require_affiliate_enabled?: boolean
   topup_count_min?: number
   topup_count_max?: number
   last_topup_before?: number
@@ -56,8 +61,27 @@ export type MarketingAutomation = {
   enabled: boolean
   apply_existing: boolean
   baseline_ready: boolean
+  trigger_config: string
   localized_content: string
   updated_time: number
+}
+
+export type MarketingAutomationTriggerConfig = {
+  match_days?: number
+  registration_wait_hours?: number
+  active_within_days?: number
+  min_request_count?: number
+  min_topup_count?: number
+  max_sends_per_user?: number
+  repeat_interval_days?: number
+  expiry_hours?: number
+}
+
+export type LatestMarketingAnnouncement = {
+  id: number
+  content: string
+  extra: string
+  publish_date: string
 }
 
 export type MarketingRecipient = {

@@ -211,6 +211,198 @@ func TestAdvancedCustomValidateBalanceRouteConstraints(t *testing.T) {
 	}
 }
 
+func TestChannelBalanceQueryConfigValidatesCustomRootRelativeMapping(t *testing.T) {
+	t.Parallel()
+
+	config := &ChannelBalanceQueryConfig{
+		Mode:       ChannelBalanceQueryModeCustom,
+		Path:       "/v1/user/balance",
+		Method:     "GET",
+		Unit:       ChannelBalanceUnitMoney,
+		MetricKind: ChannelBalanceMetricWallet,
+		Multiplier: "1",
+		Auth: &AdvancedCustomRouteAuth{
+			Type:  AdvancedCustomAuthTypeHeader,
+			Name:  "Authorization",
+			Value: "Bearer {api_key}",
+		},
+		Response: ChannelBalanceResponseConfig{
+			RemainingPath: "balance",
+			CurrencyPath:  "currency",
+			ActivePath:    "is_active",
+		},
+	}
+
+	require.NoError(t, config.Validate())
+}
+
+func TestChannelBalanceQueryConfigRejectsAbsolutePathAndMissingRemainingMapping(t *testing.T) {
+	t.Parallel()
+
+	absolute := &ChannelBalanceQueryConfig{
+		Mode:   ChannelBalanceQueryModeCustom,
+		Path:   "https://evil.example/balance",
+		Method: "GET",
+		Response: ChannelBalanceResponseConfig{
+			RemainingPath: "balance",
+		},
+	}
+	require.ErrorContains(t, absolute.Validate(), "single /")
+
+	missing := &ChannelBalanceQueryConfig{
+		Mode:   ChannelBalanceQueryModeCustom,
+		Path:   "/balance",
+		Method: "GET",
+	}
+	require.ErrorContains(t, missing.Validate(), "remaining path")
+}
+
+func TestChannelBalanceQueryConfigAcceptsManualAbsoluteURL(t *testing.T) {
+	t.Parallel()
+
+	config := &ChannelBalanceQueryConfig{
+		Mode:   ChannelBalanceQueryModeCustom,
+		URL:    "https://api.example.com/account/balance",
+		Method: "GET",
+		Auth: &AdvancedCustomRouteAuth{
+			Type:  AdvancedCustomAuthTypeHeader,
+			Name:  "Authorization",
+			Value: "Bearer {api_key}",
+		},
+		Response: ChannelBalanceResponseConfig{RemainingPath: "data.remaining"},
+		Unit:     ChannelBalanceUnitMoney,
+	}
+	require.NoError(t, config.Validate())
+
+	config.URL = "file:///etc/passwd"
+	require.ErrorContains(t, config.Validate(), "query URL")
+}
+
+func TestChannelBalanceQueryConfigSupportsPostHeadersAndDerivedRemaining(t *testing.T) {
+	t.Parallel()
+
+	config := &ChannelBalanceQueryConfig{
+		Mode:          ChannelBalanceQueryModeCustom,
+		URL:           "https://api.example.com/account/balance",
+		Method:        "POST",
+		Body:          `{"scope":"wallet"}`,
+		RemainingMode: ChannelBalanceRemainingTotalMinusUsed,
+		Auth: &AdvancedCustomRouteAuth{
+			Type:  AdvancedCustomAuthTypeHeader,
+			Name:  "Authorization",
+			Value: "Bearer account-token",
+		},
+		Headers: []ChannelBalanceRequestHeader{
+			{Name: "X-Tenant", Value: "tenant-a"},
+		},
+		Response: ChannelBalanceResponseConfig{
+			TotalPath:    "balance",
+			UsedPath:     "frozen_balance",
+			SuccessPath:  "success",
+			SuccessValue: "true",
+		},
+		Unit: ChannelBalanceUnitMoney,
+	}
+	require.NoError(t, config.Validate())
+
+	config.Method = "GET"
+	require.ErrorContains(t, config.Validate(), "cannot include a request body")
+	config.Method = "POST"
+	config.Headers = append(config.Headers, ChannelBalanceRequestHeader{Name: "Authorization", Value: "duplicate"})
+	require.ErrorContains(t, config.Validate(), "duplicate balance query header")
+}
+
+func TestChannelBalanceQueryAutomationValidation(t *testing.T) {
+	t.Parallel()
+
+	disabled := &ChannelBalanceQueryConfig{
+		Mode:           ChannelBalanceQueryModeDisabled,
+		AutoRefresh:    true,
+		RefreshMinutes: 15,
+	}
+	require.ErrorContains(t, disabled.Validate(), "cannot be enabled")
+
+	configured := &ChannelBalanceQueryConfig{
+		Mode: ChannelBalanceQueryModeNewAPI,
+		Auth: &AdvancedCustomRouteAuth{
+			Type:  AdvancedCustomAuthTypeHeader,
+			Name:  "Authorization",
+			Value: "account-token",
+		},
+		AutoRefresh:         true,
+		RefreshMinutes:      15,
+		LowBalanceAlert:     true,
+		LowBalanceThreshold: "10",
+	}
+	require.NoError(t, configured.Validate())
+	configured.LowBalanceThreshold = "0"
+	require.ErrorContains(t, configured.Validate(), "positive number")
+}
+
+func TestChannelBalanceQueryConfigRequiresAccountTokenForNewAPI(t *testing.T) {
+	t.Parallel()
+
+	config := &ChannelBalanceQueryConfig{Mode: ChannelBalanceQueryModeNewAPI}
+	require.ErrorContains(t, config.Validate(), "account access token is required")
+
+	config.Auth = &AdvancedCustomRouteAuth{
+		Type:  AdvancedCustomAuthTypeHeader,
+		Name:  "Authorization",
+		Value: "Bearer {api_key}",
+	}
+	require.ErrorContains(t, config.Validate(), "not the channel API key")
+
+	config.Auth.Value = "upstream-account-access-token"
+	require.NoError(t, config.Validate())
+
+	config.AccountUserID = "not-a-number"
+	require.ErrorContains(t, config.Validate(), "positive integer")
+
+	config.AccountUserID = "300"
+	require.NoError(t, config.Validate())
+
+	config.Auth.Value = ""
+	config.AuthConfigured = true
+	config.AuthMasked = "upst••••ream"
+	require.NoError(t, config.Validate())
+
+	auto := &ChannelBalanceQueryConfig{
+		Mode: ChannelBalanceQueryModeAuto,
+		Auth: &AdvancedCustomRouteAuth{
+			Type: AdvancedCustomAuthTypeHeader,
+			Name: "Authorization",
+		},
+	}
+	require.ErrorContains(t, auto.Validate(), "account access token is required")
+	auto.AuthConfigured = true
+	require.NoError(t, auto.Validate())
+}
+
+func TestChannelBalanceQueryConfigValidatesGCPTrialCredit(t *testing.T) {
+	t.Parallel()
+
+	config := &ChannelBalanceQueryConfig{
+		Mode: ChannelBalanceQueryModeGCPTrial,
+		GCPTrial: &ChannelBalanceGCPTrialConfig{
+			BillingAccountID:    "0112D2-3D1562-101A70",
+			QueryProjectID:      "api-505117",
+			DatasetID:           "billing_export",
+			CredentialChannelID: 69,
+			TotalAmount:         "300",
+			BaselineUsed:        "132",
+			BaselineAt:          1_787_580_000,
+		},
+	}
+	require.NoError(t, config.Validate())
+
+	config.GCPTrial.BaselineUsed = "301"
+	require.ErrorContains(t, config.Validate(), "between zero and the total")
+
+	config.GCPTrial.BaselineUsed = "132"
+	config.GCPTrial.DatasetID = "invalid.dataset"
+	require.ErrorContains(t, config.Validate(), "dataset ID")
+}
+
 func TestAdvancedCustomValidateDuplicateIncomingPathWithDisjointModels(t *testing.T) {
 	config := &AdvancedCustomConfig{
 		Routes: []AdvancedCustomRoute{

@@ -7,37 +7,50 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAutomationStagesRespectLifecycleRules(t *testing.T) {
 	now := time.Now().Unix()
-	user := &model.MarketingAudienceUser{LastTopUpId: 88, CreatedAt: now - 2*86400}
-	stage, ok := automationStage(model.MarketingScenePaidLowBalance, user, 3, now-100, now)
-	assert.True(t, ok)
-	assert.Equal(t, "topup-88", stage)
-
-	stage, ok = automationStage(model.MarketingSceneInactive, user, 0, 0, now)
+	user := &model.MarketingAudienceUser{CreatedAt: now - 90*86400}
+	oneShot := model.MarketingAutomationTriggerConfig{MatchDays: 30, MaxSendsPerUser: 1, RepeatIntervalDays: 30}
+	stage, ok := automationStage(user, 0, 0, oneShot, now)
 	assert.True(t, ok)
 	assert.Equal(t, "1", stage)
-	_, ok = automationStage(model.MarketingSceneInactive, user, 1, now-10*86400, now)
+	_, ok = automationStage(user, 1, now-31*86400, oneShot, now)
 	assert.False(t, ok)
-	stage, ok = automationStage(model.MarketingSceneInactive, user, 1, now-31*86400, now)
+
+	repeating := model.MarketingAutomationTriggerConfig{MatchDays: 30, MaxSendsPerUser: 2, RepeatIntervalDays: 30}
+	_, ok = automationStage(user, 1, now-10*86400, repeating, now)
+	assert.False(t, ok)
+	stage, ok = automationStage(user, 1, now-31*86400, repeating, now)
 	assert.True(t, ok)
 	assert.Equal(t, "2", stage)
-	_, ok = automationStage(model.MarketingSceneTrialLowBalance, &model.MarketingAudienceUser{CreatedAt: now - 3600}, 0, 0, now)
-	assert.False(t, ok)
-	stage, ok = automationStage(model.MarketingSceneTrialLowBalance, user, 1, now-8*86400, now)
-	assert.True(t, ok)
-	assert.Equal(t, "2", stage)
+}
+
+func TestAutomationAudienceRulesUseFirstCallAndAffiliateActivitySignals(t *testing.T) {
+	now := int64(1_800_000_000)
+	registration := automationAudienceRule(model.MarketingSceneRegistration, model.MarketingAutomationTriggerConfig{RegistrationWaitHours: 24}, now)
+	assert.Equal(t, now-24*3600, registration.CreatedBefore)
+	require.NotNil(t, registration.RequestCountMax)
+	assert.Zero(t, *registration.RequestCountMax)
+
+	affiliate := automationAudienceRule(model.MarketingSceneAffiliate, model.MarketingAutomationTriggerConfig{ActiveWithinDays: 30, MinRequestCount: 10, MinTopUpCount: 1}, now)
+	assert.True(t, affiliate.RequireAffiliateEnabled)
+	assert.Equal(t, now-30*86400, affiliate.LastAPIUseAfter)
+	require.NotNil(t, affiliate.RequestCountMin)
+	require.NotNil(t, affiliate.TopUpCountMin)
+	assert.Equal(t, 10, *affiliate.RequestCountMin)
+	assert.Equal(t, 1, *affiliate.TopUpCountMin)
 }
 
 func TestAutomationBaselineExcludesOnlyUsersMatchingAtEnableTime(t *testing.T) {
 	truncate(t)
 	now := time.Now().Unix()
 	require.NoError(t, model.EnsureMarketingAutomations())
-	require.NoError(t, model.UpdateMarketingAutomation(model.MarketingSceneInactive, true, false, mustMarketingContent(t, model.MarketingSceneInactive)))
+	require.NoError(t, model.UpdateMarketingAutomation(model.MarketingSceneInactive, true, false, mustMarketingContent(t, model.MarketingSceneInactive), ""))
 	automation := &model.MarketingAutomation{}
 	require.NoError(t, model.DB.Where("scene = ?", model.MarketingSceneInactive).First(automation).Error)
 	assert.False(t, automation.BaselineReady)
@@ -48,7 +61,9 @@ func TestAutomationBaselineExcludesOnlyUsersMatchingAtEnableTime(t *testing.T) {
 	require.NoError(t, model.DB.Create(future).Error)
 	campaign := &model.MarketingCampaign{Name: "inactive", Scene: model.MarketingSceneInactive, Status: model.MarketingCampaignStatusRunning, AudienceRule: "{}", LocalizedContent: automation.LocalizedContent, ActionPath: "/dashboard/overview", Automatic: true, StartedTime: now}
 	require.NoError(t, model.CreateMarketingCampaign(campaign))
-	require.NoError(t, captureMarketingAutomationBaseline(automation, campaign, now))
+	_, triggerConfig, err := model.NormalizeMarketingAutomationTriggerConfig(automation.Scene, automation.TriggerConfig)
+	require.NoError(t, err)
+	require.NoError(t, captureMarketingAutomationBaseline(automation, campaign, triggerConfig, now))
 
 	require.NoError(t, model.DB.Where("scene = ?", model.MarketingSceneInactive).First(automation).Error)
 	assert.True(t, automation.BaselineReady)
@@ -81,6 +96,51 @@ func TestMarketingSendWindowUsesShanghaiTime(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 8, 17, 9, 0, 0, 0, location).Unix(), nextMarketingSendWindow(time.Date(2026, 8, 16, 20, 0, 0, 0, location)).Unix())
 }
 
+func TestGetLatestMarketingAnnouncementUsesNewestPublishedEntry(t *testing.T) {
+	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	settings := console_setting.GetConsoleSetting()
+	original := settings.Announcements
+	t.Cleanup(func() { settings.Announcements = original })
+	settings.Announcements = `[
+		{"id":1,"content":"Older announcement","publishDate":"2026-08-20T00:00:00Z","type":"default"},
+		{"id":3,"content":"Future announcement","publishDate":"2026-08-24T00:00:00Z","type":"warning"},
+		{"id":2,"content":"Latest published announcement","extra":"Additional details","publishDate":"2026-08-23T08:00:00Z","type":"success"}
+	]`
+
+	announcement := GetLatestMarketingAnnouncement(now.Unix())
+	require.NotNil(t, announcement)
+	assert.Equal(t, 2, announcement.Id)
+	assert.Equal(t, "Latest published announcement", announcement.Content)
+	assert.Equal(t, "Additional details", announcement.Extra)
+	assert.Equal(t, "2026-08-23T08:00:00Z", announcement.PublishDate)
+}
+
+func TestAnnouncementAutomationBackfillsOnlyLatestPublishedEntry(t *testing.T) {
+	truncate(t)
+	now := common.GetTimestamp()
+	settings := console_setting.GetConsoleSetting()
+	original := settings.Announcements
+	t.Cleanup(func() { settings.Announcements = original })
+	settings.Announcements = `[
+		{"id":1,"content":"Older announcement","publishDate":"2026-08-20T00:00:00Z","type":"default"},
+		{"id":2,"content":"Latest announcement","publishDate":"2026-08-23T00:00:00Z","type":"success"}
+	]`
+	require.NoError(t, model.EnsureMarketingAutomations())
+	require.NoError(t, model.UpdateMarketingAutomation(model.MarketingSceneAnnouncement, true, true, mustMarketingContent(t, model.MarketingSceneAnnouncement), `{"expiry_hours":24}`))
+	automation, err := model.GetMarketingAutomation(model.MarketingSceneAnnouncement)
+	require.NoError(t, err)
+	// Treat both fixture announcements as historical relative to enable time.
+	require.NoError(t, model.DB.Model(automation).Update("enabled_time", now).Error)
+	automation.EnabledTime = now
+
+	require.NoError(t, materializeAnnouncementCampaigns(automation, now))
+	require.NoError(t, materializeAnnouncementCampaigns(automation, now))
+	var campaigns []model.MarketingCampaign
+	require.NoError(t, model.DB.Where("scene = ?", model.MarketingSceneAnnouncement).Find(&campaigns).Error)
+	require.Len(t, campaigns, 1)
+	assert.Equal(t, 2, campaigns[0].AnnouncementId)
+}
+
 func TestMarketingDeliveryMinuteQuotaIsExactAcrossPolls(t *testing.T) {
 	marketingDeliveryMinuteQuota.Lock()
 	marketingDeliveryMinuteQuota.minute = 0
@@ -101,4 +161,22 @@ func TestFixedMarketingTemplateEscapesCustomContentAndUsesFixedLink(t *testing.T
 	assert.Contains(t, body, "&lt;script&gt;")
 	assert.Contains(t, body, "&lt;img src=x onerror=alert(1)&gt;<br>hello")
 	assert.Equal(t, 1, strings.Count(body, `href="https://example.com/wallet"`))
+}
+
+func TestPreviewMarketingEmailUsesAnnouncementLayoutAndLink(t *testing.T) {
+	content, err := common.Marshal(map[string]model.MarketingLocalizedContent{
+		"zh-CN": {Subject: "新公告预览", Body: "公告正文"},
+	})
+	require.NoError(t, err)
+
+	subject, body, err := PreviewMarketingEmail(string(content), "zh-CN", model.MarketingSceneAnnouncement)
+	require.NoError(t, err)
+	assert.Equal(t, "新公告预览", subject)
+	assert.Contains(t, body, "公告正文")
+	assert.Contains(t, body, "/dashboard/overview#announcements")
+	assert.Contains(t, body, "新公告预览")
+}
+
+func TestSingleTopUpWinbackLinksToModelCatalog(t *testing.T) {
+	assert.Equal(t, "/pricing", marketingActionPath(model.MarketingSceneSingleTopUp))
 }

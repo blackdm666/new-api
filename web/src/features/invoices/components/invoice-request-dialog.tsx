@@ -47,6 +47,7 @@ import {
   selectInvoiceOrderIds,
 } from '../lib/invoice-selection'
 import {
+  calculateInvoiceTaxFee,
   formatInvoiceTimestamp,
   getInvoiceAmountShortfall,
 } from '../lib/invoice-utils'
@@ -69,6 +70,19 @@ const EMPTY_FORM = {
 }
 
 export function InvoiceRequestDialog({ open, onOpenChange, onCreated }: Props) {
+  if (!open) return null
+  return (
+    <OpenInvoiceRequestDialog
+      onOpenChange={onOpenChange}
+      onCreated={onCreated}
+    />
+  )
+}
+
+function OpenInvoiceRequestDialog({
+  onOpenChange,
+  onCreated,
+}: Omit<Props, 'open'>) {
   const { t } = useTranslation()
   const [orders, setOrders] = useState<EligibleTopUpOrder[]>([])
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -76,27 +90,32 @@ export function InvoiceRequestDialog({ open, onOpenChange, onCreated }: Props) {
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [minimumAmount, setMinimumAmount] = useState(500)
+  const [taxRateBasisPoints, setTaxRateBasisPoints] = useState(300)
+  const [availableBalance, setAvailableBalance] = useState(0)
   const [issueDay, setIssueDay] = useState(10)
   const [attempted, setAttempted] = useState(false)
 
   useEffect(() => {
-    if (!open) {
-      setOrders([])
-      setSelected(new Set())
-      setForm(EMPTY_FORM)
-      setAttempted(false)
-      return
-    }
-    setLoading(true)
+    let active = true
     void Promise.all([fetchEligibleInvoiceOrders(), fetchInvoiceConfig()])
       .then(([eligibleOrders, config]) => {
+        if (!active) return
         setOrders(eligibleOrders)
         setMinimumAmount(config.minimum_amount_cents / 100)
+        setTaxRateBasisPoints(config.tax_rate_basis_points)
+        setAvailableBalance(config.available_balance_cents / 100)
         setIssueDay(config.issue_day)
       })
-      .catch((error) => toast.error(getUserFacingErrorMessage(error)))
-      .finally(() => setLoading(false))
-  }, [open, t])
+      .catch((error) => {
+        if (active) toast.error(getUserFacingErrorMessage(error))
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [t])
 
   const total = useMemo(
     () =>
@@ -113,9 +132,15 @@ export function InvoiceRequestDialog({ open, onOpenChange, onCreated }: Props) {
       : ''
   const taxNumberError =
     attempted && form.taxNumber.trim() === '' ? t('Tax number is required') : ''
+  const taxFee = useMemo(
+    () => calculateInvoiceTaxFee(total, taxRateBasisPoints),
+    [taxRateBasisPoints, total]
+  )
+  const balanceInsufficient = taxFee > availableBalance
   const canSubmit =
     selected.size > 0 &&
     total >= minimumAmount &&
+    !balanceInsufficient &&
     form.companyName.trim() !== '' &&
     form.taxNumber.trim() !== ''
 
@@ -208,7 +233,7 @@ export function InvoiceRequestDialog({ open, onOpenChange, onCreated }: Props) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open onOpenChange={onOpenChange}>
       <DialogContent
         className='flex max-h-[90vh] flex-col sm:max-w-3xl'
         closeLabel={t('Close')}
@@ -219,6 +244,10 @@ export function InvoiceRequestDialog({ open, onOpenChange, onCreated }: Props) {
             {t(
               'Invoices are issued together on day {{day}} of each month. The minimum invoice amount is ¥{{amount}}, and multiple paid top-up orders can be combined. The issued invoice and notification will be sent to your account email, and the invoice can also be downloaded from the console.',
               { day: issueDay, amount: minimumAmount.toFixed(2) }
+            )}{' '}
+            {t(
+              'Submitting an invoice application deducts a {{rate}}% tax fee from your balance.',
+              { rate: (taxRateBasisPoints / 100).toFixed(2) }
             )}
           </DialogDescription>
         </DialogHeader>
@@ -282,6 +311,40 @@ export function InvoiceRequestDialog({ open, onOpenChange, onCreated }: Props) {
                       minimumAmount
                     ).toFixed(2),
                   }
+                )}
+              </p>
+            )}
+            {selected.size > 0 && (
+              <div className='bg-muted/30 grid gap-2 rounded-lg border p-3 text-sm sm:grid-cols-3'>
+                <div>
+                  <p className='text-muted-foreground text-xs'>
+                    {t('Invoice tax rate')}
+                  </p>
+                  <p className='font-semibold'>
+                    {(taxRateBasisPoints / 100).toFixed(2)}%
+                  </p>
+                </div>
+                <div>
+                  <p className='text-muted-foreground text-xs'>
+                    {t('Tax fee payable')}
+                  </p>
+                  <p className='font-semibold'>¥{taxFee.toFixed(2)}</p>
+                </div>
+                <div>
+                  <p className='text-muted-foreground text-xs'>
+                    {t('Available balance')}
+                  </p>
+                  <p className='font-semibold'>
+                    ¥{availableBalance.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+            )}
+            {selected.size > 0 && balanceInsufficient && (
+              <p className='text-destructive text-right text-xs' role='alert'>
+                {t(
+                  'Insufficient balance. This application requires a tax fee of ¥{{fee}}; please top up before submitting.',
+                  { fee: taxFee.toFixed(2) }
                 )}
               </p>
             )}
@@ -391,7 +454,10 @@ export function InvoiceRequestDialog({ open, onOpenChange, onCreated }: Props) {
           <Button
             onClick={submit}
             disabled={
-              selected.size === 0 || total < minimumAmount || submitting
+              selected.size === 0 ||
+              total < minimumAmount ||
+              submitting ||
+              balanceInsufficient
             }
           >
             {t('Submit invoice application')}

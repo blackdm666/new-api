@@ -34,7 +34,8 @@ import { formatCurrencyFromUSD } from '@/lib/currency'
 import { formatTimestampToDate } from '@/lib/format'
 
 import { getCodexUsage, updateChannelBalance } from '../../api'
-import { channelsQueryKeys } from '../../lib'
+import { channelsQueryKeys, formatChannelBalanceInfo } from '../../lib'
+import type { ChannelBalanceInfo } from '../../types'
 import { useChannels } from '../channels-provider'
 import {
   CodexUsageDialog,
@@ -48,11 +49,14 @@ type BalanceQueryDialogProps = {
 }
 
 export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { currentRow, setCurrentRow } = useChannels()
   const queryClient = useQueryClient()
   const [isQuerying, setIsQuerying] = useState(false)
   const [balance, setBalance] = useState<number | null>(null)
+  const [balanceInfo, setBalanceInfo] = useState<ChannelBalanceInfo | null>(
+    null
+  )
   const [balanceUpdatedTime, setBalanceUpdatedTime] = useState<number | null>(
     null
   )
@@ -96,18 +100,24 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
     setIsQuerying(true)
     try {
       const response = await updateChannelBalance(currentRow.id)
-      if (response.success && response.balance !== undefined) {
+      if (
+        response.success &&
+        (response.balance_info !== undefined || response.balance !== undefined)
+      ) {
         const newBalance = response.balance
-        const now = Math.floor(Date.now() / 1000)
+        const newBalanceInfo = response.balance_info || null
+        const now = newBalanceInfo?.updated_at || Math.floor(Date.now() / 1000)
 
-        setBalance(newBalance)
+        setBalance(newBalance ?? null)
+        setBalanceInfo(newBalanceInfo)
         setBalanceUpdatedTime(now)
         toast.success(t('Balance updated successfully'))
 
         // Update currentRow immediately with new balance and timestamp
         setCurrentRow({
           ...currentRow,
-          balance: newBalance,
+          balance: newBalance ?? currentRow.balance,
+          balance_info: newBalanceInfo ?? currentRow.balance_info,
           balance_updated_time: now,
         })
 
@@ -132,6 +142,7 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
 
   const handleClose = () => {
     setBalance(null)
+    setBalanceInfo(null)
     setBalanceUpdatedTime(null)
     setRawResponse(null)
     setCodexUsageResponse(null)
@@ -149,6 +160,14 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
     if (!timestamp) return 'Never'
     return formatTimestampToDate(timestamp)
   }
+
+  const currentBalanceInfo = balanceInfo ?? currentRow.balance_info
+  const currentBalanceDisplay = currentBalanceInfo
+    ? formatChannelBalanceInfo(currentBalanceInfo, {
+        locale: i18n.resolvedLanguage || i18n.language,
+        unlimitedLabel: t('Unlimited'),
+      })
+    : formatBalance(balance !== null ? balance : currentRow.balance)
 
   if (isCodex) {
     return (
@@ -192,7 +211,7 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
               <AlertTitle>{t('Balance response not recognized')}</AlertTitle>
               <AlertDescription>
                 {t(
-                  'The upstream response is valid JSON, but it does not match the OpenAI credit_summary format. The channel balance was not updated.'
+                  'The upstream response is valid JSON, but it does not match the configured balance response mapping. The channel balance was not updated.'
                 )}
               </AlertDescription>
             </Alert>
@@ -216,11 +235,28 @@ export function BalanceQueryDialog(props: BalanceQueryDialogProps) {
                 </IconBadge>
                 <span>{t('Current Balance')}</span>
               </div>
-              <div className='text-2xl font-bold'>
-                {balance !== null
-                  ? formatBalance(balance)
-                  : formatBalance(currentRow.balance)}
-              </div>
+              <div className='text-2xl font-bold'>{currentBalanceDisplay}</div>
+              {currentBalanceInfo && (
+                <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs'>
+                  <span>
+                    {t('Metric type')}:{' '}
+                    {t(currentBalanceInfo.metric_kind || 'custom')}
+                  </span>
+                  <span>
+                    {t('Source')}: {currentBalanceInfo.source || '-'}
+                  </span>
+                  {currentBalanceInfo.total && (
+                    <span>
+                      {t('Total')}: {currentBalanceInfo.total}
+                    </span>
+                  )}
+                  {currentBalanceInfo.used && (
+                    <span>
+                      {t('Used')}: {currentBalanceInfo.used}
+                    </span>
+                  )}
+                </div>
+              )}
               <div className='text-muted-foreground mt-2 text-xs'>
                 {t('Last updated:')}{' '}
                 {formatDate(

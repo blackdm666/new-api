@@ -12,8 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ListEmailDeliveries exposes delivery metadata to Root. Subject, body and
-// unsanitized recipient addresses are deliberately excluded by the model.
+// ListEmailDeliveries exposes delivery metadata and full recipient addresses
+// to Root. Subject and body content remain excluded by the model.
 func ListEmailDeliveries(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	rows, total, err := model.ListEmailDeliveries(model.EmailDeliveryQueryOptions{

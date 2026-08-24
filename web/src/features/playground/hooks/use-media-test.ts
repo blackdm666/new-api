@@ -141,7 +141,9 @@ export function useMediaTest(model: string, group: string) {
                     prompt,
                     abortController.signal
                   )
-                ).data.map(imageSource).filter(Boolean)
+                ).data
+                  .map(imageSource)
+                  .filter(Boolean)
           if (generationRef.current !== generation) return
           if (images.length === 0) {
             throw new Error(t('Image not available'))

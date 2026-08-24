@@ -54,6 +54,7 @@ export type InvoiceSettingsPayload = {
   InvoiceIssuedNotifyUserEnabled: boolean
   InvoiceAdminEmail: string
   InvoiceMinimumAmountCents: number
+  InvoiceTaxRateBasisPoints: number
   InvoiceDataRetentionDays: number
   InvoicePendingExpiryDays: number
   InvoiceFileEnabled: boolean
@@ -452,6 +453,7 @@ export type OperationsSettings = {
   InvoiceIssuedNotifyUserEnabled: boolean
   InvoiceAdminEmail: string
   InvoiceMinimumAmountCents: string
+  InvoiceTaxRateBasisPoints: string
   InvoiceDataRetentionDays: string
   InvoicePendingExpiryDays: string
   InvoiceFileEnabled: boolean

@@ -13,6 +13,7 @@ func validInvoiceSettingsPayload() InvoiceSettingsPayload {
 		InvoiceIssuedNotifyUserEnabled:       true,
 		InvoiceAdminEmail:                    "billing@example.com",
 		InvoiceMinimumAmountCents:            50000,
+		InvoiceTaxRateBasisPoints:            300,
 		InvoiceDataRetentionDays:             0,
 		InvoiceFileEnabled:                   true,
 		InvoiceFileStorage:                   "local",
@@ -57,4 +58,13 @@ func TestValidateInvoiceSettingsRetentionRange(t *testing.T) {
 	payload = validInvoiceSettingsPayload()
 	payload.InvoiceDataRetentionDays = 30
 	require.NoError(t, validateInvoiceSettingsPayload(&payload))
+}
+
+func TestValidateInvoiceSettingsTaxRateRange(t *testing.T) {
+	payload := validInvoiceSettingsPayload()
+	payload.InvoiceTaxRateBasisPoints = 301
+	require.NoError(t, validateInvoiceSettingsPayload(&payload))
+
+	payload.InvoiceTaxRateBasisPoints = 10001
+	require.ErrorContains(t, validateInvoiceSettingsPayload(&payload), "tax rate")
 }

@@ -121,6 +121,7 @@ func InitOptionMap() {
 	common.OptionMap["InvoiceFileMaxSize"] = strconv.FormatInt(setting.InvoiceFileMaxSize, 10)
 	common.OptionMap["InvoiceFileMaxCount"] = strconv.Itoa(setting.InvoiceFileMaxCount)
 	common.OptionMap["InvoiceMinimumAmountCents"] = strconv.FormatInt(setting.InvoiceMinimumAmountCents, 10)
+	common.OptionMap["InvoiceTaxRateBasisPoints"] = strconv.Itoa(setting.InvoiceTaxRateBasisPoints)
 	common.OptionMap["InvoiceDataRetentionDays"] = strconv.Itoa(setting.InvoiceDataRetentionDays)
 	common.OptionMap["InvoicePendingExpiryDays"] = strconv.Itoa(setting.InvoicePendingExpiryDays)
 	common.OptionMap["InvoiceFileAllowedExts"] = setting.InvoiceFileAllowedExts
@@ -694,6 +695,10 @@ func updateOptionMap(key string, value string) (err error) {
 	case "InvoiceMinimumAmountCents":
 		if v, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil && v > 0 {
 			setting.InvoiceMinimumAmountCents = v
+		}
+	case "InvoiceTaxRateBasisPoints":
+		if v, parseErr := strconv.Atoi(value); parseErr == nil && v >= 0 && v <= 10000 {
+			setting.InvoiceTaxRateBasisPoints = v
 		}
 	case "InvoiceDataRetentionDays":
 		if v, parseErr := strconv.Atoi(value); parseErr == nil && v >= 0 {

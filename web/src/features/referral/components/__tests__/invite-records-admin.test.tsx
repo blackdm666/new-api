@@ -45,6 +45,7 @@ describe('admin invitation records', () => {
       inviter_id: 42,
       inviter_username: 'promoter_42',
       inviter_display_name: 'Promoter Name',
+      inviter_remark: 'priority promoter',
       invitee_id: 84,
       invitee_username: 'invitee_84',
       invitee_display_name: 'Invited Name',
@@ -58,12 +59,18 @@ describe('admin invitation records', () => {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
+    let selectedUserId = 0
     await act(async () => {
       root.render(
         <I18nextProvider i18n={i18n}>
           <table>
             <tbody>
-              <AdminInviteRecordRow item={item} />
+              <AdminInviteRecordRow
+                item={item}
+                onInviterClick={(userId) => {
+                  selectedUserId = userId
+                }}
+              />
             </tbody>
           </table>
         </I18nextProvider>
@@ -71,13 +78,20 @@ describe('admin invitation records', () => {
     })
 
     const text = container.textContent ?? ''
-    assert.match(text, /promoter_42UID 42/)
+    assert.match(text, /promoter_42Remark: priority promoterUID 42/)
     assert.match(text, /invitee_84UID 84/)
     assert.doesNotMatch(text, /Promoter Name/)
     assert.doesNotMatch(text, /Invited Name/)
     const cells = container.querySelectorAll('td')
     assert.equal(cells[3]?.textContent, '0')
     assert.equal(cells[6]?.textContent, '-')
+    const inviterButton = container.querySelector('button')
+    assert.equal(
+      inviterButton?.getAttribute('aria-label'),
+      'User Information: promoter_42'
+    )
+    await act(async () => inviterButton?.click())
+    assert.equal(selectedUserId, 42)
 
     await act(async () => root.unmount())
     container.remove()

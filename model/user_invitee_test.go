@@ -57,7 +57,7 @@ func TestGetUserInviteesScopesIncludesDeletedAndPaginates(t *testing.T) {
 func TestListAdminAffiliateInviteRecordsIncludesUsersWithoutCommission(t *testing.T) {
 	truncateTables(t)
 
-	inviter := User{Username: "global-invite-owner", DisplayName: "Global Owner", Email: "global-owner@example.com", AffCode: "global-invite-owner-code", Status: common.UserStatusEnabled}
+	inviter := User{Username: "global-invite-owner", DisplayName: "Global Owner", Email: "global-owner@example.com", AffCode: "global-invite-owner-code", Remark: "priority promoter", Status: common.UserStatusEnabled}
 	require.NoError(t, DB.Create(&inviter).Error)
 	otherInviter := User{Username: "other-invite-owner", DisplayName: "Other Owner", Email: "other-owner@example.com", AffCode: "other-invite-owner-code", Status: common.UserStatusEnabled}
 	require.NoError(t, DB.Create(&otherInviter).Error)
@@ -108,6 +108,7 @@ func TestListAdminAffiliateInviteRecordsIncludesUsersWithoutCommission(t *testin
 	assert.Equal(t, int64(2), total)
 	require.Len(t, filteredRows, 2)
 	assert.Equal(t, withoutCommission.Id, filteredRows[0].InviteeId)
+	assert.Equal(t, "priority promoter", filteredRows[0].InviterRemark)
 	assert.Zero(t, filteredRows[0].TopUpCount)
 	assert.Zero(t, filteredRows[0].TopUpAmountCents)
 	assert.Equal(t, withCommission.Id, filteredRows[1].InviteeId)
@@ -121,4 +122,9 @@ func TestListAdminAffiliateInviteRecordsIncludesUsersWithoutCommission(t *testin
 	assert.Equal(t, int64(1), total)
 	require.Len(t, byUid, 1)
 	assert.Equal(t, withoutCommission.Id, byUid[0].InviteeId)
+
+	byRemark, total, err := ListAdminAffiliateInviteRecords("priority promoter", &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	require.Len(t, byRemark, 2)
 }

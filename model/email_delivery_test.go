@@ -52,8 +52,8 @@ func TestEmailDeliveryOutboxIsIdempotentAndRetriesToDeadLetter(t *testing.T) {
 	assert.Equal(t, int64(1), total)
 	require.Len(t, rows, 1)
 	assert.Equal(t, delivery.Id, rows[0].Id)
-	assert.NotContains(t, rows[0].LastError, "user@example.com")
-	assert.Contains(t, rows[0].LastError, "ur***@example.com")
+	assert.Equal(t, "user@example.com", rows[0].Recipient)
+	assert.Contains(t, rows[0].LastError, "user@example.com")
 
 	require.NoError(t, RetryEmailDelivery(delivery.Id))
 	require.NoError(t, DB.First(delivery, delivery.Id).Error)
@@ -62,7 +62,7 @@ func TestEmailDeliveryOutboxIsIdempotentAndRetriesToDeadLetter(t *testing.T) {
 	assert.Empty(t, delivery.LastError)
 }
 
-func TestCompleteEmailDeliveryScrubsSensitiveContent(t *testing.T) {
+func TestCompleteEmailDeliveryRetainsRecipientForRootMaintenance(t *testing.T) {
 	truncateTables(t)
 	delivery, _, err := EnqueueEmailDelivery(&EmailDelivery{
 		DeliveryKey: "test-email-event:2",
@@ -75,10 +75,51 @@ func TestCompleteEmailDeliveryScrubsSensitiveContent(t *testing.T) {
 	require.NoError(t, CompleteEmailDelivery(delivery.Id))
 	require.NoError(t, DB.First(delivery, delivery.Id).Error)
 	assert.Positive(t, delivery.DeliveredTime)
-	assert.Empty(t, delivery.Recipient)
+	assert.Equal(t, "user@example.com", delivery.Recipient)
 	assert.Empty(t, delivery.Subject)
 	assert.Empty(t, delivery.Body)
-	assert.Equal(t, "ur***@example.com", delivery.RecipientMasked)
+
+	rows, total, err := ListEmailDeliveries(EmailDeliveryQueryOptions{
+		Keyword: "user@example.com",
+		Status:  EmailDeliveryStatusDelivered,
+	}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "user@example.com", rows[0].Recipient)
+}
+
+func TestExpiredEmailDeliveryRetainsRecipientForRootMaintenance(t *testing.T) {
+	truncateTables(t)
+	now := common.GetTimestamp()
+	bulkExpired, _, err := EnqueueEmailDelivery(&EmailDelivery{
+		DeliveryKey: "test-email-expired:bulk",
+		Category:    "email_verification",
+		Recipient:   "bulk-expired@example.com",
+		Subject:     "Expiring subject",
+		Body:        "Expiring body",
+		ExpiresTime: now - 1,
+	})
+	require.NoError(t, err)
+	singleExpired, _, err := EnqueueEmailDelivery(&EmailDelivery{
+		DeliveryKey: "test-email-expired:single",
+		Category:    "marketing_custom",
+		Recipient:   "single-expired@example.com",
+		Subject:     "Expiring subject",
+		Body:        "Expiring body",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, ExpireEmailDeliveries(now))
+	require.NoError(t, ExpireEmailDelivery(singleExpired.Id, "campaign stopped"))
+	require.NoError(t, DB.First(bulkExpired, bulkExpired.Id).Error)
+	require.NoError(t, DB.First(singleExpired, singleExpired.Id).Error)
+	assert.Equal(t, "bulk-expired@example.com", bulkExpired.Recipient)
+	assert.Equal(t, "single-expired@example.com", singleExpired.Recipient)
+	assert.Empty(t, bulkExpired.Subject)
+	assert.Empty(t, bulkExpired.Body)
+	assert.Empty(t, singleExpired.Subject)
+	assert.Empty(t, singleExpired.Body)
 }
 
 func TestEmailDeliveryPriorityStatusBatchRetryAndCleanup(t *testing.T) {

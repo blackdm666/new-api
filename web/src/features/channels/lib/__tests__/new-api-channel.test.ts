@@ -23,7 +23,11 @@ import {
   CHANNEL_TYPE_OPTIONS,
   MODEL_FETCHABLE_TYPES,
 } from '../../constants'
-import { CHANNEL_FORM_DEFAULT_VALUES, channelFormSchema } from '../channel-form'
+import {
+  CHANNEL_FORM_DEFAULT_VALUES,
+  channelFormSchema,
+  transformFormDataToUpdatePayload,
+} from '../channel-form'
 import { getChannelTypeConfig } from '../channel-type-config'
 import { getChannelTypeIcon, getKeyPromptForType } from '../channel-utils'
 
@@ -87,5 +91,29 @@ describe('New API channel', () => {
     })
 
     expect(result.success).toBe(true)
+  })
+
+  test('persists account credentials while following the channel type', () => {
+    const payload = transformFormDataToUpdatePayload(
+      {
+        ...newAPIForm('https://new-api.example'),
+        key: '',
+        balance_query: JSON.stringify({
+          mode: 'auto',
+          auth: {
+            type: 'header',
+            name: 'Authorization',
+            value: 'account-access-token',
+          },
+          account_user_id: '300',
+        }),
+      },
+      90
+    )
+    const settings = JSON.parse(String(payload.settings))
+
+    expect(settings.balance_query.mode).toBe('auto')
+    expect(settings.balance_query.auth.value).toBe('account-access-token')
+    expect(settings.balance_query.account_user_id).toBe('300')
   })
 })

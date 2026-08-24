@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -84,6 +84,7 @@ type Props = {
     InvoiceIssuedNotifyUserEnabled: boolean
     InvoiceAdminEmail: string
     InvoiceMinimumAmountCents: string
+    InvoiceTaxRateBasisPoints: string
     InvoiceDataRetentionDays: string
     InvoicePendingExpiryDays: string
     InvoiceFileEnabled: boolean
@@ -98,6 +99,7 @@ type Props = {
 
 type FormValues = Props['defaultValues'] & {
   InvoiceMinimumAmountYuan: string
+  InvoiceTaxRatePercent: string
   InvoiceFileMaxSizeMiB: string
 }
 
@@ -110,10 +112,15 @@ function initialValues(defaultValues: Props['defaultValues']): FormValues {
     ...defaultValues,
     InvoiceMinimumAmountCents:
       defaultValues.InvoiceMinimumAmountCents || '50000',
+    InvoiceTaxRateBasisPoints: defaultValues.InvoiceTaxRateBasisPoints || '300',
     InvoiceFileMaxSize: defaultValues.InvoiceFileMaxSize || '5242880',
     InvoiceMinimumAmountYuan: decimalString(
       Number(defaultValues.InvoiceMinimumAmountCents || 50000) / 100,
       500
+    ),
+    InvoiceTaxRatePercent: decimalString(
+      Number(defaultValues.InvoiceTaxRateBasisPoints || 300) / 100,
+      3
     ),
     InvoiceFileMaxSizeMiB: decimalString(
       Number(defaultValues.InvoiceFileMaxSize || 5242880) / 1024 / 1024,
@@ -133,6 +140,9 @@ function buildPayload(values: FormValues): InvoiceSettingsPayload {
     InvoiceAdminEmail: values.InvoiceAdminEmail,
     InvoiceMinimumAmountCents: Math.round(
       Number(values.InvoiceMinimumAmountYuan) * 100
+    ),
+    InvoiceTaxRateBasisPoints: Math.round(
+      Number(values.InvoiceTaxRatePercent) * 100
     ),
     InvoiceDataRetentionDays: Number(values.InvoiceDataRetentionDays),
     InvoicePendingExpiryDays: Number(values.InvoicePendingExpiryDays),
@@ -170,22 +180,16 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [values, setValues] = useState(() => initialValues(defaultValues))
-  const baseline = useRef(initialValues(defaultValues))
-
-  useEffect(() => {
-    const next = initialValues(defaultValues)
-    baseline.current = next
-    setValues(next)
-  }, [defaultValues])
+  const [baseline, setBaseline] = useState(() => initialValues(defaultValues))
 
   const update = (key: keyof FormValues, value: string | boolean) =>
     setValues((current) => ({ ...current, [key]: value }))
-  const dirty = JSON.stringify(values) !== JSON.stringify(baseline.current)
+  const dirty = JSON.stringify(values) !== JSON.stringify(baseline)
 
   const saveMutation = useMutation({
     mutationFn: () => updateInvoiceSettings(buildPayload(values)),
     onSuccess: async () => {
-      baseline.current = values
+      setBaseline(values)
       await queryClient.invalidateQueries({ queryKey: ['system-options'] })
       toast.success(t('Invoice settings saved'))
     },
@@ -243,6 +247,20 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
           <p className='text-muted-foreground text-xs'>
             {t(
               'Users can combine multiple paid top-up orders. The selected total must reach this amount before submission.'
+            )}
+          </p>
+          <TextField
+            label={t('Invoice tax rate (%)')}
+            value={values.InvoiceTaxRatePercent}
+            onChange={(value) => update('InvoiceTaxRatePercent', value)}
+            type='number'
+            min='0'
+            max='100'
+            step='0.01'
+          />
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'The tax fee is deducted from the user balance when the invoice application is submitted. Set to 0 to disable the fee.'
             )}
           </p>
           <TextField

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,13 @@ var marketingDeliveryMinuteQuota = struct {
 }{}
 
 type marketingDispatchHandler struct{}
+
+type LatestMarketingAnnouncement struct {
+	Id          int    `json:"id"`
+	Content     string `json:"content"`
+	Extra       string `json:"extra"`
+	PublishDate string `json:"publish_date"`
+}
 
 func (marketingDispatchHandler) Type() string            { return model.SystemTaskTypeMarketingDispatch }
 func (marketingDispatchHandler) Enabled() bool           { return true }
@@ -122,6 +130,10 @@ func materializeMarketingAutomations(now int64) error {
 		if !automation.Enabled {
 			continue
 		}
+		_, triggerConfig, err := model.NormalizeMarketingAutomationTriggerConfig(automation.Scene, automation.TriggerConfig)
+		if err != nil {
+			return err
+		}
 		if automation.Scene == model.MarketingSceneAnnouncement {
 			if err := materializeAnnouncementCampaigns(automation, now); err != nil {
 				return err
@@ -150,12 +162,12 @@ func materializeMarketingAutomations(now int64) error {
 			continue
 		}
 		if !automation.BaselineReady {
-			if err := captureMarketingAutomationBaseline(automation, campaign, now); err != nil {
+			if err := captureMarketingAutomationBaseline(automation, campaign, triggerConfig, now); err != nil {
 				return err
 			}
 			continue
 		}
-		rule := automationAudienceRule(automation.Scene, now)
+		rule := automationAudienceRule(automation.Scene, triggerConfig, now)
 		for offset := 0; ; offset += 500 {
 			users, _, err := model.ListMarketingAudience(rule, 500, offset)
 			if err != nil {
@@ -166,7 +178,7 @@ func materializeMarketingAutomations(now int64) error {
 				if err != nil {
 					return err
 				}
-				stage, ok := automationStage(automation.Scene, user, count, lastAttempt, now)
+				stage, ok := automationStage(user, count, lastAttempt, triggerConfig, now)
 				if !ok {
 					continue
 				}
@@ -183,11 +195,11 @@ func materializeMarketingAutomations(now int64) error {
 	return nil
 }
 
-func captureMarketingAutomationBaseline(automation *model.MarketingAutomation, campaign *model.MarketingCampaign, now int64) error {
+func captureMarketingAutomationBaseline(automation *model.MarketingAutomation, campaign *model.MarketingCampaign, triggerConfig model.MarketingAutomationTriggerConfig, now int64) error {
 	if automation == nil || campaign == nil || automation.ApplyExisting {
 		return model.ErrMarketingInvalid
 	}
-	rule := automationAudienceRule(automation.Scene, now)
+	rule := automationAudienceRule(automation.Scene, triggerConfig, now)
 	for offset := 0; ; offset += 500 {
 		users, _, err := model.ListMarketingAudience(rule, 500, offset)
 		if err != nil {
@@ -198,7 +210,7 @@ func captureMarketingAutomationBaseline(automation *model.MarketingAutomation, c
 			if err != nil {
 				return err
 			}
-			stage, ok := automationStage(automation.Scene, user, count, lastAttempt, now)
+			stage, ok := automationStage(user, count, lastAttempt, triggerConfig, now)
 			if !ok {
 				continue
 			}
@@ -226,6 +238,7 @@ func captureMarketingAutomationBaseline(automation *model.MarketingAutomation, c
 }
 
 func materializeAnnouncementCampaigns(automation *model.MarketingAutomation, now int64) error {
+	historicalBackfillSeen := false
 	for _, announcement := range console_setting.GetAnnouncements() {
 		id, ok := marketingAnnouncementID(announcement["id"])
 		if !ok || id <= 0 {
@@ -235,8 +248,11 @@ func materializeAnnouncementCampaigns(automation *model.MarketingAutomation, now
 		if !ok || publishTime > now {
 			continue
 		}
-		if !automation.ApplyExisting && automation.EnabledTime > 0 && publishTime < automation.EnabledTime {
-			continue
+		if automation.EnabledTime > 0 && publishTime < automation.EnabledTime {
+			if !automation.ApplyExisting || historicalBackfillSeen {
+				continue
+			}
+			historicalBackfillSeen = true
 		}
 		_, err := model.FindMarketingCampaignByAnnouncementId(id)
 		if err == nil {
@@ -263,6 +279,30 @@ func materializeAnnouncementCampaigns(automation *model.MarketingAutomation, now
 		}
 		if err := MaterializeMarketingCampaign(campaign); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func GetLatestMarketingAnnouncement(now int64) *LatestMarketingAnnouncement {
+	for _, announcement := range console_setting.GetAnnouncements() {
+		publishTime, ok := marketingAnnouncementTime(announcement["publishDate"])
+		if !ok || publishTime > now {
+			continue
+		}
+		content, ok := announcement["content"].(string)
+		content = strings.TrimSpace(content)
+		if !ok || content == "" {
+			continue
+		}
+		id, _ := marketingAnnouncementID(announcement["id"])
+		publishDate, _ := announcement["publishDate"].(string)
+		extra, _ := announcement["extra"].(string)
+		return &LatestMarketingAnnouncement{
+			Id:          id,
+			Content:     content,
+			Extra:       strings.TrimSpace(extra),
+			PublishDate: strings.TrimSpace(publishDate),
 		}
 	}
 	return nil
@@ -361,7 +401,8 @@ func dispatchPendingMarketingRecipients(ctx context.Context, now int64) error {
 		}
 		clickURL := strings.TrimRight(systemEmailSiteURL(), "/") + "/api/marketing/c/" + url.PathEscape(token)
 		body := RenderFixedMarketingEmail(content.Subject, content.Body, clickURL, marketingActionLabel(recipient.Language))
-		delivery, err := QueueMarketingEmail("marketing:"+recipient.DedupeKey, "marketing_"+campaign.Scene, campaign.Id, user.Id, user.Email, content.Subject, body, now+int64(marketingDispatchExpiry.Seconds()))
+		expiresAt := now + int64(marketingCampaignDispatchExpiry(campaign).Seconds())
+		delivery, err := QueueMarketingEmail("marketing:"+recipient.DedupeKey, "marketing_"+campaign.Scene, campaign.Id, user.Id, user.Email, content.Subject, body, expiresAt)
 		if err != nil {
 			continue
 		}
@@ -441,7 +482,15 @@ func marketingEmailDeliveryAllowed(delivery *model.EmailDelivery) (bool, error) 
 	}
 	rule := model.MarketingAudienceRule{}
 	if campaign.Automatic && campaign.Scene != model.MarketingSceneAnnouncement {
-		rule = automationAudienceRule(campaign.Scene, common.GetTimestamp())
+		automation, err := model.GetMarketingAutomation(campaign.Scene)
+		if err != nil {
+			return expireMarketingEmailDelivery(delivery, recipient, "marketing automation is unavailable")
+		}
+		_, triggerConfig, err := model.NormalizeMarketingAutomationTriggerConfig(campaign.Scene, automation.TriggerConfig)
+		if err != nil {
+			return expireMarketingEmailDelivery(delivery, recipient, "marketing automation trigger config is invalid")
+		}
+		rule = automationAudienceRule(campaign.Scene, triggerConfig, common.GetTimestamp())
 	} else if !campaign.Automatic && strings.TrimSpace(campaign.AudienceRule) != "" {
 		if err := common.UnmarshalJsonStr(campaign.AudienceRule, &rule); err != nil {
 			return expireMarketingEmailDelivery(delivery, recipient, "marketing audience rule is invalid")
@@ -520,6 +569,16 @@ func RenderFixedMarketingEmail(subject string, content string, actionURL string,
 	return `<div style="background:#f4f7ff;padding:40px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif;color:#172033;line-height:1.6"><div style="max-width:560px;margin:0 auto;overflow:hidden;background:#fff;border:1px solid #dfe7ff;border-radius:18px;box-shadow:0 16px 40px rgba(37,57,128,.10)"><div style="padding:25px 32px;background:linear-gradient(135deg,#0891b2 0%,#4f46e5 55%,#7c3aed 100%)"><a href="` + siteURL + `" style="color:#fff;text-decoration:none;font-size:20px;font-weight:750">` + systemName + `</a></div><div style="padding:36px 40px 34px"><h1 style="margin:0 0 18px;font-size:25px;color:#172033">` + safeSubject + `</h1><div style="padding:20px;border:1px solid #e0e5ff;border-left:4px solid #5b5ce2;border-radius:12px;background:#f7f8ff;color:#44506a;font-size:15px">` + safeContent + `</div><div style="margin:30px 0 4px;text-align:center"><a href="` + safeActionURL + `" style="display:inline-block;padding:12px 26px;border-radius:11px;background:linear-gradient(135deg,#0891b2,#4f46e5 58%,#7c3aed);color:#fff;text-decoration:none;font-weight:650">` + safeActionLabel + `</a></div></div></div><p style="max-width:560px;margin:20px auto 0;text-align:center;font-size:12px"><a href="` + siteURL + `" style="color:#5b5ce2;text-decoration:none">` + systemName + `</a></p></div>`
 }
 
+func PreviewMarketingEmail(localizedContent string, language string, scene string) (string, string, error) {
+	content, err := marketingCampaignContent(localizedContent, language)
+	if err != nil {
+		return "", "", err
+	}
+	actionURL := strings.TrimRight(systemEmailSiteURL(), "/") + marketingActionPath(scene)
+	body := RenderFixedMarketingEmail(content.Subject, content.Body, actionURL, marketingActionLabel(language))
+	return content.Subject, body, nil
+}
+
 func SendMarketingTestEmail(root *model.User, localizedContent string, language string) error {
 	if root == nil || strings.TrimSpace(root.Email) == "" {
 		return model.ErrMarketingInvalid
@@ -562,11 +621,19 @@ func PreviewMarketingAudience(rule model.MarketingAudienceRule) (int64, error) {
 	return total, err
 }
 
-func PreviewMarketingAutomation(scene string) (int64, error) {
-	if scene == model.MarketingSceneAnnouncement {
-		return PreviewMarketingAudience(model.MarketingAudienceRule{})
+func PreviewMarketingAutomation(scene string, triggerConfigRaw string) (int64, error) {
+	if strings.TrimSpace(triggerConfigRaw) == "" {
+		automation, err := model.GetMarketingAutomation(scene)
+		if err != nil {
+			return 0, err
+		}
+		triggerConfigRaw = automation.TriggerConfig
 	}
-	return PreviewMarketingAudience(automationAudienceRule(scene, common.GetTimestamp()))
+	_, triggerConfig, err := model.NormalizeMarketingAutomationTriggerConfig(scene, triggerConfigRaw)
+	if err != nil {
+		return 0, err
+	}
+	return PreviewMarketingAudience(automationAudienceRule(scene, triggerConfig, common.GetTimestamp()))
 }
 
 func marketingCampaignContent(raw string, language string) (model.MarketingLocalizedContent, error) {
@@ -585,49 +652,56 @@ func marketingCampaignContent(raw string, language string) (model.MarketingLocal
 	return content, nil
 }
 
-func automationAudienceRule(scene string, now int64) model.MarketingAudienceRule {
+func automationAudienceRule(scene string, triggerConfig model.MarketingAutomationTriggerConfig, now int64) model.MarketingAudienceRule {
 	zero := 0
 	one := 1
-	quotaOne := int(common.QuotaPerUnit)
-	quotaTrial := int(common.QuotaPerUnit / 10)
 	switch scene {
+	case model.MarketingSceneRegistration:
+		return model.MarketingAudienceRule{
+			CreatedBefore:   now - int64(triggerConfig.RegistrationWaitHours)*3600,
+			RequestCountMax: &zero,
+		}
 	case model.MarketingSceneSingleTopUp:
-		return model.MarketingAudienceRule{TopUpCountMin: &one, TopUpCountMax: &one, LastTopUpBefore: now - 30*86400}
-	case model.MarketingScenePaidLowBalance:
-		return model.MarketingAudienceRule{TopUpCountMin: &one, QuotaMax: &quotaOne}
-	case model.MarketingSceneTrialLowBalance:
-		return model.MarketingAudienceRule{TopUpCountMax: &zero, QuotaMax: &quotaTrial, UsedQuotaPositive: true}
+		return model.MarketingAudienceRule{TopUpCountMin: &one, TopUpCountMax: &one, LastTopUpBefore: now - int64(triggerConfig.MatchDays)*86400}
 	case model.MarketingSceneInactive:
-		return model.MarketingAudienceRule{InactiveDays: 30}
+		return model.MarketingAudienceRule{InactiveDays: triggerConfig.MatchDays}
+	case model.MarketingSceneAffiliate:
+		minTopUps := triggerConfig.MinTopUpCount
+		minRequests := triggerConfig.MinRequestCount
+		return model.MarketingAudienceRule{
+			RequestCountMin:         &minRequests,
+			LastAPIUseAfter:         now - int64(triggerConfig.ActiveWithinDays)*86400,
+			RequireAffiliateEnabled: true,
+			TopUpCountMin:           &minTopUps,
+		}
 	default:
 		return model.MarketingAudienceRule{}
 	}
 }
 
-func automationStage(scene string, user *model.MarketingAudienceUser, count int64, lastAttempt int64, now int64) (string, bool) {
-	if scene == model.MarketingScenePaidLowBalance {
-		// A successful recharge opens a new low-balance cycle. The top-up id is
-		// part of the dedupe key, so later recharges can legitimately trigger a
-		// new reminder while duplicate scans remain harmless.
-		return fmt.Sprintf("topup-%d", user.LastTopUpId), true
-	}
-	if count >= 2 {
+func automationStage(user *model.MarketingAudienceUser, count int64, lastAttempt int64, triggerConfig model.MarketingAutomationTriggerConfig, now int64) (string, bool) {
+	if user == nil || count >= int64(triggerConfig.MaxSendsPerUser) {
 		return "", false
 	}
-	waitDays := int64(30)
-	if scene == model.MarketingSceneTrialLowBalance {
-		waitDays = int64(setting.GetEmailDeliveryRules().MarketingUserCooldownDays)
-	}
-	if count == 1 && (lastAttempt == 0 || lastAttempt > now-waitDays*86400) {
+	if count > 0 && (lastAttempt == 0 || lastAttempt > now-int64(triggerConfig.RepeatIntervalDays)*86400) {
 		return "", false
 	}
-	if scene == model.MarketingSceneTrialLowBalance && user.CreatedAt > now-86400 {
-		return "", false
+	return strconv.FormatInt(count+1, 10), true
+}
+
+func marketingCampaignDispatchExpiry(campaign *model.MarketingCampaign) time.Duration {
+	if campaign == nil || !campaign.Automatic || campaign.Scene != model.MarketingSceneAnnouncement {
+		return marketingDispatchExpiry
 	}
-	if count == 0 {
-		return "1", true
+	automation, err := model.GetMarketingAutomation(campaign.Scene)
+	if err != nil {
+		return marketingDispatchExpiry
 	}
-	return "2", true
+	_, triggerConfig, err := model.NormalizeMarketingAutomationTriggerConfig(campaign.Scene, automation.TriggerConfig)
+	if err != nil {
+		return marketingDispatchExpiry
+	}
+	return time.Duration(triggerConfig.ExpiryHours) * time.Hour
 }
 
 func marketingSendWindowOpen(now time.Time) bool {
@@ -663,18 +737,31 @@ func nextMarketingSendWindow(now time.Time) time.Time {
 }
 
 func marketingSceneName(scene string) string {
-	names := map[string]string{model.MarketingSceneSingleTopUp: "单次充值未复购", model.MarketingScenePaidLowBalance: "付费用户余额不足", model.MarketingSceneTrialLowBalance: "试用额度即将耗尽", model.MarketingSceneInactive: "长期未登录", model.MarketingSceneAnnouncement: "新公告通知"}
+	names := map[string]string{
+		model.MarketingSceneRegistration: "注册后未完成首次调用",
+		model.MarketingSceneSingleTopUp:  "单次充值未复购",
+		model.MarketingSceneInactive:     "长期未登录",
+		model.MarketingSceneAffiliate:    "推广计划激活",
+		model.MarketingSceneAnnouncement: "新公告通知",
+	}
 	return names[scene]
 }
 
 func marketingActionPath(scene string) string {
-	if scene == model.MarketingSceneAnnouncement {
+	switch scene {
+	case model.MarketingSceneAnnouncement:
 		return "/dashboard/overview#announcements"
-	}
-	if scene == model.MarketingSceneInactive {
+	case model.MarketingSceneRegistration:
+		return "/keys"
+	case model.MarketingSceneSingleTopUp:
+		return "/pricing"
+	case model.MarketingSceneInactive:
 		return "/dashboard/overview"
+	case model.MarketingSceneAffiliate:
+		return "/referral"
+	default:
+		return "/wallet"
 	}
-	return "/wallet"
 }
 
 func marketingActionLabel(language string) string {

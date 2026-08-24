@@ -74,6 +74,7 @@ const defaultOperationsSettings: OperationsSettings = {
   InvoiceIssuedNotifyUserEnabled: false,
   InvoiceAdminEmail: '',
   InvoiceMinimumAmountCents: '50000',
+  InvoiceTaxRateBasisPoints: '300',
   InvoiceDataRetentionDays: '0',
   InvoicePendingExpiryDays: '30',
   InvoiceFileEnabled: true,

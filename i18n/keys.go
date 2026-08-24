@@ -161,6 +161,7 @@ const (
 	MsgInvoiceOrderInvalid            = "invoice.order_invalid"
 	MsgInvoiceOrderDuplicate          = "invoice.order_duplicate"
 	MsgInvoiceAmountTooSmall          = "invoice.amount_too_small"
+	MsgInvoiceTaxFeeInsufficient      = "invoice.tax_fee_insufficient"
 	MsgInvoiceFileRequired            = "invoice.file_required"
 	MsgInvoiceCompanyEmpty            = "invoice.company_empty"
 	MsgInvoiceCompanyInvalid          = "invoice.company_invalid"

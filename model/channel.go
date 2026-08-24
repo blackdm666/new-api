@@ -21,25 +21,26 @@ import (
 )
 
 type Channel struct {
-	Id                 int     `json:"id"`
-	Type               int     `json:"type" gorm:"default:0"`
-	Key                string  `json:"key" gorm:"not null"`
-	OpenAIOrganization *string `json:"openai_organization"`
-	TestModel          *string `json:"test_model"`
-	Status             int     `json:"status" gorm:"default:1"`
-	Name               string  `json:"name" gorm:"index"`
-	Weight             *uint   `json:"weight" gorm:"default:0"`
-	CreatedTime        int64   `json:"created_time" gorm:"bigint"`
-	TestTime           int64   `json:"test_time" gorm:"bigint"`
-	ResponseTime       int     `json:"response_time"` // in milliseconds
-	BaseURL            *string `json:"base_url" gorm:"column:base_url;default:''"`
-	Other              string  `json:"other"`
-	Balance            float64 `json:"balance"` // in USD
-	BalanceUpdatedTime int64   `json:"balance_updated_time" gorm:"bigint"`
-	Models             string  `json:"models"`
-	Group              string  `json:"group" gorm:"type:varchar(64);default:'default'"`
-	UsedQuota          int64   `json:"used_quota" gorm:"bigint;default:0"`
-	ModelMapping       *string `json:"model_mapping" gorm:"type:text"`
+	Id                 int                 `json:"id"`
+	Type               int                 `json:"type" gorm:"default:0"`
+	Key                string              `json:"key" gorm:"not null"`
+	OpenAIOrganization *string             `json:"openai_organization"`
+	TestModel          *string             `json:"test_model"`
+	Status             int                 `json:"status" gorm:"default:1"`
+	Name               string              `json:"name" gorm:"index"`
+	Weight             *uint               `json:"weight" gorm:"default:0"`
+	CreatedTime        int64               `json:"created_time" gorm:"bigint"`
+	TestTime           int64               `json:"test_time" gorm:"bigint"`
+	ResponseTime       int                 `json:"response_time"` // in milliseconds
+	BaseURL            *string             `json:"base_url" gorm:"column:base_url;default:''"`
+	Other              string              `json:"other"`
+	Balance            float64             `json:"balance"` // in USD
+	BalanceUpdatedTime int64               `json:"balance_updated_time" gorm:"bigint"`
+	BalanceInfo        *ChannelBalanceInfo `json:"balance_info,omitempty" gorm:"type:json"`
+	Models             string              `json:"models"`
+	Group              string              `json:"group" gorm:"type:varchar(64);default:'default'"`
+	UsedQuota          int64               `json:"used_quota" gorm:"bigint;default:0"`
+	ModelMapping       *string             `json:"model_mapping" gorm:"type:text"`
 	//MaxInputTokens     *int    `json:"max_input_tokens" gorm:"default:0"`
 	StatusCodeMapping *string `json:"status_code_mapping" gorm:"type:varchar(1024);default:''"`
 	Priority          *int64  `json:"priority" gorm:"bigint;default:0"`
@@ -877,6 +878,35 @@ func UpdateChannelUsedQuota(id int, quota int) {
 	updateChannelUsedQuota(id, quota)
 }
 
+// ResetChannelUsedQuota establishes a clean local accounting baseline for a
+// channel. It also discards any usage delta that was queued before the reset,
+// so batch accounting cannot make pre-reset usage reappear afterward.
+func ResetChannelUsedQuota(id int) (int64, error) {
+	if id <= 0 {
+		return 0, errors.New("invalid channel id")
+	}
+	batchUpdateRunMutex.Lock()
+	defer batchUpdateRunMutex.Unlock()
+
+	batchUpdateLocks[BatchUpdateTypeChannelUsedQuota].Lock()
+	defer batchUpdateLocks[BatchUpdateTypeChannelUsedQuota].Unlock()
+	pending := batchUpdateStores[BatchUpdateTypeChannelUsedQuota][id]
+	var previous int64
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		channel := &Channel{}
+		if err := lockForUpdate(tx).Select("id", "used_quota").Where("id = ?", id).First(channel).Error; err != nil {
+			return err
+		}
+		previous = channel.UsedQuota
+		return tx.Model(&Channel{}).Where("id = ?", id).Update("used_quota", 0).Error
+	})
+	if err != nil {
+		return 0, err
+	}
+	delete(batchUpdateStores[BatchUpdateTypeChannelUsedQuota], id)
+	return previous + int64(pending), nil
+}
+
 func updateChannelUsedQuota(id int, quota int) {
 	err := DB.Model(&Channel{}).Where("id = ?", id).Update("used_quota", gorm.Expr("used_quota + ?", quota)).Error
 	if err != nil {
@@ -982,6 +1012,11 @@ func (channel *Channel) ValidateSettings() error {
 	}
 	if channelOtherSettings.AdvancedCustom != nil {
 		if err := channelOtherSettings.AdvancedCustom.Validate(); err != nil {
+			return err
+		}
+	}
+	if channelOtherSettings.BalanceQuery != nil {
+		if err := channelOtherSettings.BalanceQuery.Validate(); err != nil {
 			return err
 		}
 	}

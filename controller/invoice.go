@@ -48,9 +48,16 @@ type InvoiceRequestEventResponse struct {
 }
 
 func GetInvoiceConfig(c *gin.Context) {
+	quota, err := model.GetUserQuota(c.GetInt("id"), true)
+	if err != nil {
+		respondInvoiceInternalError(c, i18n.MsgInvoiceLoadFailed, err)
+		return
+	}
 	common.ApiSuccess(c, gin.H{
-		"minimum_amount_cents": setting.InvoiceMinimumAmountCents,
-		"issue_day":            10,
+		"minimum_amount_cents":    setting.InvoiceMinimumAmountCents,
+		"tax_rate_basis_points":   setting.InvoiceTaxRateBasisPoints,
+		"available_balance_cents": model.InvoiceQuotaToCNYCents(quota),
+		"issue_day":               10,
 	})
 }
 
@@ -100,6 +107,18 @@ func handleInvoiceError(c *gin.Context, err error, fallbackKeys ...string) {
 	case errors.Is(err, model.ErrInvoiceAmountTooSmall):
 		common.ApiErrorI18n(c, i18n.MsgInvoiceAmountTooSmall, map[string]any{
 			"Amount": fmt.Sprintf("%.2f", float64(setting.InvoiceMinimumAmountCents)/100),
+		})
+	case errors.Is(err, model.ErrInvoiceTaxFeeInsufficient):
+		fee := "0.00"
+		balance := "0.00"
+		var insufficient *model.InvoiceTaxFeeInsufficientError
+		if errors.As(err, &insufficient) {
+			fee = fmt.Sprintf("%.2f", float64(insufficient.FeeCents)/100)
+			balance = fmt.Sprintf("%.2f", float64(insufficient.AvailableCents)/100)
+		}
+		common.ApiErrorI18n(c, i18n.MsgInvoiceTaxFeeInsufficient, map[string]any{
+			"Fee":     fee,
+			"Balance": balance,
 		})
 	case errors.Is(err, model.ErrInvoiceFileRequired):
 		common.ApiErrorI18n(c, i18n.MsgInvoiceFileRequired)

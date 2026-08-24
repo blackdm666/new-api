@@ -29,6 +29,13 @@ export function getInvoiceAmountShortfall(
   return Math.max(0, minimumAmount - amount)
 }
 
+export function calculateInvoiceTaxFee(
+  amount: number,
+  rateBasisPoints: number
+): number {
+  return Math.round((amount * 100 * rateBasisPoints) / 10000) / 100
+}
+
 export const INVOICE_STATUS_META: Record<
   InvoiceStatus,
   { labelKey: string; badgeClass: string }

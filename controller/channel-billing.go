@@ -56,8 +56,10 @@ type OpenAICreditGrants struct {
 const maxAdvancedCustomBalanceResponseBytes = 256 << 10
 
 type channelBalanceResult struct {
-	Balance     float64
-	RawResponse string
+	Balance          float64
+	HasLegacyBalance bool
+	Info             *model.ChannelBalanceInfo
+	RawResponse      string
 }
 
 type OpenAIUsageResponse struct {
@@ -441,8 +443,19 @@ func fetchAdvancedCustomBalance(channel *model.Channel) (channelBalanceResult, e
 				balance >= 0 &&
 				!math.IsNaN(balance) &&
 				!math.IsInf(balance, 0) {
-				channel.UpdateBalance(balance)
-				return channelBalanceResult{Balance: balance}, nil
+				info := model.ChannelBalanceInfo{
+					Remaining:   strconv.FormatFloat(balance, 'f', -1, 64),
+					Unit:        model.ChannelBalanceUnitMoney,
+					Currency:    "USD",
+					DisplayUnit: "$",
+					MetricKind:  dto.ChannelBalanceMetricWallet,
+					Source:      "openai_credit_summary",
+					UpdatedAt:   common.GetTimestamp(),
+				}
+				if err := channel.UpdateBalanceInfo(info, &balance); err != nil {
+					return channelBalanceResult{}, err
+				}
+				return channelBalanceResult{Balance: balance, HasLegacyBalance: true, Info: &info}, nil
 			}
 		}
 	}
@@ -455,11 +468,29 @@ func fetchAdvancedCustomBalance(channel *model.Channel) (channelBalanceResult, e
 }
 
 func updateChannelBalance(channel *model.Channel) (channelBalanceResult, error) {
+	if result, handled, err := updateConfiguredChannelBalance(channel); handled {
+		return result, err
+	}
 	if channel.Type == constant.ChannelTypeAdvancedCustom {
 		return fetchAdvancedCustomBalance(channel)
 	}
 	balance, err := updateStandardChannelBalance(channel)
-	return channelBalanceResult{Balance: balance}, err
+	if err != nil {
+		return channelBalanceResult{}, err
+	}
+	info := model.ChannelBalanceInfo{
+		Remaining:   strconv.FormatFloat(balance, 'f', -1, 64),
+		Unit:        model.ChannelBalanceUnitMoney,
+		Currency:    "USD",
+		DisplayUnit: "$",
+		MetricKind:  dto.ChannelBalanceMetricWallet,
+		Source:      constant.GetChannelTypeName(channel.Type),
+		UpdatedAt:   common.GetTimestamp(),
+	}
+	if err := channel.UpdateBalanceInfo(info, &balance); err != nil {
+		return channelBalanceResult{}, err
+	}
+	return channelBalanceResult{Balance: balance, HasLegacyBalance: true, Info: &info}, nil
 }
 
 func updateStandardChannelBalance(channel *model.Channel) (float64, error) {
@@ -554,9 +585,16 @@ func UpdateChannelBalance(c *gin.Context) {
 		"success": true,
 		"message": "",
 	}
-	if result.RawResponse == "" {
+	if result.HasLegacyBalance {
 		response["balance"] = result.Balance
-	} else {
+	}
+	if result.Info != nil {
+		response["balance_info"] = result.Info
+		if result.Info.Currency != "" {
+			response["currency"] = result.Info.Currency
+		}
+	}
+	if result.RawResponse != "" {
 		response["raw_response"] = result.RawResponse
 	}
 	c.JSON(http.StatusOK, response)
@@ -571,6 +609,9 @@ func updateAllChannelsBalance() error {
 		if channel.Status != common.ChannelStatusEnabled {
 			continue
 		}
+		if channelBalanceQueryDisabled(channel) {
+			continue
+		}
 		if channel.ChannelInfo.IsMultiKey {
 			continue // skip multi-key channels
 		}
@@ -582,8 +623,7 @@ func updateAllChannelsBalance() error {
 		if err != nil {
 			continue
 		} else if result.RawResponse == "" {
-			// err is nil & balance <= 0 means quota is used up
-			if result.Balance <= 0 {
+			if channelBalanceExhausted(result.Info) || (result.Info == nil && result.HasLegacyBalance && result.Balance <= 0) {
 				service.DisableChannel(*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, "", channel.GetAutoBan()), "余额不足")
 			}
 		}

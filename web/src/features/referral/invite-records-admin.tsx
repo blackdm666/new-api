@@ -34,6 +34,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { UserInfoDialog } from '@/components/user-info-dialog'
 import { useDebounce } from '@/hooks/use-debounce'
 import { formatNumber, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -49,6 +50,8 @@ export function AdminInviteRecords() {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const [keyword, setKeyword] = useState('')
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
+  const [userInfoDialogOpen, setUserInfoDialogOpen] = useState(false)
   const debouncedKeyword = useDebounce(keyword, 300)
   const params = useMemo(
     () => ({ page, pageSize: PAGE_SIZE, keyword: debouncedKeyword }),
@@ -121,7 +124,14 @@ export function AdminInviteRecords() {
             ) : null}
             {!query.isLoading
               ? items.map((item) => (
-                  <AdminInviteRecordRow key={item.invitee_id} item={item} />
+                  <AdminInviteRecordRow
+                    key={item.invitee_id}
+                    item={item}
+                    onInviterClick={(userId) => {
+                      setSelectedUserId(userId)
+                      setUserInfoDialogOpen(true)
+                    }}
+                  />
                 ))
               : null}
           </TableBody>
@@ -153,12 +163,18 @@ export function AdminInviteRecords() {
           </Button>
         </div>
       </div>
+      <UserInfoDialog
+        userId={selectedUserId}
+        open={userInfoDialogOpen}
+        onOpenChange={setUserInfoDialogOpen}
+      />
     </div>
   )
 }
 
 export function AdminInviteRecordRow(props: {
   item: AdminAffiliateInviteRecord
+  onInviterClick?: (userId: number) => void
 }) {
   const { t } = useTranslation()
   const item = props.item
@@ -168,6 +184,12 @@ export function AdminInviteRecordRow(props: {
         <AdminUserIdentity
           id={item.inviter_id}
           username={item.inviter_username}
+          remark={item.inviter_remark}
+          onClick={
+            props.onInviterClick
+              ? () => props.onInviterClick?.(item.inviter_id)
+              : undefined
+          }
         />
       </TableCell>
       <TableCell>

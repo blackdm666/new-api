@@ -26,6 +26,7 @@ import {
   CirclePause,
   CirclePlay,
   Copy,
+  Eye,
   MailPlus,
   Pencil,
   RefreshCw,
@@ -45,6 +46,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -88,12 +90,14 @@ import {
   deleteMarketingSuppression,
   fetchMarketingAutomations,
   fetchMarketingCampaigns,
+  fetchLatestMarketingAnnouncement,
   fetchMarketingOverview,
   fetchMarketingRecipients,
   fetchMarketingSuppressions,
   fetchMarketingUserGroups,
   previewMarketingAudience,
   previewMarketingAutomation,
+  previewMarketingEmail,
   scheduleMarketingCampaign,
   sendMarketingTest,
   transitionMarketingCampaign,
@@ -107,17 +111,57 @@ import {
 import type {
   MarketingAudienceRule,
   MarketingAutomation,
+  MarketingAutomationTriggerConfig,
   MarketingCampaign,
   MarketingLocalizedContent,
 } from './types'
 
 const SCENE_LABELS: Record<string, string> = {
+  registration_no_first_call: 'Registration without first API request',
   single_topup_winback: 'Single top-up win-back',
   paid_low_balance: 'Paid user low balance',
   trial_low_balance: 'Trial balance almost depleted',
   inactive_user: 'Long-term inactive user',
+  affiliate_program_activation: 'Referral program activation',
   announcement: 'New announcement',
   custom: 'Custom campaign',
+}
+
+const ACTIVE_AUTOMATION_SCENES = new Set([
+  'registration_no_first_call',
+  'single_topup_winback',
+  'inactive_user',
+  'affiliate_program_activation',
+  'announcement',
+])
+
+const DEFAULT_AUTOMATION_TRIGGER_CONFIGS: Record<
+  string,
+  MarketingAutomationTriggerConfig
+> = {
+  registration_no_first_call: {
+    registration_wait_hours: 24,
+    max_sends_per_user: 1,
+    repeat_interval_days: 2,
+  },
+  single_topup_winback: {
+    match_days: 30,
+    max_sends_per_user: 1,
+    repeat_interval_days: 30,
+  },
+  inactive_user: {
+    match_days: 30,
+    max_sends_per_user: 1,
+    repeat_interval_days: 30,
+  },
+  affiliate_program_activation: {
+    active_within_days: 30,
+    min_request_count: 10,
+    min_topup_count: 1,
+    max_sends_per_user: 1,
+    repeat_interval_days: 30,
+  },
+  announcement: { expiry_hours: 48 },
 }
 
 const STATUS_CLASS: Record<string, string> = {
@@ -276,13 +320,17 @@ export function MarketingAdminPage() {
           </TabsContent>
           <TabsContent value='automations'>
             <div className='grid gap-4 lg:grid-cols-2'>
-              {(automationsQuery.data ?? []).map((automation) => (
-                <AutomationCard
-                  key={automation.scene}
-                  automation={automation}
-                  onEdit={() => setAutomationTarget(automation)}
-                />
-              ))}
+              {(automationsQuery.data ?? [])
+                .filter((automation) =>
+                  ACTIVE_AUTOMATION_SCENES.has(automation.scene)
+                )
+                .map((automation) => (
+                  <AutomationCard
+                    key={automation.scene}
+                    automation={automation}
+                    onEdit={() => setAutomationTarget(automation)}
+                  />
+                ))}
             </div>
           </TabsContent>
           <TabsContent value='recipients'>
@@ -330,6 +378,7 @@ function CampaignTable(props: {
 }) {
   const { t } = useTranslation()
   const [workingId, setWorkingId] = useState(0)
+  const [renderedAt] = useState(() => Math.floor(Date.now() / 1000))
   const act = async (
     campaign: MarketingCampaign,
     action: 'schedule' | 'pause' | 'resume' | 'cancel' | 'clone'
@@ -423,8 +472,7 @@ function CampaignTable(props: {
                           size='icon-sm'
                           variant='outline'
                           title={
-                            campaign.scheduled_time >
-                            Math.floor(Date.now() / 1000)
+                            campaign.scheduled_time > renderedAt
                               ? t('Schedule')
                               : t('Send now')
                           }
@@ -513,10 +561,16 @@ function AutomationCard(props: {
   const { t } = useTranslation()
   const [preview, setPreview] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
+  const triggerConfig = parseAutomationTriggerConfig(
+    props.automation.scene,
+    props.automation.trigger_config
+  )
   const loadPreview = async () => {
     setLoading(true)
     try {
-      setPreview(await previewMarketingAutomation(props.automation.scene))
+      setPreview(
+        await previewMarketingAutomation(props.automation.scene, triggerConfig)
+      )
     } catch (error) {
       toast.error(getUserFacingErrorMessage(error))
     } finally {
@@ -914,6 +968,10 @@ function AutomationDialog(props: {
 }) {
   const { t } = useTranslation()
   const initial = parseLocalizedContent(props.automation?.localized_content)
+  const initialTriggerConfig = parseAutomationTriggerConfig(
+    props.automation?.scene ?? '',
+    props.automation?.trigger_config
+  )
   const [language, setLanguage] = useState('zh-CN')
   const [enabled, setEnabled] = useState(props.automation?.enabled ?? false)
   const [applyExisting, setApplyExisting] = useState(
@@ -921,16 +979,33 @@ function AutomationDialog(props: {
   )
   const [contents, setContents] =
     useState<Record<string, MarketingLocalizedContent>>(initial)
+  const [triggerConfig, setTriggerConfig] =
+    useState<MarketingAutomationTriggerConfig>(initialTriggerConfig)
   const [saving, setSaving] = useState(false)
+  const [insertingAnnouncement, setInsertingAnnouncement] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewSubject, setPreviewSubject] = useState('')
+  const [previewBody, setPreviewBody] = useState('')
   const content = contents[language] ?? { subject: '', body: '' }
   const automationScene = props.automation?.scene ?? ''
+  const triggerConfigValid = validAutomationTriggerConfig(
+    automationScene,
+    triggerConfig
+  )
   const previewQuery = useQuery({
-    queryKey: ['marketing', 'automation-preview', automationScene],
-    queryFn: () => previewMarketingAutomation(automationScene),
-    enabled: automationScene !== '',
+    queryKey: [
+      'marketing',
+      'automation-preview',
+      automationScene,
+      triggerConfig,
+    ],
+    queryFn: () => previewMarketingAutomation(automationScene, triggerConfig),
+    enabled: automationScene !== '' && triggerConfigValid,
   })
   const fallbackContent = contents['zh-CN'] ?? { subject: '', body: '' }
   const valid =
+    triggerConfigValid &&
     fallbackContent.subject.trim().length > 0 &&
     fallbackContent.subject.length <= 120 &&
     fallbackContent.body.trim().length > 0 &&
@@ -942,6 +1017,53 @@ function AutomationDialog(props: {
         item.body.trim().length > 0 &&
         item.body.length <= 5000
     )
+  const insertLatestAnnouncement = async () => {
+    setInsertingAnnouncement(true)
+    try {
+      const announcement = await fetchLatestMarketingAnnouncement()
+      if (!announcement) {
+        toast.error(t('No published announcement available'))
+        return
+      }
+      const announcementText = [announcement.content, announcement.extra]
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join('\n\n')
+      if (announcementText.length > 5000) {
+        toast.error(
+          t('Latest announcement does not fit in the email content limit')
+        )
+        return
+      }
+      setContents((current) => ({
+        ...current,
+        [language]: { ...content, body: announcementText },
+      }))
+      toast.success(t('Latest announcement inserted'))
+    } catch (error) {
+      toast.error(getUserFacingErrorMessage(error))
+    } finally {
+      setInsertingAnnouncement(false)
+    }
+  }
+  const preview = async () => {
+    if (!valid) return
+    setPreviewing(true)
+    try {
+      const rendered = await previewMarketingEmail(
+        contents,
+        language,
+        automationScene
+      )
+      setPreviewSubject(rendered.subject)
+      setPreviewBody(rendered.body)
+      setPreviewOpen(true)
+    } catch (error) {
+      toast.error(getUserFacingErrorMessage(error))
+    } finally {
+      setPreviewing(false)
+    }
+  }
   const save = async () => {
     if (!props.automation || !valid) return
     setSaving(true)
@@ -949,6 +1071,7 @@ function AutomationDialog(props: {
       await updateMarketingAutomation(props.automation.scene, {
         enabled,
         apply_existing: applyExisting,
+        trigger_config: triggerConfig,
         localized_content: contents,
       })
       toast.success(t('Automation updated'))
@@ -962,7 +1085,7 @@ function AutomationDialog(props: {
   }
   return (
     <Dialog open={props.automation !== null} onOpenChange={props.onOpenChange}>
-      <DialogContent className='sm:max-w-2xl'>
+      <DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-2xl'>
         <DialogHeader>
           <DialogTitle>
             {props.automation
@@ -994,12 +1117,20 @@ function AutomationDialog(props: {
             />
             <span>
               <span className='block text-sm font-medium'>
-                {t('Process users who already match')}
+                {automationScene === 'announcement'
+                  ? t(
+                      'Send the latest published announcement to existing users'
+                    )
+                  : t('Process users who already match')}
               </span>
               <span className='text-muted-foreground block text-xs'>
-                {t(
-                  'If disabled, only users matching after this automation is enabled are included.'
-                )}
+                {automationScene === 'announcement'
+                  ? t(
+                      'Only the latest published announcement is backfilled; older announcements are never sent.'
+                    )
+                  : t(
+                      'If disabled, only users matching after this automation is enabled are included.'
+                    )}
               </span>
               <span className='text-muted-foreground mt-1 block text-xs'>
                 {previewQuery.isLoading
@@ -1011,16 +1142,241 @@ function AutomationDialog(props: {
             </span>
           </label>
         ) : null}
-        <NativeSelect
-          value={language}
-          onChange={(event) => setLanguage(event.target.value)}
-        >
-          {MARKETING_LANGUAGES.map((item) => (
-            <option key={item.value} value={item.value}>
-              {item.label}
-            </option>
-          ))}
-        </NativeSelect>
+        {automationScene === 'registration_no_first_call' ? (
+          <div className='grid gap-3 sm:grid-cols-3'>
+            <Field label={t('Wait after registration (hours)')}>
+              <Input
+                type='number'
+                min={1}
+                max={8760}
+                aria-label={t('Wait after registration (hours)')}
+                value={triggerConfig.registration_wait_hours ?? 24}
+                onChange={(event) =>
+                  setTriggerConfig((current) => ({
+                    ...current,
+                    registration_wait_hours: Number(event.target.value),
+                  }))
+                }
+              />
+            </Field>
+            <Field label={t('Maximum sends per user')}>
+              <Input
+                type='number'
+                min={1}
+                max={10}
+                aria-label={t('Maximum sends per user')}
+                value={triggerConfig.max_sends_per_user ?? 1}
+                onChange={(event) =>
+                  setTriggerConfig((current) => ({
+                    ...current,
+                    max_sends_per_user: Number(event.target.value),
+                  }))
+                }
+              />
+            </Field>
+            <Field label={t('Repeat interval (days)')}>
+              <Input
+                type='number'
+                min={1}
+                max={3650}
+                disabled={(triggerConfig.max_sends_per_user ?? 1) <= 1}
+                aria-label={t('Repeat interval (days)')}
+                value={triggerConfig.repeat_interval_days ?? 2}
+                onChange={(event) =>
+                  setTriggerConfig((current) => ({
+                    ...current,
+                    repeat_interval_days: Number(event.target.value),
+                  }))
+                }
+              />
+            </Field>
+          </div>
+        ) : null}
+        {automationScene === 'single_topup_winback' ||
+        automationScene === 'inactive_user' ? (
+          <div className='grid gap-3 sm:grid-cols-3'>
+            <Field
+              label={
+                automationScene === 'single_topup_winback'
+                  ? t('No repeat top-up for (days)')
+                  : t('Inactive for (days)')
+              }
+            >
+              <Input
+                type='number'
+                min={1}
+                max={3650}
+                aria-label={
+                  automationScene === 'single_topup_winback'
+                    ? t('No repeat top-up for (days)')
+                    : t('Inactive for (days)')
+                }
+                value={triggerConfig.match_days ?? 30}
+                onChange={(event) =>
+                  setTriggerConfig((current) => ({
+                    ...current,
+                    match_days: Number(event.target.value),
+                  }))
+                }
+              />
+            </Field>
+            <Field label={t('Maximum sends per user')}>
+              <Input
+                type='number'
+                min={1}
+                max={10}
+                aria-label={t('Maximum sends per user')}
+                value={triggerConfig.max_sends_per_user ?? 1}
+                onChange={(event) =>
+                  setTriggerConfig((current) => ({
+                    ...current,
+                    max_sends_per_user: Number(event.target.value),
+                  }))
+                }
+              />
+            </Field>
+            <Field label={t('Repeat interval (days)')}>
+              <Input
+                type='number'
+                min={1}
+                max={3650}
+                disabled={(triggerConfig.max_sends_per_user ?? 1) <= 1}
+                aria-label={t('Repeat interval (days)')}
+                value={triggerConfig.repeat_interval_days ?? 30}
+                onChange={(event) =>
+                  setTriggerConfig((current) => ({
+                    ...current,
+                    repeat_interval_days: Number(event.target.value),
+                  }))
+                }
+              />
+            </Field>
+          </div>
+        ) : null}
+        {automationScene === 'affiliate_program_activation' ? (
+          <div className='space-y-2'>
+            <div className='grid gap-3 sm:grid-cols-3'>
+              <Field label={t('Active API use within (days)')}>
+                <Input
+                  type='number'
+                  min={1}
+                  max={3650}
+                  aria-label={t('Active API use within (days)')}
+                  value={triggerConfig.active_within_days ?? 30}
+                  onChange={(event) =>
+                    setTriggerConfig((current) => ({
+                      ...current,
+                      active_within_days: Number(event.target.value),
+                    }))
+                  }
+                />
+              </Field>
+              <Field label={t('Minimum successful API requests')}>
+                <Input
+                  type='number'
+                  min={1}
+                  max={1_000_000_000}
+                  aria-label={t('Minimum successful API requests')}
+                  value={triggerConfig.min_request_count ?? 10}
+                  onChange={(event) =>
+                    setTriggerConfig((current) => ({
+                      ...current,
+                      min_request_count: Number(event.target.value),
+                    }))
+                  }
+                />
+              </Field>
+              <Field label={t('Minimum eligible top-ups')}>
+                <Input
+                  type='number'
+                  min={1}
+                  max={1000}
+                  aria-label={t('Minimum eligible top-ups')}
+                  value={triggerConfig.min_topup_count ?? 1}
+                  onChange={(event) =>
+                    setTriggerConfig((current) => ({
+                      ...current,
+                      min_topup_count: Number(event.target.value),
+                    }))
+                  }
+                />
+              </Field>
+              <Field label={t('Maximum sends per user')}>
+                <Input
+                  type='number'
+                  min={1}
+                  max={10}
+                  aria-label={t('Maximum sends per user')}
+                  value={triggerConfig.max_sends_per_user ?? 1}
+                  onChange={(event) =>
+                    setTriggerConfig((current) => ({
+                      ...current,
+                      max_sends_per_user: Number(event.target.value),
+                    }))
+                  }
+                />
+              </Field>
+              <Field label={t('Repeat interval (days)')}>
+                <Input
+                  type='number'
+                  min={1}
+                  max={3650}
+                  disabled={(triggerConfig.max_sends_per_user ?? 1) <= 1}
+                  aria-label={t('Repeat interval (days)')}
+                  value={triggerConfig.repeat_interval_days ?? 30}
+                  onChange={(event) =>
+                    setTriggerConfig((current) => ({
+                      ...current,
+                      repeat_interval_days: Number(event.target.value),
+                    }))
+                  }
+                />
+              </Field>
+            </div>
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'This automation only runs while the referral commission program is enabled.'
+              )}
+            </p>
+          </div>
+        ) : null}
+        {automationScene === 'announcement' ? (
+          <Field label={t('Announcement email validity (hours)')}>
+            <Input
+              type='number'
+              min={1}
+              max={168}
+              aria-label={t('Announcement email validity (hours)')}
+              value={triggerConfig.expiry_hours ?? 48}
+              onChange={(event) =>
+                setTriggerConfig((current) => ({
+                  ...current,
+                  expiry_hours: Number(event.target.value),
+                }))
+              }
+            />
+          </Field>
+        ) : null}
+        <Field label={t('Current editing language')}>
+          <div className='space-y-1.5'>
+            <NativeSelect
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+              aria-label={t('Current editing language')}
+            >
+              {MARKETING_LANGUAGES.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </NativeSelect>
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                "Emails follow each recipient's language. If a template is missing, Simplified Chinese is used."
+              )}
+            </p>
+          </div>
+        </Field>
         <Field
           label={t('Email subject')}
           hint={`${content.subject.length}/120`}
@@ -1036,7 +1392,24 @@ function AutomationDialog(props: {
             }
           />
         </Field>
-        <Field label={t('Email content')} hint={`${content.body.length}/5000`}>
+        <Field
+          label={t('Email content')}
+          hint={`${content.body.length}/5000`}
+          action={
+            automationScene === 'announcement' ? (
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                disabled={insertingAnnouncement}
+                onClick={() => void insertLatestAnnouncement()}
+              >
+                <Copy className='size-3.5' />
+                {t('Insert latest announcement')}
+              </Button>
+            ) : undefined
+          }
+        >
           <Textarea
             value={content.body}
             maxLength={5000}
@@ -1052,6 +1425,15 @@ function AutomationDialog(props: {
         <DialogFooter>
           <Button
             type='button'
+            variant='outline'
+            disabled={previewing || !valid}
+            onClick={() => void preview()}
+          >
+            <Eye className='size-4' />
+            {t('Preview email')}
+          </Button>
+          <Button
+            type='button'
             disabled={saving || !valid}
             onClick={() => void save()}
           >
@@ -1059,6 +1441,39 @@ function AutomationDialog(props: {
           </Button>
         </DialogFooter>
       </DialogContent>
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className='sm:max-w-4xl'>
+          <DialogHeader>
+            <DialogTitle>{t('Email preview')}</DialogTitle>
+          </DialogHeader>
+          <div className='space-y-3'>
+            <div className='space-y-1'>
+              <Label className='text-muted-foreground text-xs font-normal'>
+                {t('Subject')}
+              </Label>
+              <div className='bg-muted rounded-md px-3 py-2 text-sm'>
+                {previewSubject || '-'}
+              </div>
+            </div>
+            <div className='space-y-1'>
+              <Label className='text-muted-foreground text-xs font-normal'>
+                {t('Body preview')}
+              </Label>
+              <iframe
+                title='marketing-email-preview'
+                srcDoc={previewBody}
+                sandbox=''
+                className='h-[600px] w-full rounded-md border bg-white'
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant='outline' />}>
+              {t('Close')}
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 }
@@ -1066,43 +1481,71 @@ function AutomationDialog(props: {
 function RecipientRecords(props: { campaigns: MarketingCampaign[] }) {
   const { t } = useTranslation()
   const [campaignId, setCampaignId] = useState(props.campaigns[0]?.id ?? 0)
+  const [engagement, setEngagement] = useState('')
   const [page, setPage] = useState(1)
   const recipientsQuery = useQuery({
-    queryKey: ['marketing', 'recipients', campaignId, page],
-    queryFn: () => fetchMarketingRecipients(campaignId, page),
+    queryKey: ['marketing', 'recipients', campaignId, engagement, page],
+    queryFn: () => fetchMarketingRecipients(campaignId, page, engagement),
     enabled: campaignId > 0,
     placeholderData: keepPreviousData,
   })
   return (
     <div className='space-y-4'>
-      <Select
-        items={[
-          { value: '0', label: t('Select campaign') },
-          ...props.campaigns.map((campaign) => ({
-            value: String(campaign.id),
-            label: `#${campaign.id} ${campaign.name}`,
-          })),
-        ]}
-        value={String(campaignId)}
-        onValueChange={(value) => {
-          setCampaignId(Number(value))
-          setPage(1)
-        }}
-      >
-        <SelectTrigger className='w-64' aria-label={t('Campaign')}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent alignItemWithTrigger={false}>
-          <SelectGroup>
-            <SelectItem value='0'>{t('Select campaign')}</SelectItem>
-            {props.campaigns.map((campaign) => (
-              <SelectItem key={campaign.id} value={String(campaign.id)}>
-                #{campaign.id} {campaign.name}
+      <div className='flex flex-wrap gap-3'>
+        <Select
+          items={[
+            { value: '0', label: t('Select campaign') },
+            ...props.campaigns.map((campaign) => ({
+              value: String(campaign.id),
+              label: `#${campaign.id} ${campaign.name}`,
+            })),
+          ]}
+          value={String(campaignId)}
+          onValueChange={(value) => {
+            setCampaignId(Number(value))
+            setPage(1)
+          }}
+        >
+          <SelectTrigger className='w-64' aria-label={t('Campaign')}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent alignItemWithTrigger={false}>
+            <SelectGroup>
+              <SelectItem value='0'>{t('Select campaign')}</SelectItem>
+              {props.campaigns.map((campaign) => (
+                <SelectItem key={campaign.id} value={String(campaign.id)}>
+                  #{campaign.id} {campaign.name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <Select
+          items={[
+            { value: 'all', label: t('All records') },
+            { value: 'clicked', label: t('Clicked recipients') },
+            { value: 'converted', label: t('Converted recipients') },
+          ]}
+          value={engagement || 'all'}
+          onValueChange={(value) => {
+            setEngagement(value && value !== 'all' ? value : '')
+            setPage(1)
+          }}
+        >
+          <SelectTrigger className='w-44' aria-label={t('Interaction status')}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent alignItemWithTrigger={false}>
+            <SelectGroup>
+              <SelectItem value='all'>{t('All records')}</SelectItem>
+              <SelectItem value='clicked'>{t('Clicked recipients')}</SelectItem>
+              <SelectItem value='converted'>
+                {t('Converted recipients')}
               </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
       <div className='overflow-hidden rounded-xl border'>
         <Table>
           <TableHeader>
@@ -1302,13 +1745,25 @@ function PaginationControls(props: {
   )
 }
 
-function Field(props: { label: string; hint?: string; children: ReactNode }) {
+function Field(props: {
+  label: string
+  hint?: string
+  action?: ReactNode
+  children: ReactNode
+}) {
   return (
     <div className='space-y-1.5'>
       <div className='flex items-center justify-between gap-3'>
         <Label>{props.label}</Label>
-        {props.hint ? (
-          <span className='text-muted-foreground text-xs'>{props.hint}</span>
+        {props.action || props.hint ? (
+          <div className='flex items-center gap-2'>
+            {props.action}
+            {props.hint ? (
+              <span className='text-muted-foreground text-xs'>
+                {props.hint}
+              </span>
+            ) : null}
+          </div>
         ) : null}
       </div>
       {props.children}
@@ -1385,15 +1840,74 @@ function dateInputToTimestamp(value: string) {
   return Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : 0
 }
 
+function parseAutomationTriggerConfig(
+  scene: string,
+  raw: string | undefined
+): MarketingAutomationTriggerConfig {
+  const defaults = DEFAULT_AUTOMATION_TRIGGER_CONFIGS[scene] ?? {}
+  try {
+    const parsed = JSON.parse(raw || '{}') as MarketingAutomationTriggerConfig
+    return { ...defaults, ...parsed }
+  } catch {
+    return { ...defaults }
+  }
+}
+
+function validAutomationTriggerConfig(
+  scene: string,
+  config: MarketingAutomationTriggerConfig
+) {
+  if (scene === 'registration_no_first_call') {
+    return (
+      Number(config.registration_wait_hours) >= 1 &&
+      Number(config.registration_wait_hours) <= 8760 &&
+      Number(config.max_sends_per_user) >= 1 &&
+      Number(config.max_sends_per_user) <= 10 &&
+      Number(config.repeat_interval_days) >= 1 &&
+      Number(config.repeat_interval_days) <= 3650
+    )
+  }
+  if (scene === 'single_topup_winback' || scene === 'inactive_user') {
+    return (
+      Number(config.match_days) >= 1 &&
+      Number(config.match_days) <= 3650 &&
+      Number(config.max_sends_per_user) >= 1 &&
+      Number(config.max_sends_per_user) <= 10 &&
+      Number(config.repeat_interval_days) >= 1 &&
+      Number(config.repeat_interval_days) <= 3650
+    )
+  }
+  if (scene === 'affiliate_program_activation') {
+    return (
+      Number(config.active_within_days) >= 1 &&
+      Number(config.active_within_days) <= 3650 &&
+      Number(config.min_request_count) >= 1 &&
+      Number(config.min_request_count) <= 1_000_000_000 &&
+      Number(config.min_topup_count) >= 1 &&
+      Number(config.min_topup_count) <= 1000 &&
+      Number(config.max_sends_per_user) >= 1 &&
+      Number(config.max_sends_per_user) <= 10 &&
+      Number(config.repeat_interval_days) >= 1 &&
+      Number(config.repeat_interval_days) <= 3650
+    )
+  }
+  if (scene === 'announcement') {
+    return (
+      Number(config.expiry_hours) >= 1 && Number(config.expiry_hours) <= 168
+    )
+  }
+  return false
+}
+
 function automationDescription(scene: string): string {
   const descriptions: Record<string, string> = {
+    registration_no_first_call:
+      'Users who registered long enough ago but have not completed their first successful API request.',
     single_topup_winback:
-      'Users with exactly one eligible wallet top-up and no repeat top-up for 30 days.',
-    paid_low_balance:
-      'Paying users whose displayed balance falls to 1.0 or below.',
-    trial_low_balance:
-      'Users who consumed trial quota, never paid, and have 0.1 balance or less.',
-    inactive_user: 'Users who have not signed in for at least 30 days.',
+      'Users with exactly one eligible wallet top-up and no repeat top-up for the configured period.',
+    inactive_user: 'Users who have not signed in for the configured period.',
+    affiliate_program_activation:
+      'Users with eligible top-ups who meet the configured usage activity requirements.',
     announcement: 'Enabled users receive each published announcement once.',
   }
   return descriptions[scene] || scene

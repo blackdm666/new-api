@@ -33,6 +33,7 @@ type InvoiceSettingsPayload struct {
 	InvoiceIssuedNotifyUserEnabled       bool   `json:"InvoiceIssuedNotifyUserEnabled"`
 	InvoiceAdminEmail                    string `json:"InvoiceAdminEmail"`
 	InvoiceMinimumAmountCents            int64  `json:"InvoiceMinimumAmountCents"`
+	InvoiceTaxRateBasisPoints            int    `json:"InvoiceTaxRateBasisPoints"`
 	InvoiceDataRetentionDays             int    `json:"InvoiceDataRetentionDays"`
 	InvoicePendingExpiryDays             int    `json:"InvoicePendingExpiryDays"`
 	InvoiceFileEnabled                   bool   `json:"InvoiceFileEnabled"`
@@ -78,6 +79,9 @@ func validateInvoiceSettingsPayload(payload *InvoiceSettingsPayload) error {
 	}
 	if payload.InvoiceMinimumAmountCents <= 0 || payload.InvoiceMinimumAmountCents > 100_000_000 {
 		return errors.New("minimum invoice amount must be between CNY 0.01 and CNY 1,000,000")
+	}
+	if payload.InvoiceTaxRateBasisPoints < 0 || payload.InvoiceTaxRateBasisPoints > 10000 {
+		return errors.New("invoice tax rate must be between 0% and 100%")
 	}
 	if payload.InvoiceDataRetentionDays != 0 && (payload.InvoiceDataRetentionDays < 30 || payload.InvoiceDataRetentionDays > 36500) {
 		return errors.New("invoice data retention must be 0 or between 30 and 36500 days")
@@ -259,6 +263,7 @@ func (payload *InvoiceSettingsPayload) optionValues() map[string]string {
 		"InvoiceIssuedNotifyUserEnabled":       strconv.FormatBool(payload.InvoiceIssuedNotifyUserEnabled),
 		"InvoiceAdminEmail":                    payload.InvoiceAdminEmail,
 		"InvoiceMinimumAmountCents":            strconv.FormatInt(payload.InvoiceMinimumAmountCents, 10),
+		"InvoiceTaxRateBasisPoints":            strconv.Itoa(payload.InvoiceTaxRateBasisPoints),
 		"InvoiceDataRetentionDays":             strconv.Itoa(payload.InvoiceDataRetentionDays),
 		"InvoicePendingExpiryDays":             strconv.Itoa(payload.InvoicePendingExpiryDays),
 		"InvoiceFileEnabled":                   strconv.FormatBool(payload.InvoiceFileEnabled),
@@ -320,7 +325,8 @@ func UpdateInvoiceSettings(c *gin.Context) {
 		return
 	}
 	recordManageAudit(c, "invoice.settings.update", map[string]interface{}{
-		"storage": payload.InvoiceFileStorage,
+		"storage":               payload.InvoiceFileStorage,
+		"tax_rate_basis_points": payload.InvoiceTaxRateBasisPoints,
 	})
 	common.ApiSuccess(c, gin.H{"storage": payload.InvoiceFileStorage})
 }

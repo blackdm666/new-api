@@ -21,7 +21,9 @@ import { api } from '@/lib/api'
 import type {
   MarketingAudienceRule,
   MarketingAutomation,
+  MarketingAutomationTriggerConfig,
   MarketingCampaign,
+  LatestMarketingAnnouncement,
   MarketingLocalizedContent,
   MarketingOverview,
   MarketingRecipient,
@@ -122,6 +124,20 @@ export async function sendMarketingTest(
   )
 }
 
+export async function previewMarketingEmail(
+  localizedContent: Record<string, MarketingLocalizedContent>,
+  language: string,
+  scene: string
+): Promise<{ subject: string; body: string }> {
+  return data(
+    await api.post('/api/marketing/preview', {
+      localized_content: localizedContent,
+      language,
+      scene,
+    })
+  )
+}
+
 export async function fetchMarketingAutomations(): Promise<
   MarketingAutomation[]
 > {
@@ -133,6 +149,7 @@ export async function updateMarketingAutomation(
   payload: {
     enabled: boolean
     apply_existing: boolean
+    trigger_config: MarketingAutomationTriggerConfig
     localized_content: Record<string, MarketingLocalizedContent>
   }
 ): Promise<void> {
@@ -140,21 +157,35 @@ export async function updateMarketingAutomation(
 }
 
 export async function previewMarketingAutomation(
-  scene: string
+  scene: string,
+  triggerConfig?: MarketingAutomationTriggerConfig
 ): Promise<number> {
   const result = data<{ total: number }>(
-    await api.get(`/api/marketing/automations/${scene}/preview`)
+    await api.get(`/api/marketing/automations/${scene}/preview`, {
+      params: triggerConfig
+        ? { trigger_config: JSON.stringify(triggerConfig) }
+        : undefined,
+    })
   )
   return result.total
 }
 
+export async function fetchLatestMarketingAnnouncement(): Promise<LatestMarketingAnnouncement | null> {
+  return data(
+    await api.get('/api/marketing/announcements/latest', {
+      disableDuplicate: true,
+    })
+  )
+}
+
 export async function fetchMarketingRecipients(
   campaignId: number,
-  page: number
+  page: number,
+  engagement = ''
 ): Promise<Paginated<MarketingRecipient>> {
   return data(
     await api.get(`/api/marketing/campaigns/${campaignId}/recipients`, {
-      params: { p: page, page_size: 20 },
+      params: { p: page, page_size: 20, engagement },
     })
   )
 }

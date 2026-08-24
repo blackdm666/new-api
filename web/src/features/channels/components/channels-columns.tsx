@@ -59,8 +59,10 @@ import { getCodexUsage, updateChannelBalance } from '../api'
 import { CHANNEL_STATUS_CONFIG, MODEL_FETCHABLE_TYPES } from '../constants'
 import {
   formatRelativeTime,
+  formatChannelBalanceInfo,
   formatResponseTime,
   getBalanceVariant,
+  getChannelBalanceInfoVariant,
   getChannelTypeIcon,
   getChannelTypeLabel,
   getResponseTimeConfig,
@@ -363,7 +365,12 @@ export function BalanceCell({ channel }: { channel: Channel }) {
     })
   )
   const remainingFull = withSuffix(
-    formatCurrencyFromUSD(balance, balanceFormatOptions)
+    channel.balance_info
+      ? formatChannelBalanceInfo(channel.balance_info, {
+          locale,
+          unlimitedLabel: t('Unlimited'),
+        })
+      : formatCurrencyFromUSD(balance, balanceFormatOptions)
   )
   const usedDisplay =
     usedFull.length > MAX_INLINE_BALANCE_CHARS
@@ -375,16 +382,22 @@ export function BalanceCell({ channel }: { channel: Channel }) {
           })
         )
       : usedFull
-  const remainingDisplay =
-    remainingFull.length > MAX_INLINE_BALANCE_CHARS
-      ? withSuffix(
+  let remainingDisplay = remainingFull
+  if (remainingFull.length > MAX_INLINE_BALANCE_CHARS) {
+    remainingDisplay = channel.balance_info
+      ? formatChannelBalanceInfo(channel.balance_info, {
+          locale,
+          compact: true,
+          unlimitedLabel: t('Unlimited'),
+        })
+      : withSuffix(
           formatCurrencyFromUSD(balance, {
             compact: true,
             locale,
             showSymbol: layout !== 'card',
           })
         )
-      : remainingFull
+  }
   const usedLabel = `${t('Used:')} ${usedFull}`
   const remainingLabel = `${t('Remaining:')} ${remainingFull}`
   const maskedUsedLabel = `${t('Used:')} ${SENSITIVE_MASK}`
@@ -420,7 +433,9 @@ export function BalanceCell({ channel }: { channel: Channel }) {
   }
 
   // Regular channel row: show used and remaining with click to update
-  const variant = getBalanceVariant(balance)
+  const variant = channel.balance_info
+    ? getChannelBalanceInfoVariant(channel.balance_info)
+    : getBalanceVariant(balance)
 
   const handleClickUpdate = async () => {
     if (isUpdating) {
@@ -448,14 +463,23 @@ export function BalanceCell({ channel }: { channel: Channel }) {
 
     try {
       const response = await updateChannelBalance(channel.id)
-      if (response.success && response.balance !== undefined) {
-        toast.success(
-          t('Balance updated: {{balance}}', {
-            balance: formatCurrencyFromUSD(response.balance, {
+      if (
+        response.success &&
+        (response.balance_info !== undefined || response.balance !== undefined)
+      ) {
+        const updatedBalance = response.balance_info
+          ? formatChannelBalanceInfo(response.balance_info, {
+              locale,
+              unlimitedLabel: t('Unlimited'),
+            })
+          : formatCurrencyFromUSD(response.balance || 0, {
               digitsLarge: 2,
               digitsSmall: 4,
               abbreviate: false,
-            }),
+            })
+        toast.success(
+          t('Balance updated: {{balance}}', {
+            balance: updatedBalance,
           })
         )
         void queryClient.invalidateQueries({

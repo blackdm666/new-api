@@ -18,8 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { ChatCompletionResponse } from '../../types'
 
-const DATA_IMAGE_PATTERN =
-  /data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+/gi
+const DATA_IMAGE_PATTERN = /data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+/gi
 const MARKDOWN_IMAGE_URL_PATTERN = /!\[[^\]]*\]\(\s*(https?:\/\/[^)\s]+)\s*\)/gi
 
 function extractFromText(content: string) {

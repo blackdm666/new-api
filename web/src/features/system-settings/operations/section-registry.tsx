@@ -129,6 +129,7 @@ const OPERATIONS_SECTIONS = [
             settings.InvoiceIssuedNotifyUserEnabled,
           InvoiceAdminEmail: settings.InvoiceAdminEmail,
           InvoiceMinimumAmountCents: settings.InvoiceMinimumAmountCents,
+          InvoiceTaxRateBasisPoints: settings.InvoiceTaxRateBasisPoints,
           InvoiceDataRetentionDays: settings.InvoiceDataRetentionDays,
           InvoicePendingExpiryDays: settings.InvoicePendingExpiryDays,
           InvoiceFileEnabled: settings.InvoiceFileEnabled,

@@ -19,7 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { describe, expect, test } from 'vitest'
 
 import { buildInvoiceListQuery } from '../api'
-import { getInvoiceAmountShortfall } from '../lib/invoice-utils'
+import {
+  calculateInvoiceTaxFee,
+  getInvoiceAmountShortfall,
+} from '../lib/invoice-utils'
 import { INVOICE_STATUS, INVOICE_STATUS_OPTIONS } from '../types'
 
 describe('independent invoice domain', () => {
@@ -51,5 +54,11 @@ describe('independent invoice domain', () => {
   test('accepts exactly the minimum invoice amount and reports the shortfall below it', () => {
     expect(getInvoiceAmountShortfall(500, 500)).toBe(0)
     expect(getInvoiceAmountShortfall(499.99, 500)).toBeCloseTo(0.01, 8)
+  })
+
+  test('calculates the invoice tax fee in cents using basis points', () => {
+    expect(calculateInvoiceTaxFee(500, 300)).toBe(15)
+    expect(calculateInvoiceTaxFee(100.01, 300)).toBe(3)
+    expect(calculateInvoiceTaxFee(500, 0)).toBe(0)
   })
 })

@@ -27,7 +27,12 @@ import {
   RESPONSE_TIME_THRESHOLDS,
   TYPE_TO_KEY_PROMPT,
 } from '../constants'
-import type { Channel, ChannelSettings, ChannelOtherSettings } from '../types'
+import type {
+  Channel,
+  ChannelBalanceInfo,
+  ChannelSettings,
+  ChannelOtherSettings,
+} from '../types'
 
 // ============================================================================
 // Channel Type Utilities
@@ -336,6 +341,47 @@ export function formatBalance(balance: number | null | undefined): string {
     digitsSmall: 4,
     abbreviate: false,
   })
+}
+
+export function formatChannelBalanceInfo(
+  info: ChannelBalanceInfo | null | undefined,
+  options: {
+    locale?: string
+    compact?: boolean
+    unlimitedLabel?: string
+  } = {}
+): string {
+  if (!info) return '-'
+  if (info.unlimited) return options.unlimitedLabel || 'Unlimited'
+  const value = Number(info.remaining)
+  if (!Number.isFinite(value)) return '-'
+  const formatOptions: Intl.NumberFormatOptions = {
+    maximumFractionDigits: options.compact ? 2 : 4,
+    minimumFractionDigits: 0,
+    notation: options.compact ? 'compact' : 'standard',
+  }
+  let formatter: Intl.NumberFormat
+  try {
+    formatter = new Intl.NumberFormat(options.locale, formatOptions)
+  } catch {
+    formatter = new Intl.NumberFormat(undefined, formatOptions)
+  }
+  const formatted = formatter.format(value)
+  const displayUnit = info.display_unit || info.currency || info.unit || ''
+  if (!displayUnit) return formatted
+  if (['$', '¥', '€', '£', '¤'].includes(displayUnit)) {
+    return `${displayUnit}${formatted}`
+  }
+  return `${formatted} ${displayUnit}`
+}
+
+export function getChannelBalanceInfoVariant(
+  info: ChannelBalanceInfo | null | undefined
+): 'success' | 'warning' | 'danger' | 'neutral' {
+  if (!info || info.unlimited) return 'success'
+  const value = Number(info.remaining)
+  if (!Number.isFinite(value)) return 'neutral'
+  return getBalanceVariant(value)
 }
 
 /**

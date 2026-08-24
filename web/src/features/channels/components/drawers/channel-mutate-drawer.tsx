@@ -39,6 +39,7 @@ import {
   RefreshCw,
   Code,
   Route,
+  CircleDollarSign,
   Settings,
   SlidersHorizontal,
   Wand2,
@@ -55,6 +56,7 @@ import { type SubmitErrorHandler, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import {
   sideDrawerContentClassName,
   sideDrawerFooterClassName,
@@ -130,11 +132,13 @@ import { useAuthStore } from '@/stores/auth-store'
 import {
   fetchModels,
   getAllModels,
+  getChannelBalanceQueryToken,
   getChannel,
   getChannelKey,
   getGroups,
   getPrefillGroups,
   refreshCodexCredential,
+  resetChannelUsedQuota,
 } from '../../api'
 import {
   ADD_MODE_OPTIONS,
@@ -171,12 +175,21 @@ import {
   hasAdvancedSettingsErrors,
 } from '../../lib'
 import {
+  buildBalanceQueryPreviewURL,
+  getBalanceQueryModeLabel,
+  getEffectiveBalanceQueryPath,
+  getGCPTrialBillingTable,
+  parseBalanceQueryConfig,
+  stringifyBalanceQueryConfig,
+} from '../../lib/balance-query'
+import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
-import type { Channel } from '../../types'
+import type { Channel, ChannelBalanceQueryConfig } from '../../types'
 import { useChannels } from '../channels-provider'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
+import { BalanceQueryEditorDialog } from '../dialogs/balance-query-editor-dialog'
 import { FetchModelsDialog } from '../dialogs/fetch-models-dialog'
 import {
   MissingModelsConfirmationDialog,
@@ -259,6 +272,7 @@ const ADVANCED_SETTINGS_SECTION_IDS = {
   routingStrategy: 'channel-section-advanced-routing-strategy',
   internalNotes: 'channel-section-advanced-internal-notes',
   overrideRules: 'channel-section-advanced-override-rules',
+  balanceQuery: 'channel-section-advanced-balance-query',
   extraSettings: 'channel-section-advanced-extra-settings',
   fieldPassthrough: 'channel-section-advanced-field-passthrough',
   upstreamModelDetection: 'channel-section-advanced-upstream-model-detection',
@@ -280,6 +294,7 @@ const SENSITIVE_FORM_FIELDS = [
   'settings',
   'setting',
   'advanced_custom',
+  'balance_query',
   'is_enterprise_account',
   'vertex_key_type',
   'aws_key_type',
@@ -620,12 +635,24 @@ export function ChannelMutateDrawer({
     ADMIN_PERMISSION_RESOURCES.CHANNEL,
     ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
   )
+  const canOperateChannel = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.CHANNEL,
+    ADMIN_PERMISSION_ACTIONS.OPERATE
+  )
   const canRevealChannelKey = currentUser?.role === ROLE.SUPER_ADMIN
   const [fetchModelsDialogOpen, setFetchModelsDialogOpen] = useState(false)
   const [channelKey, setChannelKey] = useState<string | null>(null)
   const [isChannelKeyLoading, setIsChannelKeyLoading] = useState(false)
+  const [balanceQueryToken, setBalanceQueryToken] = useState<string | null>(
+    null
+  )
+  const [isBalanceQueryTokenLoading, setIsBalanceQueryTokenLoading] =
+    useState(false)
   const [isCodexCredentialRefreshing, setIsCodexCredentialRefreshing] =
     useState(false)
+  const [resetUsedQuotaOpen, setResetUsedQuotaOpen] = useState(false)
+  const [isResettingUsedQuota, setIsResettingUsedQuota] = useState(false)
   const initialModelsRef = useRef<string[]>([])
   const initialModelMappingRef = useRef<string>('')
   const initialStatusCodeMappingRef = useRef<string>('')
@@ -653,6 +680,7 @@ export function ChannelMutateDrawer({
   const [paramOverrideEditorOpen, setParamOverrideEditorOpen] = useState(false)
   const [advancedCustomEditorOpen, setAdvancedCustomEditorOpen] =
     useState(false)
+  const [balanceQueryEditorOpen, setBalanceQueryEditorOpen] = useState(false)
   const [clipboardConnectionInfo, setClipboardConnectionInfo] =
     useState<ChannelConnectionInfo | null>(null)
 
@@ -702,8 +730,11 @@ export function ChannelMutateDrawer({
     if (!open) {
       setChannelKey(null)
       setIsChannelKeyLoading(false)
+      setBalanceQueryToken(null)
+      setIsBalanceQueryTokenLoading(false)
     } else if (channelId) {
       setChannelKey(null)
+      setBalanceQueryToken(null)
     }
   }, [open, channelId])
 
@@ -737,6 +768,7 @@ export function ChannelMutateDrawer({
   )
   const currentSettings = form.watch('settings')
   const currentAdvancedCustom = form.watch('advanced_custom')
+  const currentBalanceQuery = form.watch('balance_query')
   const currentPriority = form.watch('priority')
   const currentWeight = form.watch('weight')
   const currentTestModel = form.watch('test_model')
@@ -882,6 +914,35 @@ export function ChannelMutateDrawer({
     hiddenAdvancedCustomRouteTypeCount > 0
       ? advancedCustomStats.routeTypeLabels.join(', ')
       : undefined
+  const balanceQueryConfig = useMemo<ChannelBalanceQueryConfig>(
+    () => parseBalanceQueryConfig(currentBalanceQuery),
+    [currentBalanceQuery]
+  )
+  const balanceQueryPath = getEffectiveBalanceQueryPath(
+    balanceQueryConfig,
+    currentType
+  )
+  const balanceQueryPreviewURL =
+    balanceQueryConfig.mode === 'custom' && balanceQueryConfig.url?.trim()
+      ? balanceQueryConfig.url.trim()
+      : buildBalanceQueryPreviewURL(currentBaseUrl, balanceQueryPath)
+  const gcpTrialBillingTable = getGCPTrialBillingTable(balanceQueryConfig)
+  const balanceQueryModeLabel = getBalanceQueryModeLabel(
+    balanceQueryConfig,
+    currentType
+  )
+  let balanceQueryDescription = t(
+    'Use the channel type adapter or configure a custom balance endpoint.'
+  )
+  if (gcpTrialBillingTable) {
+    balanceQueryDescription = t('BigQuery billing table: {{table}}', {
+      table: gcpTrialBillingTable,
+    })
+  } else if (balanceQueryPreviewURL) {
+    balanceQueryDescription = t('Final request URL: {{url}}', {
+      url: balanceQueryPreviewURL,
+    })
+  }
 
   // Get all models list
   const allModelsList = useMemo(
@@ -1017,6 +1078,9 @@ export function ChannelMutateDrawer({
     hasConfiguredOverrideValue(currentParamOverride) ||
     hasConfiguredOverrideValue(currentHeaderOverride)
   )
+  const balanceQueryConfigured = Boolean(
+    balanceQueryConfig.mode !== 'auto' || balanceQueryPath
+  )
   const extraSettingsConfigured = Boolean(
     currentForceFormat ||
     currentThinkingToContent ||
@@ -1057,6 +1121,7 @@ export function ChannelMutateDrawer({
     routingStrategyConfigured ||
     internalNotesConfigured ||
     overrideRulesConfigured ||
+    balanceQueryConfigured ||
     extraSettingsConfigured ||
     fieldPassthroughConfigured ||
     upstreamModelDetectionConfigured
@@ -1076,6 +1141,11 @@ export function ChannelMutateDrawer({
       id: ADVANCED_SETTINGS_SECTION_IDS.overrideRules,
       title: t('Override Rules'),
       configured: overrideRulesConfigured,
+    },
+    {
+      id: ADVANCED_SETTINGS_SECTION_IDS.balanceQuery,
+      title: t('Upstream Balance Query'),
+      configured: balanceQueryConfigured,
     },
     {
       id: ADVANCED_SETTINGS_SECTION_IDS.extraSettings,
@@ -1400,6 +1470,61 @@ export function ChannelMutateDrawer({
     }
   }, [channelId, withVerification, fetchChannelKey, t])
 
+  const fetchBalanceQueryToken = useCallback(async () => {
+    if (!channelId) {
+      throw new Error(t('Channel is not selected'))
+    }
+    setIsBalanceQueryTokenLoading(true)
+    try {
+      const res = await getChannelBalanceQueryToken(channelId)
+      const token = res.data?.token || ''
+      if (!res.success || !token) {
+        throw new Error(res.message || t('Failed to fetch balance query token'))
+      }
+      setBalanceQueryToken(token)
+      toast.success(t('Balance query token unlocked'))
+      return res
+    } finally {
+      setIsBalanceQueryTokenLoading(false)
+    }
+  }, [channelId, t])
+
+  const handleRevealBalanceQueryToken = useCallback(async () => {
+    try {
+      await fetchBalanceQueryToken()
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to fetch balance query token')
+      )
+    }
+  }, [fetchBalanceQueryToken, t])
+
+  const handleCopyBalanceQueryToken = useCallback(async () => {
+    if (balanceQueryToken) {
+      await copyToClipboard(balanceQueryToken)
+      return
+    }
+    const fetchAndCopy = async () => {
+      const res = await fetchBalanceQueryToken()
+      const token = res.data?.token || ''
+      if (token) {
+        await copyToClipboard(token)
+      }
+      return res
+    }
+    try {
+      await fetchAndCopy()
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to fetch balance query token')
+      )
+    }
+  }, [balanceQueryToken, copyToClipboard, fetchBalanceQueryToken, t])
+
   const handleRefreshCodexCredential = useCallback(async () => {
     if (!channelId) return
     setIsCodexCredentialRefreshing(true)
@@ -1416,6 +1541,35 @@ export function ChannelMutateDrawer({
       toast.error(error instanceof Error ? error.message : t('Refresh failed'))
     } finally {
       setIsCodexCredentialRefreshing(false)
+    }
+  }, [channelId, queryClient, t])
+
+  const handleResetUsedQuota = useCallback(async () => {
+    if (!channelId) return
+    setIsResettingUsedQuota(true)
+    try {
+      const response = await resetChannelUsedQuota(channelId)
+      if (!response.success) {
+        throw new Error(response.message || t('Failed to reset channel usage'))
+      }
+      toast.success(t('Channel cumulative usage has been reset'))
+      setResetUsedQuotaOpen(false)
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: channelsQueryKeys.lists(),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: channelsQueryKeys.detail(channelId),
+        }),
+      ])
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to reset channel usage')
+      )
+    } finally {
+      setIsResettingUsedQuota(false)
     }
   }, [channelId, queryClient, t])
 
@@ -1857,6 +2011,7 @@ export function ChannelMutateDrawer({
         setExpandedEditorNavItemId(undefined)
         setAdvancedSettingsOpen(false)
         setClipboardConnectionInfo(null)
+        setResetUsedQuotaOpen(false)
       }
     },
     [onOpenChange, form]
@@ -4046,6 +4201,66 @@ export function ChannelMutateDrawer({
                           </div>
                         </div>
 
+                        {/* ── Upstream Balance Query ── */}
+                        <div
+                          id={ADVANCED_SETTINGS_SECTION_IDS.balanceQuery}
+                          className={sideDrawerSectionClassName(
+                            configuredAdvancedSectionClassName(
+                              'scroll-mt-4',
+                              balanceQueryConfigured
+                            )
+                          )}
+                        >
+                          <CardHeading
+                            title={t('Upstream Balance Query')}
+                            icon={<CircleDollarSign className='h-4 w-4' />}
+                            iconTone='success'
+                          />
+                          <FormField
+                            control={form.control}
+                            name='balance_query'
+                            render={({ field }) => (
+                              <FormItem className='space-y-3'>
+                                <div className='rounded-lg border p-4'>
+                                  <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                                    <div className='min-w-0 space-y-2'>
+                                      <div className='flex flex-wrap gap-2'>
+                                        <Badge variant='secondary'>
+                                          {t(balanceQueryModeLabel)}
+                                        </Badge>
+                                        {balanceQueryPath && (
+                                          <Badge variant='outline'>
+                                            {balanceQueryPath}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <FormDescription>
+                                        {balanceQueryDescription}
+                                      </FormDescription>
+                                    </div>
+                                    <Button
+                                      type='button'
+                                      variant='outline'
+                                      size='sm'
+                                      disabled={sensitiveLocked}
+                                      onClick={() =>
+                                        setBalanceQueryEditorOpen(true)
+                                      }
+                                    >
+                                      <Settings className='mr-2 h-4 w-4' />
+                                      {t('Configure balance query')}
+                                    </Button>
+                                  </div>
+                                </div>
+                                <FormControl>
+                                  <input type='hidden' {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
                         {/* ── Extra Settings ── */}
                         <div
                           id={ADVANCED_SETTINGS_SECTION_IDS.extraSettings}
@@ -4776,12 +4991,33 @@ export function ChannelMutateDrawer({
           </Form>
 
           <SheetFooter className={sideDrawerFooterClassName()}>
+            {isEditing && canOperateChannel ? (
+              <Button
+                type='button'
+                variant='outline'
+                className='text-destructive hover:text-destructive col-span-2 sm:col-span-1 sm:mr-auto'
+                disabled={isSubmitting || isResettingUsedQuota}
+                onClick={() => setResetUsedQuotaOpen(true)}
+              >
+                <Eraser className='size-4' />
+                {t('Reset cumulative usage')}
+              </Button>
+            ) : null}
             <SheetClose
-              render={<Button variant='outline' disabled={isSubmitting} />}
+              render={
+                <Button
+                  variant='outline'
+                  disabled={isSubmitting || isResettingUsedQuota}
+                />
+              }
             >
               {t('Cancel')}
             </SheetClose>
-            <Button form='channel-form' type='submit' disabled={isSubmitting}>
+            <Button
+              form='channel-form'
+              type='submit'
+              disabled={isSubmitting || isResettingUsedQuota}
+            >
               {isSubmitting && (
                 <Loader2 className='mr-2 h-4 w-4 animate-spin' />
               )}
@@ -4818,6 +5054,61 @@ export function ChannelMutateDrawer({
           }}
         />
       )}
+
+      {balanceQueryEditorOpen && !sensitiveLocked && (
+        <BalanceQueryEditorDialog
+          open={balanceQueryEditorOpen}
+          value={balanceQueryConfig}
+          channelType={currentType}
+          baseURL={currentBaseUrl || ''}
+          channelId={channelId || undefined}
+          savedToken={balanceQueryToken}
+          canRevealSavedToken={Boolean(channelId) && canRevealChannelKey}
+          savedTokenLoading={isBalanceQueryTokenLoading}
+          onRevealSavedToken={handleRevealBalanceQueryToken}
+          onCopySavedToken={handleCopyBalanceQueryToken}
+          onOpenChange={(nextOpen) => {
+            setBalanceQueryEditorOpen(nextOpen)
+            if (!nextOpen) {
+              setBalanceQueryToken(null)
+            }
+          }}
+          onSave={(nextValue) => {
+            form.setValue(
+              'balance_query',
+              stringifyBalanceQueryConfig(nextValue),
+              {
+                shouldDirty: true,
+                shouldValidate: true,
+              }
+            )
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={resetUsedQuotaOpen}
+        onOpenChange={setResetUsedQuotaOpen}
+        title={t('Reset channel cumulative usage?')}
+        desc={
+          <div className='space-y-2'>
+            <p>
+              {t(
+                'This resets only the local cumulative usage counter so you can observe consumption again from the current moment.'
+              )}
+            </p>
+            <p>
+              {t(
+                'Upstream balance, user billing, and historical usage logs will not be changed. The previous cumulative value cannot be restored.'
+              )}
+            </p>
+          </div>
+        }
+        confirmText={t('Reset cumulative usage')}
+        destructive
+        isLoading={isResettingUsedQuota}
+        handleConfirm={() => void handleResetUsedQuota()}
+      />
 
       {/* Fetch Models Dialog */}
       <FetchModelsDialog

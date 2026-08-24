@@ -143,7 +143,10 @@ export function InvoiceDetailPage({
   }, [admin, invoiceId])
 
   useEffect(() => {
-    void refresh()
+    const timeout = window.setTimeout(() => {
+      void refresh()
+    }, 0)
+    return () => window.clearTimeout(timeout)
   }, [refresh])
 
   const saveStatus = async () => {
@@ -537,6 +540,20 @@ function InvoiceInformation({
           <dt className='text-muted-foreground text-xs'>{t('Total amount')}</dt>
           <dd className='text-primary mt-1 text-xl font-semibold'>
             ¥{Number(invoice.total_money || 0).toFixed(2)}
+          </dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground text-xs'>
+            {t('Invoice tax rate')}
+          </dt>
+          <dd className='mt-1 text-sm font-semibold'>
+            {(Number(invoice.tax_rate_basis_points || 0) / 100).toFixed(2)}%
+          </dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground text-xs'>{t('Tax fee paid')}</dt>
+          <dd className='mt-1 text-sm font-semibold'>
+            ¥{(Number(invoice.tax_fee_cents || 0) / 100).toFixed(2)}
           </dd>
         </div>
         {invoice.remark && (

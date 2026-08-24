@@ -36,6 +36,11 @@ import {
   stringifyAdvancedCustomConfig,
   validateAdvancedCustomConfig,
 } from './advanced-custom'
+import {
+  parseBalanceQueryConfig,
+  stringifyBalanceQueryConfig,
+  validateBalanceQueryConfig,
+} from './balance-query'
 
 // ============================================================================
 // Form Validation Schema
@@ -246,6 +251,7 @@ export const channelFormSchema = z
       .optional()
       .refine(isOptionalJsonObject, ERROR_MESSAGES.INVALID_JSON),
     advanced_custom: z.string().optional(),
+    balance_query: z.string().optional(),
     other: z.string().optional(),
     // Multi-key options (not sent to backend directly)
     multi_key_mode: z.enum(['single', 'batch', 'multi_to_single']).optional(),
@@ -284,6 +290,12 @@ export const channelFormSchema = z
     upstream_model_update_ignored_models: z.string().optional(),
   })
   .superRefine((data, ctx) => {
+    const balanceQueryConfig = parseBalanceQueryConfig(data.balance_query)
+    const balanceQueryError = validateBalanceQueryConfig(balanceQueryConfig)
+    if (balanceQueryError) {
+      addRequiredIssue(ctx, 'balance_query', balanceQueryError)
+    }
+
     if (
       [3, 8, 36, 45, CHANNEL_TYPE_NEW_API].includes(data.type) &&
       !data.base_url?.trim()
@@ -454,6 +466,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
   advanced_custom: '',
+  balance_query: '',
 }
 
 // ============================================================================
@@ -518,6 +531,7 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
   let advancedCustom = ''
+  let balanceQuery = ''
 
   if (channel.settings) {
     try {
@@ -545,6 +559,9 @@ export function transformChannelToFormDefaults(
         : ''
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
+      }
+      if (parsed.balance_query) {
+        balanceQuery = stringifyBalanceQueryConfig(parsed.balance_query)
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -597,6 +614,7 @@ export function transformChannelToFormDefaults(
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
     advanced_custom: advancedCustom,
+    balance_query: balanceQuery,
   }
 }
 
@@ -761,6 +779,14 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     }
   } else if ('advanced_custom' in settingsObj) {
     delete settingsObj.advanced_custom
+  }
+
+  const balanceQueryConfig = parseBalanceQueryConfig(formData.balance_query)
+  const serializedBalanceQuery = stringifyBalanceQueryConfig(balanceQueryConfig)
+  if (serializedBalanceQuery) {
+    settingsObj.balance_query = JSON.parse(serializedBalanceQuery)
+  } else if ('balance_query' in settingsObj) {
+    delete settingsObj.balance_query
   }
 
   return JSON.stringify(settingsObj)

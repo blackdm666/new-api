@@ -48,6 +48,9 @@ export type InvoiceRequest = {
   topup_order_ids: string
   total_money: number
   total_money_cents: number
+  tax_rate_basis_points: number
+  tax_fee_cents: number
+  tax_fee_quota: number
   status: InvoiceStatus
   rejection_reason: string
   issued_time: number
@@ -101,6 +104,8 @@ export type InvoiceRequestEvent = {
 
 export type InvoiceConfig = {
   minimum_amount_cents: number
+  tax_rate_basis_points: number
+  available_balance_cents: number
   issue_day: number
 }
 

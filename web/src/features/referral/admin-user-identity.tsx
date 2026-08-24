@@ -16,12 +16,55 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { UserRoundSearch } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
-export function AdminUserIdentity(props: { id: number; username?: string }) {
-  return (
-    <div className='min-w-36'>
-      <div className='font-medium'>{props.username || '-'}</div>
+type AdminUserIdentityProps = {
+  id: number
+  username?: string
+  remark?: string
+  onClick?: () => void
+}
+
+export function AdminUserIdentity(props: AdminUserIdentityProps) {
+  const { t } = useTranslation()
+  const content = (
+    <>
+      <div className='flex items-center gap-1.5 font-medium'>
+        <span className='break-all group-hover:underline'>
+          {props.username || '-'}
+        </span>
+        {props.onClick ? (
+          <UserRoundSearch
+            className='text-muted-foreground size-3.5 shrink-0'
+            aria-hidden='true'
+          />
+        ) : null}
+      </div>
+      {props.remark?.trim() ? (
+        <div
+          className='text-muted-foreground mt-0.5 max-w-56 text-xs break-words'
+          title={props.remark}
+        >
+          {t('Remark')}: {props.remark}
+        </div>
+      ) : null}
       <div className='text-muted-foreground text-xs'>UID {props.id}</div>
-    </div>
+    </>
   )
+
+  if (props.onClick) {
+    return (
+      <button
+        type='button'
+        className='group focus-visible:ring-ring min-w-36 rounded-md text-left focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none'
+        aria-label={`${t('User Information')}: ${props.username || `UID ${props.id}`}`}
+        onClick={props.onClick}
+      >
+        {content}
+      </button>
+    )
+  }
+
+  return <div className='min-w-36'>{content}</div>
 }

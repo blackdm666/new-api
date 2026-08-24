@@ -93,6 +93,14 @@ function SectionTitle(props: { children: React.ReactNode }) {
   )
 }
 
+function PanelTitle(props: { children: React.ReactNode }) {
+  return (
+    <h2 className='text-foreground text-lg leading-tight font-semibold tracking-tight'>
+      {props.children}
+    </h2>
+  )
+}
+
 const CAPABILITY_LABEL_KEYS: Record<ModelCapability, string> = {
   function_calling: 'Function calling',
   streaming: 'Streaming',
@@ -1178,28 +1186,34 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
         <TabsContent value='overview' className='space-y-6 outline-none'>
           <OverviewSummaryGrid model={props.model} />
 
-          <section className='bg-card/60 space-y-5 rounded-xl border p-4 shadow-sm'>
-            <SectionTitle>{t('Pricing')}</SectionTitle>
-            <PriceSection
-              model={props.model}
-              priceRate={props.priceRate}
-              usdExchangeRate={props.usdExchangeRate}
-              tokenUnit={props.tokenUnit}
-              showRechargePrice={showRechargePrice}
-            />
-            {isDynamic && (
-              <DynamicPricingBreakdown billingExpr={props.model.billing_expr} />
-            )}
-            <GroupPricingSection
-              model={props.model}
-              groupRatio={props.groupRatio}
-              usableGroup={props.usableGroup}
-              autoGroups={props.autoGroups}
-              priceRate={props.priceRate}
-              usdExchangeRate={props.usdExchangeRate}
-              tokenUnit={props.tokenUnit}
-              showRechargePrice={showRechargePrice}
-            />
+          <section className='bg-card/60 overflow-hidden rounded-xl border shadow-sm'>
+            <header className='border-border/60 border-b px-4 py-3.5 sm:px-5'>
+              <PanelTitle>{t('Pricing')}</PanelTitle>
+            </header>
+            <div className='space-y-5 p-4 sm:p-5'>
+              <PriceSection
+                model={props.model}
+                priceRate={props.priceRate}
+                usdExchangeRate={props.usdExchangeRate}
+                tokenUnit={props.tokenUnit}
+                showRechargePrice={showRechargePrice}
+              />
+              {isDynamic && (
+                <DynamicPricingBreakdown
+                  billingExpr={props.model.billing_expr}
+                />
+              )}
+              <GroupPricingSection
+                model={props.model}
+                groupRatio={props.groupRatio}
+                usableGroup={props.usableGroup}
+                autoGroups={props.autoGroups}
+                priceRate={props.priceRate}
+                usdExchangeRate={props.usdExchangeRate}
+                tokenUnit={props.tokenUnit}
+                showRechargePrice={showRechargePrice}
+              />
+            </div>
           </section>
 
           <ModelBackendDetailsSection model={props.model} />

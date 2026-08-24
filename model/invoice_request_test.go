@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,6 +20,7 @@ func seedInvoiceRequestUserAndOrder(t *testing.T, tradeNo string, money float64)
 		Email:    "invoice-request@example.com",
 		AffCode:  "invoice-request-code",
 		Status:   common.UserStatusEnabled,
+		Quota:    100_000_000,
 	}
 	require.NoError(t, DB.Create(user).Error)
 	order := &TopUp{
@@ -170,6 +173,91 @@ func TestInvoiceRequestRejectsAmountBelowFiveHundredYuan(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, ErrInvoiceAmountTooSmall)
+}
+
+func TestInvoiceRequestDeductsConfiguredTaxFeeAtomically(t *testing.T) {
+	truncateTables(t)
+	originalQuotaPerUnit := common.QuotaPerUnit
+	originalExchangeRate := operation_setting.USDExchangeRate
+	originalTaxRate := setting.InvoiceTaxRateBasisPoints
+	common.QuotaPerUnit = 500_000
+	operation_setting.USDExchangeRate = 1
+	setting.InvoiceTaxRateBasisPoints = 300
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+		operation_setting.USDExchangeRate = originalExchangeRate
+		setting.InvoiceTaxRateBasisPoints = originalTaxRate
+	})
+
+	user, order := seedInvoiceRequestUserAndOrder(t, "invoice-tax-order", 500)
+	quotaBefore := user.Quota
+	request, _, err := CreateInvoiceRequest(CreateInvoiceRequestParams{
+		UserId:        user.Id,
+		Username:      user.Username,
+		CompanyName:   "Tax Invoice Co.",
+		TaxNumber:     "91310000TAXFEE",
+		Email:         "tax@example.com",
+		TopUpOrderIds: []int{order.Id},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 300, request.TaxRateBasisPoints)
+	assert.Equal(t, int64(1500), request.TaxFeeCents)
+	assert.Equal(t, 7_500_000, request.TaxFeeQuota)
+
+	var stored User
+	require.NoError(t, DB.First(&stored, user.Id).Error)
+	assert.Equal(t, quotaBefore-request.TaxFeeQuota, stored.Quota)
+
+	_, _, err = CreateInvoiceRequest(CreateInvoiceRequestParams{
+		UserId:        user.Id,
+		Username:      user.Username,
+		CompanyName:   "Duplicate Tax Invoice Co.",
+		TaxNumber:     "91310000TAXDUP",
+		Email:         "tax@example.com",
+		TopUpOrderIds: []int{order.Id},
+	})
+	require.ErrorIs(t, err, ErrInvoiceOrderDuplicate)
+	require.NoError(t, DB.First(&stored, user.Id).Error)
+	assert.Equal(t, quotaBefore-request.TaxFeeQuota, stored.Quota)
+}
+
+func TestInvoiceRequestRejectsInsufficientTaxFeeBalanceWithoutCreatingRequest(t *testing.T) {
+	truncateTables(t)
+	originalQuotaPerUnit := common.QuotaPerUnit
+	originalExchangeRate := operation_setting.USDExchangeRate
+	originalTaxRate := setting.InvoiceTaxRateBasisPoints
+	common.QuotaPerUnit = 500_000
+	operation_setting.USDExchangeRate = 1
+	setting.InvoiceTaxRateBasisPoints = 300
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+		operation_setting.USDExchangeRate = originalExchangeRate
+		setting.InvoiceTaxRateBasisPoints = originalTaxRate
+	})
+
+	user, order := seedInvoiceRequestUserAndOrder(t, "invoice-tax-insufficient-order", 500)
+	require.NoError(t, DB.Model(user).Update("quota", 7_000_000).Error)
+
+	_, _, err := CreateInvoiceRequest(CreateInvoiceRequestParams{
+		UserId:        user.Id,
+		Username:      user.Username,
+		CompanyName:   "Insufficient Tax Invoice Co.",
+		TaxNumber:     "91310000TAXLOW",
+		Email:         "tax@example.com",
+		TopUpOrderIds: []int{order.Id},
+	})
+	require.ErrorIs(t, err, ErrInvoiceTaxFeeInsufficient)
+	var insufficient *InvoiceTaxFeeInsufficientError
+	require.ErrorAs(t, err, &insufficient)
+	assert.Equal(t, int64(1500), insufficient.FeeCents)
+	assert.Equal(t, int64(1400), insufficient.AvailableCents)
+
+	var requestCount int64
+	require.NoError(t, DB.Model(&InvoiceRequest{}).Count(&requestCount).Error)
+	assert.Zero(t, requestCount)
+	var claimCount int64
+	require.NoError(t, DB.Model(&InvoiceOrderClaim{}).Count(&claimCount).Error)
+	assert.Zero(t, claimCount)
 }
 
 func TestIssuedInvoiceRequiresDirectlyBoundInvoiceFile(t *testing.T) {

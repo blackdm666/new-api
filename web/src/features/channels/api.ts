@@ -24,6 +24,8 @@ import type {
   BatchDeleteParams,
   BatchSetTagParams,
   Channel,
+  ChannelBalanceInfo,
+  ChannelBalanceQueryConfig,
   ChannelBalanceResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
@@ -234,6 +236,28 @@ export async function updateChannelBalance(
   return res.data
 }
 
+export type ResetChannelUsedQuotaResponse = {
+  success: boolean
+  message?: string
+  data?: {
+    id: number
+    previous_used_quota: number
+    used_quota: number
+  }
+}
+
+/** Reset the local cumulative usage counter without changing upstream balance. */
+export async function resetChannelUsedQuota(
+  id: number
+): Promise<ResetChannelUsedQuotaResponse> {
+  const res = await api.post(
+    `/api/channel/${id}/used_quota/reset`,
+    undefined,
+    channelActionConfig()
+  )
+  return res.data
+}
+
 /**
  * Fetch available models from upstream provider
  */
@@ -303,6 +327,43 @@ export async function getChannelKey(
     channelActionConfig({
       headers: proofToken ? { 'X-Security-Proof': proofToken } : undefined,
     })
+  )
+  return res.data
+}
+
+/**
+ * Get the complete balance-query account token as the root administrator.
+ */
+export async function getChannelBalanceQueryToken(id: number): Promise<{
+  success: boolean
+  message?: string
+  data?: { token: string }
+}> {
+  const res = await api.post(
+    `/api/channel/${id}/balance_query/token`,
+    undefined,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export type TestChannelBalanceQueryResponse = {
+  success: boolean
+  mapping_success?: boolean
+  message?: string
+  balance?: number
+  balance_info?: ChannelBalanceInfo
+  raw_response?: string
+}
+
+export async function testChannelBalanceQuery(
+  id: number,
+  config: ChannelBalanceQueryConfig
+): Promise<TestChannelBalanceQueryResponse> {
+  const res = await api.post(
+    `/api/channel/${id}/balance_query/test`,
+    { config },
+    channelActionConfig()
   )
   return res.data
 }

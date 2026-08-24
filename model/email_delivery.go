@@ -2,7 +2,6 @@ package model
 
 import (
 	"errors"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -48,7 +47,6 @@ type EmailDeliveryListItem struct {
 	UserId            int    `json:"user_id"`
 	InvoiceDeliveryId int    `json:"invoice_delivery_id"`
 	Recipient         string `json:"recipient"`
-	RecipientMasked   string `json:"recipient_masked"`
 	Priority          int    `json:"priority"`
 	Status            string `json:"status" gorm:"-"`
 	Attempts          int    `json:"attempts"`
@@ -146,7 +144,6 @@ func enqueueEmailDelivery(tx *gorm.DB, delivery *EmailDelivery) (*EmailDelivery,
 	if delivery.Priority <= 0 {
 		delivery.Priority = EmailPriorityBusiness
 	}
-	delivery.RecipientMasked = maskEmailAddress(delivery.Recipient)
 	delivery.CreatedTime = now
 	delivery.UpdatedTime = now
 	delivery.NextAttemptTime = now
@@ -302,7 +299,6 @@ func CompleteEmailDelivery(id int, smtpMetadata ...string) error {
 			return errors.New("expired email delivery cannot be completed")
 		}
 		if err := tx.Model(delivery).Updates(map[string]any{
-			"recipient":         "",
 			"subject":           "",
 			"body":              "",
 			"last_error":        "",
@@ -362,7 +358,6 @@ func ExpireEmailDeliveries(now int64) error {
 	return DB.Model(&EmailDelivery{}).
 		Where("delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0 AND expires_time > 0 AND expires_time <= ?", now).
 		Updates(map[string]any{
-			"recipient":    "",
 			"subject":      "",
 			"body":         "",
 			"last_error":   "expired before delivery",
@@ -387,7 +382,6 @@ func ExpireEmailDelivery(id int, reason string) error {
 	result := DB.Model(&EmailDelivery{}).
 		Where("id = ? AND delivered_time = 0 AND expired_time = 0", id).
 		Updates(map[string]any{
-			"recipient":         "",
 			"subject":           "",
 			"body":              "",
 			"last_error":        reason,
@@ -471,9 +465,9 @@ func GetEmailDeliveryById(id int) (*EmailDelivery, error) {
 	return delivery, nil
 }
 
-// ListEmailDeliveries is intentionally Root-only at the controller layer:
-// pending and failed rows may still contain recipient addresses and message
-// content required for retrying delivery.
+// ListEmailDeliveries is intentionally Root-only at the controller layer.
+// Recipient addresses remain visible and searchable for queue maintenance,
+// while subject and body content are never selected into the response.
 func ListEmailDeliveries(options EmailDeliveryQueryOptions, pageInfo *common.PageInfo) ([]*EmailDeliveryListItem, int64, error) {
 	query := DB.Model(&EmailDelivery{})
 	now := common.GetTimestamp()
@@ -500,10 +494,10 @@ func ListEmailDeliveries(options EmailDeliveryQueryOptions, pageInfo *common.Pag
 			return nil, 0, err
 		}
 		if id, err := strconv.Atoi(keyword); err == nil && id > 0 {
-			query = query.Where("(id = ? OR related_id = ? OR user_id = ? OR delivery_key LIKE ? ESCAPE '!' OR category LIKE ? ESCAPE '!' OR recipient LIKE ? ESCAPE '!' OR recipient_masked LIKE ? ESCAPE '!' OR subject LIKE ? ESCAPE '!' OR user_id IN (?))", id, id, id, pattern, pattern, pattern, pattern, pattern,
+			query = query.Where("(id = ? OR related_id = ? OR user_id = ? OR delivery_key LIKE ? ESCAPE '!' OR category LIKE ? ESCAPE '!' OR recipient LIKE ? ESCAPE '!' OR subject LIKE ? ESCAPE '!' OR user_id IN (?))", id, id, id, pattern, pattern, pattern, pattern,
 				DB.Model(&User{}).Select("id").Where("username LIKE ? ESCAPE '!' OR display_name LIKE ? ESCAPE '!'", pattern, pattern))
 		} else {
-			query = query.Where("(delivery_key LIKE ? ESCAPE '!' OR category LIKE ? ESCAPE '!' OR recipient LIKE ? ESCAPE '!' OR recipient_masked LIKE ? ESCAPE '!' OR subject LIKE ? ESCAPE '!' OR last_error LIKE ? ESCAPE '!' OR user_id IN (?))", pattern, pattern, pattern, pattern, pattern, pattern,
+			query = query.Where("(delivery_key LIKE ? ESCAPE '!' OR category LIKE ? ESCAPE '!' OR recipient LIKE ? ESCAPE '!' OR subject LIKE ? ESCAPE '!' OR last_error LIKE ? ESCAPE '!' OR user_id IN (?))", pattern, pattern, pattern, pattern, pattern,
 				DB.Model(&User{}).Select("id").Where("username LIKE ? ESCAPE '!' OR display_name LIKE ? ESCAPE '!'", pattern, pattern))
 		}
 	}
@@ -512,16 +506,11 @@ func ListEmailDeliveries(options EmailDeliveryQueryOptions, pageInfo *common.Pag
 		return nil, 0, err
 	}
 	rows := []*EmailDeliveryListItem{}
-	if err := query.Select("id, category, smtp_profile, smtp_channel, message_id, related_id, user_id, invoice_delivery_id, recipient, recipient_masked, priority, attempts, last_error, next_attempt_time, locked_until, expires_time, delivered_time, dead_letter_time, expired_time, created_time, updated_time").Order("id DESC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&rows).Error; err != nil {
+	if err := query.Select("id, category, smtp_profile, smtp_channel, message_id, related_id, user_id, invoice_delivery_id, recipient, priority, attempts, last_error, next_attempt_time, locked_until, expires_time, delivered_time, dead_letter_time, expired_time, created_time, updated_time").Order("id DESC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	for _, row := range rows {
 		row.Status = emailDeliveryStatus(row, now)
-		if row.RecipientMasked == "" {
-			row.RecipientMasked = maskEmailAddress(row.Recipient)
-		}
-		row.LastError = maskEmailAddressesInText(row.LastError)
-		row.Recipient = ""
 	}
 	return rows, total, nil
 }
@@ -621,12 +610,6 @@ func emailDeliveryStatus(row *EmailDeliveryListItem, now int64) string {
 		return EmailDeliveryStatusRetrying
 	}
 	return EmailDeliveryStatusQueued
-}
-
-var emailAddressInTextPattern = regexp.MustCompile(`(?i)[a-z0-9.!#$%&'*+/=?^_` + "`" + `{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+`)
-
-func maskEmailAddressesInText(value string) string {
-	return emailAddressInTextPattern.ReplaceAllStringFunc(value, maskEmailAddress)
 }
 
 func maskEmailAddress(address string) string {
