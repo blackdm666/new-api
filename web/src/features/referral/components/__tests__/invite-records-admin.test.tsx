@@ -40,7 +40,7 @@ const reactTestGlobals = globalThis as typeof globalThis & {
 reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 
 describe('admin invitation records', () => {
-  test('shows a registered invitee even when no commission exists', async () => {
+  test('opens both promoter and invited user information', async () => {
     const item: AdminAffiliateInviteRecord = {
       inviter_id: 42,
       inviter_username: 'promoter_42',
@@ -59,7 +59,7 @@ describe('admin invitation records', () => {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
-    let selectedUserId = 0
+    const selectedUserIds: number[] = []
     await act(async () => {
       root.render(
         <I18nextProvider i18n={i18n}>
@@ -68,7 +68,10 @@ describe('admin invitation records', () => {
               <AdminInviteRecordRow
                 item={item}
                 onInviterClick={(userId) => {
-                  selectedUserId = userId
+                  selectedUserIds.push(userId)
+                }}
+                onInviteeClick={(userId) => {
+                  selectedUserIds.push(userId)
                 }}
               />
             </tbody>
@@ -85,13 +88,21 @@ describe('admin invitation records', () => {
     const cells = container.querySelectorAll('td')
     assert.equal(cells[3]?.textContent, '0')
     assert.equal(cells[6]?.textContent, '-')
-    const inviterButton = container.querySelector('button')
+    const userButtons = container.querySelectorAll('button')
+    assert.equal(userButtons.length, 2)
+    const inviterButton = userButtons[0]
+    const inviteeButton = userButtons[1]
     assert.equal(
-      inviterButton?.getAttribute('aria-label'),
+      inviterButton.getAttribute('aria-label'),
       'User Information: promoter_42'
     )
-    await act(async () => inviterButton?.click())
-    assert.equal(selectedUserId, 42)
+    assert.equal(
+      inviteeButton.getAttribute('aria-label'),
+      'User Information: invitee_84'
+    )
+    await act(async () => inviterButton.click())
+    await act(async () => inviteeButton.click())
+    assert.deepEqual(selectedUserIds, [42, 84])
 
     await act(async () => root.unmount())
     container.remove()

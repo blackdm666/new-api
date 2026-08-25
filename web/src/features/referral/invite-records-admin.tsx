@@ -65,6 +65,10 @@ export function AdminInviteRecords() {
   const items = query.data?.items ?? []
   const total = query.data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const openUserInfo = (userId: number) => {
+    setSelectedUserId(userId)
+    setUserInfoDialogOpen(true)
+  }
 
   return (
     <div className='space-y-4'>
@@ -127,10 +131,8 @@ export function AdminInviteRecords() {
                   <AdminInviteRecordRow
                     key={item.invitee_id}
                     item={item}
-                    onInviterClick={(userId) => {
-                      setSelectedUserId(userId)
-                      setUserInfoDialogOpen(true)
-                    }}
+                    onInviterClick={openUserInfo}
+                    onInviteeClick={openUserInfo}
                   />
                 ))
               : null}
@@ -175,6 +177,7 @@ export function AdminInviteRecords() {
 export function AdminInviteRecordRow(props: {
   item: AdminAffiliateInviteRecord
   onInviterClick?: (userId: number) => void
+  onInviteeClick?: (userId: number) => void
 }) {
   const { t } = useTranslation()
   const item = props.item
@@ -197,6 +200,11 @@ export function AdminInviteRecordRow(props: {
           <AdminUserIdentity
             id={item.invitee_id}
             username={item.invitee_username}
+            onClick={
+              props.onInviteeClick
+                ? () => props.onInviteeClick?.(item.invitee_id)
+                : undefined
+            }
           />
           {item.is_new ? <Badge variant='secondary'>{t('New')}</Badge> : null}
         </div>
