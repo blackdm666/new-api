@@ -36,6 +36,7 @@ type MarketingPageOptions = {
   automations?: Array<Record<string, unknown>>
   latestAnnouncement?: Record<string, unknown> | null
   preview?: { subject: string; body: string }
+  recipients?: Array<Record<string, unknown>>
 }
 
 function renderMarketingPage(options: MarketingPageOptions = {}) {
@@ -66,7 +67,10 @@ function renderMarketingPage(options: MarketingPageOptions = {}) {
       case '/api/marketing/announcements/latest':
         return successfulResponse(options.latestAnnouncement ?? null)
       case '/api/marketing/campaigns/2/recipients':
-        return successfulResponse({ items: [], total: 0 })
+        return successfulResponse({
+          items: options.recipients ?? [],
+          total: options.recipients?.length ?? 0,
+        })
       case '/api/option/email_deliveries':
         return successfulResponse({ items: [], total: 0 })
       case '/api/option/email_deliveries/stats':
@@ -200,6 +204,44 @@ describe('email marketing navigation', () => {
         })
       )
     })
+  })
+
+  test('renders readable language and localized recipient status labels', async () => {
+    const user = userEvent.setup()
+    renderMarketingPage({
+      recipients: [
+        {
+          id: 1,
+          username: 'recipient_user',
+          recipient_masked: 're***@example.com',
+          language: 'zh-CN',
+          status: 'delivered',
+          delivered_time: 1,
+          clicked_time: 0,
+          converted_time: 0,
+        },
+        {
+          id: 2,
+          username: 'skipped_user',
+          recipient_masked: 'sk***@example.com',
+          language: 'en',
+          status: 'skipped',
+          delivered_time: 0,
+          clicked_time: 0,
+          converted_time: 0,
+        },
+      ],
+    })
+
+    await screen.findByText('Marketing launch')
+    await user.click(screen.getByRole('tab', { name: 'Sending records' }))
+
+    expect(await screen.findByText('简体中文')).toBeInTheDocument()
+    expect(screen.getByText('English')).toBeInTheDocument()
+    expect(screen.getByText('Delivered')).toBeInTheDocument()
+    expect(screen.getByText('Skipped')).toBeInTheDocument()
+    expect(screen.queryByText('zh-CN')).not.toBeInTheDocument()
+    expect(screen.queryByText('delivered')).not.toBeInTheDocument()
   })
 
   test('inserts the latest announcement into announcement email content', async () => {

@@ -1102,6 +1102,7 @@ export const STATIC_I18N_KEYS = [
   'Clicked at',
   'Converted at',
   'Sent at',
+  'Skipped',
   'No marketing campaigns',
   'No sending records',
   'Users who registered long enough ago but have not completed their first successful API request.',

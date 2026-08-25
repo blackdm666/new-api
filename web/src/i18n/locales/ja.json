@@ -4683,6 +4683,7 @@
     "Skip retry on failure": "失敗時にリトライしない",
     "Skip SMTP TLS certificate verification": "SMTP TLS証明書の検証をスキップ",
     "Skip to Main": "メインコンテンツへスキップ",
+    "Skipped": "スキップ済み",
     "Slug": "スラッグ",
     "Slug can only contain letters, numbers, hyphens, and underscores": "スラッグには英数字、ハイフン、アンダースコアのみ使用できます",
     "Slug is required": "スラッグは必須です",

@@ -4683,6 +4683,7 @@
     "Skip retry on failure": "Không thử lại khi thất bại",
     "Skip SMTP TLS certificate verification": "Bỏ qua xác minh chứng chỉ TLS SMTP",
     "Skip to Main": "Bỏ qua đến nội dung chính",
+    "Skipped": "Đã bỏ qua",
     "Slug": "Slug",
     "Slug can only contain letters, numbers, hyphens, and underscores": "Slug chỉ có thể chứa chữ cái, số, dấu gạch ngang và dấu gạch dưới",
     "Slug is required": "Slug là bắt buộc",

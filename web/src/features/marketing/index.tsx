@@ -21,6 +21,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
+import type { TFunction } from 'i18next'
 import {
   Ban,
   CirclePause,
@@ -191,6 +192,27 @@ const MARKETING_LANGUAGES = [
   { value: 'ru', label: 'Русский' },
   { value: 'vi', label: 'Tiếng Việt' },
 ] as const
+
+const MARKETING_LANGUAGE_LABELS = Object.fromEntries(
+  MARKETING_LANGUAGES.map((item) => [item.value, item.label])
+) as Record<string, string>
+
+function recipientStatusLabel(status: string, t: TFunction): string {
+  switch (status) {
+    case 'pending':
+      return t('Pending')
+    case 'queued':
+      return t('Queued')
+    case 'delivered':
+      return t('Delivered')
+    case 'failed':
+      return t('Failed')
+    case 'skipped':
+      return t('Skipped')
+    default:
+      return status
+  }
+}
 
 export function MarketingAdminPage() {
   const { t } = useTranslation()
@@ -1564,8 +1586,10 @@ function RecipientRecords(props: { campaigns: MarketingCampaign[] }) {
               <TableRow key={item.id}>
                 <TableCell>{item.username || '-'}</TableCell>
                 <TableCell>{item.recipient_masked}</TableCell>
-                <TableCell>{item.language}</TableCell>
-                <TableCell>{t(item.status)}</TableCell>
+                <TableCell>
+                  {MARKETING_LANGUAGE_LABELS[item.language] || item.language}
+                </TableCell>
+                <TableCell>{recipientStatusLabel(item.status, t)}</TableCell>
                 <TableCell>
                   {item.delivered_time
                     ? formatTimestampToDate(item.delivered_time)

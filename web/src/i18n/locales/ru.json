@@ -4683,6 +4683,7 @@
     "Skip retry on failure": "Не повторять при ошибке",
     "Skip SMTP TLS certificate verification": "Пропустить проверку TLS-сертификата SMTP",
     "Skip to Main": "Перейти к основному содержимому",
+    "Skipped": "Пропущено",
     "Slug": "Идентификатор",
     "Slug can only contain letters, numbers, hyphens, and underscores": "Slug может содержать только буквы, цифры, дефисы и подчёркивания",
     "Slug is required": "Slug обязателен",

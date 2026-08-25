@@ -4683,6 +4683,7 @@
     "Skip retry on failure": "Ne pas réessayer en cas d'échec",
     "Skip SMTP TLS certificate verification": "Ignorer la vérification du certificat TLS SMTP",
     "Skip to Main": "Aller au contenu principal",
+    "Skipped": "Ignoré",
     "Slug": "Slug",
     "Slug can only contain letters, numbers, hyphens, and underscores": "Le slug ne peut contenir que des lettres, des chiffres, des tirets et des underscores",
     "Slug is required": "Le slug est requis",
