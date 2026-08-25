@@ -284,8 +284,8 @@ twofa.record_id_empty: "2FA record ID cannot be empty"
 twofa.code_invalid: "Verification code or backup code is incorrect"
 
 # Rate limit messages
-rate_limit.reached: "You have reached the request limit: maximum {{.Max}} requests in {{.Minutes}} minutes"
-rate_limit.total_reached: "You have reached the total request limit: maximum {{.Max}} requests in {{.Minutes}} minutes, including failed attempts"
+rate_limit.reached: "Your request rate is too high. The current user group allows up to {{.Max}} successful requests within a {{.Minutes}}-minute window. Please try again later. To request a higher rate or concurrency limit, visit the https://88api.ai console and contact support."
+rate_limit.total_reached: "Your request rate is too high. The current user group allows up to {{.Max}} requests within a {{.Minutes}}-minute window, and failed requests also count. Check your request parameters and try again later. To request a higher rate or concurrency limit, visit the https://88api.ai console and contact support."
 
 # Setting messages
 setting.invalid_type: "Invalid warning type"

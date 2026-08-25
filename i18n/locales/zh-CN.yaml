@@ -285,8 +285,8 @@ twofa.record_id_empty: "2FA记录ID不能为空"
 twofa.code_invalid: "验证码或备用码不正确"
 
 # Rate limit messages
-rate_limit.reached: "您已达到请求数限制：{{.Minutes}}分钟内最多请求{{.Max}}次"
-rate_limit.total_reached: "您已达到总请求数限制：{{.Minutes}}分钟内最多请求{{.Max}}次，包括失败次数"
+rate_limit.reached: "您的请求频率过快；当前用户组{{.Minutes}}分钟内最多允许{{.Max}}次成功请求，请稍后重试。如需更高的请求频率或并发额度，请前往https://88api.ai 控制台内联系客服申请提升。"
+rate_limit.total_reached: "您的请求频率过快；当前用户组{{.Minutes}}分钟内最多允许{{.Max}}次请求（失败请求也会计入），请检查请求参数并稍后重试。如需更高的请求频率或并发额度，请前往https://88api.ai 控制台内联系客服申请提升。"
 
 # Setting messages
 setting.invalid_type: "无效的预警类型"

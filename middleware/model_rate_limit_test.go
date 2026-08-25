@@ -2,10 +2,14 @@ package middleware
 
 import (
 	"context"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,6 +50,33 @@ func TestResolveModelRequestRateLimitFallsBackFromTokenGroupToUserGroup(t *testi
 			total, success := resolveModelRequestRateLimit(test.tokenGroup, test.userGroup)
 			assert.Equal(t, test.expectTotal, total)
 			assert.Equal(t, test.expectOK, success)
+		})
+	}
+}
+
+func TestModelRequestRateLimitMessagesGuideUsersToSupport(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name     string
+		language string
+		key      string
+		expected string
+	}{
+		{name: "Chinese successful request limit", language: "zh-CN", key: i18n.MsgRateLimitReached, expected: "您的请求频率过快；当前用户组1分钟内最多允许60次成功请求，请稍后重试。如需更高的请求频率或并发额度，请前往https://88api.ai 控制台内联系客服申请提升。"},
+		{name: "Chinese total request limit", language: "zh-CN", key: i18n.MsgRateLimitTotalReached, expected: "您的请求频率过快；当前用户组1分钟内最多允许60次请求（失败请求也会计入），请检查请求参数并稍后重试。如需更高的请求频率或并发额度，请前往https://88api.ai 控制台内联系客服申请提升。"},
+		{name: "English successful request limit", language: "en", key: i18n.MsgRateLimitReached, expected: "Your request rate is too high. The current user group allows up to 60 successful requests within a 1-minute window. Please try again later. To request a higher rate or concurrency limit, visit the https://88api.ai console and contact support."},
+		{name: "English total request limit", language: "en", key: i18n.MsgRateLimitTotalReached, expected: "Your request rate is too high. The current user group allows up to 60 requests within a 1-minute window, and failed requests also count. Check your request parameters and try again later. To request a higher rate or concurrency limit, visit the https://88api.ai console and contact support."},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest("GET", "/v1/chat/completions", nil)
+			ctx.Request.Header.Set("Accept-Language", test.language)
+			message := common.TranslateMessage(ctx, test.key, map[string]any{"Minutes": 1, "Max": 60})
+			assert.Equal(t, test.expected, message)
 		})
 	}
 }
