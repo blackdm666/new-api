@@ -187,7 +187,8 @@ func getModelListGroups(c *gin.Context) (modelListGroups, error) {
 		}
 	}
 
-	if tokenGroup == "auto" {
+	usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+	if tokenGroup == "auto" || (tokenGroup == "" && usingGroup == "auto") {
 		return modelListGroups{
 			userGroup:   userGroup,
 			tokenGroup:  tokenGroup,
