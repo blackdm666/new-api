@@ -286,6 +286,7 @@ twofa.code_invalid: "Verification code or backup code is incorrect"
 # Rate limit messages
 rate_limit.reached: "Your request rate is too high. The current user group allows up to {{.Max}} successful requests within a {{.Minutes}}-minute window. Please try again later. To request a higher rate or concurrency limit, visit the https://88api.ai console and contact support."
 rate_limit.total_reached: "Your request rate is too high. The current user group allows up to {{.Max}} requests within a {{.Minutes}}-minute window, and failed requests also count. Check your request parameters and try again later. To request a higher rate or concurrency limit, visit the https://88api.ai console and contact support."
+video.omni.reference_duration_exceeded: "Reference video duration is {{.Duration}} seconds, which exceeds the {{.Max}}-second limit for {{.Model}}."
 
 # Setting messages
 setting.invalid_type: "Invalid warning type"
