@@ -2,10 +2,35 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGetUserModelUsageTopNUsesLiveConsumeLogs(t *testing.T) {
+	truncateTables(t)
+	now := time.Now().Unix()
+	logs := []*Log{
+		{UserId: 7, CreatedAt: now - 30, Type: LogTypeConsume, ModelName: "gpt-live", Quota: 100, PromptTokens: 10, CompletionTokens: 5},
+		{UserId: 7, CreatedAt: now - 20, Type: LogTypeConsume, ModelName: "gpt-live", Quota: 120, PromptTokens: 12, CompletionTokens: 6},
+		{UserId: 7, CreatedAt: now - 10, Type: LogTypeConsume, ModelName: "gemini-live", Quota: 80, PromptTokens: 8, CompletionTokens: 4},
+		{UserId: 8, CreatedAt: now - 5, Type: LogTypeConsume, ModelName: "other-user", Quota: 999},
+		{UserId: 7, CreatedAt: now - 5, Type: LogTypeManage, ModelName: "not-consume", Quota: 999},
+	}
+	for _, log := range logs {
+		require.NoError(t, LOG_DB.Create(log).Error)
+	}
+
+	usage, err := GetUserModelUsageTopN(7, now-60, 8)
+	require.NoError(t, err)
+	require.Len(t, usage, 2)
+	require.Equal(t, "gpt-live", usage[0].ModelName)
+	require.Equal(t, 2, usage[0].Count)
+	require.Equal(t, 220, usage[0].Quota)
+	require.Equal(t, 33, usage[0].TokenUsed)
+	require.Equal(t, "gemini-live", usage[1].ModelName)
+}
 
 func seedFlowQuotaData(t *testing.T, quotaData QuotaData) {
 	t.Helper()
@@ -190,4 +215,77 @@ func TestLogQuotaDataSplitsRowsByUseGroupTokenChannelAndNode(t *testing.T) {
 	require.Equal(t, 60, rows[0].TokenUsed)
 	require.Equal(t, "default", rows[1].UseGroup)
 	require.Equal(t, 25, rows[1].Quota)
+}
+
+func TestRecordTaskBillingLogExportsSignedAdjustmentsWithoutCountingRequests(t *testing.T) {
+	tests := []struct {
+		name          string
+		logType       int
+		adjustment    int
+		expectedQuota int
+	}{
+		{
+			name:          "additional consumption",
+			logType:       LogTypeConsume,
+			adjustment:    25,
+			expectedQuota: 125,
+		},
+		{
+			name:          "refund",
+			logType:       LogTypeRefund,
+			adjustment:    25,
+			expectedQuota: 75,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			truncateTables(t)
+			oldDataExportEnabled := common.DataExportEnabled
+			common.DataExportEnabled = true
+			t.Cleanup(func() {
+				common.DataExportEnabled = oldDataExportEnabled
+				CacheQuotaDataLock.Lock()
+				CacheQuotaData = make(map[string]*QuotaData)
+				CacheQuotaDataLock.Unlock()
+			})
+
+			CacheQuotaDataLock.Lock()
+			CacheQuotaData = make(map[string]*QuotaData)
+			CacheQuotaDataLock.Unlock()
+
+			require.NoError(t, DB.Create(&User{Id: 1, Username: "alice"}).Error)
+			createdAt := common.GetTimestamp()
+			LogQuotaData(QuotaDataLogParams{
+				UserID:    1,
+				Username:  "alice",
+				ModelName: "video-model",
+				Quota:     100,
+				CreatedAt: createdAt,
+				UseGroup:  "default",
+				ChannelID: 7,
+				NodeName:  "node-a",
+			})
+
+			RecordTaskBillingLog(RecordTaskBillingLogParams{
+				UserId:    1,
+				LogType:   tt.logType,
+				Content:   "task settlement",
+				ChannelId: 7,
+				ModelName: "video-model",
+				Quota:     tt.adjustment,
+				Group:     "default",
+				NodeName:  "node-a",
+			})
+
+			CacheQuotaDataLock.Lock()
+			defer CacheQuotaDataLock.Unlock()
+			require.Len(t, CacheQuotaData, 1)
+			for _, row := range CacheQuotaData {
+				require.Equal(t, 1, row.Count)
+				require.Equal(t, tt.expectedQuota, row.Quota)
+				require.Zero(t, row.TokenUsed)
+			}
+		})
+	}
 }

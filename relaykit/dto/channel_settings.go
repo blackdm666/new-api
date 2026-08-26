@@ -2,8 +2,10 @@ package dto
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -66,25 +68,324 @@ const (
 )
 
 type ChannelOtherSettings struct {
-	AzureResponsesVersion                 string                `json:"azure_responses_version,omitempty"`
-	VertexKeyType                         VertexKeyType         `json:"vertex_key_type,omitempty"` // "json" or "api_key"
-	OpenRouterEnterprise                  *bool                 `json:"openrouter_enterprise,omitempty"`
-	ClaudeBetaQuery                       bool                  `json:"claude_beta_query,omitempty"`          // Claude 渠道是否强制追加 ?beta=true
-	AllowServiceTier                      bool                  `json:"allow_service_tier,omitempty"`         // 是否允许 service_tier 透传（默认过滤以避免额外计费）
-	AllowInferenceGeo                     bool                  `json:"allow_inference_geo,omitempty"`        // 是否允许 inference_geo 透传（仅 Claude，默认过滤以满足数据驻留合规
-	AllowSpeed                            bool                  `json:"allow_speed,omitempty"`                // 是否允许 speed 透传（仅 Claude，默认过滤以避免意外切换推理速度模式）
-	AllowSafetyIdentifier                 bool                  `json:"allow_safety_identifier,omitempty"`    // 是否允许 safety_identifier 透传（默认过滤以保护用户隐私）
-	DisableStore                          bool                  `json:"disable_store,omitempty"`              // 是否禁用 store 透传（默认允许透传，禁用后可能导致 Codex 无法使用）
-	AllowIncludeObfuscation               bool                  `json:"allow_include_obfuscation,omitempty"`  // 是否允许 stream_options.include_obfuscation 透传（默认过滤以避免关闭流混淆保护）
-	DisableTaskPollingSleep               bool                  `json:"disable_task_polling_sleep,omitempty"` // 是否跳过异步任务轮询间隔
-	AwsKeyType                            AwsKeyType            `json:"aws_key_type,omitempty"`
-	UpstreamModelUpdateCheckEnabled       bool                  `json:"upstream_model_update_check_enabled,omitempty"`        // 是否检测上游模型更新
-	UpstreamModelUpdateAutoSyncEnabled    bool                  `json:"upstream_model_update_auto_sync_enabled,omitempty"`    // 是否自动同步上游模型更新
-	UpstreamModelUpdateLastCheckTime      int64                 `json:"upstream_model_update_last_check_time,omitempty"`      // 上次检测时间
-	UpstreamModelUpdateLastDetectedModels []string              `json:"upstream_model_update_last_detected_models,omitempty"` // 上次检测到的可加入模型
-	UpstreamModelUpdateLastRemovedModels  []string              `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
-	UpstreamModelUpdateIgnoredModels      []string              `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
-	AdvancedCustom                        *AdvancedCustomConfig `json:"advanced_custom,omitempty"`
+	AzureResponsesVersion                 string                     `json:"azure_responses_version,omitempty"`
+	VertexKeyType                         VertexKeyType              `json:"vertex_key_type,omitempty"` // "json" or "api_key"
+	OpenRouterEnterprise                  *bool                      `json:"openrouter_enterprise,omitempty"`
+	ClaudeBetaQuery                       bool                       `json:"claude_beta_query,omitempty"`          // Claude 渠道是否强制追加 ?beta=true
+	AllowServiceTier                      bool                       `json:"allow_service_tier,omitempty"`         // 是否允许 service_tier 透传（默认过滤以避免额外计费）
+	AllowInferenceGeo                     bool                       `json:"allow_inference_geo,omitempty"`        // 是否允许 inference_geo 透传（仅 Claude，默认过滤以满足数据驻留合规
+	AllowSpeed                            bool                       `json:"allow_speed,omitempty"`                // 是否允许 speed 透传（仅 Claude，默认过滤以避免意外切换推理速度模式）
+	AllowSafetyIdentifier                 bool                       `json:"allow_safety_identifier,omitempty"`    // 是否允许 safety_identifier 透传（默认过滤以保护用户隐私）
+	DisableStore                          bool                       `json:"disable_store,omitempty"`              // 是否禁用 store 透传（默认允许透传，禁用后可能导致 Codex 无法使用）
+	AllowIncludeObfuscation               bool                       `json:"allow_include_obfuscation,omitempty"`  // 是否允许 stream_options.include_obfuscation 透传（默认过滤以避免关闭流混淆保护）
+	DisableTaskPollingSleep               bool                       `json:"disable_task_polling_sleep,omitempty"` // 是否跳过异步任务轮询间隔
+	AwsKeyType                            AwsKeyType                 `json:"aws_key_type,omitempty"`
+	UpstreamModelUpdateCheckEnabled       bool                       `json:"upstream_model_update_check_enabled,omitempty"`        // 是否检测上游模型更新
+	UpstreamModelUpdateAutoSyncEnabled    bool                       `json:"upstream_model_update_auto_sync_enabled,omitempty"`    // 是否自动同步上游模型更新
+	UpstreamModelUpdateLastCheckTime      int64                      `json:"upstream_model_update_last_check_time,omitempty"`      // 上次检测时间
+	UpstreamModelUpdateLastDetectedModels []string                   `json:"upstream_model_update_last_detected_models,omitempty"` // 上次检测到的可加入模型
+	UpstreamModelUpdateLastRemovedModels  []string                   `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
+	UpstreamModelUpdateIgnoredModels      []string                   `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
+	AdvancedCustom                        *AdvancedCustomConfig      `json:"advanced_custom,omitempty"`
+	BalanceQuery                          *ChannelBalanceQueryConfig `json:"balance_query,omitempty"`
+}
+
+const (
+	ChannelBalanceQueryModeAuto     = "auto"
+	ChannelBalanceQueryModeDisabled = "disabled"
+	ChannelBalanceQueryModeNewAPI   = "new_api"
+	ChannelBalanceQueryModeOneAPI   = "one_api"
+	ChannelBalanceQueryModeSub2API  = "sub2api"
+	ChannelBalanceQueryModeGCPTrial = "gcp_trial_credit"
+	ChannelBalanceQueryModeCustom   = "custom"
+)
+
+const (
+	ChannelBalanceUnitMoney    = "money"
+	ChannelBalanceUnitTokens   = "tokens"
+	ChannelBalanceUnitCredits  = "credits"
+	ChannelBalanceUnitRequests = "requests"
+)
+
+const (
+	ChannelBalanceMetricWallet       = "wallet"
+	ChannelBalanceMetricQuota        = "quota"
+	ChannelBalanceMetricSubscription = "subscription"
+	ChannelBalanceMetricRateLimit    = "rate_limit"
+	ChannelBalanceMetricCustom       = "custom"
+)
+
+const (
+	ChannelBalanceRemainingDirect         = "direct"
+	ChannelBalanceRemainingTotalMinusUsed = "total_minus_used"
+)
+
+// ChannelBalanceQueryConfig describes an optional management-only balance
+// lookup. Base URLs remain channel roots; versioned paths belong in Path.
+type ChannelBalanceQueryConfig struct {
+	Mode                string                        `json:"mode,omitempty"`
+	URL                 string                        `json:"url,omitempty"`
+	Path                string                        `json:"path,omitempty"`
+	Method              string                        `json:"method,omitempty"`
+	Body                string                        `json:"body,omitempty"`
+	Auth                *AdvancedCustomRouteAuth      `json:"auth,omitempty"`
+	Headers             []ChannelBalanceRequestHeader `json:"headers,omitempty"`
+	AuthConfigured      bool                          `json:"auth_configured,omitempty" gorm:"-"`
+	AuthMasked          string                        `json:"auth_masked,omitempty" gorm:"-"`
+	AccountUserID       string                        `json:"account_user_id,omitempty"`
+	GCPTrial            *ChannelBalanceGCPTrialConfig `json:"gcp_trial,omitempty"`
+	Response            ChannelBalanceResponseConfig  `json:"response,omitempty"`
+	Unit                string                        `json:"unit,omitempty"`
+	Currency            string                        `json:"currency,omitempty"`
+	DisplayUnit         string                        `json:"display_unit,omitempty"`
+	MetricKind          string                        `json:"metric_kind,omitempty"`
+	Multiplier          string                        `json:"multiplier,omitempty"`
+	RemainingMode       string                        `json:"remaining_mode,omitempty"`
+	AutoRefresh         bool                          `json:"auto_refresh,omitempty"`
+	RefreshMinutes      int                           `json:"refresh_minutes,omitempty"`
+	LowBalanceAlert     bool                          `json:"low_balance_alert,omitempty"`
+	LowBalanceThreshold string                        `json:"low_balance_threshold,omitempty"`
+}
+
+type ChannelBalanceRequestHeader struct {
+	Name       string `json:"name,omitempty"`
+	Value      string `json:"value,omitempty"`
+	Configured bool   `json:"configured,omitempty" gorm:"-"`
+	Masked     string `json:"masked,omitempty" gorm:"-"`
+}
+
+// ChannelBalanceGCPTrialConfig tracks a fixed Google Cloud promotional credit
+// balance from the standard Cloud Billing BigQuery export. Credentials are
+// always reused from a Vertex channel and are never stored in this config.
+type ChannelBalanceGCPTrialConfig struct {
+	BillingAccountID    string `json:"billing_account_id,omitempty"`
+	QueryProjectID      string `json:"query_project_id,omitempty"`
+	DatasetID           string `json:"dataset_id,omitempty"`
+	CredentialChannelID int    `json:"credential_channel_id,omitempty"`
+	TotalAmount         string `json:"total_amount,omitempty"`
+	BaselineUsed        string `json:"baseline_used,omitempty"`
+	BaselineAt          int64  `json:"baseline_at,omitempty"`
+}
+
+// ChannelBalanceResponseConfig uses dotted object paths such as data.balance.
+// Array indexes are supported by the backend parser as numeric path segments.
+type ChannelBalanceResponseConfig struct {
+	RemainingPath string `json:"remaining_path,omitempty"`
+	TotalPath     string `json:"total_path,omitempty"`
+	UsedPath      string `json:"used_path,omitempty"`
+	CurrencyPath  string `json:"currency_path,omitempty"`
+	ActivePath    string `json:"active_path,omitempty"`
+	UnlimitedPath string `json:"unlimited_path,omitempty"`
+	SuccessPath   string `json:"success_path,omitempty"`
+	SuccessValue  string `json:"success_value,omitempty"`
+}
+
+func (config *ChannelBalanceQueryConfig) Validate() error {
+	if config == nil {
+		return nil
+	}
+	mode := strings.TrimSpace(config.Mode)
+	if mode == "" {
+		mode = ChannelBalanceQueryModeAuto
+	}
+	if config.AutoRefresh {
+		if mode == ChannelBalanceQueryModeDisabled {
+			return fmt.Errorf("balance query auto refresh cannot be enabled while the query is disabled")
+		}
+		if config.RefreshMinutes < 1 || config.RefreshMinutes > 1440 {
+			return fmt.Errorf("balance query refresh interval must be between 1 and 1440 minutes")
+		}
+	}
+	if config.LowBalanceAlert {
+		if !config.AutoRefresh {
+			return fmt.Errorf("low balance alert requires automatic balance refresh")
+		}
+		threshold, err := strconv.ParseFloat(strings.TrimSpace(config.LowBalanceThreshold), 64)
+		if err != nil || threshold <= 0 || math.IsNaN(threshold) || math.IsInf(threshold, 0) {
+			return fmt.Errorf("low balance alert threshold must be a positive number")
+		}
+	}
+	switch mode {
+	case ChannelBalanceQueryModeAuto:
+		if config.Auth != nil || config.AuthConfigured || strings.TrimSpace(config.AccountUserID) != "" {
+			autoAccountConfig := *config
+			autoAccountConfig.Mode = ChannelBalanceQueryModeNewAPI
+			return autoAccountConfig.Validate()
+		}
+		return nil
+	case ChannelBalanceQueryModeDisabled,
+		ChannelBalanceQueryModeSub2API:
+		return nil
+	case ChannelBalanceQueryModeNewAPI,
+		ChannelBalanceQueryModeOneAPI:
+		if config.Auth == nil || (strings.TrimSpace(config.Auth.Value) == "" && !config.AuthConfigured) {
+			return fmt.Errorf("%s account access token is required", mode)
+		}
+		if strings.Contains(config.Auth.Value, "{api_key}") {
+			return fmt.Errorf("%s balance query requires an account access token, not the channel API key", mode)
+		}
+		if userID := strings.TrimSpace(config.AccountUserID); userID != "" {
+			parsed, err := strconv.ParseInt(userID, 10, 64)
+			if err != nil || parsed <= 0 {
+				return fmt.Errorf("%s account user ID must be a positive integer", mode)
+			}
+		}
+		return nil
+	case ChannelBalanceQueryModeGCPTrial:
+		return config.validateGCPTrial()
+	case ChannelBalanceQueryModeCustom:
+	default:
+		return fmt.Errorf("invalid balance query mode: %s", config.Mode)
+	}
+
+	method := strings.ToUpper(strings.TrimSpace(config.Method))
+	if method == "" {
+		method = "GET"
+	}
+	if method != "GET" && method != "POST" {
+		return fmt.Errorf("balance query method must be GET or POST")
+	}
+	if method == "GET" && strings.TrimSpace(config.Body) != "" {
+		return fmt.Errorf("balance query GET method cannot include a request body")
+	}
+	requestURL := strings.TrimSpace(config.URL)
+	if requestURL != "" {
+		parsedURL, err := url.Parse(requestURL)
+		if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" || parsedURL.User != nil || parsedURL.Fragment != "" {
+			return fmt.Errorf("invalid balance query URL")
+		}
+	} else {
+		path := strings.TrimSpace(config.Path)
+		if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+			return fmt.Errorf("balance query path must start with a single /")
+		}
+		parsedPath, err := url.Parse(path)
+		if err != nil || parsedPath.IsAbs() || parsedPath.Host != "" || parsedPath.Fragment != "" {
+			return fmt.Errorf("invalid balance query path")
+		}
+	}
+	remainingMode := strings.TrimSpace(config.RemainingMode)
+	if remainingMode == "" {
+		remainingMode = ChannelBalanceRemainingDirect
+	}
+	switch remainingMode {
+	case ChannelBalanceRemainingDirect:
+		if strings.TrimSpace(config.Response.RemainingPath) == "" {
+			return fmt.Errorf("balance query remaining path is required")
+		}
+	case ChannelBalanceRemainingTotalMinusUsed:
+		if strings.TrimSpace(config.Response.TotalPath) == "" || strings.TrimSpace(config.Response.UsedPath) == "" {
+			return fmt.Errorf("balance query total and used paths are required for total_minus_used")
+		}
+	default:
+		return fmt.Errorf("invalid balance query remaining mode: %s", config.RemainingMode)
+	}
+	if strings.TrimSpace(config.Response.SuccessPath) != "" && strings.TrimSpace(config.Response.SuccessValue) == "" {
+		return fmt.Errorf("balance query success value is required when success path is configured")
+	}
+
+	unit := strings.TrimSpace(config.Unit)
+	if unit == "" {
+		unit = ChannelBalanceUnitMoney
+	}
+	switch unit {
+	case ChannelBalanceUnitMoney, ChannelBalanceUnitTokens, ChannelBalanceUnitCredits, ChannelBalanceUnitRequests:
+	default:
+		return fmt.Errorf("invalid balance query unit: %s", config.Unit)
+	}
+	metricKind := strings.TrimSpace(config.MetricKind)
+	if metricKind != "" {
+		switch metricKind {
+		case ChannelBalanceMetricWallet,
+			ChannelBalanceMetricQuota,
+			ChannelBalanceMetricSubscription,
+			ChannelBalanceMetricRateLimit,
+			ChannelBalanceMetricCustom:
+		default:
+			return fmt.Errorf("invalid balance query metric kind: %s", config.MetricKind)
+		}
+	}
+	multiplier := strings.TrimSpace(config.Multiplier)
+	if multiplier != "" {
+		value, err := strconv.ParseFloat(multiplier, 64)
+		if err != nil || value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return fmt.Errorf("balance query multiplier must be a positive number")
+		}
+	}
+	if config.Auth != nil {
+		authType := strings.TrimSpace(config.Auth.Type)
+		switch authType {
+		case "", AdvancedCustomAuthTypeNone:
+		case AdvancedCustomAuthTypeHeader, AdvancedCustomAuthTypeQuery:
+			if strings.TrimSpace(config.Auth.Name) == "" {
+				return fmt.Errorf("balance query auth name is required")
+			}
+			if strings.TrimSpace(config.Auth.Value) == "" && !config.AuthConfigured {
+				return fmt.Errorf("balance query auth value is required")
+			}
+		default:
+			return fmt.Errorf("invalid balance query auth type: %s", config.Auth.Type)
+		}
+	}
+	if len(config.Headers) > 20 {
+		return fmt.Errorf("balance query supports at most 20 additional headers")
+	}
+	seenHeaders := map[string]struct{}{}
+	if config.Auth != nil && strings.TrimSpace(config.Auth.Type) == AdvancedCustomAuthTypeHeader {
+		seenHeaders[strings.ToLower(strings.TrimSpace(config.Auth.Name))] = struct{}{}
+	}
+	for _, header := range config.Headers {
+		name := strings.TrimSpace(header.Name)
+		if name == "" || strings.ContainsAny(name, " \t\r\n:") {
+			return fmt.Errorf("invalid balance query additional header name")
+		}
+		lowerName := strings.ToLower(name)
+		if _, exists := seenHeaders[lowerName]; exists {
+			return fmt.Errorf("duplicate balance query header: %s", name)
+		}
+		seenHeaders[lowerName] = struct{}{}
+		if strings.ContainsAny(header.Value, "\r\n") {
+			return fmt.Errorf("invalid balance query additional header value")
+		}
+		if strings.TrimSpace(header.Value) == "" && !header.Configured {
+			return fmt.Errorf("balance query additional header value is required: %s", name)
+		}
+	}
+	return nil
+}
+
+func (config *ChannelBalanceQueryConfig) validateGCPTrial() error {
+	if config.GCPTrial == nil {
+		return fmt.Errorf("gcp trial credit configuration is required")
+	}
+	gcp := config.GCPTrial
+	billingAccountID := strings.TrimSpace(gcp.BillingAccountID)
+	if matched, _ := regexp.MatchString(`^[A-Za-z0-9]{6}-[A-Za-z0-9]{6}-[A-Za-z0-9]{6}$`, billingAccountID); !matched {
+		return fmt.Errorf("invalid Google Cloud billing account ID")
+	}
+	projectID := strings.TrimSpace(gcp.QueryProjectID)
+	if matched, _ := regexp.MatchString(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`, projectID); !matched {
+		return fmt.Errorf("invalid BigQuery project ID")
+	}
+	datasetID := strings.TrimSpace(gcp.DatasetID)
+	if matched, _ := regexp.MatchString(`^[A-Za-z_][A-Za-z0-9_]*$`, datasetID); !matched || len(datasetID) > 1024 {
+		return fmt.Errorf("invalid BigQuery dataset ID")
+	}
+	if gcp.CredentialChannelID < 0 {
+		return fmt.Errorf("Vertex credential channel ID must be positive")
+	}
+	total, err := strconv.ParseFloat(strings.TrimSpace(gcp.TotalAmount), 64)
+	if err != nil || total <= 0 || math.IsNaN(total) || math.IsInf(total, 0) {
+		return fmt.Errorf("Google Cloud trial credit total must be a positive number")
+	}
+	baseline, err := strconv.ParseFloat(strings.TrimSpace(gcp.BaselineUsed), 64)
+	if err != nil || baseline < 0 || baseline > total || math.IsNaN(baseline) || math.IsInf(baseline, 0) {
+		return fmt.Errorf("Google Cloud trial credit baseline must be between zero and the total")
+	}
+	if gcp.BaselineAt <= 0 {
+		return fmt.Errorf("Google Cloud trial credit baseline time is required")
+	}
+	return nil
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
@@ -145,8 +446,12 @@ const (
 	advancedCustomEndpointPathEmbeddings             = "/v1/embeddings"
 )
 
-// AdvancedCustomModelListPath identifies the optional OpenAI Models discovery route.
-const AdvancedCustomModelListPath = "/v1/models"
+const (
+	// AdvancedCustomModelListPath identifies the optional OpenAI Models discovery route.
+	AdvancedCustomModelListPath = "/v1/models"
+	// AdvancedCustomBalancePath identifies the optional balance lookup route used by channel management.
+	AdvancedCustomBalancePath = "/v1/dashboard/billing/credit_grants"
+)
 
 // MatchPath returns the first route whose IncomingPath matches requestPath.
 // Matching mirrors the relay adaptor: exact match, {model} placeholder, and
@@ -187,6 +492,19 @@ func (c *AdvancedCustomConfig) ModelListRoute() (AdvancedCustomRoute, bool) {
 	}
 	for _, route := range c.Routes {
 		if strings.TrimSpace(route.IncomingPath) == AdvancedCustomModelListPath {
+			return route, true
+		}
+	}
+	return AdvancedCustomRoute{}, false
+}
+
+// BalanceRoute returns the explicitly configured channel-management balance route.
+func (c *AdvancedCustomConfig) BalanceRoute() (AdvancedCustomRoute, bool) {
+	if c == nil {
+		return AdvancedCustomRoute{}, false
+	}
+	for _, route := range c.Routes {
+		if strings.TrimSpace(route.IncomingPath) == AdvancedCustomBalancePath {
 			return route, true
 		}
 	}
@@ -360,6 +678,7 @@ func (c *AdvancedCustomConfig) Validate() error {
 
 	paths := make(map[string]*advancedCustomPathModelState, len(c.Routes))
 	modelListRouteIndex := -1
+	balanceRouteIndex := -1
 	for i := range c.Routes {
 		route := c.Routes[i]
 		route.IncomingPath = strings.TrimSpace(route.IncomingPath)
@@ -378,19 +697,28 @@ func (c *AdvancedCustomConfig) Validate() error {
 		if strings.Contains(route.IncomingPath, "?") {
 			return fmt.Errorf("advanced_custom.advanced_routes[%d].incoming_path must not include query", i)
 		}
-		if route.IncomingPath == AdvancedCustomModelListPath {
-			if modelListRouteIndex >= 0 {
-				return fmt.Errorf("advanced_custom.advanced_routes[%d] duplicates the /v1/models route at advanced_routes[%d]", i, modelListRouteIndex)
+		if route.IncomingPath == AdvancedCustomModelListPath || route.IncomingPath == AdvancedCustomBalancePath {
+			managementRouteName := route.IncomingPath
+			previousIndex := modelListRouteIndex
+			if route.IncomingPath == AdvancedCustomBalancePath {
+				previousIndex = balanceRouteIndex
 			}
-			modelListRouteIndex = i
+			if previousIndex >= 0 {
+				return fmt.Errorf("advanced_custom.advanced_routes[%d] duplicates the %s route at advanced_routes[%d]", i, managementRouteName, previousIndex)
+			}
+			if route.IncomingPath == AdvancedCustomModelListPath {
+				modelListRouteIndex = i
+			} else {
+				balanceRouteIndex = i
+			}
 			if len(normalizeAdvancedCustomRouteModels(route.Models)) > 0 {
-				return fmt.Errorf("advanced_custom.advanced_routes[%d].models must be empty for /v1/models", i)
+				return fmt.Errorf("advanced_custom.advanced_routes[%d].models must be empty for %s", i, managementRouteName)
 			}
 			if route.Converter != advancedCustomConverterNone {
-				return fmt.Errorf("advanced_custom.advanced_routes[%d].converter must be none for /v1/models", i)
+				return fmt.Errorf("advanced_custom.advanced_routes[%d].converter must be none for %s", i, managementRouteName)
 			}
 			if strings.Contains(upstreamPath, advancedCustomModelPlaceholder) {
-				return fmt.Errorf("advanced_custom.advanced_routes[%d].upstream_path must not contain %s for /v1/models", i, advancedCustomModelPlaceholder)
+				return fmt.Errorf("advanced_custom.advanced_routes[%d].upstream_path must not contain %s for %s", i, advancedCustomModelPlaceholder, managementRouteName)
 			}
 		}
 		if err := validateAdvancedCustomRouteModels(i, route.IncomingPath, route.Models, paths); err != nil {

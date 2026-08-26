@@ -34,6 +34,23 @@ export const channelInfoSchema = z.object({
 
 export type ChannelInfo = z.infer<typeof channelInfoSchema>
 
+export const channelBalanceInfoSchema = z.object({
+  remaining: z.string().optional(),
+  total: z.string().optional(),
+  used: z.string().optional(),
+  unit: z.enum(['money', 'tokens', 'credits', 'requests']).optional(),
+  currency: z.string().optional(),
+  display_unit: z.string().optional(),
+  metric_kind: z
+    .enum(['wallet', 'quota', 'subscription', 'rate_limit', 'custom'])
+    .optional(),
+  source: z.string().optional(),
+  unlimited: z.boolean().default(false),
+  updated_at: z.number(),
+})
+
+export type ChannelBalanceInfo = z.infer<typeof channelBalanceInfoSchema>
+
 export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
@@ -50,6 +67,7 @@ export const channelSchema = z.object({
   other: z.string().default(''),
   balance: z.number().default(0), // in USD
   balance_updated_time: z.number(),
+  balance_info: channelBalanceInfoSchema.nullish(),
   models: z.string().default(''),
   group: z.string().default('default'),
   used_quota: z.number().default(0),
@@ -109,6 +127,80 @@ export interface ChannelOtherSettings {
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
   advanced_custom?: AdvancedCustomConfig
+  balance_query?: ChannelBalanceQueryConfig
+}
+
+export type ChannelBalanceQueryMode =
+  | 'auto'
+  | 'disabled'
+  | 'new_api'
+  | 'one_api'
+  | 'sub2api'
+  | 'gcp_trial_credit'
+  | 'custom'
+
+export type ChannelBalanceUnit = 'money' | 'tokens' | 'credits' | 'requests'
+
+export type ChannelBalanceMetricKind =
+  | 'wallet'
+  | 'quota'
+  | 'subscription'
+  | 'rate_limit'
+  | 'custom'
+
+export type ChannelBalanceRemainingMode = 'direct' | 'total_minus_used'
+
+export interface ChannelBalanceQueryConfig {
+  mode?: ChannelBalanceQueryMode
+  url?: string
+  path?: string
+  method?: 'GET' | string
+  body?: string
+  auth?: AdvancedCustomRouteAuth
+  headers?: ChannelBalanceRequestHeader[]
+  auth_configured?: boolean
+  auth_masked?: string
+  account_user_id?: string
+  gcp_trial?: ChannelBalanceGCPTrialConfig
+  response?: ChannelBalanceResponseConfig
+  unit?: ChannelBalanceUnit
+  currency?: string
+  display_unit?: string
+  metric_kind?: ChannelBalanceMetricKind
+  multiplier?: string
+  remaining_mode?: ChannelBalanceRemainingMode
+  auto_refresh?: boolean
+  refresh_minutes?: number
+  low_balance_alert?: boolean
+  low_balance_threshold?: string
+}
+
+export interface ChannelBalanceRequestHeader {
+  name?: string
+  value?: string
+  configured?: boolean
+  masked?: string
+}
+
+export interface ChannelBalanceGCPTrialConfig {
+  billing_account_id?: string
+  query_project_id?: string
+  dataset_id?: string
+  credential_channel_id?: number
+  total_amount?: string
+  baseline_used?: string
+  baseline_at?: number
+}
+
+export interface ChannelBalanceResponseConfig {
+  remaining_path?: string
+  total_path?: string
+  used_path?: string
+  currency_path?: string
+  active_path?: string
+  unlimited_path?: string
+  success_path?: string
+  success_value?: string
 }
 
 export interface AdvancedCustomConfig {
@@ -197,6 +289,8 @@ export interface ChannelBalanceResponse {
   message?: string
   balance?: number
   currency?: string
+  balance_info?: ChannelBalanceInfo
+  raw_response?: string
 }
 
 export interface FetchModelsResponse {

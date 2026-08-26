@@ -102,6 +102,8 @@ Do NOT directly import or call `encoding/json` in business code. `json.RawMessag
 
 **Billing expression system:** When working on tiered/dynamic billing (expression-based pricing), MUST read `pkg/billingexpr/expr.md` first. It documents the design philosophy, expression language, full architecture, token normalization rules, quota conversion, and expression versioning. All billing expression changes must follow that document.
 
+**Task video per-call/per-duration billing:** When a task mentions `TASK_PRICE_PATCH`, video model per-call/per-second billing, 按次计费, 按秒计费, or changing duration-based task pricing, MUST read `docs/task-price-patch-operations.md` before inspecting, configuring, deploying, or modifying the billing behavior. Treat the Compose file as the persistent configuration source; never rely on a one-off container environment edit.
+
 **Billing safety invariants:** Quota/billing code MUST never produce a negative charge (a credit) from arithmetic overflow or unvalidated input. Apply defense in depth:
 
 - Every user-controlled quantity that becomes a billing multiplier (image `n`, video `seconds`/`duration`, resolution/quality ratios, batch counts) MUST be bounded before it reaches quota calculation. Reject out-of-range values at request validation with a 400. Existing bounds: `dto.MaxImageN` for image generation count, `relaycommon.MaxTaskDurationSeconds` for task video duration, `maxTokensLimit` (`relay/helper/valid_request.go`) for `max_tokens`-family fields on every relay format (OpenAI, Claude, Gemini, Responses). Reuse these constants instead of introducing new ad hoc limits for the same concepts. When adding a new relay format or request DTO, bound its max-tokens and count fields in its validator from day one.

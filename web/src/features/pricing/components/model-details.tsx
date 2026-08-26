@@ -76,6 +76,7 @@ import type {
   TokenUnit,
 } from '../types'
 import { DynamicPricingBreakdown } from './dynamic-pricing-breakdown'
+import { GroupPricingMeta } from './group-pricing-meta'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelDetailsApi } from './model-details-api'
 import { ModelDetailsPerformance } from './model-details-performance'
@@ -87,6 +88,14 @@ import { ModelDetailsPerformance } from './model-details-performance'
 function SectionTitle(props: { children: React.ReactNode }) {
   return (
     <h2 className='text-muted-foreground mb-3 text-xs font-semibold tracking-wider uppercase'>
+      {props.children}
+    </h2>
+  )
+}
+
+function PanelTitle(props: { children: React.ReactNode }) {
+  return (
+    <h2 className='text-foreground text-lg leading-tight font-semibold tracking-tight'>
       {props.children}
     </h2>
   )
@@ -852,7 +861,7 @@ function getDynamicFormattedPricesByTier(
 function GroupPricingSection(props: {
   model: PricingModel
   groupRatio: Record<string, number>
-  usableGroup: Record<string, { desc: string; ratio: number }>
+  usableGroup: Record<string, string>
   autoGroups: string[]
   priceRate: number
   usdExchangeRate: number
@@ -976,11 +985,13 @@ function GroupPricingSection(props: {
 
             return (
               <div key={group} className='overflow-hidden rounded-lg border'>
-                <div className='bg-muted/20 flex items-center justify-between gap-3 border-b px-3 py-2'>
+                <div className='bg-muted/20 flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 sm:flex-nowrap'>
                   <GroupBadge group={group} size='sm' />
-                  <span className='text-muted-foreground font-mono text-xs'>
-                    {ratio}x
-                  </span>
+                  <GroupPricingMeta
+                    group={group}
+                    ratio={ratio}
+                    description={props.usableGroup[group]}
+                  />
                 </div>
                 <StaticDataTable
                   className='rounded-none border-0'
@@ -1064,8 +1075,14 @@ function GroupPricingSection(props: {
             id: 'ratio',
             header: t('Ratio'),
             className: thClass,
-            cellClassName: 'text-muted-foreground py-2.5 font-mono',
-            cell: (group) => `${props.groupRatio[group] || 1}x`,
+            cellClassName: 'py-2.5',
+            cell: (group) => (
+              <GroupPricingMeta
+                group={group}
+                ratio={props.groupRatio[group] || 1}
+                description={props.usableGroup[group]}
+              />
+            ),
           },
           ...(isTokenBased
             ? [
@@ -1128,7 +1145,7 @@ const TAB_META: Record<
 export interface ModelDetailsContentProps {
   model: PricingModel
   groupRatio: Record<string, number>
-  usableGroup: Record<string, { desc: string; ratio: number }>
+  usableGroup: Record<string, string>
   endpointMap: Record<string, { path?: string; method?: string }>
   autoGroups: string[]
   priceRate: number
@@ -1169,28 +1186,34 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
         <TabsContent value='overview' className='space-y-6 outline-none'>
           <OverviewSummaryGrid model={props.model} />
 
-          <section className='bg-card/60 space-y-5 rounded-xl border p-4 shadow-sm'>
-            <SectionTitle>{t('Pricing')}</SectionTitle>
-            <PriceSection
-              model={props.model}
-              priceRate={props.priceRate}
-              usdExchangeRate={props.usdExchangeRate}
-              tokenUnit={props.tokenUnit}
-              showRechargePrice={showRechargePrice}
-            />
-            {isDynamic && (
-              <DynamicPricingBreakdown billingExpr={props.model.billing_expr} />
-            )}
-            <GroupPricingSection
-              model={props.model}
-              groupRatio={props.groupRatio}
-              usableGroup={props.usableGroup}
-              autoGroups={props.autoGroups}
-              priceRate={props.priceRate}
-              usdExchangeRate={props.usdExchangeRate}
-              tokenUnit={props.tokenUnit}
-              showRechargePrice={showRechargePrice}
-            />
+          <section className='bg-card/60 overflow-hidden rounded-xl border shadow-sm'>
+            <header className='border-border/60 border-b px-4 py-3.5 sm:px-5'>
+              <PanelTitle>{t('Pricing')}</PanelTitle>
+            </header>
+            <div className='space-y-5 p-4 sm:p-5'>
+              <PriceSection
+                model={props.model}
+                priceRate={props.priceRate}
+                usdExchangeRate={props.usdExchangeRate}
+                tokenUnit={props.tokenUnit}
+                showRechargePrice={showRechargePrice}
+              />
+              {isDynamic && (
+                <DynamicPricingBreakdown
+                  billingExpr={props.model.billing_expr}
+                />
+              )}
+              <GroupPricingSection
+                model={props.model}
+                groupRatio={props.groupRatio}
+                usableGroup={props.usableGroup}
+                autoGroups={props.autoGroups}
+                priceRate={props.priceRate}
+                usdExchangeRate={props.usdExchangeRate}
+                tokenUnit={props.tokenUnit}
+                showRechargePrice={showRechargePrice}
+              />
+            </div>
           </section>
 
           <ModelBackendDetailsSection model={props.model} />

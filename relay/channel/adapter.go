@@ -82,3 +82,9 @@ type TaskAdaptor interface {
 type OpenAIVideoConverter interface {
 	ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error)
 }
+
+// PromptOnlyVideoTester lets task adaptors exclude models that require media
+// inputs from the dashboard's prompt-only Playground.
+type PromptOnlyVideoTester interface {
+	SupportsPromptOnlyVideo(modelName string) bool
+}

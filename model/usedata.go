@@ -75,7 +75,7 @@ func logQuotaDataCache(quotaData *QuotaData) {
 	CacheQuotaData[key] = quotaData
 }
 
-func LogQuotaData(params QuotaDataLogParams) {
+func logQuotaData(params QuotaDataLogParams, count int) {
 	// 只精确到小时
 	createdAt := params.CreatedAt - (params.CreatedAt % 3600)
 	quotaData := &QuotaData{
@@ -87,7 +87,7 @@ func LogQuotaData(params QuotaDataLogParams) {
 		TokenID:   params.TokenID,
 		ChannelID: params.ChannelID,
 		NodeName:  params.NodeName,
-		Count:     1,
+		Count:     count,
 		Quota:     params.Quota,
 		TokenUsed: params.TokenUsed,
 	}
@@ -95,6 +95,15 @@ func LogQuotaData(params QuotaDataLogParams) {
 	CacheQuotaDataLock.Lock()
 	defer CacheQuotaDataLock.Unlock()
 	logQuotaDataCache(quotaData)
+}
+
+func LogQuotaData(params QuotaDataLogParams) {
+	logQuotaData(params, 1)
+}
+
+// LogQuotaDataAdjustment adjusts exported quota without counting another request.
+func LogQuotaDataAdjustment(params QuotaDataLogParams) {
+	logQuotaData(params, 0)
 }
 
 func SaveQuotaDataCache() {
@@ -168,6 +177,27 @@ func GetQuotaDataGroupByUser(startTime int64, endTime int64) (quotaData []*Quota
 		Group("username, created_at").
 		Find(&quotaDatas).Error
 	return quotaDatas, err
+}
+
+func GetUserModelUsageTopN(userId int, since int64, topN int) ([]*QuotaData, error) {
+	if userId <= 0 {
+		return []*QuotaData{}, nil
+	}
+	if topN <= 0 || topN > 100 {
+		topN = 8
+	}
+	var rows []*QuotaData
+	// Invoice review needs live, user-scoped usage even when the optional
+	// dashboard aggregation/export job is disabled. Aggregate the canonical
+	// consume logs directly instead of relying on quota_data snapshots.
+	err := LOG_DB.Table("logs").
+		Select("model_name, COUNT(*) AS count, COALESCE(SUM(quota), 0) AS quota, COALESCE(SUM(prompt_tokens), 0) + COALESCE(SUM(completion_tokens), 0) AS token_used").
+		Where("user_id = ? AND type = ? AND created_at >= ? AND model_name <> ''", userId, LogTypeConsume, since).
+		Group("model_name").
+		Order("count DESC, quota DESC, model_name ASC").
+		Limit(topN).
+		Scan(&rows).Error
+	return rows, err
 }
 
 func GetAllQuotaDates(startTime int64, endTime int64, username string) (quotaData []*QuotaData, err error) {

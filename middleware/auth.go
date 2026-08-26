@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,16 @@ import (
 )
 
 const authIdentityContextKey = "auth_identity"
+
+func resolveTokenUsingGroup(userGroup, tokenGroup string, defaultUseAutoGroup bool) string {
+	if tokenGroup != "" {
+		return tokenGroup
+	}
+	if defaultUseAutoGroup {
+		return "auto"
+	}
+	return userGroup
+}
 
 type dashboardCredentialKind int
 
@@ -374,7 +385,8 @@ func TokenAuth() func(c *gin.Context) {
 			}
 		}
 		// gemini api 从query中获取key
-		if strings.HasPrefix(c.Request.URL.Path, "/v1beta/models") ||
+		if c.Request.URL.Path == "/v1/models" ||
+			strings.HasPrefix(c.Request.URL.Path, "/v1beta/models") ||
 			strings.HasPrefix(c.Request.URL.Path, "/v1beta/openai/models") ||
 			strings.HasPrefix(c.Request.URL.Path, "/v1/models/") {
 			skKey := c.Query("key")
@@ -470,9 +482,9 @@ func TokenAuth() func(c *gin.Context) {
 					return
 				}
 			}
-			userGroup = tokenGroup
 		}
-		common.SetContextKey(c, constant.ContextKeyUsingGroup, userGroup)
+		usingGroup := resolveTokenUsingGroup(userGroup, tokenGroup, setting.DefaultUseAutoGroup)
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 
 		err = SetupContextForToken(c, token, parts...)
 		if err != nil {

@@ -22,8 +22,10 @@ type RequestErrorLike = {
   message?: string
   response?: {
     data?: {
+      code?: string
       error?: {
         code?: string
+        message?: string
       }
       message?: string
     }
@@ -35,12 +37,27 @@ export type RequestErrorDetails = {
   errorMessage: string
 }
 
+const INSUFFICIENT_QUOTA_CODE = 'insufficient_user_quota'
+
+export function getPlaygroundRequestErrorMessage(
+  details: RequestErrorDetails,
+  translate: (key: string) => string
+) {
+  return details.errorCode === INSUFFICIENT_QUOTA_CODE
+    ? translate('Insufficient balance')
+    : details.errorMessage
+}
+
 export function parseRequestErrorDetails(error: unknown): RequestErrorDetails {
   const requestError = error as RequestErrorLike
 
   return {
-    errorCode: requestError?.response?.data?.error?.code || undefined,
+    errorCode:
+      requestError?.response?.data?.error?.code ||
+      requestError?.response?.data?.code ||
+      undefined,
     errorMessage:
+      requestError?.response?.data?.error?.message ||
       requestError?.response?.data?.message ||
       requestError?.message ||
       ERROR_MESSAGES.API_REQUEST_ERROR,

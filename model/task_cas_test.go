@@ -36,6 +36,7 @@ func TestMain(m *testing.M) {
 
 	if err := db.AutoMigrate(
 		&Task{},
+		&TaskCallbackDelivery{},
 		&User{},
 		&UserSession{},
 		&AuthFlow{},
@@ -46,9 +47,32 @@ func TestMain(m *testing.M) {
 		&TwoFABackupCode{},
 		&Log{},
 		&Channel{},
+		&Midjourney{},
 		&QuotaData{},
 		&Ability{},
 		&TopUp{},
+		&AffiliateCommission{},
+		&AffiliateUpgradeNotice{},
+		&AffiliateAccount{},
+		&AffiliatePayout{},
+		&AffiliateTransfer{},
+		&EmailDelivery{},
+		&QuotaNotificationState{},
+		&MarketingEmailDailyQuota{},
+		&MarketingCampaign{},
+		&MarketingRecipient{},
+		&MarketingAutomation{},
+		&MarketingSuppression{},
+		&MarketingEvent{},
+		&InvoiceRequest{},
+		&InvoiceOrderClaim{},
+		&InvoiceStorageProfile{},
+		&InvoiceFileUpload{},
+		&InvoiceFile{},
+		&InvoiceRequestEvent{},
+		&InvoiceSearchTerm{},
+		&InvoiceFileCleanup{},
+		&InvoiceNotificationDelivery{},
 		&SubscriptionPlan{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
@@ -60,6 +84,9 @@ func TestMain(m *testing.M) {
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
+	if err := ensureInvoiceSearchIndexes(); err != nil {
+		panic("failed to create invoice search indexes: " + err.Error())
+	}
 
 	os.Exit(m.Run())
 }
@@ -67,7 +94,18 @@ func TestMain(m *testing.M) {
 func truncateTables(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
+		DB.Exec("DELETE FROM marketing_events")
+		DB.Exec("DELETE FROM marketing_recipients")
+		DB.Exec("DELETE FROM marketing_campaigns")
+		DB.Exec("DELETE FROM marketing_automations")
+		DB.Exec("DELETE FROM marketing_suppressions")
+		DB.Exec("DELETE FROM affiliate_transfers")
+		DB.Exec("DELETE FROM affiliate_accounts")
+		DB.Exec("DELETE FROM email_deliveries")
+		DB.Exec("DELETE FROM quota_notification_states")
+		DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&MarketingEmailDailyQuota{})
 		DB.Exec("DELETE FROM tasks")
+		DB.Exec("DELETE FROM task_callback_deliveries")
 		DB.Exec("DELETE FROM auth_flows")
 		DB.Exec("DELETE FROM external_identity_claims")
 		DB.Exec("DELETE FROM user_sessions")
@@ -79,9 +117,22 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM users")
 		DB.Exec("DELETE FROM logs")
 		DB.Exec("DELETE FROM channels")
+		DB.Exec("DELETE FROM midjourneys")
 		DB.Exec("DELETE FROM quota_data")
 		DB.Exec("DELETE FROM abilities")
+		DB.Exec("DELETE FROM invoice_files")
+		DB.Exec("DELETE FROM invoice_file_uploads")
+		DB.Exec("DELETE FROM invoice_file_cleanups")
+		DB.Exec("DELETE FROM invoice_storage_profiles")
+		DB.Exec("DELETE FROM invoice_notification_deliveries")
+		DB.Exec("DELETE FROM invoice_request_events")
+		DB.Exec("DELETE FROM invoice_search_terms")
+		DB.Exec("DELETE FROM invoice_order_claims")
+		DB.Exec("DELETE FROM invoice_requests")
 		DB.Exec("DELETE FROM top_ups")
+		DB.Exec("DELETE FROM affiliate_upgrade_notices")
+		DB.Exec("DELETE FROM affiliate_payouts")
+		DB.Exec("DELETE FROM affiliate_commissions")
 		DB.Exec("DELETE FROM subscription_orders")
 		DB.Exec("DELETE FROM subscription_plans")
 		DB.Exec("DELETE FROM user_subscriptions")

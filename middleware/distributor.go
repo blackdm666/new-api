@@ -30,6 +30,28 @@ type ModelRequest struct {
 	Group string `json:"group,omitempty"`
 }
 
+const legacyResponsesCompactModelSuffix = "-openai-compact"
+
+func normalizeResponsesCompactModel(requestPath, modelName string) string {
+	if strings.HasPrefix(requestPath, "/v1/responses/compact") {
+		return strings.TrimSuffix(modelName, legacyResponsesCompactModelSuffix)
+	}
+	return modelName
+}
+
+func tokenModelLimitAllowsRequest(tokenModelLimit map[string]bool, modelName, requestPath string) bool {
+	matchName := ratio_setting.FormatMatchingModelName(modelName)
+	if _, ok := tokenModelLimit[matchName]; ok {
+		return true
+	}
+	if !strings.HasPrefix(requestPath, "/v1/responses/compact") || strings.HasSuffix(modelName, legacyResponsesCompactModelSuffix) {
+		return false
+	}
+	legacyMatchName := ratio_setting.FormatMatchingModelName(modelName + legacyResponsesCompactModelSuffix)
+	_, ok := tokenModelLimit[legacyMatchName]
+	return ok
+}
+
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		var channel *model.Channel
@@ -70,8 +92,7 @@ func Distribute() func(c *gin.Context) {
 				if !ok {
 					tokenModelLimit = map[string]bool{}
 				}
-				matchName := ratio_setting.FormatMatchingModelName(modelRequest.Model) // match gpts & thinking-*
-				if _, ok := tokenModelLimit[matchName]; !ok {
+				if !tokenModelLimitAllowsRequest(tokenModelLimit, modelRequest.Model, c.Request.URL.Path) {
 					abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorTokenModelForbidden, map[string]any{"Model": modelRequest.Model}))
 					return
 				}
@@ -84,8 +105,8 @@ func Distribute() func(c *gin.Context) {
 				}
 				var selectGroup string
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-				// check path is /pg/chat/completions
-				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
+				// Playground requests may select any group available to the user.
+				if relayconstant.IsPlaygroundRelayPath(c.Request.URL.Path) && c.Request.Method != http.MethodGet {
 					playgroundRequest := &dto.PlayGroundRequest{}
 					err = common.UnmarshalBodyReusable(c, playgroundRequest)
 					if err != nil {
@@ -101,12 +122,13 @@ func Distribute() func(c *gin.Context) {
 						common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 					}
 				}
+				requestPath := relayconstant.CanonicalRelayRequestPath(c.Request.URL.Path)
 
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
 					affinityUsable := false
 					preferred, err := model.CacheGetChannel(preferredChannelID)
 					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
-						channelSupportsRequestPath(preferred, c.Request.URL.Path, modelRequest.Model) {
+						channelSupportsRequestPath(preferred, requestPath, modelRequest.Model) {
 						if usingGroup == "auto" {
 							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 							autoGroups := service.GetRequestAutoGroups(c, userGroup)
@@ -137,7 +159,7 @@ func Distribute() func(c *gin.Context) {
 						Ctx:         c,
 						ModelName:   modelRequest.Model,
 						TokenGroup:  usingGroup,
-						RequestPath: c.Request.URL.Path,
+						RequestPath: requestPath,
 						Retry:       common.GetPointer(0),
 					})
 					if err != nil {
@@ -181,6 +203,7 @@ func channelSupportsRequestPath(channel *model.Channel, requestPath string, requ
 		return true
 	}
 	config := channel.GetOtherSettings().AdvancedCustom
+	requestPath = relayconstant.CanonicalRelayRequestPath(requestPath)
 	return config != nil && config.SupportsPathForModel(requestPath, requestModel)
 }
 
@@ -254,6 +277,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 	var modelRequest ModelRequest
 	shouldSelectChannel := true
 	var err error
+	requestPath := relayconstant.CanonicalRelayRequestPath(c.Request.URL.Path)
 	if strings.Contains(c.Request.URL.Path, "/mj/") {
 		relayMode := relayconstant.Path2RelayModeMidjourney(c.Request.URL.Path)
 		if relayMode == relayconstant.RelayModeMidjourneyTaskFetch ||
@@ -293,11 +317,11 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		}
 		c.Set("platform", string(constant.TaskPlatformSuno))
 		c.Set("relay_mode", relayMode)
-	} else if strings.Contains(c.Request.URL.Path, "/v1/videos/") && strings.HasSuffix(c.Request.URL.Path, "/remix") {
+	} else if strings.Contains(requestPath, "/v1/videos/") && strings.HasSuffix(requestPath, "/remix") {
 		relayMode := relayconstant.RelayModeVideoSubmit
 		c.Set("relay_mode", relayMode)
 		shouldSelectChannel = false
-	} else if strings.Contains(c.Request.URL.Path, "/v1/videos") {
+	} else if strings.Contains(requestPath, "/v1/videos") {
 		//curl https://api.openai.com/v1/videos \
 		//  -H "Authorization: Bearer $OPENAI_API_KEY" \
 		//  -F "model=sora-2" \
@@ -399,8 +423,8 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		}
 		c.Set("relay_mode", relayMode)
 	}
-	if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
-		// playground chat completions
+	if relayconstant.IsPlaygroundRelayPath(c.Request.URL.Path) && c.Request.Method != http.MethodGet {
+		// Playground requests share the same optional group override.
 		req, err := getModelFromRequest(c)
 		if err != nil {
 			return nil, false, err
@@ -410,9 +434,8 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		common.SetContextKey(c, constant.ContextKeyTokenGroup, modelRequest.Group)
 	}
 
-	if strings.HasPrefix(c.Request.URL.Path, "/v1/responses/compact") && modelRequest.Model != "" {
-		modelRequest.Model = ratio_setting.WithCompactModelSuffix(modelRequest.Model)
-	}
+	modelRequest.Model = normalizeResponsesCompactModel(c.Request.URL.Path, modelRequest.Model)
+
 	return &modelRequest, shouldSelectChannel, nil
 }
 

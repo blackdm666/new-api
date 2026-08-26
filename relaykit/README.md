@@ -21,7 +21,7 @@ RelayKit 是从 [new-api](https://github.com/QuantumNous/new-api) 中拆分出�
 |---|---:|---:|---:|---:|
 | OpenAI Chat | — | Good | Fair | Fair |
 | OpenAI Responses | Good | — | Fair | Fair |
-| Claude Messages | Fair | Fair | — | Discouraged |
+| Claude Messages | Fair | Fair | — | Fair |
 | Gemini | Fair | Fair | Discouraged | — |
 
 质量等级表示协议之间的语义匹配程度：

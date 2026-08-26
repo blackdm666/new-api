@@ -50,6 +50,7 @@ export const userSchema = z.object({
   aff_count: z.number().optional(),
   aff_quota: z.number().optional(),
   aff_history_quota: z.number().optional(),
+  affiliate_lifetime_earned_cents: z.number().optional(),
   inviter_id: z.number().optional(),
   linux_do_id: z.string().optional(),
   status: userStatusSchema,
@@ -125,7 +126,15 @@ export interface UserFormData {
   quota?: number // Only used when updating user
   group?: string // Only used when updating user
   remark?: string // Only used when updating user
+  inviter_id?: number // Only used when updating user; 0 clears the relationship
   admin_permissions?: AdminPermissionMatrix
+}
+
+export interface UserInviterOption {
+  id: number
+  username: string
+  display_name: string
+  status: number
 }
 
 export type ManageUserAction =

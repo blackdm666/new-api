@@ -27,6 +27,10 @@ import { useAuthStore } from '@/stores/auth-store'
 const redemptionsSearchSchema = z.object({
   page: z.number().optional().catch(1),
   pageSize: z.number().optional().catch(10),
+  name: z.string().optional().catch(''),
+  code: z.string().optional().catch(''),
+  id: z.string().optional().catch(''),
+  // Retained so existing bookmarked mixed-filter URLs remain valid.
   filter: z.string().optional().catch(''),
   status: z.array(z.enum(REDEMPTION_FILTER_VALUES)).optional().catch([]),
 })

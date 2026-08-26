@@ -57,8 +57,9 @@ const (
 )
 
 func Path2RelayMode(path string) int {
+	path = CanonicalRelayRequestPath(path)
 	relayMode := RelayModeUnknown
-	if strings.HasPrefix(path, "/v1/chat/completions") || strings.HasPrefix(path, "/pg/chat/completions") {
+	if strings.HasPrefix(path, "/v1/chat/completions") {
 		relayMode = RelayModeChatCompletions
 	} else if strings.HasPrefix(path, "/v1/completions") {
 		relayMode = RelayModeCompletions
@@ -96,6 +97,22 @@ func Path2RelayMode(path string) int {
 		relayMode = Path2RelayModeMidjourney(path)
 	}
 	return relayMode
+}
+
+// IsPlaygroundRelayPath reports whether path belongs to the internal Playground
+// relay namespace. Segment-aware matching avoids treating paths such as /pgx as
+// Playground traffic.
+func IsPlaygroundRelayPath(path string) bool {
+	return path == "/pg" || strings.HasPrefix(path, "/pg/")
+}
+
+// CanonicalRelayRequestPath maps an internal Playground relay path to the
+// public API path used by channel capability checks and upstream relays.
+func CanonicalRelayRequestPath(path string) string {
+	if IsPlaygroundRelayPath(path) {
+		return "/v1" + strings.TrimPrefix(path, "/pg")
+	}
+	return path
 }
 
 func Path2RelayModeMidjourney(path string) int {

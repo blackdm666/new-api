@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Loader2 } from 'lucide-react'
+import { Loader2, UserRoundPlus } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -49,6 +49,7 @@ import {
   getAffiliateCode,
   saveAffiliateCode,
 } from '@/features/auth/lib/storage'
+import { runTurnstileProtectedAuthAttempt } from '@/features/auth/lib/turnstile-auth-attempt'
 import { useStatus } from '@/hooks/use-status'
 import { isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
@@ -75,6 +76,7 @@ export function SignUpForm({
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
+    isStatusReady,
   } = useTurnstile()
   const { redirectToLogin, handleLoginSuccess } = useAuthRedirect()
   const {
@@ -107,7 +109,16 @@ export function SignUpForm({
     status?.data?.oauth_register_enabled ??
     true
   const hasWeChatLogin = Boolean(status?.wechat_login)
-  const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
+  const turnstileReady =
+    isStatusReady && (!isTurnstileEnabled || Boolean(turnstileToken))
+  const turnstilePayload = { turnstile: turnstileToken }
+  const resetTurnstile = () => {
+    setTurnstileToken('')
+    if (isTurnstileEnabled) {
+      setTurnstileWidgetKey((current) => current + 1)
+    }
+  }
+  const clearTurnstileToken = () => setTurnstileToken('')
 
   const wechatQrCodeUrl = useMemo(() => {
     return (
@@ -158,23 +169,32 @@ export function SignUpForm({
 
     if (!validateTurnstile()) return
 
+    const submittedTurnstileToken = turnstileToken
+
     setIsLoading(true)
     try {
-      const res = await register({
-        username: data.username,
-        password: data.password,
-        email: data.email || undefined,
-        verification_code: verificationCode || undefined,
-        aff_code: getAffiliateCode(),
-        turnstile: turnstileToken,
-      })
+      await runTurnstileProtectedAuthAttempt(
+        async () => {
+          const res = await register({
+            username: data.username,
+            password: data.password,
+            email: data.email || undefined,
+            verification_code: verificationCode || undefined,
+            aff_code: getAffiliateCode(),
+            turnstile: submittedTurnstileToken,
+          })
 
-      if (res?.success) {
-        toast.success(t('Account created! Please sign in'))
-        redirectToLogin()
-      } else {
-        toast.error(res?.message || t('Failed to create account'))
-      }
+          if (res?.success) {
+            toast.success(t('Account created! Please sign in'))
+            redirectToLogin()
+            return true
+          }
+
+          toast.error(res?.message || t('Failed to create account'))
+          return false
+        },
+        isTurnstileEnabled ? resetTurnstile : undefined
+      )
     } catch {
       // Errors are handled by global interceptor
     } finally {
@@ -183,9 +203,9 @@ export function SignUpForm({
   }
 
   async function handleSendVerificationCode() {
-    if (await sendCode(emailValue || '')) {
-      setTurnstileToken('')
-      setTurnstileWidgetKey((current) => current + 1)
+    await sendCode(emailValue || '')
+    if (isTurnstileEnabled && turnstileToken) {
+      resetTurnstile()
     }
   }
 
@@ -194,6 +214,7 @@ export function SignUpForm({
       toast.error(legalConsentErrorMessage)
       return
     }
+    if (!validateTurnstile()) return
 
     setIsWeChatDialogOpen(true)
   }
@@ -214,7 +235,7 @@ export function SignUpForm({
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode)
+      const res = await wechatLoginByCode(wechatCode, turnstilePayload)
       if (res?.success && isAuthBundle(res.data)) {
         await handleLoginSuccess(res.data)
         toast.success(t('Signed in via WeChat'))
@@ -228,6 +249,7 @@ export function SignUpForm({
       toast.error(t('Login failed'))
     } finally {
       setIsWeChatSubmitting(false)
+      resetTurnstile()
     }
   }
 
@@ -353,6 +375,7 @@ export function SignUpForm({
               key={turnstileWidgetKey}
               siteKey={turnstileSiteKey}
               onVerify={setTurnstileToken}
+              onExpire={clearTurnstileToken}
             />
           </div>
         )}
@@ -374,7 +397,11 @@ export function SignUpForm({
             !turnstileReady
           }
         >
-          {isLoading ? <Loader2 className='h-4 w-4 animate-spin' /> : null}
+          {isLoading ? (
+            <Loader2 className='h-4 w-4 animate-spin' />
+          ) : (
+            <UserRoundPlus className='h-4 w-4' />
+          )}
           {t('Create account')}
         </Button>
 
@@ -384,6 +411,11 @@ export function SignUpForm({
             disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
             onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
             isWeChatLoading={isWeChatSubmitting}
+            turnstileVerification={{
+              ...turnstilePayload,
+              validate: validateTurnstile,
+              reset: resetTurnstile,
+            }}
             className='pt-2'
           />
         )}

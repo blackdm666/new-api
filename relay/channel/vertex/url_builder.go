@@ -7,6 +7,7 @@ import (
 
 const (
 	DefaultAPIVersion    = "v1"
+	GeminiTTSAPIVersion  = "v1beta1"
 	OpenSourceAPIVersion = "v1beta1"
 	PublisherGoogle      = "google"
 	PublisherAnthropic   = "anthropic"

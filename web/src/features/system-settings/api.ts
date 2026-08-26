@@ -16,15 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { t } from 'i18next'
+
 import { api } from '@/lib/api'
+import { UserFacingError } from '@/lib/user-facing-error'
 
 import type {
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
+  InvoiceSettingsPayload,
+  InvoiceSettingsResponse,
   LogCleanupTask,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
+  SMTPTestResponse,
   UpdateOptionRequest,
   UpdateOptionResponse,
   UpstreamChannelsResponse,
@@ -38,6 +44,51 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function testSMTPEmail(
+  email: string,
+  channel: 'security' | 'primary' | 'marketing' | 'backup'
+) {
+  const res = await api.post<SMTPTestResponse>(
+    '/api/option/smtp-test',
+    { email, channel },
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  if (!res.data.success) {
+    throw new UserFacingError(
+      res.data.message?.trim() || t('SMTP test email failed')
+    )
+  }
+  return res.data
+}
+
+export async function updateInvoiceSettings(request: InvoiceSettingsPayload) {
+  const res = await api.put<InvoiceSettingsResponse>(
+    '/api/option/invoice',
+    request,
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  if (!res.data.success) {
+    throw new UserFacingError(
+      res.data.message?.trim() || t('Failed to update invoice settings')
+    )
+  }
+  return res.data
+}
+
+export async function testInvoiceStorage() {
+  const res = await api.post<InvoiceSettingsResponse>(
+    '/api/option/invoice/storage-test',
+    undefined,
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  if (!res.data.success) {
+    throw new UserFacingError(
+      res.data.message?.trim() || t('Invoice storage connection failed')
+    )
+  }
   return res.data
 }
 

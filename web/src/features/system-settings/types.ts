@@ -39,6 +39,57 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type SMTPTestResponse = {
+  success: boolean
+  message: string
+  data?: {
+    recipient: string
+    profile: 'security' | 'notification' | 'marketing'
+    channel: 'security' | 'primary' | 'marketing' | 'backup'
+  }
+}
+
+export type InvoiceSettingsPayload = {
+  InvoiceApplicationNotifyAdminEnabled: boolean
+  InvoiceIssuedNotifyUserEnabled: boolean
+  InvoiceAdminEmail: string
+  InvoiceMinimumAmountCents: number
+  InvoiceTaxRateBasisPoints: number
+  InvoiceDataRetentionDays: number
+  InvoicePendingExpiryDays: number
+  InvoiceFileEnabled: boolean
+  InvoiceFileStorage: string
+  InvoiceFileMaxSize: number
+  InvoiceFileMaxCount: number
+  InvoiceFileAllowedExts: string
+  InvoiceFileLocalPath: string
+  InvoiceFileSignedURLTTL: number
+  InvoiceFileOSSEndpoint: string
+  InvoiceFileOSSBucket: string
+  InvoiceFileOSSRegion: string
+  InvoiceFileOSSAccessKeyId: string
+  InvoiceFileOSSAccessKeySecret: string
+  InvoiceFileOSSCustomDomain: string
+  InvoiceFileS3Endpoint: string
+  InvoiceFileS3Bucket: string
+  InvoiceFileS3Region: string
+  InvoiceFileS3AccessKeyId: string
+  InvoiceFileS3AccessKeySecret: string
+  InvoiceFileS3CustomDomain: string
+  InvoiceFileCOSEndpoint: string
+  InvoiceFileCOSBucket: string
+  InvoiceFileCOSRegion: string
+  InvoiceFileCOSSecretId: string
+  InvoiceFileCOSSecretKey: string
+  InvoiceFileCOSCustomDomain: string
+}
+
+export type InvoiceSettingsResponse = {
+  success: boolean
+  message: string
+  data?: { storage: string }
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string
@@ -235,7 +286,11 @@ export type ModelSettings = {
   AutomaticRetryStatusCodes: string
   'monitor_setting.auto_test_channel_enabled': boolean
   'monitor_setting.auto_test_channel_minutes': number
-  'monitor_setting.channel_test_mode': 'scheduled_all' | 'passive_recovery'
+  'monitor_setting.channel_test_concurrency': number
+  'monitor_setting.channel_test_mode':
+    | 'scheduled_all'
+    | 'auto_ban_only'
+    | 'passive_recovery'
   'channel_affinity_setting.enabled': boolean
   'channel_affinity_setting.switch_on_success': boolean
   'channel_affinity_setting.keep_on_channel_disabled': boolean
@@ -254,6 +309,14 @@ export type BillingSettings = {
   TopUpLink: string
   'general_setting.docs_link': string
   'quota_setting.enable_free_model_pre_consume': boolean
+  AffiliateCommissionEnabled: boolean
+  AffiliateCommissionAutoApprove: boolean
+  AffiliateCommissionDefaultRateBasisPoints: number
+  AffiliateCommissionGroupRates: string
+  AffiliateUpgradeEffectiveInviteesThreshold: number
+  AffiliateGoldUpgradeEffectiveInviteesThreshold: number
+  AffiliateUpgradeEffectiveTopUpAmountCents: number
+  AffiliateGoldUpgradeEffectiveTopUpAmountCents: number
   QuotaPerUnit: number
   USDExchangeRate: number
   'general_setting.quota_display_type': string
@@ -305,6 +368,16 @@ export type BillingSettings = {
   CreemWebhookSecret: string
   CreemTestMode: boolean
   CreemProducts: string
+  AntomEnabled: boolean
+  AntomDisplayName: string
+  AntomGateway: string
+  AntomClientId: string
+  AntomMerchantPrivateKey: string
+  AntomPublicKey: string
+  AntomMerchantPrivateKeyConfigured: boolean
+  AntomPublicKeyConfigured: boolean
+  AntomNotifyURL: string
+  AntomRedirectURL: string
   WaffoEnabled: boolean
   WaffoApiKey: string
   WaffoPrivateKey: string
@@ -346,6 +419,68 @@ export type OperationsSettings = {
   SMTPStartTLSEnabled: boolean
   SMTPInsecureSkipVerify: boolean
   SMTPForceAuthLogin: boolean
+  SMTPBackupEnabled: boolean
+  SMTPBackupServer: string
+  SMTPBackupPort: string
+  SMTPBackupAccount: string
+  SMTPBackupFrom: string
+  SMTPBackupToken: string
+  SMTPBackupSSLEnabled: boolean
+  SMTPBackupStartTLSEnabled: boolean
+  SMTPBackupInsecureSkipVerify: boolean
+  SMTPBackupForceAuthLogin: boolean
+  SMTPSecurityEnabled: boolean
+  SMTPSecurityServer: string
+  SMTPSecurityPort: string
+  SMTPSecurityAccount: string
+  SMTPSecurityFrom: string
+  SMTPSecurityToken: string
+  SMTPSecuritySSLEnabled: boolean
+  SMTPSecurityStartTLSEnabled: boolean
+  SMTPSecurityInsecureSkipVerify: boolean
+  SMTPSecurityForceAuthLogin: boolean
+  SMTPMarketingEnabled: boolean
+  SMTPMarketingServer: string
+  SMTPMarketingPort: string
+  SMTPMarketingAccount: string
+  SMTPMarketingFrom: string
+  SMTPMarketingToken: string
+  SMTPMarketingSSLEnabled: boolean
+  SMTPMarketingStartTLSEnabled: boolean
+  SMTPMarketingInsecureSkipVerify: boolean
+  SMTPMarketingForceAuthLogin: boolean
+  InvoiceApplicationNotifyAdminEnabled: boolean
+  InvoiceIssuedNotifyUserEnabled: boolean
+  InvoiceAdminEmail: string
+  InvoiceMinimumAmountCents: string
+  InvoiceTaxRateBasisPoints: string
+  InvoiceDataRetentionDays: string
+  InvoicePendingExpiryDays: string
+  InvoiceFileEnabled: boolean
+  InvoiceFileStorage: string
+  InvoiceFileMaxSize: string
+  InvoiceFileMaxCount: string
+  InvoiceFileAllowedExts: string
+  InvoiceFileLocalPath: string
+  InvoiceFileSignedURLTTL: string
+  InvoiceFileOSSEndpoint: string
+  InvoiceFileOSSBucket: string
+  InvoiceFileOSSRegion: string
+  InvoiceFileOSSAccessKeyId: string
+  InvoiceFileOSSAccessKeySecret: string
+  InvoiceFileOSSCustomDomain: string
+  InvoiceFileS3Endpoint: string
+  InvoiceFileS3Bucket: string
+  InvoiceFileS3Region: string
+  InvoiceFileS3AccessKeyId: string
+  InvoiceFileS3AccessKeySecret: string
+  InvoiceFileS3CustomDomain: string
+  InvoiceFileCOSEndpoint: string
+  InvoiceFileCOSBucket: string
+  InvoiceFileCOSRegion: string
+  InvoiceFileCOSSecretId: string
+  InvoiceFileCOSSecretKey: string
+  InvoiceFileCOSCustomDomain: string
   WorkerUrl: string
   WorkerValidKey: string
   WorkerAllowHttpImageRequestEnabled: boolean

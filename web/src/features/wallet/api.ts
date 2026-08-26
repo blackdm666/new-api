@@ -29,8 +29,11 @@ import type {
   AmountResponse,
   PaymentResponse,
   StripePaymentResponse,
+  AntomPaymentResponse,
+  AntomQueryResponse,
   AffiliateCodeResponse,
   AffiliateTransferResponse,
+  InviteeHistoryResponse,
   BillingHistoryResponse,
   CompleteOrderRequest,
   CreemPaymentRequest,
@@ -134,6 +137,32 @@ export async function requestStripePayment(
 }
 
 /**
+ * Create an Antom hosted checkout session.
+ */
+export async function requestAntomPayment(
+  request: PaymentRequest
+): Promise<AntomPaymentResponse> {
+  const res = await api.post(
+    '/api/user/antom/pay',
+    { amount: request.amount },
+    { skipBusinessError: true } as Record<string, unknown>
+  )
+  return res.data
+}
+
+/**
+ * Synchronize one Antom payment result for the current user.
+ */
+export async function queryAntomPayment(
+  tradeNo: string
+): Promise<AntomQueryResponse> {
+  const res = await api.post('/api/user/antom/query', { trade_no: tradeNo }, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
  * Request Creem payment
  */
 export async function requestCreemPayment(
@@ -196,6 +225,21 @@ export async function transferAffiliateQuota(
   request: AffiliateTransferRequest
 ): Promise<AffiliateTransferResponse> {
   const res = await api.post('/api/user/aff_transfer', request)
+  return res.data
+}
+
+/**
+ * Get users invited by the current user.
+ */
+export async function getUserInvitees(
+  page: number,
+  pageSize: number
+): Promise<ApiResponse<InviteeHistoryResponse>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  const res = await api.get(`/api/user/aff/invitees?${params.toString()}`)
   return res.data
 }
 

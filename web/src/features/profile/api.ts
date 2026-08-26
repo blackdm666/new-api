@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import type { CustomOAuthBinding } from '@/lib/oauth'
+import { normalizeOAuthBindings } from '@/lib/oauth-bindings'
 import type { LoginSession } from '@/stores/auth-store'
 
 import type {
@@ -102,11 +104,10 @@ export async function sendEmailVerification(
   email: string,
   turnstileToken?: string
 ): Promise<ApiResponse> {
-  const params = new URLSearchParams({ email })
-  if (turnstileToken) {
-    params.append('turnstile', turnstileToken)
-  }
-  const res = await api.get(`/api/verification?${params}`)
+  const res = await api.post('/api/verification', {
+    email,
+    turnstile: turnstileToken,
+  })
   return res.data
 }
 
@@ -172,12 +173,6 @@ export async function revokeOtherLoginSessions(): Promise<ApiResponse> {
 // Custom OAuth Binding APIs
 // ============================================================================
 
-export interface CustomOAuthBinding {
-  provider_id: string
-  provider_name: string
-  external_id?: string
-}
-
 /**
  * Get current user's custom OAuth bindings
  */
@@ -185,14 +180,18 @@ export async function getSelfOAuthBindings(): Promise<
   ApiResponse<CustomOAuthBinding[]>
 > {
   const res = await api.get('/api/user/oauth/bindings')
-  return res.data
+  const response = res.data as ApiResponse<unknown>
+  return {
+    ...response,
+    data: normalizeOAuthBindings(response.data),
+  }
 }
 
 /**
  * Unbind a custom OAuth provider for current user
  */
 export async function unbindCustomOAuth(
-  providerId: string
+  providerId: number
 ): Promise<ApiResponse> {
   const res = await api.delete(`/api/user/oauth/bindings/${providerId}`)
   return res.data

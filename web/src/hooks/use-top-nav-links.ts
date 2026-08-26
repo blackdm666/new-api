@@ -16,12 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { TFunction } from 'i18next'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useStatus } from '@/hooks/use-status'
-import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
+import { INFINITE_CANVAS_URL } from '@/lib/external-links'
+import {
+  type HeaderNavModules,
+  parseHeaderNavModulesFromStatus,
+} from '@/lib/nav-modules'
 import { useAuthStore } from '@/stores/auth-store'
+
+export { INFINITE_CANVAS_URL }
 
 export type TopNavLink = {
   title: string
@@ -29,6 +36,71 @@ export type TopNavLink = {
   disabled?: boolean
   requiresAuth?: boolean
   external?: boolean
+}
+
+type BuildTopNavLinksOptions = {
+  modules: HeaderNavModules
+  docsLink?: string
+  isAuthed: boolean
+  t: TFunction
+}
+
+export function buildTopNavLinks(
+  options: BuildTopNavLinksOptions
+): TopNavLink[] {
+  const links: TopNavLink[] = []
+
+  if (options.modules.home !== false) {
+    links.push({ title: options.t('Home'), href: '/' })
+  }
+
+  if (options.modules.console !== false) {
+    links.push({ title: options.t('Console'), href: '/dashboard' })
+  }
+
+  const pricing = options.modules.pricing
+  if (pricing && typeof pricing === 'object' && pricing.enabled) {
+    const requiresAuth = pricing.requireAuth && !options.isAuthed
+    links.push({
+      title: options.t('Model Square'),
+      href: '/pricing',
+      requiresAuth,
+    })
+  }
+
+  links.push({
+    title: options.t('Infinite Canvas'),
+    href: INFINITE_CANVAS_URL,
+    external: true,
+  })
+
+  const rankings = options.modules.rankings
+  if (rankings && typeof rankings === 'object' && rankings.enabled) {
+    const requiresAuth = rankings.requireAuth && !options.isAuthed
+    links.push({
+      title: options.t('Rankings'),
+      href: '/rankings',
+      requiresAuth,
+    })
+  }
+
+  if (options.modules.docs !== false) {
+    if (options.docsLink) {
+      links.push({
+        title: options.t('Docs'),
+        href: options.docsLink,
+        external: true,
+      })
+    } else {
+      links.push({ title: options.t('Docs'), href: '/docs' })
+    }
+  }
+
+  if (options.modules.about !== false) {
+    links.push({ title: options.t('About'), href: '/about' })
+  }
+
+  return links
 }
 
 /**
@@ -60,45 +132,5 @@ export function useTopNavLinks(): TopNavLink[] {
 
   const isAuthed = !!auth?.user
 
-  const links: TopNavLink[] = []
-
-  // Home
-  if (modules?.home !== false) {
-    links.push({ title: t('Home'), href: '/' })
-  }
-
-  // Console -> /dashboard (new console path)
-  if (modules?.console !== false) {
-    links.push({ title: t('Console'), href: '/dashboard' })
-  }
-
-  // Pricing
-  const pricing = modules?.pricing
-  if (pricing && typeof pricing === 'object' && pricing.enabled) {
-    const requiresAuth = pricing.requireAuth && !isAuthed
-    links.push({ title: t('Model Square'), href: '/pricing', requiresAuth })
-  }
-
-  // Rankings
-  const rankings = modules?.rankings
-  if (rankings && typeof rankings === 'object' && rankings.enabled) {
-    const requiresAuth = rankings.requireAuth && !isAuthed
-    links.push({ title: t('Rankings'), href: '/rankings', requiresAuth })
-  }
-
-  // Docs (supports external links)
-  if (modules?.docs !== false) {
-    if (docsLink) {
-      links.push({ title: t('Docs'), href: docsLink, external: true })
-    } else {
-      links.push({ title: t('Docs'), href: '/docs' })
-    }
-  }
-
-  // About
-  if (modules?.about !== false) {
-    links.push({ title: t('About'), href: '/about' })
-  }
-
-  return links
+  return buildTopNavLinks({ modules, docsLink, isAuthed, t })
 }

@@ -85,6 +85,9 @@ func sweepTimedOutTasks(ctx context.Context) {
 		if !isLegacy && task.Quota != 0 {
 			RefundTaskQuota(ctx, task, reason)
 		}
+		if task.PrivateData.CallbackEnabled {
+			ScheduleTaskCallback(task.TaskID)
+		}
 	}
 
 	if timedOutCount > 0 {
@@ -474,8 +477,6 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 
 	logger.LogDebug(ctx, "updateVideoSingleTask response: %s", responseBody)
 
-	snap := task.Snapshot()
-
 	taskResult := &relaycommon.TaskInfo{}
 	// try parse as New API response format
 	var responseItems taskdto.TaskResponse[model.Task]
@@ -492,15 +493,29 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		return fmt.Errorf("parseTaskResult failed for task %s: %w", taskId, err)
 	}
 
-	task.Data = redactVideoResponseBody(responseBody)
-
 	logger.LogDebug(ctx, "updateVideoSingleTask taskResult: %+v", taskResult)
+	return FinalizeVideoTaskResult(ctx, adaptor, task, taskResult, responseBody)
+}
+
+// FinalizeVideoTaskResult is the single terminal-state path for both the
+// background poller and request-time Vertex/Gemini refreshes. The CAS winner
+// persists the terminal state and is the only caller allowed to settle or
+// refund quota.
+func FinalizeVideoTaskResult(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo, responseBody []byte) error {
+	if task == nil || taskResult == nil {
+		return errors.New("task and task result are required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	snap := task.Snapshot()
+	task.Data = redactVideoResponseBody(responseBody)
 
 	now := time.Now().Unix()
 	if taskResult.Status == "" {
 		//taskResult = relaycommon.FailTaskInfo("upstream returned empty status")
 		errorResult := &dto.GeneralErrorResponse{}
-		if err = common.Unmarshal(responseBody, &errorResult); err == nil {
+		if parseErr := common.Unmarshal(responseBody, &errorResult); parseErr == nil {
 			openaiError := errorResult.TryToOpenAIError()
 			if openaiError != nil {
 				// 返回规范的 OpenAI 错误格式，提取错误信息，判断错误是否为任务失败
@@ -513,7 +528,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 				taskResult = relaycommon.FailTaskInfo("upstream returned error")
 			} else {
 				// unknown error format, log original response
-				logger.LogError(ctx, fmt.Sprintf("Task %s returned empty status with unrecognized error format, response: %s", taskId, string(responseBody)))
+				logger.LogError(ctx, fmt.Sprintf("Task %s returned empty status with unrecognized error format, response: %s", task.TaskID, string(responseBody)))
 				taskResult = relaycommon.FailTaskInfo("upstream returned unrecognized message")
 			}
 		}
@@ -522,6 +537,14 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	shouldRefund := false
 	shouldSettle := false
 	quota := task.Quota
+	cached := false
+	if taskResult.Status == model.TaskStatusSuccess {
+		var cacheErr error
+		cached, cacheErr = CacheTaskVideoResult(ctx, task, taskResult.Url)
+		if cacheErr != nil {
+			return fmt.Errorf("cache video result for task %s: %w", task.TaskID, cacheErr)
+		}
+	}
 
 	task.Status = model.TaskStatus(taskResult.Status)
 	switch taskResult.Status {
@@ -539,7 +562,9 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		if task.FinishTime == 0 {
 			task.FinishTime = now
 		}
-		if strings.HasPrefix(taskResult.Url, "data:") {
+		if cached {
+			// CacheTaskVideoResult has already installed the authenticated proxy URL.
+		} else if strings.HasPrefix(taskResult.Url, "data:") {
 			// data: URI (e.g. Vertex base64 encoded video) — keep in Data, not in ResultURL
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 		} else if taskResult.Url != "" {
@@ -551,7 +576,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		}
 		shouldSettle = true
 	case model.TaskStatusFailure:
-		logger.LogJson(ctx, fmt.Sprintf("Task %s failed", taskId), task)
+		logger.LogJson(ctx, fmt.Sprintf("Task %s failed", task.TaskID), task)
 		task.Status = model.TaskStatusFailure
 		task.Progress = taskcommon.ProgressComplete
 		if task.FinishTime == 0 {
@@ -571,6 +596,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 
 	isDone := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
+	terminalTransitionWon := false
 	if isDone && snap.Status != task.Status {
 		won, err := task.UpdateWithStatus(snap.Status)
 		if err != nil {
@@ -581,6 +607,8 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			logger.LogWarn(ctx, fmt.Sprintf("Task %s CAS lost or no-op update, skip billing", task.TaskID))
 			shouldRefund = false
 			shouldSettle = false
+		} else {
+			terminalTransitionWon = true
 		}
 	} else if !snap.Equal(task.Snapshot()) {
 		if _, err := task.UpdateWithStatus(snap.Status); err != nil {
@@ -590,12 +618,19 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		// No changes, skip update
 		logger.LogDebug(ctx, "No update needed for task %s", task.TaskID)
 	}
+	if !terminalTransitionWon {
+		shouldRefund = false
+		shouldSettle = false
+	}
 
 	if shouldSettle {
 		settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
 	}
 	if shouldRefund {
 		RefundTaskQuota(ctx, task, task.FailReason)
+	}
+	if terminalTransitionWon && task.PrivateData.CallbackEnabled {
+		ScheduleTaskCallback(task.TaskID)
 	}
 
 	return nil
@@ -616,6 +651,26 @@ func redactVideoResponseBody(body []byte) []byte {
 			for i := range vs {
 				if vm, ok := vs[i].(map[string]any); ok {
 					delete(vm, "bytesBase64Encoded")
+				}
+			}
+		}
+	}
+	for _, field := range []string{"steps", "outputs"} {
+		items, _ := m[field].([]any)
+		for _, item := range items {
+			step, _ := item.(map[string]any)
+			stepType, _ := step["type"].(string)
+			stepMimeType, _ := step["mime_type"].(string)
+			if stepType == "video" || strings.HasPrefix(stepMimeType, "video/") {
+				delete(step, "data")
+			}
+			contents, _ := step["content"].([]any)
+			for _, content := range contents {
+				part, _ := content.(map[string]any)
+				partType, _ := part["type"].(string)
+				mimeType, _ := part["mime_type"].(string)
+				if partType == "video" || strings.HasPrefix(mimeType, "video/") {
+					delete(part, "data")
 				}
 			}
 		}

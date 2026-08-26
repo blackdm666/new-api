@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,6 +31,123 @@ type fakeSMTPServer struct {
 	messages          chan string
 	authCommands      chan string
 	startTLSCommands  chan string
+}
+
+func TestWriteEmailMessageIncludesInvoiceAttachment(t *testing.T) {
+	withSMTPSettings(t)
+	SMTPFrom = "sender@example.com"
+	SystemName = "New API"
+	var message strings.Builder
+	err := writeEmailMessage(
+		&message,
+		"<message@example.com>",
+		"=?UTF-8?B?VGVzdA==?=",
+		"receiver@example.com",
+		"<p>issued</p>",
+		[]EmailAttachment{{
+			Filename: "发票.pdf", ContentType: "application/pdf", Reader: strings.NewReader("invoice"),
+		}},
+		SystemNameOrDefault(),
+	)
+	require.NoError(t, err)
+	require.Contains(t, message.String(), "Content-Type: multipart/mixed")
+	require.Contains(t, message.String(), "filename*=UTF-8''%E5%8F%91%E7%A5%A8.pdf")
+	require.Contains(t, message.String(), "aW52b2ljZQ==")
+}
+
+func TestWriteEmailMessageUsesConfiguredSystemNameAsSender(t *testing.T) {
+	withSMTPSettings(t)
+	SMTPFrom = "api@88fk.org"
+	OptionMapRWMutex.Lock()
+	originalMap := OptionMap
+	if OptionMap == nil {
+		OptionMap = map[string]string{}
+	}
+	originalName, existed := OptionMap["SystemName"]
+	OptionMap["SystemName"] = "YMeng CC"
+	OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		OptionMapRWMutex.Lock()
+		defer OptionMapRWMutex.Unlock()
+		if originalMap == nil {
+			OptionMap = nil
+			return
+		}
+		if existed {
+			OptionMap["SystemName"] = originalName
+		} else {
+			delete(OptionMap, "SystemName")
+		}
+	})
+
+	var message strings.Builder
+	err := writeEmailMessage(
+		&message,
+		"<message@88fk.org>",
+		"=?UTF-8?B?VGVzdA==?=",
+		"receiver@example.com",
+		"<p>content</p>",
+		nil,
+		SystemNameOrDefault(),
+	)
+	require.NoError(t, err)
+	require.Contains(t, message.String(), `From: "YMeng CC" <api@88fk.org>`)
+
+	OptionMapRWMutex.Lock()
+	OptionMap["SystemName"] = "88API"
+	OptionMapRWMutex.Unlock()
+	message.Reset()
+	err = writeEmailMessage(
+		&message,
+		"<message-2@88fk.org>",
+		"=?UTF-8?B?VGVzdA==?=",
+		"receiver@example.com",
+		"<p>content</p>",
+		nil,
+		SystemNameOrDefault(),
+	)
+	require.NoError(t, err)
+	require.Contains(t, message.String(), `From: "88API" <api@88fk.org>`)
+	require.NotContains(t, message.String(), "YMeng CC")
+}
+
+func TestSecuritySMTPProfileUsesDedicatedSenderAndMultipartAlternative(t *testing.T) {
+	withSMTPSettings(t)
+	server := newFakeSMTPServer(t)
+	defer server.close()
+
+	SMTPSecurityEnabled = true
+	SMTPSecurityServer = server.host
+	SMTPSecurityPort = server.port
+	SMTPSecurityAccount = "security@example.com"
+	SMTPSecurityFrom = "security@example.com"
+	SMTPSecurityToken = ""
+	SystemName = "New API"
+	t.Cleanup(func() {
+		SMTPSecurityEnabled = false
+		SMTPSecurityServer = ""
+		SMTPSecurityPort = 587
+		SMTPSecurityAccount = ""
+		SMTPSecurityFrom = ""
+		SMTPSecurityToken = ""
+	})
+
+	result, err := SendEmailWithProfileResult(SMTPProfileSecurity, "Verification", "receiver@example.com", "<p>Your code is <strong>123456</strong></p>")
+	require.NoError(t, err)
+	assert.Equal(t, SMTPProfileSecurity, result.Profile)
+	assert.Equal(t, SMTPChannelSecurity, result.Channel)
+	assert.NotEmpty(t, result.MessageID)
+
+	select {
+	case message := <-server.messages:
+		assert.Contains(t, message, `<security@example.com>`)
+		assert.Contains(t, message, "Content-Type: multipart/alternative")
+		assert.Contains(t, message, "Content-Type: text/plain; charset=UTF-8")
+		assert.Contains(t, message, "Content-Type: text/html; charset=UTF-8")
+		assert.Contains(t, message, "Your code is 123456")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for security SMTP DATA")
+	}
 }
 
 func newFakeSMTPServer(t *testing.T) *fakeSMTPServer {
@@ -251,6 +369,16 @@ func withSMTPSettings(t *testing.T) {
 	originalSMTPAccount := SMTPAccount
 	originalSMTPFrom := SMTPFrom
 	originalSMTPToken := SMTPToken
+	originalSMTPBackupEnabled := SMTPBackupEnabled
+	originalSMTPBackupServer := SMTPBackupServer
+	originalSMTPBackupPort := SMTPBackupPort
+	originalSMTPBackupSSLEnabled := SMTPBackupSSLEnabled
+	originalSMTPBackupStartTLSEnabled := SMTPBackupStartTLSEnabled
+	originalSMTPBackupInsecureSkipVerify := SMTPBackupInsecureSkipVerify
+	originalSMTPBackupForceAuthLogin := SMTPBackupForceAuthLogin
+	originalSMTPBackupAccount := SMTPBackupAccount
+	originalSMTPBackupFrom := SMTPBackupFrom
+	originalSMTPBackupToken := SMTPBackupToken
 	originalSystemName := SystemName
 
 	t.Cleanup(func() {
@@ -263,8 +391,105 @@ func withSMTPSettings(t *testing.T) {
 		SMTPAccount = originalSMTPAccount
 		SMTPFrom = originalSMTPFrom
 		SMTPToken = originalSMTPToken
+		SMTPBackupEnabled = originalSMTPBackupEnabled
+		SMTPBackupServer = originalSMTPBackupServer
+		SMTPBackupPort = originalSMTPBackupPort
+		SMTPBackupSSLEnabled = originalSMTPBackupSSLEnabled
+		SMTPBackupStartTLSEnabled = originalSMTPBackupStartTLSEnabled
+		SMTPBackupInsecureSkipVerify = originalSMTPBackupInsecureSkipVerify
+		SMTPBackupForceAuthLogin = originalSMTPBackupForceAuthLogin
+		SMTPBackupAccount = originalSMTPBackupAccount
+		SMTPBackupFrom = originalSMTPBackupFrom
+		SMTPBackupToken = originalSMTPBackupToken
 		SystemName = originalSystemName
 	})
+}
+
+func TestSendEmailFallsBackToBackupSMTPChannel(t *testing.T) {
+	backupServer := newFakeSMTPServerWithSTARTTLSAdvertisement(t, false)
+	defer backupServer.close()
+	withSMTPSettings(t)
+
+	SMTPServer = "127.0.0.1"
+	SMTPPort = 1
+	SMTPAccount = "primary@example.com"
+	SMTPFrom = "primary@example.com"
+	SMTPBackupEnabled = true
+	SMTPBackupServer = backupServer.host
+	SMTPBackupPort = backupServer.port
+	SMTPBackupAccount = "backup@example.com"
+	SMTPBackupFrom = "backup@example.com"
+	SystemName = "New API"
+
+	result, err := SendEmailWithResult("Failover test", "receiver@example.com", "<p>backup</p>")
+	require.NoError(t, err)
+	require.Equal(t, SMTPChannelBackup, result.Channel)
+
+	select {
+	case message := <-backupServer.messages:
+		require.Contains(t, message, `<backup@example.com>`)
+		require.Contains(t, message, "<p>backup</p>")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for backup SMTP DATA")
+	}
+}
+
+func TestSendEmailDoesNotUseBackupWhenPrimarySucceeds(t *testing.T) {
+	primaryServer := newFakeSMTPServerWithSTARTTLSAdvertisement(t, false)
+	defer primaryServer.close()
+	withSMTPSettings(t)
+
+	SMTPServer = primaryServer.host
+	SMTPPort = primaryServer.port
+	SMTPAccount = "primary@example.com"
+	SMTPFrom = "primary@example.com"
+	SMTPBackupEnabled = true
+	SMTPBackupServer = "127.0.0.1"
+	SMTPBackupPort = 1
+	SMTPBackupAccount = "backup@example.com"
+	SMTPBackupFrom = "backup@example.com"
+	SystemName = "New API"
+
+	result, err := SendEmailWithResult("Primary test", "receiver@example.com", "<p>primary</p>")
+	require.NoError(t, err)
+	require.Equal(t, SMTPChannelPrimary, result.Channel)
+
+	select {
+	case message := <-primaryServer.messages:
+		require.Contains(t, message, `<primary@example.com>`)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for primary SMTP DATA")
+	}
+}
+
+func TestSendEmailViaBackupChannelCanVerifyBeforeActivation(t *testing.T) {
+	backupServer := newFakeSMTPServerWithSTARTTLSAdvertisement(t, false)
+	defer backupServer.close()
+	withSMTPSettings(t)
+
+	SMTPBackupEnabled = false
+	SMTPBackupServer = backupServer.host
+	SMTPBackupPort = backupServer.port
+	SMTPBackupAccount = "backup@example.com"
+	SMTPBackupFrom = "backup@example.com"
+	SystemName = "New API"
+
+	result, err := SendEmailViaChannel(
+		"Backup verification",
+		"receiver@example.com",
+		"<p>verify backup</p>",
+		SMTPChannelBackup,
+	)
+	require.NoError(t, err)
+	require.Equal(t, SMTPChannelBackup, result.Channel)
+
+	select {
+	case message := <-backupServer.messages:
+		require.Contains(t, message, `<backup@example.com>`)
+		require.Contains(t, message, "<p>verify backup</p>")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for backup SMTP verification DATA")
+	}
 }
 
 func TestSendEmailUsesExplicitStartTLSWithInsecureCertificate(t *testing.T) {

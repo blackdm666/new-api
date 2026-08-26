@@ -29,8 +29,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-import { useOAuthLogin } from '../hooks/use-oauth-login'
+import {
+  useOAuthLogin,
+  type OAuthTurnstileVerification,
+} from '../hooks/use-oauth-login'
 import type { SystemStatus } from '../types'
+import { CustomOAuthProviderIcon } from './custom-oauth-provider-icon'
+import { oauthProviderGridClassName } from './oauth-provider-layout'
 import { TelegramLoginDialog } from './telegram-login-dialog'
 
 type OAuthProvidersProps = {
@@ -40,6 +45,7 @@ type OAuthProvidersProps = {
   onWeChatLogin?: () => void
   isWeChatLoading?: boolean
   redirectTo?: string
+  turnstileVerification?: OAuthTurnstileVerification
 }
 
 type ProviderButton = {
@@ -57,6 +63,7 @@ export function OAuthProviders({
   onWeChatLogin,
   isWeChatLoading = false,
   redirectTo,
+  turnstileVerification,
 }: OAuthProvidersProps) {
   const { t } = useTranslation()
   const {
@@ -73,7 +80,7 @@ export function OAuthProviders({
     isTelegramPending,
     handleTelegramAuthorization,
     setIsTelegramDialogOpen,
-  } = useOAuthLogin(status, redirectTo)
+  } = useOAuthLogin(status, redirectTo, turnstileVerification)
 
   const providerButtons: ProviderButton[] = []
 
@@ -143,6 +150,12 @@ export function OAuthProviders({
         key: `custom-${provider.slug}`,
         label: t('Continue with {{name}}', { name: provider.name }),
         onClick: () => handleCustomOAuthLogin(provider),
+        icon: (
+          <CustomOAuthProviderIcon
+            provider={provider}
+            className='h-5 w-5 shrink-0 object-contain'
+          />
+        ),
       })
     }
   }
@@ -163,7 +176,7 @@ export function OAuthProviders({
           </div>
         </div>
 
-        <div className='flex flex-col gap-2'>
+        <div className={oauthProviderGridClassName}>
           {providerButtons.map(
             ({ key, label, onClick, icon, disabled: extraDisabled }) => (
               <Button
@@ -172,7 +185,7 @@ export function OAuthProviders({
                 type='button'
                 disabled={disabled || isLoading || extraDisabled}
                 onClick={onClick}
-                className='h-11 w-full justify-center gap-2 rounded-lg'
+                className='h-[50px] w-full justify-center gap-2 rounded-lg'
               >
                 {icon}
                 {label}

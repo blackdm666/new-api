@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
 import { Pencil } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -89,7 +89,8 @@ import {
   transformFormDataToPayload,
   transformUserToFormDefaults,
 } from '../lib'
-import { type User } from '../types'
+import type { User } from '../types'
+import { UserInviterSelector } from './user-inviter-selector'
 import { UserQuotaDialog } from './user-quota-dialog'
 import { useUsers } from './users-provider'
 
@@ -106,9 +107,15 @@ export function UsersMutateDrawer({
 }: UsersMutateDrawerProps) {
   const { t } = useTranslation()
   const isUpdate = !!currentRow
+  const userId = currentRow?.id
   const { triggerRefresh } = useUsers()
   const currentUser = useAuthStore((s) => s.auth.user)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [userLoadState, setUserLoadState] = useState<
+    'idle' | 'loading' | 'ready' | 'error'
+  >('idle')
+  const [loadedUserId, setLoadedUserId] = useState<number | null>(null)
+  const userDetailRequestRef = useRef(0)
   const [quotaDialogOpen, setQuotaDialogOpen] = useState(false)
 
   // Fetch groups
@@ -134,18 +141,62 @@ export function UsersMutateDrawer({
 
   // Load existing data when updating
   useEffect(() => {
-    if (open && isUpdate && currentRow) {
-      // For update, fetch fresh data
-      getUser(currentRow.id).then((result) => {
-        if (result.success && result.data) {
-          form.reset(transformUserToFormDefaults(result.data))
-        }
-      })
-    } else if (open && !isUpdate) {
-      // For create, reset to defaults
-      form.reset(USER_FORM_DEFAULT_VALUES)
+    const requestId = ++userDetailRequestRef.current
+
+    if (!open) {
+      setUserLoadState('idle')
+      setLoadedUserId(null)
+      return
     }
-  }, [open, isUpdate, currentRow, form])
+
+    if (!isUpdate || !currentRow || userId === undefined) {
+      form.reset(USER_FORM_DEFAULT_VALUES)
+      setUserLoadState('ready')
+      setLoadedUserId(null)
+      return
+    }
+
+    // Keep the selected row visible while the authoritative details load, but
+    // do not allow edits or saves until that matching response arrives.
+    form.reset(transformUserToFormDefaults(currentRow))
+    setUserLoadState('loading')
+    setLoadedUserId(null)
+
+    void getUser(userId)
+      .then((result) => {
+        if (userDetailRequestRef.current !== requestId) return
+
+        if (!result.success || !result.data || result.data.id !== userId) {
+          setUserLoadState('error')
+          toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+          return
+        }
+
+        form.reset(transformUserToFormDefaults(result.data))
+        setLoadedUserId(userId)
+        setUserLoadState('ready')
+      })
+      .catch(() => {
+        if (userDetailRequestRef.current !== requestId) return
+
+        setUserLoadState('error')
+        toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+      })
+
+    return () => {
+      userDetailRequestRef.current += 1
+    }
+  }, [open, isUpdate, userId, currentRow, form, t])
+
+  const isUpdateReady =
+    !isUpdate || (userLoadState === 'ready' && loadedUserId === currentRow?.id)
+  const isLoadingUser = userLoadState === 'loading'
+  let submitButtonLabel = t('Save changes')
+  if (isLoadingUser) {
+    submitButtonLabel = t('Loading...')
+  } else if (isSubmitting) {
+    submitButtonLabel = t('Saving...')
+  }
 
   const { meta: currencyMeta } = getCurrencyDisplay()
   const currencyLabel = getCurrencyLabel()
@@ -157,6 +208,10 @@ export function UsersMutateDrawer({
   const targetIsAdmin = (selectedRole ?? currentRow?.role ?? 0) >= ROLE.ADMIN
 
   const onSubmit = async (data: UserFormValues) => {
+    if (isUpdate && (!currentRow || !isUpdateReady)) {
+      return
+    }
+
     if (!isUpdate) {
       const passwordLength = data.password?.length || 0
       if (passwordLength < 8 || passwordLength > 20) {
@@ -195,7 +250,7 @@ export function UsersMutateDrawer({
               : t(ERROR_MESSAGES.CREATE_FAILED))
         )
       }
-    } catch (_error) {
+    } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setIsSubmitting(false)
@@ -204,11 +259,36 @@ export function UsersMutateDrawer({
 
   const refreshUserData = async () => {
     if (!currentRow) return
-    const result = await getUser(currentRow.id)
-    if (result.success && result.data) {
-      form.reset(transformUserToFormDefaults(result.data))
-    }
+    const requestedUserId = currentRow.id
+    const requestId = ++userDetailRequestRef.current
+
+    setUserLoadState('loading')
+    setLoadedUserId(null)
     triggerRefresh()
+
+    try {
+      const result = await getUser(requestedUserId)
+      if (userDetailRequestRef.current !== requestId) return
+
+      if (
+        !result.success ||
+        !result.data ||
+        result.data.id !== requestedUserId
+      ) {
+        setUserLoadState('error')
+        toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+        return
+      }
+
+      form.reset(transformUserToFormDefaults(result.data))
+      setLoadedUserId(requestedUserId)
+      setUserLoadState('ready')
+    } catch {
+      if (userDetailRequestRef.current !== requestId) return
+
+      setUserLoadState('error')
+      toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+    }
   }
 
   return (
@@ -240,6 +320,8 @@ export function UsersMutateDrawer({
               id='user-form'
               onSubmit={form.handleSubmit(onSubmit)}
               className={sideDrawerFormClassName()}
+              aria-busy={isLoadingUser}
+              inert={!isUpdateReady || isSubmitting}
             >
               {/* Basic Information */}
               <SideDrawerSection>
@@ -278,7 +360,8 @@ export function UsersMutateDrawer({
                             { value: '10', label: t('Admin') },
                           ]}
                           onValueChange={(value) =>
-                            value !== null && field.onChange(parseInt(value))
+                            value !== null &&
+                            field.onChange(Number.parseInt(value))
                           }
                           value={String(field.value)}
                         >
@@ -360,12 +443,10 @@ export function UsersMutateDrawer({
                       <FormItem>
                         <FormLabel>{t('Group')}</FormLabel>
                         <Select
-                          items={[
-                            ...groups.map((group) => ({
-                              value: group,
-                              label: group,
-                            })),
-                          ]}
+                          items={groups.map((group) => ({
+                            value: group,
+                            label: group,
+                          }))}
                           onValueChange={field.onChange}
                           value={field.value}
                         >
@@ -443,6 +524,36 @@ export function UsersMutateDrawer({
                             rows={3}
                           />
                         </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </SideDrawerSection>
+              )}
+
+              {isUpdate && currentRow && (
+                <SideDrawerSection>
+                  <h3 className='text-sm font-medium'>
+                    {t('Invitation relationship')}
+                  </h3>
+                  <FormField
+                    control={form.control}
+                    name='inviter_id'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Inviter')}</FormLabel>
+                        <FormControl>
+                          <UserInviterSelector
+                            targetUserId={currentRow.id}
+                            value={field.value ?? 0}
+                            onValueChange={field.onChange}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Changing the inviter updates referral counts and future commission attribution. It does not grant registration rewards or move historical commissions.'
+                          )}
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -577,8 +688,12 @@ export function UsersMutateDrawer({
             <SheetClose render={<Button variant='outline' />}>
               {t('Close')}
             </SheetClose>
-            <Button form='user-form' type='submit' disabled={isSubmitting}>
-              {isSubmitting ? t('Saving...') : t('Save changes')}
+            <Button
+              form='user-form'
+              type='submit'
+              disabled={isSubmitting || !isUpdateReady}
+            >
+              {submitButtonLabel}
             </Button>
           </SheetFooter>
         </SheetContent>

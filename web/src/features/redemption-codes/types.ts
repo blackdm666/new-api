@@ -64,6 +64,10 @@ export interface GetRedemptionsResponse {
 }
 
 export interface SearchRedemptionsParams {
+  name?: string
+  code?: string
+  id?: string
+  // Kept for compatibility with older callers of the mixed search endpoint.
   keyword?: string
   status?: string
   p?: number

@@ -18,6 +18,26 @@ func newTokenAutoGroupsContext() *gin.Context {
 	return ctx
 }
 
+func TestResolveTokenUsingGroupRoutesEmptyTokensThroughConfiguredDefault(t *testing.T) {
+	tests := []struct {
+		name                string
+		userGroup           string
+		tokenGroup          string
+		defaultUseAutoGroup bool
+		expected            string
+	}{
+		{name: "explicit token group remains authoritative", userGroup: "vip", tokenGroup: "GPT-Pro", defaultUseAutoGroup: true, expected: "GPT-Pro"},
+		{name: "empty token uses auto when system default enables auto", userGroup: "vip", defaultUseAutoGroup: true, expected: "auto"},
+		{name: "empty token preserves identity routing when auto default is disabled", userGroup: "vip", expected: "vip"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, resolveTokenUsingGroup(test.userGroup, test.tokenGroup, test.defaultUseAutoGroup))
+		})
+	}
+}
+
 func TestSetupContextForTokenPreservesCustomAutoGroupsOrder(t *testing.T) {
 	ctx := newTokenAutoGroupsContext()
 	token := &model.Token{Id: 1, UserId: 2, AutoGroups: `["vip","default"]`}

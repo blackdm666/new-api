@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/limiter"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
@@ -91,7 +92,10 @@ func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) g
 			return
 		}
 		if !allowed {
-			abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到请求数限制：%d分钟内最多请求%d次", setting.ModelRequestRateLimitDurationMinutes, successMaxCount))
+			abortWithOpenAiMessage(c, http.StatusTooManyRequests, common.TranslateMessage(c, i18n.MsgRateLimitReached, map[string]any{
+				"Minutes": setting.ModelRequestRateLimitDurationMinutes,
+				"Max":     successMaxCount,
+			}))
 			return
 		}
 
@@ -115,7 +119,10 @@ func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) g
 			}
 
 			if !allowed {
-				abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到总请求数限制：%d分钟内最多请求%d次，包括失败次数，请检查您的请求是否正确", setting.ModelRequestRateLimitDurationMinutes, totalMaxCount))
+				abortWithOpenAiMessage(c, http.StatusTooManyRequests, common.TranslateMessage(c, i18n.MsgRateLimitTotalReached, map[string]any{
+					"Minutes": setting.ModelRequestRateLimitDurationMinutes,
+					"Max":     totalMaxCount,
+				}))
 			}
 		}
 
@@ -164,6 +171,27 @@ func memoryRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) 
 	}
 }
 
+func resolveModelRequestRateLimit(tokenGroup, userGroup string) (totalMaxCount, successMaxCount int) {
+	totalMaxCount = setting.ModelRequestRateLimitCount
+	successMaxCount = setting.ModelRequestRateLimitSuccessCount
+
+	if tokenGroup != "" {
+		groupTotalCount, groupSuccessCount, found := setting.GetGroupRateLimit(tokenGroup)
+		if found {
+			return groupTotalCount, groupSuccessCount
+		}
+	}
+
+	if userGroup != "" {
+		groupTotalCount, groupSuccessCount, found := setting.GetGroupRateLimit(userGroup)
+		if found {
+			return groupTotalCount, groupSuccessCount
+		}
+	}
+
+	return totalMaxCount, successMaxCount
+}
+
 // ModelRequestRateLimit 模型请求限流中间件
 func ModelRequestRateLimit() func(c *gin.Context) {
 	return func(c *gin.Context) {
@@ -175,21 +203,9 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 
 		// 计算限流参数
 		duration := int64(setting.ModelRequestRateLimitDurationMinutes * 60)
-		totalMaxCount := setting.ModelRequestRateLimitCount
-		successMaxCount := setting.ModelRequestRateLimitSuccessCount
-
-		// 获取分组
-		group := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
-		if group == "" {
-			group = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-		}
-
-		//获取分组的限流配置
-		groupTotalCount, groupSuccessCount, found := setting.GetGroupRateLimit(group)
-		if found {
-			totalMaxCount = groupTotalCount
-			successMaxCount = groupSuccessCount
-		}
+		tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+		userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+		totalMaxCount, successMaxCount := resolveModelRequestRateLimit(tokenGroup, userGroup)
 
 		// 根据存储类型选择并执行限流处理器
 		if common.RedisEnabled {

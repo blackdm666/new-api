@@ -322,7 +322,7 @@ func verifyTelegramAuthorization(params url.Values, token string, now time.Time)
 
 	strs := make([]string, 0, len(params)-1)
 	for k, v := range params {
-		if k == "hash" {
+		if k == "hash" || k == "turnstile" {
 			continue
 		}
 		strs = append(strs, k+"="+v[0])

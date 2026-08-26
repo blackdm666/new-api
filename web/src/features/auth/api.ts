@@ -121,15 +121,22 @@ export async function sendPasswordResetEmail(
   email: string,
   turnstile?: string
 ): Promise<ApiResponse> {
-  const res = await api.get('/api/reset_password', {
-    params: { email, turnstile },
-  })
+  const res = await api.post('/api/reset_password', { email, turnstile })
   return res.data
 }
 
 // ----------------------------------------------------------------------------
 // OAuth
 // ----------------------------------------------------------------------------
+
+export interface TurnstileVerificationPayload {
+  turnstile?: string
+}
+
+function getTurnstileQueryParams(verification?: TurnstileVerificationPayload) {
+  if (!verification) return {}
+  return { turnstile: verification.turnstile }
+}
 
 // Start GitHub OAuth flow
 export async function githubOAuthStart(clientId: string, state: string) {
@@ -140,13 +147,21 @@ export async function githubOAuthStart(clientId: string, state: string) {
 // Get OAuth state for CSRF protection
 export async function createOAuthFlow(
   provider: string,
-  intent: 'login' | 'bind'
+  intent: 'login' | 'bind',
+  verification?: TurnstileVerificationPayload
 ): Promise<string> {
   const aff = intent === 'login' ? getAffiliateCode() : ''
   const res = await api.post(
     '/api/oauth/state',
-    { provider, intent, aff: aff || undefined },
-    { skipAuthRefresh: intent === 'login' }
+    {
+      provider,
+      intent,
+      aff: aff || undefined,
+    },
+    {
+      params: { turnstile: verification?.turnstile },
+      skipAuthRefresh: intent === 'login',
+    }
   )
   if (res.data?.success) {
     if (typeof res.data.data === 'string') return res.data.data
@@ -158,16 +173,25 @@ export async function createOAuthFlow(
 }
 
 // WeChat login by authorization code
-export async function wechatLoginByCode(code: string): Promise<ApiResponse> {
-  const res = await api.get('/api/oauth/wechat', { params: { code } })
+export async function wechatLoginByCode(
+  code: string,
+  verification?: TurnstileVerificationPayload
+): Promise<ApiResponse> {
+  const res = await api.get('/api/oauth/wechat', {
+    params: { code, ...getTurnstileQueryParams(verification) },
+  })
   return res.data
 }
 
 export async function telegramLogin(
-  authorization: TelegramAuthorization
+  authorization: TelegramAuthorization,
+  verification?: TurnstileVerificationPayload
 ): Promise<ApiResponse> {
   const res = await api.get('/api/oauth/telegram/login', {
-    params: authorization,
+    params: {
+      ...authorization,
+      ...getTurnstileQueryParams(verification),
+    },
     disableDuplicate: true,
     skipAuthRefresh: true,
     skipBusinessError: true,
@@ -193,9 +217,7 @@ export async function sendEmailVerification(
   email: string,
   turnstile?: string
 ): Promise<ApiResponse> {
-  const res = await api.get('/api/verification', {
-    params: { email, turnstile },
-  })
+  const res = await api.post('/api/verification', { email, turnstile })
   return res.data
 }
 

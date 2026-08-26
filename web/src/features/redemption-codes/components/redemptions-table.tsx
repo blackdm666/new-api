@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
-import { useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -28,7 +28,9 @@ import {
   DataTablePage,
   useDataTable,
 } from '@/components/data-table'
-import { useMediaQuery } from '@/hooks'
+import { Input } from '@/components/ui/input'
+import { UserInfoDialog } from '@/components/user-info-dialog'
+import { useDebounce, useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 
 import { getRedemptions, searchRedemptions } from '../api'
@@ -55,9 +57,16 @@ function isDisabledRedemptionRow(redemption: Redemption) {
 
 export function RedemptionsTable() {
   const { t } = useTranslation()
-  const columns = useRedemptionsColumns()
   const { refreshTrigger } = useRedemptions()
   const isMobile = useMediaQuery('(max-width: 640px)')
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
+  const [userInfoDialogOpen, setUserInfoDialogOpen] = useState(false)
+
+  const handleUserClick = useCallback((userId: number) => {
+    setSelectedUserId(userId)
+    setUserInfoDialogOpen(true)
+  }, [])
+  const columns = useRedemptionsColumns(handleUserClick)
 
   const {
     globalFilter,
@@ -72,8 +81,20 @@ export function RedemptionsTable() {
     navigate: route.useNavigate(),
     pagination: { defaultPage: 1, defaultPageSize: isMobile ? 10 : 20 },
     globalFilter: { enabled: true, key: 'filter' },
-    columnFilters: [{ columnId: 'status', searchKey: 'status', type: 'array' }],
+    columnFilters: [
+      { columnId: 'name', searchKey: 'name', type: 'string' },
+      { columnId: 'code', searchKey: 'code', type: 'string' },
+      { columnId: 'id', searchKey: 'id', type: 'string' },
+      { columnId: 'status', searchKey: 'status', type: 'array' },
+    ],
   })
+  const getTextFilter = (columnId: string) =>
+    String(columnFilters.find((filter) => filter.id === columnId)?.value ?? '')
+  const nameFilter = getTextFilter('name')
+  const codeFilter = getTextFilter('code')
+  const idFilter = getTextFilter('id')
+  const debouncedCodeFilter = useDebounce(codeFilter, 500)
+  const debouncedIdFilter = useDebounce(idFilter, 500)
   const statusFilter =
     (columnFilters.find((filter) => filter.id === 'status')?.value as
       | string[]
@@ -87,11 +108,18 @@ export function RedemptionsTable() {
       pagination.pageIndex + 1,
       pagination.pageSize,
       globalFilter,
+      nameFilter,
+      debouncedCodeFilter,
+      debouncedIdFilter,
       statusFilterValue,
       refreshTrigger,
     ],
     queryFn: async () => {
-      const hasFilter = globalFilter?.trim()
+      const hasFilter =
+        globalFilter?.trim() ||
+        nameFilter.trim() ||
+        debouncedCodeFilter.trim() ||
+        debouncedIdFilter.trim()
       const hasStatusFilter = statusFilterValue !== ''
       const params = {
         p: pagination.pageIndex + 1,
@@ -102,6 +130,10 @@ export function RedemptionsTable() {
         hasFilter || hasStatusFilter
           ? await searchRedemptions({
               ...params,
+              name: nameFilter,
+              code: debouncedCodeFilter,
+              id: debouncedIdFilter,
+              // Supports old bookmarked URLs that used the mixed filter.
               keyword: globalFilter,
               status: statusFilterValue,
             })
@@ -136,13 +168,7 @@ export function RedemptionsTable() {
     columnFilters,
     globalFilter,
     pagination,
-    globalFilterFn: (row, _columnId, filterValue) => {
-      const name = String(row.getValue('name')).toLowerCase()
-      const id = String(row.getValue('id'))
-      const searchValue = String(filterValue).toLowerCase()
-
-      return name.includes(searchValue) || id.includes(searchValue)
-    },
+    globalFilterFn: () => true,
     onPaginationChange,
     onGlobalFilterChange,
     onColumnFiltersChange,
@@ -158,34 +184,75 @@ export function RedemptionsTable() {
   )
 
   return (
-    <DataTablePage
-      table={table}
-      columns={columns}
-      isLoading={isLoading}
-      isFetching={isFetching}
-      emptyTitle={t('No Redemption Codes Found')}
-      emptyDescription={t(
-        'No redemption codes available. Create your first redemption code to get started.'
-      )}
-      skeletonKeyPrefix='redemptions-skeleton'
-      applyHeaderSize
-      toolbarProps={{
-        searchPlaceholder: t('Filter by name or ID...'),
-        filters: [
-          {
-            columnId: 'status',
-            title: t('Status'),
-            options: redemptionStatusOptions,
-            singleSelect: true,
-          },
-        ],
-      }}
-      mobile={<RedemptionsMobileList table={table} isLoading={isLoading} />}
-      getRowClassName={(row, { isMobile }) => {
-        if (!isDisabledRedemptionRow(row.original)) return undefined
-        return isMobile ? DISABLED_ROW_MOBILE : DISABLED_ROW_DESKTOP
-      }}
-      bulkActions={<DataTableBulkActions table={table} />}
-    />
+    <>
+      <DataTablePage
+        table={table}
+        columns={columns}
+        isLoading={isLoading}
+        isFetching={isFetching}
+        emptyTitle={t('No Redemption Codes Found')}
+        emptyDescription={t(
+          'No redemption codes available. Create your first redemption code to get started.'
+        )}
+        skeletonKeyPrefix='redemptions-skeleton'
+        applyHeaderSize
+        toolbarProps={{
+          searchKey: 'name',
+          searchPlaceholder: t('Filter by name...'),
+          searchDebounceMs: 500,
+          additionalSearch: (
+            <>
+              <Input
+                inputMode='text'
+                autoComplete='off'
+                aria-label={t('Filter by redemption code...')}
+                placeholder={t('Filter by redemption code...')}
+                value={codeFilter}
+                onChange={(event) =>
+                  table.getColumn('code')?.setFilterValue(event.target.value)
+                }
+                className='w-full sm:w-[230px] lg:w-[280px]'
+              />
+              <Input
+                inputMode='numeric'
+                autoComplete='off'
+                aria-label={t('Filter by ID...')}
+                placeholder={t('Filter by ID...')}
+                value={idFilter}
+                onChange={(event) =>
+                  table.getColumn('id')?.setFilterValue(event.target.value)
+                }
+                className='w-full sm:w-[130px] lg:w-[150px]'
+              />
+            </>
+          ),
+          filters: [
+            {
+              columnId: 'status',
+              title: t('Status'),
+              options: redemptionStatusOptions,
+              singleSelect: true,
+            },
+          ],
+        }}
+        mobile={
+          <RedemptionsMobileList
+            table={table}
+            isLoading={isLoading}
+            onUserClick={handleUserClick}
+          />
+        }
+        getRowClassName={(row, { isMobile }) => {
+          if (!isDisabledRedemptionRow(row.original)) return undefined
+          return isMobile ? DISABLED_ROW_MOBILE : DISABLED_ROW_DESKTOP
+        }}
+        bulkActions={<DataTableBulkActions table={table} />}
+      />
+      <UserInfoDialog
+        userId={selectedUserId}
+        open={userInfoDialogOpen}
+        onOpenChange={setUserInfoDialogOpen}
+      />
+    </>
   )
 }

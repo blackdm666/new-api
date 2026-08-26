@@ -27,6 +27,12 @@ func registerChannelRoutes(apiRouter *gin.RouterGroup) {
 		middleware.SecureVerificationRequired(),
 		controller.GetChannelKey,
 	)
+	channelRoute.POST("/:id/balance_query/token",
+		middleware.RootAuth(),
+		middleware.CriticalRateLimit(),
+		middleware.DisableCache(),
+		controller.GetChannelBalanceQueryToken,
+	)
 
 	for _, route := range channelPermissionRoutes {
 		channelRoute.Handle(route.method, route.path,
@@ -51,6 +57,8 @@ var channelPermissionRoutes = []permissionRoute{
 	{method: http.MethodPut, path: "/", permission: authz.ChannelWrite, handler: controller.UpdateChannel},
 	{method: http.MethodPost, path: "/status/batch", permission: authz.ChannelOperate, handler: controller.BatchUpdateChannelStatus},
 	{method: http.MethodPost, path: "/:id/status", permission: authz.ChannelOperate, handler: controller.UpdateChannelStatus},
+	{method: http.MethodPost, path: "/:id/used_quota/reset", permission: authz.ChannelOperate, handler: controller.ResetChannelUsedQuota},
+	{method: http.MethodPost, path: "/:id/balance_query/test", permission: authz.ChannelSensitiveWrite, handler: controller.TestChannelBalanceQuery},
 	{method: http.MethodDelete, path: "/disabled", permission: authz.ChannelSensitiveWrite, handler: controller.DeleteDisabledChannel},
 	{method: http.MethodPost, path: "/tag/disabled", permission: authz.ChannelOperate, handler: controller.DisableTagChannels},
 	{method: http.MethodPost, path: "/tag/enabled", permission: authz.ChannelOperate, handler: controller.EnableTagChannels},

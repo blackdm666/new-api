@@ -22,8 +22,12 @@ import { API_ENDPOINTS } from './constants'
 import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
-  ModelOption,
   GroupOption,
+  ImageGenerationResponse,
+  ModelOption,
+  PlaygroundModelMode,
+  PlaygroundModelTransport,
+  PlaygroundVideo,
 } from './types'
 
 /**
@@ -45,7 +49,7 @@ export async function sendChatCompletion(
  */
 export async function getUserModels(group: string): Promise<ModelOption[]> {
   const res = await api.get(API_ENDPOINTS.USER_MODELS, {
-    params: { group },
+    params: { group, details: true },
   })
   const { data } = res
 
@@ -53,10 +57,84 @@ export async function getUserModels(group: string): Promise<ModelOption[]> {
     return []
   }
 
-  return data.data.map((model: string) => ({
-    label: model,
-    value: model,
-  }))
+  return data.data.flatMap((item: unknown): ModelOption[] => {
+    if (typeof item === 'string') {
+      return [{ label: item, value: item, mode: 'chat', transport: 'chat' }]
+    }
+    if (!item || typeof item !== 'object') return []
+
+    const candidate = item as {
+      model?: unknown
+      mode?: unknown
+      transport?: unknown
+    }
+    if (typeof candidate.model !== 'string') return []
+    if (!isPlaygroundModelMode(candidate.mode)) return []
+
+    return [
+      {
+        label: candidate.model,
+        value: candidate.model,
+        mode: candidate.mode,
+        transport: isPlaygroundModelTransport(candidate.transport)
+          ? candidate.transport
+          : candidate.mode,
+      },
+    ]
+  })
+}
+
+function isPlaygroundModelTransport(
+  value: unknown
+): value is PlaygroundModelTransport {
+  return value === 'chat' || value === 'image' || value === 'video'
+}
+
+function isPlaygroundModelMode(value: unknown): value is PlaygroundModelMode {
+  return value === 'chat' || value === 'image' || value === 'video'
+}
+
+export async function generatePlaygroundImage(
+  model: string,
+  group: string,
+  prompt: string,
+  signal?: AbortSignal
+): Promise<ImageGenerationResponse> {
+  const res = await api.post(
+    API_ENDPOINTS.IMAGE_GENERATIONS,
+    { model, group, prompt },
+    { signal, skipErrorHandler: true, skipBusinessError: true } as Record<
+      string,
+      unknown
+    >
+  )
+  return res.data
+}
+
+export async function submitPlaygroundVideo(
+  model: string,
+  group: string,
+  prompt: string,
+  signal?: AbortSignal
+): Promise<PlaygroundVideo> {
+  const res = await api.post(API_ENDPOINTS.VIDEOS, { model, group, prompt }, {
+    signal,
+    skipErrorHandler: true,
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+export async function getPlaygroundVideo(
+  taskId: string,
+  signal?: AbortSignal
+): Promise<PlaygroundVideo> {
+  const res = await api.get(`${API_ENDPOINTS.VIDEOS}/${taskId}`, {
+    signal,
+    skipErrorHandler: true,
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
 }
 
 /**

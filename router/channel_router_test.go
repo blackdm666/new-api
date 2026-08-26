@@ -15,6 +15,7 @@ import (
 func TestChannelStatusRoutesUseOperatePermission(t *testing.T) {
 	assertChannelRoutePermission(t, http.MethodPost, "/:id/status", authz.ChannelOperate, controller.UpdateChannelStatus)
 	assertChannelRoutePermission(t, http.MethodPost, "/status/batch", authz.ChannelOperate, controller.BatchUpdateChannelStatus)
+	assertChannelRoutePermission(t, http.MethodPost, "/:id/used_quota/reset", authz.ChannelOperate, controller.ResetChannelUsedQuota)
 	assertChannelRoutePermission(t, http.MethodPut, "/", authz.ChannelWrite, controller.UpdateChannel)
 }
 
@@ -25,6 +26,7 @@ func TestChannelDeleteRoutesUseSensitiveWritePermission(t *testing.T) {
 	assertChannelRoutePermission(t, http.MethodPut, "/", authz.ChannelWrite, controller.UpdateChannel)
 	assertChannelRoutePermission(t, http.MethodPut, "/tag", authz.ChannelWrite, controller.EditTagChannels)
 	assertChannelRoutePermission(t, http.MethodPost, "/batch/tag", authz.ChannelWrite, controller.BatchSetChannelTag)
+	assertChannelRoutePermission(t, http.MethodPost, "/:id/balance_query/test", authz.ChannelSensitiveWrite, controller.TestChannelBalanceQuery)
 }
 
 func TestChannelStatusRoutesRegisterWithoutConflict(t *testing.T) {

@@ -36,22 +36,32 @@ import {
   SOURCE_TIME,
   normalizeTierLabel,
   parseTiersFromExpr,
+  requestRuleGroupsFromTrace,
   splitBillingExprAndRequestRules,
   tryParseRequestRuleExpr,
   type ParsedTier,
   type RequestCondition,
   type RequestRuleGroup,
+  type RequestRuleTrace,
   type TierCondition,
 } from '../lib/billing-expr'
 
 type DynamicPricingBreakdownProps = {
   billingExpr: string | null | undefined
   /**
+   * Multiplier applied to every displayed tier price. Usage-log details pass
+   * the effective ratio recorded for that request so the table matches the
+   * actual billing prices. Defaults to 1 for model-pricing views.
+   */
+  groupRatioMultiplier?: number
+  /**
    * Label of the tier that fired for the current request. When provided,
    * the corresponding row is highlighted and tagged as "Matched". Used by
    * the usage-log details dialog to show which tier the engine selected.
    */
   matchedTierLabel?: string | null
+  /** Request-rule traces emitted by the settlement run. */
+  requestRules?: RequestRuleTrace[] | null
   /**
    * Hide cache-pricing columns regardless of the per-tier values. The log
    * details dialog passes this when the actual request did not consume any
@@ -148,14 +158,26 @@ function describeGroup(
   group: RequestRuleGroup,
   t: (key: string) => string
 ): string {
-  return (group.conditions || [])
-    .map((c) => describeCondition(c, t))
+  const description = (group.conditions || [])
+    .map((condition) => describeCondition(condition, t))
     .join(' && ')
+  return description || group.conditionText || ''
+}
+
+function nextOccurrenceKey(
+  baseKey: string,
+  occurrences: Map<string, number>
+): string {
+  const occurrence = occurrences.get(baseKey) || 0
+  occurrences.set(baseKey, occurrence + 1)
+  return `${baseKey}:${occurrence}`
 }
 
 export function DynamicPricingBreakdown({
   billingExpr,
+  groupRatioMultiplier = 1,
   matchedTierLabel,
+  requestRules,
   hideCacheColumns = false,
   compact = false,
 }: DynamicPricingBreakdownProps) {
@@ -179,18 +201,24 @@ export function DynamicPricingBreakdown({
   const { tiers, ruleGroups } = useMemo(() => {
     const split = splitBillingExprAndRequestRules(expr)
     const parsedTiers = parseTiersFromExpr(split.billingExpr)
-    const parsedRules = tryParseRequestRuleExpr(split.requestRuleExpr || '')
+    const parsedRules =
+      requestRules != null
+        ? requestRuleGroupsFromTrace(requestRules)
+        : tryParseRequestRuleExpr(split.requestRuleExpr || '')
     return {
       tiers: parsedTiers,
       ruleGroups: parsedRules || [],
     }
-  }, [expr])
+  }, [expr, requestRules])
 
   const hasTiers = tiers.length > 0
   const hasRules = ruleGroups.length > 0
   const normalizedMatchedTierLabel = normalizeTierLabel(
     matchedTierLabel ?? undefined
   )
+  const effectivePriceMultiplier = Number.isFinite(groupRatioMultiplier)
+    ? groupRatioMultiplier
+    : 1
 
   if (!expr) return null
 
@@ -229,6 +257,8 @@ export function DynamicPricingBreakdown({
       (tier) => Number(tier[v.field as string as keyof ParsedTier] || 0) > 0
     )
   })
+  const mobileTierKeyOccurrences = new Map<string, number>()
+  const requestRuleKeyOccurrences = new Map<string, number>()
 
   return (
     <section className={cn('min-w-0', !compact && 'py-3 sm:py-4')}>
@@ -260,15 +290,19 @@ export function DynamicPricingBreakdown({
             {t('Tiered price table')}
           </div>
           <div className='space-y-1.5 sm:hidden'>
-            {tiers.map((tier, i) => {
+            {tiers.map((tier) => {
               const condSummary = formatConditionSummary(tier.conditions, t)
               const isMatched =
                 matchedTierLabel != null &&
                 matchedTierLabel !== '' &&
                 tier.label === matchedTierLabel
+              const rowKey = nextOccurrenceKey(
+                JSON.stringify(tier),
+                mobileTierKeyOccurrences
+              )
               return (
                 <div
-                  key={`tier-mobile-${i}`}
+                  key={`tier-mobile-${rowKey}`}
                   className={cn(
                     'rounded-md border p-2',
                     isMatched && 'border-emerald-500/40 bg-emerald-500/10'
@@ -312,7 +346,11 @@ export function DynamicPricingBreakdown({
                             )}
                           >
                             {value > 0
-                              ? `${symbol}${(value * rate).toFixed(4)}`
+                              ? `${symbol}${(
+                                  value *
+                                  rate *
+                                  effectivePriceMultiplier
+                                ).toFixed(4)}`
                               : '-'}
                           </div>
                         </div>
@@ -401,7 +439,11 @@ export function DynamicPricingBreakdown({
                   )
                   return value > 0 ? (
                     <span className={cn(!compact && 'font-semibold')}>
-                      {`${symbol}${(value * rate).toFixed(4)}`}
+                      {`${symbol}${(
+                        value *
+                        rate *
+                        effectivePriceMultiplier
+                      ).toFixed(4)}`}
                     </span>
                   ) : (
                     '-'
@@ -425,27 +467,41 @@ export function DynamicPricingBreakdown({
             {t('Conditional multipliers')}
           </div>
           <ul className='space-y-1.5'>
-            {ruleGroups.map((group, gi) => (
-              <li
-                key={`group-${gi}`}
-                className='bg-muted/50 flex items-center justify-between gap-3 rounded-md px-3 py-2'
-              >
-                <span
+            {ruleGroups.map((group) => {
+              const isMatched = group.matched === true
+              const rowKey = nextOccurrenceKey(
+                `${group.conditionText || JSON.stringify(group.conditions)}:${group.multiplier}`,
+                requestRuleKeyOccurrences
+              )
+              return (
+                <li
+                  key={`group-${rowKey}`}
                   className={cn(
-                    'text-foreground break-all',
-                    compact ? 'text-xs' : 'text-sm'
+                    'bg-muted/50 flex items-center justify-between gap-3 rounded-md border border-transparent px-3 py-2',
+                    isMatched && 'border-emerald-500/40 bg-emerald-500/10'
                   )}
                 >
-                  {describeGroup(group, t)}
-                </span>
-                <Badge
-                  variant='secondary'
-                  className='shrink-0 bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300'
-                >
-                  {group.multiplier}x
-                </Badge>
-              </li>
-            ))}
+                  <span
+                    className={cn(
+                      'text-foreground break-all',
+                      compact ? 'text-xs' : 'text-sm'
+                    )}
+                  >
+                    {describeGroup(group, t)}
+                  </span>
+                  <Badge
+                    variant='secondary'
+                    className={cn(
+                      'shrink-0 bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300',
+                      isMatched &&
+                        'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300'
+                    )}
+                  >
+                    {group.multiplier}x{isMatched && ` · ${t('Matched')}`}
+                  </Badge>
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}

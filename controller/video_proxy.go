@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	vertexcore "github.com/QuantumNous/new-api/relay/channel/vertex"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
@@ -55,6 +56,26 @@ func VideoProxy(c *gin.Context) {
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+
+	if reader, mimeType, cached, cacheErr := service.OpenTaskVideoCache(ctx, task); cached && cacheErr == nil {
+		defer reader.Close()
+		c.Writer.Header().Set("Content-Type", mimeType)
+		c.Writer.Header().Set("Content-Disposition", "inline")
+		c.Writer.Header().Set("Cache-Control", "private, max-age=86400")
+		c.Writer.Header().Set("X-Video-Cache", "HIT")
+		c.Writer.WriteHeader(http.StatusOK)
+		if _, copyErr := io.Copy(c.Writer, reader); copyErr != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream cached video for task %s: %s", taskID, copyErr.Error()))
+		}
+		return
+	} else if cached && cacheErr != nil {
+		// A transient object-storage problem should not make a completed task
+		// unreadable. Fall back to the existing provider proxy path.
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to read cached video for task %s, falling back upstream: %s", taskID, cacheErr.Error()))
+	}
+
 	channel, err := model.CacheGetChannel(task.ChannelId)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to get channel for task %s: %s", taskID, err.Error()))
@@ -80,8 +101,6 @@ func VideoProxy(c *gin.Context) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "", nil)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to create request: %s", err.Error()))
@@ -111,9 +130,30 @@ func VideoProxy(c *gin.Context) {
 			videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to resolve Vertex video URL")
 			return
 		}
+		if strings.HasPrefix(videoURL, "http://") || strings.HasPrefix(videoURL, "https://") {
+			credentials := &vertexcore.Credentials{}
+			if decodeErr := common.Unmarshal([]byte(getVertexTaskKey(channel, task)), credentials); decodeErr != nil {
+				videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to decode Vertex credentials")
+				return
+			}
+			accessToken, tokenErr := vertexcore.AcquireAccessToken(*credentials, proxy)
+			if tokenErr != nil {
+				videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to authenticate Vertex video download")
+				return
+			}
+			req.Header.Set("Authorization", "Bearer "+accessToken)
+			req.Header.Set("x-goog-user-project", credentials.ProjectID)
+		}
 	case constant.ChannelTypeOpenAI, constant.ChannelTypeSora:
 		videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.GetUpstreamTaskID())
 		req.Header.Set("Authorization", "Bearer "+channel.Key)
+	case constant.ChannelTypeSub2API:
+		videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.GetUpstreamTaskID())
+		key := task.PrivateData.Key
+		if key == "" {
+			key = channel.Key
+		}
+		req.Header.Set("Authorization", "Bearer "+key)
 	default:
 		// Video URL is stored in PrivateData.ResultURL (fallback to FailReason for old data)
 		videoURL = task.GetResultURL()
@@ -169,16 +209,20 @@ func VideoProxy(c *gin.Context) {
 		return
 	}
 
-	for key, values := range resp.Header {
-		for _, value := range values {
-			c.Writer.Header().Add(key, value)
-		}
-	}
+	copyVideoResponseHeaders(c.Writer.Header(), resp.Header)
 
 	c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
 	c.Writer.WriteHeader(resp.StatusCode)
 	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
+	}
+}
+
+func copyVideoResponseHeaders(dst, src http.Header) {
+	for _, key := range []string{"Content-Type", "Content-Length", "Content-Disposition", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified"} {
+		for _, value := range src.Values(key) {
+			dst.Add(key, value)
+		}
 	}
 }
 

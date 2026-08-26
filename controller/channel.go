@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -69,6 +70,129 @@ func clearChannelInfo(channel *model.Channel) {
 		channel.ChannelInfo.MultiKeyDisabledReason = nil
 		channel.ChannelInfo.MultiKeyDisabledTime = nil
 	}
+	redactChannelBalanceQuerySecret(channel)
+}
+
+func maskChannelBalanceQuerySecret(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 8 {
+		return "••••••••"
+	}
+	return value[:4] + "••••••••" + value[len(value)-4:]
+}
+
+func redactChannelBalanceQuerySecret(channel *model.Channel) {
+	if channel == nil || strings.TrimSpace(channel.OtherSettings) == "" {
+		return
+	}
+	settings := dto.ChannelOtherSettings{}
+	if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+		return
+	}
+	config := settings.BalanceQuery
+	if config == nil {
+		return
+	}
+	changed := false
+	if config.Auth != nil {
+		value := strings.TrimSpace(config.Auth.Value)
+		if value != "" && !strings.Contains(value, "{api_key}") {
+			config.AuthConfigured = true
+			config.AuthMasked = maskChannelBalanceQuerySecret(value)
+			config.Auth.Value = ""
+			changed = true
+		}
+	}
+	for index := range config.Headers {
+		value := strings.TrimSpace(config.Headers[index].Value)
+		if value == "" || strings.Contains(value, "{api_key}") {
+			continue
+		}
+		config.Headers[index].Configured = true
+		config.Headers[index].Masked = maskChannelBalanceQuerySecret(value)
+		config.Headers[index].Value = ""
+		changed = true
+	}
+	if changed {
+		channel.SetOtherSettings(settings)
+	}
+}
+
+func restoreChannelBalanceQuerySecret(channel *model.Channel, origin *model.Channel, requestData map[string]any) error {
+	if channel == nil || origin == nil {
+		return nil
+	}
+	if _, provided := requestData["settings"]; !provided {
+		return nil
+	}
+	incomingSettings := dto.ChannelOtherSettings{}
+	if strings.TrimSpace(channel.OtherSettings) != "" {
+		if err := common.UnmarshalJsonStr(channel.OtherSettings, &incomingSettings); err != nil {
+			return err
+		}
+	}
+	config := incomingSettings.BalanceQuery
+	if config == nil {
+		return nil
+	}
+	originSettings := dto.ChannelOtherSettings{}
+	originLoaded := false
+	loadOrigin := func() error {
+		if originLoaded {
+			return nil
+		}
+		if err := common.UnmarshalJsonStr(origin.OtherSettings, &originSettings); err != nil {
+			return err
+		}
+		originLoaded = true
+		return nil
+	}
+	if config.AuthConfigured && (config.Auth == nil || strings.TrimSpace(config.Auth.Value) == "") {
+		if err := loadOrigin(); err != nil {
+			return err
+		}
+		if originSettings.BalanceQuery == nil || originSettings.BalanceQuery.Auth == nil || strings.TrimSpace(originSettings.BalanceQuery.Auth.Value) == "" {
+			return errors.New("configured balance query access token is no longer available")
+		}
+		if config.Auth == nil {
+			config.Auth = &dto.AdvancedCustomRouteAuth{
+				Type: dto.AdvancedCustomAuthTypeHeader,
+				Name: "Authorization",
+			}
+		}
+		config.Auth.Value = originSettings.BalanceQuery.Auth.Value
+	}
+	for index := range config.Headers {
+		header := &config.Headers[index]
+		if !header.Configured || strings.TrimSpace(header.Value) != "" {
+			header.Configured = false
+			header.Masked = ""
+			continue
+		}
+		if err := loadOrigin(); err != nil {
+			return err
+		}
+		if originSettings.BalanceQuery == nil {
+			return errors.New("configured balance query additional header is no longer available")
+		}
+		found := false
+		for _, originHeader := range originSettings.BalanceQuery.Headers {
+			if strings.EqualFold(strings.TrimSpace(originHeader.Name), strings.TrimSpace(header.Name)) && strings.TrimSpace(originHeader.Value) != "" {
+				header.Value = originHeader.Value
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("configured balance query header %s is no longer available", header.Name)
+		}
+		header.Configured = false
+		header.Masked = ""
+	}
+	config.AuthConfigured = false
+	config.AuthMasked = ""
+	channel.SetOtherSettings(incomingSettings)
+	return nil
 }
 
 func applyChannelStatusFilter(query *gorm.DB, statusFilter int) *gorm.DB {
@@ -453,6 +577,54 @@ func GetChannelKey(c *gin.Context) {
 	})
 }
 
+func channelBalanceQueryToken(channel *model.Channel) (string, error) {
+	if channel == nil {
+		return "", errors.New("channel does not exist")
+	}
+	config := channel.GetOtherSettings().BalanceQuery
+	if config == nil || config.Auth == nil {
+		return "", errors.New("balance query access token is not configured")
+	}
+	token := strings.TrimSpace(config.Auth.Value)
+	if token == "" || strings.Contains(token, "{api_key}") {
+		return "", errors.New("balance query access token is not configured")
+	}
+	return token, nil
+}
+
+// GetChannelBalanceQueryToken returns the complete upstream account token to
+// the root administrator. Normal channel responses remain redacted so the
+// secret is disclosed only for this explicit maintenance action.
+func GetChannelBalanceQueryToken(c *gin.Context) {
+	channelID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("invalid channel id: %w", err))
+		return
+	}
+	channel, err := model.GetChannelById(channelID, true)
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("failed to get channel: %w", err))
+		return
+	}
+	token, err := channelBalanceQueryToken(channel)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	recordManageAudit(c, "channel.balance_token_view", map[string]interface{}{
+		"id":   channelID,
+		"name": channel.Name,
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "success",
+		"data": gin.H{
+			"token": token,
+		},
+	})
+}
+
 // validateTwoFactorAuth 统一的2FA验证函数
 func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
 	// 尝试验证TOTP
@@ -487,6 +659,17 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
 	if isAdd {
+		balanceQuery := channel.GetOtherSettings().BalanceQuery
+		if balanceQuery != nil && (balanceQuery.AuthConfigured || strings.TrimSpace(balanceQuery.AuthMasked) != "") {
+			return fmt.Errorf("balance query access token must be provided when creating a channel")
+		}
+		if balanceQuery != nil {
+			for _, header := range balanceQuery.Headers {
+				if header.Configured || strings.TrimSpace(header.Masked) != "" {
+					return fmt.Errorf("balance query additional header values must be provided when creating a channel")
+				}
+			}
+		}
 		if channel.Key == "" {
 			return fmt.Errorf("channel cannot be empty")
 		}
@@ -963,6 +1146,21 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	clearChannelReadOnlyFields(&channel, requestData)
+	originChannel, err := model.GetChannelById(channel.Id, true)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	if err := restoreChannelBalanceQuerySecret(&channel.Channel, originChannel, requestData); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
 
 	// 使用统一的校验函数
 	if err := validateChannel(&channel.Channel, false); err != nil {
@@ -973,14 +1171,6 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	// Preserve existing ChannelInfo to ensure multi-key channels keep correct state even if the client does not send ChannelInfo in the request.
-	originChannel, err := model.GetChannelById(channel.Id, true)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
-		return
-	}
 	originProxy := originChannel.GetSetting().Proxy
 	proxyChanged := false
 	if _, settingProvided := requestData["setting"]; settingProvided {
@@ -1148,6 +1338,39 @@ func UpdateChannelStatus(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data":    changed,
+	})
+}
+
+func ResetChannelUsedQuota(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	channel, err := model.GetChannelById(id, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	previousUsedQuota, err := model.ResetChannelUsedQuota(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.InitChannelCache()
+	recordManageAudit(c, "channel.used_quota_reset", map[string]interface{}{
+		"id":                  channel.Id,
+		"name":                channel.Name,
+		"previous_used_quota": previousUsedQuota,
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"id":                  channel.Id,
+			"previous_used_quota": previousUsedQuota,
+			"used_quota":          0,
+		},
 	})
 }
 

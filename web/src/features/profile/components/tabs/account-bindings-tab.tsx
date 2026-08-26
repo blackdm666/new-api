@@ -28,6 +28,7 @@ import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { createOAuthFlow } from '@/features/auth/api'
+import { CustomOAuthProviderIcon } from '@/features/auth/components/custom-oauth-provider-icon'
 import {
   OAUTH_BIND_CALLBACK_MESSAGE,
   OAUTH_BIND_RESULT_MESSAGE,
@@ -44,15 +45,13 @@ import { api } from '@/lib/api'
 import {
   buildDiscordOAuthUrl,
   buildGitHubOAuthUrl,
+  indexCustomOAuthBindings,
   buildLinuxDOOAuthUrl,
   buildOIDCOAuthUrl,
+  type CustomOAuthBinding,
 } from '@/lib/oauth'
 
-import {
-  getSelfOAuthBindings,
-  unbindCustomOAuth,
-  type CustomOAuthBinding,
-} from '../../api'
+import { getSelfOAuthBindings, unbindCustomOAuth } from '../../api'
 import type { UserProfile, BindingItem } from '../../types'
 import { EmailBindDialog } from '../dialogs/email-bind-dialog'
 import { TelegramBindDialog } from '../dialogs/telegram-bind-dialog'
@@ -112,6 +111,10 @@ export function AccountBindingsTab({
   const customProviders = status?.custom_oauth_providers as
     | CustomOAuthProviderInfo[]
     | undefined
+  const customBindingsByProviderId = useMemo(
+    () => indexCustomOAuthBindings(customBindings),
+    [customBindings]
+  )
 
   const fetchCustomBindings = useCallback(async () => {
     if (!customProviders || customProviders.length === 0) return
@@ -474,9 +477,7 @@ export function AccountBindingsTab({
           </p>
           <div className='grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3'>
             {customProviders.map((provider) => {
-              const binding = customBindings.find(
-                (b) => b.provider_id === String(provider.id)
-              )
+              const binding = customBindingsByProviderId.get(provider.id)
               const isBound = !!binding
               return (
                 <div
@@ -485,7 +486,11 @@ export function AccountBindingsTab({
                 >
                   <div className='flex min-w-0 items-center gap-2.5 sm:gap-3'>
                     <div className='bg-muted shrink-0 rounded-md p-1.5 sm:p-2'>
-                      <Link2 className='h-4 w-4' />
+                      <CustomOAuthProviderIcon
+                        provider={provider}
+                        className='h-4 w-4 object-contain'
+                        fallback={<Link2 className='h-4 w-4' />}
+                      />
                     </div>
                     <div className='min-w-0'>
                       <div className='flex items-center gap-1.5'>
@@ -500,7 +505,7 @@ export function AccountBindingsTab({
                       </div>
                       <p className='text-muted-foreground truncate text-xs'>
                         {isBound
-                          ? binding?.external_id || t('Bound')
+                          ? binding?.provider_user_id || t('Bound')
                           : t('Not bound')}
                       </p>
                     </div>

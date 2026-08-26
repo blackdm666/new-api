@@ -234,6 +234,11 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	// Channel identity feeds the converter options snapshot (e.g.
 	// OpenRouterDialect); drop the cache so a cross-channel retry rebuilds it.
 	info.convOptions = nil
+	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || channelMeta.ChannelSetting.PassThroughBodyEnabled {
+		info.ReasoningEffort = ""
+	} else {
+		info.ReasoningEffort = reasoningEffortFromRequest(info.Request)
+	}
 
 	// reset some fields based on channel meta
 	// 重置某些字段，例如模型名称等
@@ -435,6 +440,36 @@ func GenRelayInfoOpenAI(c *gin.Context, request dto.Request) *RelayInfo {
 	return info
 }
 
+func reasoningEffortFromRequest(request dto.Request) string {
+	var effort string
+	switch req := request.(type) {
+	case *dto.GeneralOpenAIRequest:
+		if req == nil {
+			return ""
+		}
+		effort = req.ReasoningEffort
+		if strings.TrimSpace(effort) == "" && len(req.Reasoning) > 0 {
+			value := gjson.GetBytes(req.Reasoning, "effort")
+			if value.Type == gjson.String {
+				effort = value.String()
+			}
+		}
+	case *dto.OpenAIResponsesRequest:
+		if req != nil && req.Reasoning != nil {
+			effort = req.Reasoning.Effort
+		}
+	case *dto.ClaudeRequest:
+		if req != nil {
+			effort = req.GetEfforts()
+		}
+	case *dto.GeminiChatRequest:
+		if req != nil && req.GenerationConfig.ThinkingConfig != nil {
+			effort = req.GenerationConfig.ThinkingConfig.ThinkingLevel
+		}
+	}
+	return strings.TrimSpace(effort)
+}
+
 func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 	//channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
@@ -465,8 +500,10 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	if reqId == "" {
 		reqId = common.NewRequestId()
 	}
+	reasoningEffort := reasoningEffortFromRequest(request)
 	info := &RelayInfo{
-		Request: request,
+		Request:         request,
+		ReasoningEffort: reasoningEffort,
 
 		RequestId:  reqId,
 		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),
@@ -504,10 +541,9 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		info.RelayMode = c.GetInt("relay_mode")
 	}
 
-	if strings.HasPrefix(c.Request.URL.Path, "/pg") {
+	if relayconstant.IsPlaygroundRelayPath(c.Request.URL.Path) {
 		info.IsPlayground = true
-		info.RequestURLPath = strings.TrimPrefix(info.RequestURLPath, "/pg")
-		info.RequestURLPath = "/v1" + info.RequestURLPath
+		info.RequestURLPath = relayconstant.CanonicalRelayRequestPath(info.RequestURLPath)
 	}
 
 	userSetting, ok := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
@@ -740,7 +776,7 @@ func (info *RelayInfo) SetReasoningEffort(effort string) {
 	if info == nil {
 		return
 	}
-	info.ReasoningEffort = effort
+	info.ReasoningEffort = strings.TrimSpace(effort)
 }
 
 func (info *RelayInfo) EnsureClaudeConvertInfo() *convmeta.ClaudeConvertInfo {
@@ -816,6 +852,7 @@ func (info *RelayInfo) HasSendResponse() bool {
 type TaskRelayInfo struct {
 	Action       string
 	OriginTaskID string
+	CallbackURL  string
 	// PublicTaskID 是提交时预生成的 task_xxxx 格式公开 ID，
 	// 供 DoResponse 在返回给客户端时使用（避免暴露上游真实 ID）。
 	PublicTaskID string
@@ -834,10 +871,13 @@ type TaskSubmitReq struct {
 	Mode           string                 `json:"mode,omitempty"`
 	Image          string                 `json:"image,omitempty"`
 	Images         []string               `json:"images,omitempty"`
+	Video          string                 `json:"video,omitempty"`
+	Videos         []string               `json:"videos,omitempty"`
 	Size           string                 `json:"size,omitempty"`
 	Duration       int                    `json:"duration,omitempty"`
 	Seconds        string                 `json:"seconds,omitempty"`
 	InputReference string                 `json:"input_reference,omitempty"`
+	CallbackURL    string                 `json:"callback_url,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -847,6 +887,10 @@ func (t *TaskSubmitReq) GetPrompt() string {
 
 func (t *TaskSubmitReq) HasImage() bool {
 	return len(t.Images) > 0
+}
+
+func (t *TaskSubmitReq) HasVideo() bool {
+	return strings.TrimSpace(t.Video) != "" || len(t.Videos) > 0
 }
 
 func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {

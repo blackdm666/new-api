@@ -15,6 +15,8 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay"
+	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
@@ -36,6 +38,14 @@ var (
 	errUserPasswordUnset    = errors.New("user password is not set")
 	errOriginalPasswordFail = errors.New("original password is incorrect")
 )
+
+func writeLoginFailure(c *gin.Context, code string, messageKey string) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": false,
+		"code":    code,
+		"message": i18n.T(c, messageKey),
+	})
+}
 
 func Login(c *gin.Context) {
 	if !common.PasswordLoginEnabled {
@@ -66,8 +76,10 @@ func Login(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgDatabaseError)
 		case errors.Is(err, model.ErrUserEmptyCredentials):
 			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		case errors.Is(err, model.ErrUserDisabled):
+			writeLoginFailure(c, "AUTH_USER_DISABLED", i18n.MsgAuthUserBanned)
 		default:
-			common.ApiErrorI18n(c, i18n.MsgUserUsernameOrPasswordError)
+			writeLoginFailure(c, "AUTH_INVALID_CREDENTIALS", i18n.MsgUserUsernameOrPasswordError)
 		}
 		return
 	}
@@ -157,7 +169,7 @@ func setupLogin(user *model.User, c *gin.Context) {
 
 func setupLoginAtAuthVersion(user *model.User, expectedAuthVersion int64, c *gin.Context) {
 	if user == nil || user.Id <= 0 || user.Status != common.UserStatusEnabled {
-		common.ApiErrorI18n(c, i18n.MsgAuthUserBanned)
+		writeLoginFailure(c, "AUTH_USER_DISABLED", i18n.MsgAuthUserBanned)
 		return
 	}
 	currentUser, err := model.GetUserById(user.Id, false)
@@ -280,6 +292,9 @@ func Register(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if common.EmailVerificationEnabled {
+		common.DeleteKey(user.Email, common.EmailVerificationPurpose)
+	}
 
 	// 获取插入后的用户ID
 	var insertedUser model.User
@@ -368,8 +383,45 @@ func SearchUsers(c *gin.Context) {
 	return
 }
 
+func GetUserInviterOptions(c *gin.Context) {
+	targetUserId, err := strconv.Atoi(c.Query("target_id"))
+	if err != nil || targetUserId <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	targetUser, err := model.GetUserById(targetUserId, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !canManageTargetRole(c.GetInt("role"), targetUser.Role) {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+		return
+	}
+
+	selectedUserId := 0
+	if selected := strings.TrimSpace(c.Query("selected_id")); selected != "" {
+		selectedUserId, err = strconv.Atoi(selected)
+		if err != nil || selectedUserId < 0 {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+	}
+	options, err := model.SearchUserInviterOptions(c.Query("keyword"), targetUserId, selectedUserId, 20)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, options)
+}
+
 func canManageTargetRole(myRole int, targetRole int) bool {
 	return myRole == common.RoleRootUser || myRole > targetRole
+}
+
+type managedUserDetail struct {
+	*model.User
+	InviterUsername string `json:"inviter_username,omitempty"`
 }
 
 func GetUser(c *gin.Context) {
@@ -389,10 +441,21 @@ func GetUser(c *gin.Context) {
 		return
 	}
 	user.AdminPermissions = authz.Capabilities(user.Id, user.Role)
+	responseData := managedUserDetail{User: user}
+	if user.InviterId > 0 {
+		inviter, inviterErr := model.GetUserById(user.InviterId, false)
+		if inviterErr != nil && !errors.Is(inviterErr, gorm.ErrRecordNotFound) {
+			common.ApiError(c, inviterErr)
+			return
+		}
+		if inviterErr == nil {
+			responseData.InviterUsername = inviter.Username
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    user,
+		"data":    responseData,
 	})
 	return
 }
@@ -426,7 +489,8 @@ func GenerateAccessToken(c *gin.Context) {
 }
 
 type TransferAffQuotaRequest struct {
-	Quota int `json:"quota" binding:"required"`
+	Quota     int    `json:"quota" binding:"required"`
+	RequestId string `json:"request_id"`
 }
 
 func TransferAffQuota(c *gin.Context) {
@@ -445,7 +509,10 @@ func TransferAffQuota(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	err = user.TransferAffQuotaToQuota(tran.Quota)
+	if strings.TrimSpace(tran.RequestId) == "" {
+		tran.RequestId = common.NewRequestId()
+	}
+	err = model.TransferLegacyAffQuotaToQuota(user.Id, tran.Quota)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserTransferFailed, map[string]any{"Error": err.Error()})
 		return
@@ -476,6 +543,21 @@ func GetAffCode(c *gin.Context) {
 		"data":    user.AffCode,
 	})
 	return
+}
+
+func GetUserInvitees(c *gin.Context) {
+	userId := c.GetInt("id")
+	pageInfo := common.GetPageQuery(c)
+
+	invitees, total, err := model.GetUserInvitees(userId, pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	pageInfo.SetItems(invitees)
+	pageInfo.SetTotal(int(total))
+	common.ApiSuccess(c, pageInfo)
 }
 
 func GetSelf(c *gin.Context) {
@@ -655,19 +737,175 @@ func GetUserModels(c *gin.Context) {
 			groupsToQuery = []string{group}
 		}
 	}
+	models := service.GetGroupsEnabledModels(groupsToQuery)
+	data := any(models)
+	if c.Query("details") == "true" {
+		data = getPlaygroundModelDetails(models, groupsToQuery)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    service.GetGroupsEnabledModels(groupsToQuery),
+		"data":    data,
 	})
 }
 
+type playgroundModelDetail struct {
+	Model     string `json:"model"`
+	Mode      string `json:"mode"`
+	Transport string `json:"transport"`
+}
+
+func getPlaygroundModelDetails(models []string, groups []string) []playgroundModelDetail {
+	const (
+		modeChat        = "chat"
+		modeImage       = "image"
+		modeVideo       = "video"
+		modeUnsupported = "unsupported"
+		transportChat   = "chat"
+		transportImage  = "image"
+		transportVideo  = "video"
+	)
+
+	// Ensure endpoint metadata is populated before classifying image and
+	// Advanced Custom video routes.
+	model.GetPricing()
+	modes := make(map[string]string, len(models))
+	transports := make(map[string]string, len(models))
+	for _, modelName := range models {
+		modes[modelName] = modeChat
+		transports[modelName] = transportChat
+		for _, endpoint := range model.GetModelSupportEndpointTypes(modelName) {
+			switch endpoint {
+			case constant.EndpointTypeImageGeneration:
+				modes[modelName] = modeImage
+				transports[modelName] = transportImage
+			case constant.EndpointTypeOpenAIVideo:
+				if modes[modelName] != modeImage {
+					modes[modelName] = modeVideo
+					transports[modelName] = transportVideo
+				}
+			}
+		}
+		// Gemini image models generate through Chat Completions, while Grok
+		// image models use the OpenAI Images endpoint. Both still render as
+		// images in the prompt-only Playground.
+		if isPlaygroundChatImageModel(modelName) {
+			modes[modelName] = modeImage
+			transports[modelName] = transportChat
+		} else if isPlaygroundImageEndpointModel(modelName) {
+			modes[modelName] = modeImage
+			transports[modelName] = transportImage
+		}
+	}
+
+	groupSet := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		groupSet[group] = struct{}{}
+	}
+	abilities, err := model.GetAllEnableAbilityWithChannels()
+	if err == nil {
+		for _, ability := range abilities {
+			if _, ok := groupSet[ability.Group]; !ok || modes[ability.Model] == modeImage {
+				continue
+			}
+			adaptor := relay.GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(ability.ChannelType)))
+			if adaptor == nil || !stringSliceContains(adaptor.GetModelList(), ability.Model) {
+				continue
+			}
+			if tester, ok := adaptor.(channel.PromptOnlyVideoTester); ok && !tester.SupportsPromptOnlyVideo(ability.Model) {
+				if modes[ability.Model] == modeChat {
+					modes[ability.Model] = modeUnsupported
+				}
+				continue
+			}
+			modes[ability.Model] = modeVideo
+			transports[ability.Model] = transportVideo
+		}
+	}
+
+	details := make([]playgroundModelDetail, 0, len(models))
+	for _, modelName := range models {
+		details = append(details, playgroundModelDetail{
+			Model:     modelName,
+			Mode:      modes[modelName],
+			Transport: transports[modelName],
+		})
+	}
+	return details
+}
+
+func isPlaygroundChatImageModel(modelName string) bool {
+	modelName = strings.ToLower(modelName)
+	return strings.Contains(modelName, "nano-banana") ||
+		(strings.HasPrefix(modelName, "gemini-") &&
+			(strings.Contains(modelName, "-image") || strings.Contains(modelName, "image-generation")))
+}
+
+func isPlaygroundImageEndpointModel(modelName string) bool {
+	modelName = strings.ToLower(modelName)
+	return strings.HasPrefix(modelName, "grok-imagine-image") || modelName == "grok-2-image-1212"
+}
+
+func stringSliceContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+type updateUserRequest struct {
+	Id               int                        `json:"id"`
+	Username         string                     `json:"username"`
+	Password         string                     `json:"password"`
+	DisplayName      string                     `json:"display_name"`
+	Role             int                        `json:"role"`
+	Group            string                     `json:"group"`
+	Remark           string                     `json:"remark"`
+	AdminPermissions map[string]map[string]bool `json:"admin_permissions"`
+	InviterId        *int                       `json:"inviter_id"`
+}
+
+func writeUserInviterError(c *gin.Context, err error) bool {
+	var code string
+	var messageKey string
+	switch {
+	case errors.Is(err, model.ErrUserInviterInvalid):
+		code, messageKey = "USER_INVITER_INVALID", i18n.MsgUserInviterInvalid
+	case errors.Is(err, model.ErrUserInviterNotFound):
+		code, messageKey = "USER_INVITER_NOT_FOUND", i18n.MsgUserInviterNotFound
+	case errors.Is(err, model.ErrUserInviterSelf):
+		code, messageKey = "USER_INVITER_SELF", i18n.MsgUserInviterSelf
+	case errors.Is(err, model.ErrUserInviterCycle):
+		code, messageKey = "USER_INVITER_CYCLE", i18n.MsgUserInviterCycle
+	default:
+		return false
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": false,
+		"code":    code,
+		"message": i18n.T(c, messageKey),
+	})
+	return true
+}
+
 func UpdateUser(c *gin.Context) {
-	var updatedUser model.User
-	err := common.DecodeJson(c.Request.Body, &updatedUser)
-	if err != nil || updatedUser.Id == 0 {
+	var request updateUserRequest
+	err := common.DecodeJson(c.Request.Body, &request)
+	if err != nil || request.Id == 0 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
+	}
+	updatedUser := model.User{
+		Id:               request.Id,
+		Username:         request.Username,
+		Password:         request.Password,
+		DisplayName:      request.DisplayName,
+		Role:             request.Role,
+		Group:            request.Group,
+		Remark:           request.Remark,
+		AdminPermissions: request.AdminPermissions,
 	}
 	updatedUser.Username = strings.TrimSpace(updatedUser.Username)
 	if updatedUser.Username == "" {
@@ -701,7 +939,16 @@ func UpdateUser(c *gin.Context) {
 	}
 	updatePassword := updatedUser.Password != ""
 	authzTouched := false
+	previousInviterId := originUser.InviterId
+	inviterChanged := false
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if request.InviterId != nil {
+			var err error
+			previousInviterId, inviterChanged, err = model.UpdateUserInviterWithTx(tx, updatedUser.Id, *request.InviterId)
+			if err != nil {
+				return err
+			}
+		}
 		if err := updatedUser.EditWithTx(tx, updatePassword); err != nil {
 			return err
 		}
@@ -709,6 +956,9 @@ func UpdateUser(c *gin.Context) {
 		authzTouched = touched
 		return err
 	}); err != nil {
+		if writeUserInviterError(c, err) {
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}
@@ -728,10 +978,15 @@ func UpdateUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	recordManageAuditFor(c, updatedUser.Id, "user.update", map[string]interface{}{
+	auditDetails := map[string]interface{}{
 		"username": originUser.Username,
 		"id":       updatedUser.Id,
-	})
+	}
+	if inviterChanged && request.InviterId != nil {
+		auditDetails["previous_inviter_id"] = previousInviterId
+		auditDetails["inviter_id"] = *request.InviterId
+	}
+	recordManageAuditFor(c, updatedUser.Id, "user.update", auditDetails)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -1300,6 +1555,7 @@ func EmailBind(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	common.DeleteKey(email, common.EmailVerificationPurpose)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -1492,13 +1748,14 @@ func UpdateUserSetting(c *gin.Context) {
 	if user.Role >= common.RoleAdminUser && req.UpstreamModelUpdateNotifyEnabled != nil {
 		upstreamModelUpdateNotifyEnabled = *req.UpstreamModelUpdateNotifyEnabled
 	}
+	acceptUnsetRatioModel := user.Role >= common.RoleAdminUser && req.AcceptUnsetModelRatioModel
 
 	// 构建设置
 	settings := dto.UserSetting{
 		NotifyType:                       req.QuotaWarningType,
 		QuotaWarningThreshold:            req.QuotaWarningThreshold,
 		UpstreamModelUpdateNotifyEnabled: upstreamModelUpdateNotifyEnabled,
-		AcceptUnsetRatioModel:            req.AcceptUnsetModelRatioModel,
+		AcceptUnsetRatioModel:            acceptUnsetRatioModel,
 		RecordIpLog:                      req.RecordIpLog,
 	}
 

@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { describe, expect, test } from 'vitest'
 
 import { PAYMENT_TYPES } from '../constants'
 import { requestPaymentAmount } from './use-payment'
@@ -44,7 +43,23 @@ describe('payment amount routing', () => {
       },
     })
 
-    assert.equal(amount, 18.75)
-    assert.deepEqual(calls, ['waffo:120'])
+    expect(amount).toBe(18.75)
+    expect(calls).toEqual(['waffo:120'])
+  })
+
+  test('uses the NewAPI regular amount calculator for Antom', async () => {
+    const calls: string[] = []
+    const amount = await requestPaymentAmount(10, PAYMENT_TYPES.ANTOM, {
+      regular: async (request) => {
+        calls.push(`regular:${request.amount}`)
+        return { success: true, data: '10.00' }
+      },
+      stripe: async () => ({ success: true, data: '0' }),
+      waffo: async () => ({ success: true, data: '0' }),
+      waffoPancake: async () => ({ success: true, data: '0' }),
+    })
+
+    expect(amount).toBe(10)
+    expect(calls).toEqual(['regular:10'])
   })
 })

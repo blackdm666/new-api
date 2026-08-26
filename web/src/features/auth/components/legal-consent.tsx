@@ -37,9 +37,10 @@ export function LegalConsent({
   onCheckedChange,
   className,
 }: LegalConsentProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const hasUserAgreement = Boolean(status?.user_agreement_enabled)
   const hasPrivacyPolicy = Boolean(status?.privacy_policy_enabled)
+  const isChinese = i18n.resolvedLanguage?.toLowerCase().startsWith('zh')
 
   if (!hasUserAgreement && !hasPrivacyPolicy) {
     return null
@@ -52,7 +53,9 @@ export function LegalConsent({
   return (
     <div
       className={cn(
-        'border-border/60 bg-muted/40 flex items-start gap-3 rounded-md border p-3',
+        'border-border/60 bg-muted/40 flex items-start gap-3 rounded-md border p-3 transition-[border-color,box-shadow]',
+        !checked &&
+          'border-blue-500/70 shadow-[0_0_0_1px_rgb(59_130_246_/_0.30),0_0_18px_rgb(37_99_235_/_0.22)]',
         className
       )}
     >
@@ -64,34 +67,76 @@ export function LegalConsent({
       />
       <Label
         htmlFor='legal-consent'
-        className='text-muted-foreground items-start gap-1 text-left text-xs leading-5 font-normal'
+        className='text-muted-foreground min-w-0 flex-1 items-start gap-1 text-left text-xs leading-5 font-normal'
       >
         <span>
-          {t('I have read and agree to the')}{' '}
-          {hasUserAgreement && (
-            <a
-              href='/user-agreement'
-              target='_blank'
-              rel='noopener noreferrer'
-              className='text-primary hover:underline'
-            >
-              {t('User Agreement')}
-            </a>
+          {t('I have read and agree to the')}
+          {isChinese ? (
+            <>
+              {hasUserAgreement && (
+                <>
+                  《
+                  <a
+                    href='/user-agreement'
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    className='text-primary hover:underline'
+                  >
+                    {t('User Agreement')}
+                  </a>
+                  》
+                </>
+              )}
+              {hasUserAgreement && hasPrivacyPolicy && '和'}
+              {hasPrivacyPolicy && (
+                <>
+                  《
+                  <a
+                    href='/privacy-policy'
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    className='text-primary hover:underline'
+                  >
+                    {t('Privacy Policy')}
+                  </a>
+                  》
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              {' '}
+              {hasUserAgreement && (
+                <a
+                  href='/user-agreement'
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='text-primary hover:underline'
+                >
+                  {t('User Agreement')}
+                </a>
+              )}
+              {hasUserAgreement && hasPrivacyPolicy && ' and the '}
+              {hasPrivacyPolicy && (
+                <a
+                  href='/privacy-policy'
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='text-primary hover:underline'
+                >
+                  {t('Privacy Policy')}
+                </a>
+              )}
+              .
+            </>
           )}
-          {hasUserAgreement && hasPrivacyPolicy && ' and the '}
-          {hasPrivacyPolicy && (
-            <a
-              href='/privacy-policy'
-              target='_blank'
-              rel='noopener noreferrer'
-              className='text-primary hover:underline'
-            >
-              {t('Privacy Policy')}
-            </a>
-          )}
-          .
         </span>
       </Label>
+      {!checked && (
+        <span className='shrink-0 rounded-full border border-blue-400/60 bg-blue-950/20 px-2 py-1 text-[11px] leading-none font-semibold text-blue-500 dark:text-blue-300'>
+          ✓ {t('Required')}
+        </span>
+      )}
     </div>
   )
 }

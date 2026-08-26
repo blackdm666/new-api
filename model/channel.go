@@ -21,25 +21,26 @@ import (
 )
 
 type Channel struct {
-	Id                 int     `json:"id"`
-	Type               int     `json:"type" gorm:"default:0"`
-	Key                string  `json:"key" gorm:"not null"`
-	OpenAIOrganization *string `json:"openai_organization"`
-	TestModel          *string `json:"test_model"`
-	Status             int     `json:"status" gorm:"default:1"`
-	Name               string  `json:"name" gorm:"index"`
-	Weight             *uint   `json:"weight" gorm:"default:0"`
-	CreatedTime        int64   `json:"created_time" gorm:"bigint"`
-	TestTime           int64   `json:"test_time" gorm:"bigint"`
-	ResponseTime       int     `json:"response_time"` // in milliseconds
-	BaseURL            *string `json:"base_url" gorm:"column:base_url;default:''"`
-	Other              string  `json:"other"`
-	Balance            float64 `json:"balance"` // in USD
-	BalanceUpdatedTime int64   `json:"balance_updated_time" gorm:"bigint"`
-	Models             string  `json:"models"`
-	Group              string  `json:"group" gorm:"type:varchar(64);default:'default'"`
-	UsedQuota          int64   `json:"used_quota" gorm:"bigint;default:0"`
-	ModelMapping       *string `json:"model_mapping" gorm:"type:text"`
+	Id                 int                 `json:"id"`
+	Type               int                 `json:"type" gorm:"default:0"`
+	Key                string              `json:"key" gorm:"not null"`
+	OpenAIOrganization *string             `json:"openai_organization"`
+	TestModel          *string             `json:"test_model"`
+	Status             int                 `json:"status" gorm:"default:1"`
+	Name               string              `json:"name" gorm:"index"`
+	Weight             *uint               `json:"weight" gorm:"default:0"`
+	CreatedTime        int64               `json:"created_time" gorm:"bigint"`
+	TestTime           int64               `json:"test_time" gorm:"bigint"`
+	ResponseTime       int                 `json:"response_time"` // in milliseconds
+	BaseURL            *string             `json:"base_url" gorm:"column:base_url;default:''"`
+	Other              string              `json:"other"`
+	Balance            float64             `json:"balance"` // in USD
+	BalanceUpdatedTime int64               `json:"balance_updated_time" gorm:"bigint"`
+	BalanceInfo        *ChannelBalanceInfo `json:"balance_info,omitempty" gorm:"type:json"`
+	Models             string              `json:"models"`
+	Group              string              `json:"group" gorm:"type:varchar(64);default:'default'"`
+	UsedQuota          int64               `json:"used_quota" gorm:"bigint;default:0"`
+	ModelMapping       *string             `json:"model_mapping" gorm:"type:text"`
 	//MaxInputTokens     *int    `json:"max_input_tokens" gorm:"default:0"`
 	StatusCodeMapping *string `json:"status_code_mapping" gorm:"type:varchar(1024);default:''"`
 	Priority          *int64  `json:"priority" gorm:"bigint;default:0"`
@@ -346,11 +347,21 @@ func (channel *Channel) Save() error {
 	return DB.Save(channel).Error
 }
 
-func (channel *Channel) SaveWithoutKey() error {
+// saveStatusState persists only the fields owned by the channel status flow.
+// Keeping this allowlist here prevents a stale channel snapshot from
+// overwriting credentials, accounting counters, or channel configuration.
+func (channel *Channel) saveStatusState() error {
 	if channel.Id == 0 {
 		return errors.New("channel ID is 0")
 	}
-	return DB.Omit("key").Save(channel).Error
+	updates := map[string]any{
+		"status":     channel.Status,
+		"other_info": channel.OtherInfo,
+	}
+	if channel.ChannelInfo.IsMultiKey {
+		updates["channel_info"] = channel.ChannelInfo
+	}
+	return DB.Model(&Channel{}).Where("id = ?", channel.Id).Updates(updates).Error
 }
 
 func GetAllChannels(startIdx int, num int, selectAll bool, idSort bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {
@@ -713,19 +724,24 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 	if common.MemoryCacheEnabled {
 		channelStatusLock.Lock()
 		defer channelStatusLock.Unlock()
+	}
 
+	// ChannelInfo stores both multi-key status and the polling cursor. Hold the
+	// same per-channel lock from the first read through persistence so neither
+	// writer can save a stale JSON snapshot over the other.
+	pollingLock := GetChannelPollingLock(channelId)
+	pollingLock.Lock()
+	defer pollingLock.Unlock()
+
+	if common.MemoryCacheEnabled {
 		channelCache, _ := CacheGetChannel(channelId)
 		if channelCache == nil {
 			return false
 		}
 		if channelCache.ChannelInfo.IsMultiKey {
-			// Use per-channel lock to prevent concurrent map read/write with GetNextEnabledKey
 			beforeStatus := channelCache.Status
-			pollingLock := GetChannelPollingLock(channelId)
-			pollingLock.Lock()
 			// 如果是多Key模式，更新缓存中的状态
 			handlerMultiKeyUpdate(channelCache, usingKey, status, reason)
-			pollingLock.Unlock()
 			if beforeStatus != channelCache.Status {
 				CacheUpdateChannelStatus(channelId, channelCache.Status)
 			}
@@ -759,11 +775,7 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 
 		if channel.ChannelInfo.IsMultiKey {
 			beforeStatus := channel.Status
-			// Protect map writes with the same per-channel lock used by readers
-			pollingLock := GetChannelPollingLock(channelId)
-			pollingLock.Lock()
 			handlerMultiKeyUpdate(channel, usingKey, status, reason)
-			pollingLock.Unlock()
 			if beforeStatus != channel.Status {
 				shouldUpdateAbilities = true
 			}
@@ -775,7 +787,7 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 			channel.Status = status
 			shouldUpdateAbilities = true
 		}
-		err = channel.SaveWithoutKey()
+		err = channel.saveStatusState()
 		if err != nil {
 			common.SysLog(fmt.Sprintf("failed to update channel status: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
 			return false
@@ -864,6 +876,35 @@ func UpdateChannelUsedQuota(id int, quota int) {
 		return
 	}
 	updateChannelUsedQuota(id, quota)
+}
+
+// ResetChannelUsedQuota establishes a clean local accounting baseline for a
+// channel. It also discards any usage delta that was queued before the reset,
+// so batch accounting cannot make pre-reset usage reappear afterward.
+func ResetChannelUsedQuota(id int) (int64, error) {
+	if id <= 0 {
+		return 0, errors.New("invalid channel id")
+	}
+	batchUpdateRunMutex.Lock()
+	defer batchUpdateRunMutex.Unlock()
+
+	batchUpdateLocks[BatchUpdateTypeChannelUsedQuota].Lock()
+	defer batchUpdateLocks[BatchUpdateTypeChannelUsedQuota].Unlock()
+	pending := batchUpdateStores[BatchUpdateTypeChannelUsedQuota][id]
+	var previous int64
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		channel := &Channel{}
+		if err := lockForUpdate(tx).Select("id", "used_quota").Where("id = ?", id).First(channel).Error; err != nil {
+			return err
+		}
+		previous = channel.UsedQuota
+		return tx.Model(&Channel{}).Where("id = ?", id).Update("used_quota", 0).Error
+	})
+	if err != nil {
+		return 0, err
+	}
+	delete(batchUpdateStores[BatchUpdateTypeChannelUsedQuota], id)
+	return previous + int64(pending), nil
 }
 
 func updateChannelUsedQuota(id int, quota int) {
@@ -971,6 +1012,11 @@ func (channel *Channel) ValidateSettings() error {
 	}
 	if channelOtherSettings.AdvancedCustom != nil {
 		if err := channelOtherSettings.AdvancedCustom.Validate(); err != nil {
+			return err
+		}
+	}
+	if channelOtherSettings.BalanceQuery != nil {
+		if err := channelOtherSettings.BalanceQuery.Validate(); err != nil {
 			return err
 		}
 	}

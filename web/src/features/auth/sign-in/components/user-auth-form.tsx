@@ -46,6 +46,7 @@ import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { loginFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
+import { runTurnstileProtectedAuthAttempt } from '@/features/auth/lib/turnstile-auth-attempt'
 import { beginPasskeyLogin, finishPasskeyLogin } from '@/features/auth/passkey'
 import type { AuthFormProps } from '@/features/auth/types'
 import { useStatus } from '@/hooks/use-status'
@@ -72,6 +73,7 @@ export function UserAuthForm({
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false)
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
   const [isWeChatSubmitting, setIsWeChatSubmitting] = useState(false)
+  const [turnstileWidgetKey, setTurnstileWidgetKey] = useState(0)
   const legalConsentErrorMessage = t('Please agree to the legal terms first')
   const loginFailedMessage = t('Login failed')
 
@@ -89,6 +91,7 @@ export function UserAuthForm({
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
+    isStatusReady,
   } = useTurnstile()
   const { handleLoginSuccess, redirectTo2FA } = useAuthRedirect()
   const setPending2FAFlowToken = useAuthStore(
@@ -113,6 +116,18 @@ export function UserAuthForm({
   )
   const hasAlternativeLogin =
     passkeyLoginEnabled || hasWeChatLogin || hasOAuthLogin
+  const requiresTurnstileSurface =
+    passwordLoginEnabled || hasWeChatLogin || hasOAuthLogin
+  const turnstileReady =
+    isStatusReady && (!isTurnstileEnabled || Boolean(turnstileToken))
+  const turnstilePayload = { turnstile: turnstileToken }
+  const resetTurnstile = () => {
+    setTurnstileToken('')
+    if (isTurnstileEnabled) {
+      setTurnstileWidgetKey((current) => current + 1)
+    }
+  }
+  const clearTurnstileToken = () => setTurnstileToken('')
 
   useEffect(() => {
     if (requiresLegalConsent) {
@@ -158,30 +173,38 @@ export function UserAuthForm({
 
     if (!validateTurnstile()) return
 
+    const submittedTurnstileToken = turnstileToken
+
     setIsLoading(true)
     try {
-      const res = await login({
-        username: data.username,
-        password: data.password,
-        turnstile: turnstileToken,
-      })
+      await runTurnstileProtectedAuthAttempt(
+        async () => {
+          const res = await login({
+            username: data.username,
+            password: data.password,
+            turnstile: submittedTurnstileToken,
+          })
 
-      if (res.success) {
-        if (res.data && 'require_2fa' in res.data && res.data.require_2fa) {
-          if (!res.data.flow_token) {
-            throw new Error(t('Login flow expired. Please sign in again.'))
+          if (!res.success) return false
+
+          if (res.data && 'require_2fa' in res.data && res.data.require_2fa) {
+            if (!res.data.flow_token) {
+              throw new Error(t('Login flow expired. Please sign in again.'))
+            }
+            setPending2FAFlowToken(res.data.flow_token)
+            redirectTo2FA()
+            return true
           }
-          setPending2FAFlowToken(res.data.flow_token)
-          redirectTo2FA()
-          return
-        }
 
-        if (!isAuthBundle(res.data)) {
-          throw new Error(t('Login failed'))
-        }
-        await handleLoginSuccess(res.data, redirectTo)
-        toast.success(t('Welcome back!'))
-      }
+          if (!isAuthBundle(res.data)) {
+            throw new Error(t('Login failed'))
+          }
+          await handleLoginSuccess(res.data, redirectTo)
+          toast.success(t('Welcome back!'))
+          return true
+        },
+        isTurnstileEnabled ? resetTurnstile : undefined
+      )
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) return
       toast.error(error instanceof Error ? error.message : loginFailedMessage)
@@ -195,6 +218,7 @@ export function UserAuthForm({
       toast.error(legalConsentErrorMessage)
       return
     }
+    if (!validateTurnstile()) return
 
     setIsWeChatDialogOpen(true)
   }
@@ -215,7 +239,7 @@ export function UserAuthForm({
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode)
+      const res = await wechatLoginByCode(wechatCode, turnstilePayload)
       if (res?.success && isAuthBundle(res.data)) {
         await handleLoginSuccess(res.data, redirectTo)
         toast.success(t('Signed in via WeChat'))
@@ -229,6 +253,7 @@ export function UserAuthForm({
       toast.error(loginFailedMessage)
     } finally {
       setIsWeChatSubmitting(false)
+      resetTurnstile()
     }
   }
 
@@ -337,6 +362,11 @@ export function UserAuthForm({
         disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
         onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
         isWeChatLoading={isWeChatSubmitting}
+        turnstileVerification={{
+          ...turnstilePayload,
+          validate: validateTurnstile,
+          reset: resetTurnstile,
+        }}
       />
     </>
   )
@@ -393,27 +423,19 @@ export function UserAuthForm({
                 </FormItem>
               )}
             />
-
-            {/* Submit Button */}
-            <Button
-              type='submit'
-              className='mt-2 w-full justify-center gap-2'
-              disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
-            >
-              {isLoading ? <Loader2 className='animate-spin' /> : <LogIn />}
-              {t('Sign in')}
-            </Button>
-
-            {/* Turnstile */}
-            {isTurnstileEnabled && (
-              <div className='mt-2'>
-                <Turnstile
-                  siteKey={turnstileSiteKey}
-                  onVerify={setTurnstileToken}
-                />
-              </div>
-            )}
           </>
+        )}
+
+        {/* Turnstile also gates registration-capable OAuth routes. */}
+        {requiresTurnstileSurface && isTurnstileEnabled && (
+          <div className='mt-2'>
+            <Turnstile
+              key={turnstileWidgetKey}
+              siteKey={turnstileSiteKey}
+              onVerify={setTurnstileToken}
+              onExpire={clearTurnstileToken}
+            />
+          </div>
         )}
 
         <LegalConsent
@@ -424,6 +446,21 @@ export function UserAuthForm({
         />
 
         {!hasAlternativeLogin && alternativeLoginMethods}
+
+        {passwordLoginEnabled && (
+          <Button
+            type='submit'
+            className='mt-2 w-full justify-center gap-2'
+            disabled={
+              isLoading ||
+              !turnstileReady ||
+              (requiresLegalConsent && !agreedToLegal)
+            }
+          >
+            {isLoading ? <Loader2 className='animate-spin' /> : <LogIn />}
+            {t('Sign in')}
+          </Button>
+        )}
       </form>
 
       {hasWeChatLogin && (

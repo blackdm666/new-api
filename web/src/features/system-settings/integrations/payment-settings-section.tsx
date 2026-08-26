@@ -60,6 +60,10 @@ import { useUpdateOption } from '../hooks/use-update-option'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import { AmountDiscountVisualEditor } from './amount-discount-visual-editor'
 import { AmountOptionsVisualEditor } from './amount-options-visual-editor'
+import {
+  AntomSettingsSection,
+  type AntomSettingsValues,
+} from './antom-settings-section'
 import { CreemProductsVisualEditor } from './creem-products-visual-editor'
 import { PaymentMethodsVisualEditor } from './payment-methods-visual-editor'
 import {
@@ -94,7 +98,41 @@ function isHttpOriginUrl(value: string) {
   }
 }
 
-const paymentSchema = z.object({
+function isAllowedAntomUrl(
+  value: string,
+  clientId: string,
+  originOnly: boolean
+) {
+  const trimmed = value.trim()
+  if (!trimmed) return true
+
+  try {
+    const url = new URL(trimmed)
+    const isSandbox = clientId.trim().startsWith('SANDBOX_')
+    const isLocalhost = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(
+      url.hostname
+    )
+    const isAllowedProtocol =
+      url.protocol === 'https:' ||
+      (isSandbox && isLocalhost && url.protocol === 'http:')
+    const isAllowedOrigin =
+      !originOnly ||
+      ((url.pathname === '' || url.pathname === '/') &&
+        !url.search &&
+        !url.hash)
+    return (
+      isAllowedProtocol &&
+      isAllowedOrigin &&
+      !url.username &&
+      !url.password &&
+      !url.hash
+    )
+  } catch {
+    return false
+  }
+}
+
+const paymentBaseSchema = z.object({
   PayAddress: z.string().refine((value) => {
     const trimmed = value.trim()
     if (!trimmed) return true
@@ -159,6 +197,14 @@ const paymentSchema = z.object({
       })
     }
   }),
+  AntomEnabled: z.boolean(),
+  AntomDisplayName: z.string().max(64),
+  AntomGateway: z.string(),
+  AntomClientId: z.string(),
+  AntomMerchantPrivateKey: z.string(),
+  AntomPublicKey: z.string(),
+  AntomNotifyURL: z.string(),
+  AntomRedirectURL: z.string(),
   WaffoEnabled: z.boolean(),
   WaffoApiKey: z.string(),
   WaffoPrivateKey: z.string(),
@@ -176,6 +222,35 @@ const paymentSchema = z.object({
   WaffoPancakeMerchantID: z.string(),
   WaffoPancakePrivateKey: z.string(),
   WaffoPancakeReturnURL: z.string(),
+})
+
+const paymentSchema = paymentBaseSchema.superRefine((values, ctx) => {
+  if (!isAllowedAntomUrl(values.AntomGateway, values.AntomClientId, true)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'Use an HTTPS Antom gateway origin without a path or query. Sandbox localhost may use HTTP.',
+      path: ['AntomGateway'],
+    })
+  }
+  if (!isAllowedAntomUrl(values.AntomNotifyURL, values.AntomClientId, false)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'Use an HTTPS Antom notification URL. Sandbox localhost may use HTTP.',
+      path: ['AntomNotifyURL'],
+    })
+  }
+  if (
+    !isAllowedAntomUrl(values.AntomRedirectURL, values.AntomClientId, false)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'Use an HTTPS Antom redirect URL. Sandbox localhost may use HTTP.',
+      path: ['AntomRedirectURL'],
+    })
+  }
 })
 
 type PaymentFormValues = z.infer<typeof paymentSchema>
@@ -202,6 +277,10 @@ type PaymentSettingsSectionProps = {
   waffoPancakeProvisionedStoreID?: string
   waffoPancakeProvisionedProductID?: string
   complianceDefaults: PaymentComplianceDefaults
+  antomCredentialStatus: {
+    privateKeyConfigured: boolean
+    publicKeyConfigured: boolean
+  }
 }
 
 function parseWaffoPayMethods(value: string): PayMethod[] {
@@ -220,6 +299,7 @@ export function PaymentSettingsSection({
   waffoPancakeProvisionedStoreID,
   waffoPancakeProvisionedProductID,
   complianceDefaults,
+  antomCredentialStatus,
 }: PaymentSettingsSectionProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -404,6 +484,19 @@ export function PaymentSettingsSection({
     [setPaymentValue]
   )
 
+  const setAntomValue = React.useCallback(
+    <K extends keyof AntomSettingsValues>(
+      key: K,
+      value: AntomSettingsValues[K]
+    ) => {
+      setPaymentValue(
+        key as keyof PaymentFormValues,
+        value as PaymentFormValues[keyof PaymentFormValues]
+      )
+    },
+    [setPaymentValue]
+  )
+
   React.useEffect(() => {
     const parsedDefaults = JSON.parse(defaultsSignature) as PaymentFormValues
     initialRef.current = parsedDefaults
@@ -437,6 +530,14 @@ export function PaymentSettingsSection({
       CreemWebhookSecret: values.CreemWebhookSecret.trim(),
       CreemTestMode: values.CreemTestMode,
       CreemProducts: values.CreemProducts.trim(),
+      AntomEnabled: values.AntomEnabled,
+      AntomDisplayName: values.AntomDisplayName.trim(),
+      AntomGateway: removeTrailingSlash(values.AntomGateway),
+      AntomClientId: values.AntomClientId.trim(),
+      AntomMerchantPrivateKey: values.AntomMerchantPrivateKey.trim(),
+      AntomPublicKey: values.AntomPublicKey.trim(),
+      AntomNotifyURL: values.AntomNotifyURL.trim(),
+      AntomRedirectURL: values.AntomRedirectURL.trim(),
       WaffoEnabled: values.WaffoEnabled,
       WaffoSandbox: values.WaffoSandbox,
       WaffoMerchantId: values.WaffoMerchantId.trim(),
@@ -482,6 +583,15 @@ export function PaymentSettingsSection({
       CreemWebhookSecret: initialRef.current.CreemWebhookSecret.trim(),
       CreemTestMode: initialRef.current.CreemTestMode,
       CreemProducts: initialRef.current.CreemProducts.trim(),
+      AntomEnabled: initialRef.current.AntomEnabled,
+      AntomDisplayName: initialRef.current.AntomDisplayName.trim(),
+      AntomGateway: removeTrailingSlash(initialRef.current.AntomGateway),
+      AntomClientId: initialRef.current.AntomClientId.trim(),
+      AntomMerchantPrivateKey:
+        initialRef.current.AntomMerchantPrivateKey.trim(),
+      AntomPublicKey: initialRef.current.AntomPublicKey.trim(),
+      AntomNotifyURL: initialRef.current.AntomNotifyURL.trim(),
+      AntomRedirectURL: initialRef.current.AntomRedirectURL.trim(),
       WaffoEnabled: initialRef.current.WaffoEnabled,
       WaffoSandbox: initialRef.current.WaffoSandbox,
       WaffoMerchantId: initialRef.current.WaffoMerchantId.trim(),
@@ -629,6 +739,47 @@ export function PaymentSettingsSection({
       updates.push({ key: 'CreemProducts', value: sanitized.CreemProducts })
     }
 
+    if (sanitized.AntomEnabled !== initial.AntomEnabled) {
+      updates.push({ key: 'AntomEnabled', value: sanitized.AntomEnabled })
+    }
+
+    if (sanitized.AntomDisplayName !== initial.AntomDisplayName) {
+      updates.push({
+        key: 'AntomDisplayName',
+        value: sanitized.AntomDisplayName,
+      })
+    }
+
+    if (sanitized.AntomGateway !== initial.AntomGateway) {
+      updates.push({ key: 'AntomGateway', value: sanitized.AntomGateway })
+    }
+
+    if (sanitized.AntomClientId !== initial.AntomClientId) {
+      updates.push({ key: 'AntomClientId', value: sanitized.AntomClientId })
+    }
+
+    if (sanitized.AntomMerchantPrivateKey) {
+      updates.push({
+        key: 'AntomMerchantPrivateKey',
+        value: sanitized.AntomMerchantPrivateKey,
+      })
+    }
+
+    if (sanitized.AntomPublicKey) {
+      updates.push({ key: 'AntomPublicKey', value: sanitized.AntomPublicKey })
+    }
+
+    if (sanitized.AntomNotifyURL !== initial.AntomNotifyURL) {
+      updates.push({ key: 'AntomNotifyURL', value: sanitized.AntomNotifyURL })
+    }
+
+    if (sanitized.AntomRedirectURL !== initial.AntomRedirectURL) {
+      updates.push({
+        key: 'AntomRedirectURL',
+        value: sanitized.AntomRedirectURL,
+      })
+    }
+
     if (sanitized.WaffoEnabled !== initial.WaffoEnabled) {
       updates.push({ key: 'WaffoEnabled', value: sanitized.WaffoEnabled })
     }
@@ -773,6 +924,16 @@ export function PaymentSettingsSection({
   }
 
   const currentFormValues = form.watch()
+  const antomValues: AntomSettingsValues = {
+    AntomEnabled: currentFormValues.AntomEnabled,
+    AntomDisplayName: currentFormValues.AntomDisplayName,
+    AntomGateway: currentFormValues.AntomGateway,
+    AntomClientId: currentFormValues.AntomClientId,
+    AntomMerchantPrivateKey: currentFormValues.AntomMerchantPrivateKey,
+    AntomPublicKey: currentFormValues.AntomPublicKey,
+    AntomNotifyURL: currentFormValues.AntomNotifyURL,
+    AntomRedirectURL: currentFormValues.AntomRedirectURL,
+  }
   const waffoValues: WaffoSettingsValues = {
     WaffoEnabled: currentFormValues.WaffoEnabled,
     WaffoApiKey: currentFormValues.WaffoApiKey,
@@ -877,9 +1038,10 @@ export function PaymentSettingsSection({
           />
           <Tabs defaultValue='general' className='min-w-0'>
             <div className='overflow-x-auto pb-1'>
-              <TabsList className='grid min-w-[44rem] grid-cols-6'>
+              <TabsList className='grid min-w-[52rem] grid-cols-7'>
                 <TabsTrigger value='general'>{t('General')}</TabsTrigger>
                 <TabsTrigger value='epay'>Epay</TabsTrigger>
+                <TabsTrigger value='antom'>Antom</TabsTrigger>
                 <TabsTrigger value='stripe'>{t('Stripe')}</TabsTrigger>
                 <TabsTrigger value='creem'>Creem</TabsTrigger>
                 <TabsTrigger value='waffo-pancake'>Waffo Pancake</TabsTrigger>
@@ -1002,7 +1164,7 @@ export function PaymentSettingsSection({
                       </FormControl>
                       <FormDescription>
                         {t(
-                          'Configured as PayMethods JSON. The type value decides which payment flow is used: stripe for Stripe, waffo_pancake for Waffo Pancake, and other values are sent to Epay as the type parameter.'
+                          'Configured as PayMethods JSON. The type value decides which payment flow is used: antom for Antom Checkout, stripe for Stripe, waffo_pancake for Waffo Pancake, and other values are sent to Epay as the type parameter.'
                         )}
                       </FormDescription>
                       <FormMessage />
@@ -1251,6 +1413,23 @@ export function PaymentSettingsSection({
                   />
                 </div>
               </div>
+            </TabsContent>
+
+            <TabsContent value='antom' className={paymentTabContentClassName}>
+              <AntomSettingsSection
+                values={antomValues}
+                onValueChange={setAntomValue}
+                privateKeyConfigured={
+                  antomCredentialStatus.privateKeyConfigured
+                }
+                publicKeyConfigured={antomCredentialStatus.publicKeyConfigured}
+                errors={{
+                  AntomGateway: form.formState.errors.AntomGateway?.message,
+                  AntomNotifyURL: form.formState.errors.AntomNotifyURL?.message,
+                  AntomRedirectURL:
+                    form.formState.errors.AntomRedirectURL?.message,
+                }}
+              />
             </TabsContent>
 
             <TabsContent value='stripe' className={paymentTabContentClassName}>

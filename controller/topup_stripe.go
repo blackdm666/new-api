@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"github.com/stripe/stripe-go/v81"
 	"github.com/stripe/stripe-go/v81/checkout/session"
 	"github.com/stripe/stripe-go/v81/webhook"
@@ -47,10 +48,17 @@ func (*StripeAdaptor) RequestAmount(c *gin.Context, req *StripePayRequest) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", getStripeMinTopup())})
 		return
 	}
+	if req.Amount > 10000 {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值数量不能大于 10000"})
+		return
+	}
 	id := c.GetInt("id")
 	group, err := model.GetUserGroup(id, true)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
+		return
+	}
+	if rejectInvalidCreditedQuota(c, id, getStripeCreditedQuota(req.Amount, group)) {
 		return
 	}
 	payMoney := getStripePayMoney(float64(req.Amount), group)
@@ -86,8 +94,22 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	}
 
 	id := c.GetInt("id")
-	user, _ := model.GetUserById(id, false)
-	chargedMoney := GetChargedAmount(float64(req.Amount), *user)
+	user, err := model.GetUserById(id, false)
+	if err != nil || user == nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "用户不存在"})
+		return
+	}
+	creditedMoney := GetChargedAmount(float64(req.Amount), *user)
+	creditedQuotaDecimal := decimal.NewFromFloat(creditedMoney).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+	creditedQuota, quotaErr := common.QuotaFromDecimalStrict(creditedQuotaDecimal)
+	if quotaErr != nil || creditedQuota <= 0 {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "无效的充值额度"})
+		return
+	}
+	if rejectInvalidCreditedQuota(c, id, creditedQuotaDecimal) {
+		return
+	}
+	expectedPayMoney := getStripePayMoney(float64(req.Amount), user.Group)
 
 	reference := fmt.Sprintf("new-api-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "ref_" + common.Sha1([]byte(reference))
@@ -102,7 +124,8 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	topUp := &model.TopUp{
 		UserId:          id,
 		Amount:          req.Amount,
-		Money:           chargedMoney,
+		Money:           expectedPayMoney,
+		CreditedQuota:   creditedQuota,
 		TradeNo:         referenceId,
 		PaymentMethod:   model.PaymentMethodStripe,
 		PaymentProvider: model.PaymentProviderStripe,
@@ -115,7 +138,7 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
 		return
 	}
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Stripe 充值订单创建成功 user_id=%d trade_no=%s amount=%d money=%.2f", id, referenceId, req.Amount, chargedMoney))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Stripe 充值订单创建成功 user_id=%d trade_no=%s amount=%d expected_money=%.2f credited_quota=%d", id, referenceId, req.Amount, expectedPayMoney, creditedQuota))
 	c.JSON(http.StatusOK, gin.H{
 		"message": "success",
 		"data": gin.H{
@@ -278,15 +301,32 @@ func fulfillOrder(ctx context.Context, event stripe.Event, referenceId string, c
 		return
 	}
 
-	err := model.Recharge(referenceId, customerId, callerIp)
+	amountTotal, parseErr := strconv.ParseInt(event.GetObjectValue("amount_total"), 10, 64)
+	currency := strings.ToUpper(event.GetObjectValue("currency"))
+	if parseErr != nil || amountTotal <= 0 {
+		logger.LogError(ctx, fmt.Sprintf("Stripe 充值金额无效 trade_no=%s amount_total=%q currency=%s", referenceId, event.GetObjectValue("amount_total"), currency))
+		return
+	}
+	paidMoney := stripeMinorUnitsToMoney(amountTotal, currency)
+	err := model.Recharge(referenceId, customerId, paidMoney, currency, callerIp)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("Stripe 充值处理失败 trade_no=%s event_type=%s client_ip=%s error=%q", referenceId, string(event.Type), callerIp, err.Error()))
 		return
 	}
 
-	total, _ := strconv.ParseFloat(event.GetObjectValue("amount_total"), 64)
-	currency := strings.ToUpper(event.GetObjectValue("currency"))
-	logger.LogInfo(ctx, fmt.Sprintf("Stripe 充值成功 trade_no=%s amount_total=%.2f currency=%s event_type=%s client_ip=%s", referenceId, total/100, currency, string(event.Type), callerIp))
+	logger.LogInfo(ctx, fmt.Sprintf("Stripe 充值成功 trade_no=%s amount_total=%.2f currency=%s event_type=%s client_ip=%s", referenceId, paidMoney, currency, string(event.Type), callerIp))
+}
+
+func stripeMinorUnitsToMoney(amount int64, currency string) float64 {
+	zeroDecimal := map[string]struct{}{
+		"BIF": {}, "CLP": {}, "DJF": {}, "GNF": {}, "JPY": {}, "KMF": {},
+		"KRW": {}, "MGA": {}, "PYG": {}, "RWF": {}, "UGX": {}, "VND": {},
+		"VUV": {}, "XAF": {}, "XOF": {}, "XPF": {},
+	}
+	if _, ok := zeroDecimal[strings.ToUpper(strings.TrimSpace(currency))]; ok {
+		return float64(amount)
+	}
+	return decimal.NewFromInt(amount).Div(decimal.NewFromInt(100)).InexactFloat64()
 }
 
 func sessionExpired(ctx context.Context, event stripe.Event) {
@@ -366,7 +406,6 @@ func genStripeLink(referenceId string, customerId string, email string, amount i
 		Mode:                stripe.String(string(stripe.CheckoutSessionModePayment)),
 		AllowPromotionCodes: stripe.Bool(setting.StripePromotionCodesEnabled),
 	}
-
 	if "" == customerId {
 		if "" != email {
 			params.CustomerEmail = stripe.String(email)
@@ -392,6 +431,16 @@ func GetChargedAmount(count float64, user model.User) float64 {
 	}
 
 	return count * topUpGroupRatio
+}
+
+func getStripeCreditedQuota(amount int64, group string) decimal.Decimal {
+	topUpGroupRatio := common.GetTopupGroupRatio(group)
+	if topUpGroupRatio == 0 {
+		topUpGroupRatio = 1
+	}
+	return decimal.NewFromInt(amount).
+		Mul(decimal.NewFromFloat(topUpGroupRatio)).
+		Mul(decimal.NewFromFloat(common.QuotaPerUnit))
 }
 
 func getStripePayMoney(amount float64, group string) float64 {

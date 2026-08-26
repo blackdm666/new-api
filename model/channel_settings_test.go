@@ -98,3 +98,19 @@ func TestAdvancedCustomChannelRequiresModelListRouteOnlyWhenUpdateChecksEnabled(
 		})
 	}
 }
+
+func TestChannelValidateSettingsRejectsInvalidCustomBalanceQuery(t *testing.T) {
+	t.Parallel()
+
+	channel := &Channel{}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		BalanceQuery: &dto.ChannelBalanceQueryConfig{
+			Mode:   dto.ChannelBalanceQueryModeCustom,
+			Path:   "/v1/user/balance",
+			Method: "GET",
+		},
+	})
+
+	err := channel.ValidateSettings()
+	require.ErrorContains(t, err, "remaining path")
+}

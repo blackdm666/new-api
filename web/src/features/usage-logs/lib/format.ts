@@ -167,6 +167,25 @@ export function parseLogOther(other: string): LogOtherData | null {
   }
 }
 
+export function getReasoningEffortVariant(
+  effort: string | undefined
+): StatusBadgeProps['variant'] {
+  switch (effort?.trim().toLowerCase()) {
+    case 'max':
+    case 'xhigh':
+    case 'high':
+      return 'orange'
+    case 'medium':
+      return 'yellow'
+    case 'low':
+    case 'minimal':
+      return 'green'
+    case 'none':
+    default:
+      return 'grey'
+  }
+}
+
 /**
  * Get time color based on duration (in seconds)
  */
@@ -406,6 +425,8 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   'channel.delete_batch': 'Batch deleted {{count}} channels',
   'channel.delete_disabled': 'Deleted all disabled channels ({{count}})',
   'channel.key_view': 'Viewed channel key {{name}} (ID: {{id}})',
+  'channel.balance_token_view':
+    'Viewed balance query token {{name}} (ID: {{id}})',
   'channel.tag_disable': 'Disabled channels with tag {{tag}}',
   'channel.tag_enable': 'Enabled channels with tag {{tag}}',
   'channel.tag_edit': 'Edited channels with tag {{tag}}',

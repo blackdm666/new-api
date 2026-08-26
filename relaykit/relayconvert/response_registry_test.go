@@ -30,7 +30,7 @@ func TestLookupBuiltinResponseConverters(t *testing.T) {
 			id:       requestConverterClaudeToGemini,
 			from:     types.RelayFormatClaude,
 			to:       types.RelayFormatGemini,
-			quality:  ResponseConverterQualityDiscouraged,
+			quality:  ResponseConverterQualityFair,
 			stepConverters: []string{
 				ConverterClaudeMessagesToOpenAIChat,
 				ConverterOpenAIChatToGeminiContent,

@@ -17,70 +17,306 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Loader2, Send } from 'lucide-react'
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import * as z from 'zod'
 
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Form } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { getUserFacingErrorMessage } from '@/lib/user-facing-error'
 
+import { testSMTPEmail } from '../api'
 import {
+  SettingsControlGroup,
   SettingsForm,
-  SettingsSwitchContent,
-  SettingsSwitchItem,
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
+import {
+  SmtpChannelFields,
+  type SmtpChannelFieldNames,
+} from './smtp-channel-fields'
+
+const portSchema = (message: string) =>
+  z.string().refine((value) => {
+    const trimmed = value.trim()
+    if (!trimmed) return true
+    if (!/^\d+$/.test(trimmed)) return false
+    const port = Number(trimmed)
+    return port >= 1 && port <= 65535
+  }, message)
+
+const emailSchema = (message: string) =>
+  z.string().refine((value) => {
+    const trimmed = value.trim()
+    if (!trimmed) return true
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)
+  }, message)
 
 const createEmailSchema = (t: (key: string) => string) =>
-  z.object({
-    SMTPServer: z.string(),
-    SMTPPort: z.string().refine((value) => {
-      const trimmed = value.trim()
-      if (!trimmed) return true
-      return /^\d+$/.test(trimmed)
-    }, t('Port must be a positive integer')),
-    SMTPAccount: z.string(),
-    SMTPFrom: z.string().refine((value) => {
-      const trimmed = value.trim()
-      if (!trimmed) return true
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)
-    }, t('Enter a valid email or leave blank')),
-    SMTPToken: z.string(),
-    SMTPSSLEnabled: z.boolean(),
-    SMTPStartTLSEnabled: z.boolean(),
-    SMTPInsecureSkipVerify: z.boolean(),
-    SMTPForceAuthLogin: z.boolean(),
-  })
+  z
+    .object({
+      SMTPServer: z.string(),
+      SMTPPort: portSchema(t('Port must be between 1 and 65535')),
+      SMTPAccount: z.string(),
+      SMTPFrom: emailSchema(t('Enter a valid email or leave blank')),
+      SMTPToken: z.string(),
+      SMTPSSLEnabled: z.boolean(),
+      SMTPStartTLSEnabled: z.boolean(),
+      SMTPInsecureSkipVerify: z.boolean(),
+      SMTPForceAuthLogin: z.boolean(),
+      SMTPBackupEnabled: z.boolean(),
+      SMTPBackupServer: z.string(),
+      SMTPBackupPort: portSchema(t('Port must be between 1 and 65535')),
+      SMTPBackupAccount: z.string(),
+      SMTPBackupFrom: emailSchema(t('Enter a valid email or leave blank')),
+      SMTPBackupToken: z.string(),
+      SMTPBackupSSLEnabled: z.boolean(),
+      SMTPBackupStartTLSEnabled: z.boolean(),
+      SMTPBackupInsecureSkipVerify: z.boolean(),
+      SMTPBackupForceAuthLogin: z.boolean(),
+      SMTPSecurityEnabled: z.boolean(),
+      SMTPSecurityServer: z.string(),
+      SMTPSecurityPort: portSchema(t('Port must be between 1 and 65535')),
+      SMTPSecurityAccount: z.string(),
+      SMTPSecurityFrom: emailSchema(t('Enter a valid email or leave blank')),
+      SMTPSecurityToken: z.string(),
+      SMTPSecuritySSLEnabled: z.boolean(),
+      SMTPSecurityStartTLSEnabled: z.boolean(),
+      SMTPSecurityInsecureSkipVerify: z.boolean(),
+      SMTPSecurityForceAuthLogin: z.boolean(),
+      SMTPMarketingEnabled: z.boolean(),
+      SMTPMarketingServer: z.string(),
+      SMTPMarketingPort: portSchema(t('Port must be between 1 and 65535')),
+      SMTPMarketingAccount: z.string(),
+      SMTPMarketingFrom: emailSchema(t('Enter a valid email or leave blank')),
+      SMTPMarketingToken: z.string(),
+      SMTPMarketingSSLEnabled: z.boolean(),
+      SMTPMarketingStartTLSEnabled: z.boolean(),
+      SMTPMarketingInsecureSkipVerify: z.boolean(),
+      SMTPMarketingForceAuthLogin: z.boolean(),
+    })
+    .superRefine((values, context) => {
+      const hasBackupConfiguration = Boolean(
+        values.SMTPBackupServer.trim() ||
+        values.SMTPBackupAccount.trim() ||
+        values.SMTPBackupFrom.trim() ||
+        values.SMTPBackupToken.trim()
+      )
+      if (hasBackupConfiguration && !values.SMTPBackupServer.trim()) {
+        context.addIssue({
+          code: 'custom',
+          path: ['SMTPBackupServer'],
+          message: t('Backup SMTP host is required when failover is enabled'),
+        })
+      }
+      if (
+        hasBackupConfiguration &&
+        !values.SMTPBackupFrom.trim() &&
+        !values.SMTPBackupAccount.trim()
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['SMTPBackupFrom'],
+          message: t(
+            'Backup sender address or username is required when failover is enabled'
+          ),
+        })
+      }
 
-type EmailFormValues = z.infer<ReturnType<typeof createEmailSchema>>
+      const profiles = [
+        {
+          server: values.SMTPSecurityServer,
+          account: values.SMTPSecurityAccount,
+          from: values.SMTPSecurityFrom,
+          token: values.SMTPSecurityToken,
+          serverPath: 'SMTPSecurityServer' as const,
+          fromPath: 'SMTPSecurityFrom' as const,
+        },
+        {
+          server: values.SMTPMarketingServer,
+          account: values.SMTPMarketingAccount,
+          from: values.SMTPMarketingFrom,
+          token: values.SMTPMarketingToken,
+          serverPath: 'SMTPMarketingServer' as const,
+          fromPath: 'SMTPMarketingFrom' as const,
+        },
+      ]
+      for (const profile of profiles) {
+        const configured = Boolean(
+          profile.server.trim() ||
+          profile.account.trim() ||
+          profile.from.trim() ||
+          profile.token.trim()
+        )
+        if (!configured) continue
+        if (!profile.server.trim()) {
+          context.addIssue({
+            code: 'custom',
+            path: [profile.serverPath],
+            message: t('SMTP host is required when a profile is configured'),
+          })
+        }
+        if (!profile.from.trim() && !profile.account.trim()) {
+          context.addIssue({
+            code: 'custom',
+            path: [profile.fromPath],
+            message: t(
+              'Sender address or username is required when a profile is configured'
+            ),
+          })
+        }
+      }
+    })
+
+export type EmailFormValues = z.infer<ReturnType<typeof createEmailSchema>>
 
 type EmailSettingsSectionProps = {
   defaultValues: EmailFormValues
 }
 
-type SmtpSecurityMode = 'none' | 'ssl_tls' | 'starttls'
+const PRIMARY_FIELDS = {
+  server: 'SMTPServer',
+  port: 'SMTPPort',
+  account: 'SMTPAccount',
+  from: 'SMTPFrom',
+  token: 'SMTPToken',
+  sslEnabled: 'SMTPSSLEnabled',
+  startTLSEnabled: 'SMTPStartTLSEnabled',
+  insecureSkipVerify: 'SMTPInsecureSkipVerify',
+  forceAuthLogin: 'SMTPForceAuthLogin',
+} as const satisfies SmtpChannelFieldNames
 
-function getSmtpSecurityMode(values: {
-  SMTPSSLEnabled: boolean
-  SMTPStartTLSEnabled: boolean
-}): SmtpSecurityMode {
-  if (values.SMTPSSLEnabled) return 'ssl_tls'
-  if (values.SMTPStartTLSEnabled) return 'starttls'
-  return 'none'
+const BACKUP_FIELDS = {
+  server: 'SMTPBackupServer',
+  port: 'SMTPBackupPort',
+  account: 'SMTPBackupAccount',
+  from: 'SMTPBackupFrom',
+  token: 'SMTPBackupToken',
+  sslEnabled: 'SMTPBackupSSLEnabled',
+  startTLSEnabled: 'SMTPBackupStartTLSEnabled',
+  insecureSkipVerify: 'SMTPBackupInsecureSkipVerify',
+  forceAuthLogin: 'SMTPBackupForceAuthLogin',
+} as const satisfies SmtpChannelFieldNames
+
+const SECURITY_FIELDS = {
+  server: 'SMTPSecurityServer',
+  port: 'SMTPSecurityPort',
+  account: 'SMTPSecurityAccount',
+  from: 'SMTPSecurityFrom',
+  token: 'SMTPSecurityToken',
+  sslEnabled: 'SMTPSecuritySSLEnabled',
+  startTLSEnabled: 'SMTPSecurityStartTLSEnabled',
+  insecureSkipVerify: 'SMTPSecurityInsecureSkipVerify',
+  forceAuthLogin: 'SMTPSecurityForceAuthLogin',
+} as const satisfies SmtpChannelFieldNames
+
+const MARKETING_FIELDS = {
+  server: 'SMTPMarketingServer',
+  port: 'SMTPMarketingPort',
+  account: 'SMTPMarketingAccount',
+  from: 'SMTPMarketingFrom',
+  token: 'SMTPMarketingToken',
+  sslEnabled: 'SMTPMarketingSSLEnabled',
+  startTLSEnabled: 'SMTPMarketingStartTLSEnabled',
+  insecureSkipVerify: 'SMTPMarketingInsecureSkipVerify',
+  forceAuthLogin: 'SMTPMarketingForceAuthLogin',
+} as const satisfies SmtpChannelFieldNames
+
+const SMTP_OPTION_KEYS = [
+  'SMTPServer',
+  'SMTPPort',
+  'SMTPAccount',
+  'SMTPFrom',
+  'SMTPToken',
+  'SMTPSSLEnabled',
+  'SMTPStartTLSEnabled',
+  'SMTPInsecureSkipVerify',
+  'SMTPForceAuthLogin',
+  'SMTPBackupServer',
+  'SMTPBackupPort',
+  'SMTPBackupAccount',
+  'SMTPBackupFrom',
+  'SMTPBackupToken',
+  'SMTPBackupSSLEnabled',
+  'SMTPBackupStartTLSEnabled',
+  'SMTPBackupInsecureSkipVerify',
+  'SMTPBackupForceAuthLogin',
+  'SMTPSecurityServer',
+  'SMTPSecurityPort',
+  'SMTPSecurityAccount',
+  'SMTPSecurityFrom',
+  'SMTPSecurityToken',
+  'SMTPSecuritySSLEnabled',
+  'SMTPSecurityStartTLSEnabled',
+  'SMTPSecurityInsecureSkipVerify',
+  'SMTPSecurityForceAuthLogin',
+  'SMTPMarketingServer',
+  'SMTPMarketingPort',
+  'SMTPMarketingAccount',
+  'SMTPMarketingFrom',
+  'SMTPMarketingToken',
+  'SMTPMarketingSSLEnabled',
+  'SMTPMarketingStartTLSEnabled',
+  'SMTPMarketingInsecureSkipVerify',
+  'SMTPMarketingForceAuthLogin',
+] as const satisfies ReadonlyArray<keyof EmailFormValues>
+
+const SMTP_BACKUP_CONFIGURATION_KEYS = [
+  'SMTPBackupServer',
+  'SMTPBackupPort',
+  'SMTPBackupAccount',
+  'SMTPBackupFrom',
+  'SMTPBackupToken',
+  'SMTPBackupSSLEnabled',
+  'SMTPBackupStartTLSEnabled',
+  'SMTPBackupInsecureSkipVerify',
+  'SMTPBackupForceAuthLogin',
+] as const satisfies ReadonlyArray<keyof EmailFormValues>
+
+type SMTPChannel = 'security' | 'primary' | 'marketing' | 'backup'
+
+function sanitize(values: EmailFormValues): EmailFormValues {
+  return {
+    ...values,
+    SMTPServer: values.SMTPServer.trim(),
+    SMTPPort: values.SMTPPort.trim(),
+    SMTPAccount: values.SMTPAccount.trim(),
+    SMTPFrom: values.SMTPFrom.trim(),
+    SMTPToken: values.SMTPToken.trim(),
+    SMTPStartTLSEnabled: !values.SMTPSSLEnabled && values.SMTPStartTLSEnabled,
+    SMTPBackupServer: values.SMTPBackupServer.trim(),
+    SMTPBackupPort: values.SMTPBackupPort.trim(),
+    SMTPBackupAccount: values.SMTPBackupAccount.trim(),
+    SMTPBackupFrom: values.SMTPBackupFrom.trim(),
+    SMTPBackupToken: values.SMTPBackupToken.trim(),
+    SMTPBackupStartTLSEnabled:
+      !values.SMTPBackupSSLEnabled && values.SMTPBackupStartTLSEnabled,
+    SMTPSecurityServer: values.SMTPSecurityServer.trim(),
+    SMTPSecurityPort: values.SMTPSecurityPort.trim(),
+    SMTPSecurityAccount: values.SMTPSecurityAccount.trim(),
+    SMTPSecurityFrom: values.SMTPSecurityFrom.trim(),
+    SMTPSecurityToken: values.SMTPSecurityToken.trim(),
+    SMTPSecurityStartTLSEnabled:
+      !values.SMTPSecuritySSLEnabled && values.SMTPSecurityStartTLSEnabled,
+    SMTPMarketingServer: values.SMTPMarketingServer.trim(),
+    SMTPMarketingPort: values.SMTPMarketingPort.trim(),
+    SMTPMarketingAccount: values.SMTPMarketingAccount.trim(),
+    SMTPMarketingFrom: values.SMTPMarketingFrom.trim(),
+    SMTPMarketingToken: values.SMTPMarketingToken.trim(),
+    SMTPMarketingStartTLSEnabled:
+      !values.SMTPMarketingSSLEnabled && values.SMTPMarketingStartTLSEnabled,
+  }
 }
 
 export function EmailSettingsSection({
@@ -88,95 +324,137 @@ export function EmailSettingsSection({
 }: EmailSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-  const emailSchema = createEmailSchema(t)
-
+  const queryClient = useQueryClient()
+  const [testRecipient, setTestRecipient] = useState('')
+  const [activeChannel, setActiveChannel] = useState<SMTPChannel>('security')
   const form = useForm<EmailFormValues>({
-    resolver: zodResolver(emailSchema),
+    resolver: zodResolver(createEmailSchema(t)),
     defaultValues,
   })
 
   useResetForm(form, defaultValues)
 
-  const onSubmit = async (values: EmailFormValues) => {
-    const securityMode = getSmtpSecurityMode(values)
-    const sanitized = {
-      SMTPServer: values.SMTPServer.trim(),
-      SMTPPort: values.SMTPPort.trim(),
-      SMTPAccount: values.SMTPAccount.trim(),
-      SMTPFrom: values.SMTPFrom.trim(),
-      SMTPToken: values.SMTPToken.trim(),
-      SMTPSSLEnabled: securityMode === 'ssl_tls',
-      SMTPStartTLSEnabled: securityMode === 'starttls',
-      SMTPInsecureSkipVerify: values.SMTPInsecureSkipVerify,
-      SMTPForceAuthLogin: values.SMTPForceAuthLogin,
-    }
+  const testMutation = useMutation({
+    mutationFn: (channel: SMTPChannel) =>
+      testSMTPEmail(testRecipient.trim(), channel),
+    onSuccess: (result, channel) => {
+      if (channel !== 'primary') {
+        const enabledUpdates: Partial<EmailFormValues> = {}
+        if (channel === 'backup') enabledUpdates.SMTPBackupEnabled = true
+        if (channel === 'security') enabledUpdates.SMTPSecurityEnabled = true
+        if (channel === 'marketing') enabledUpdates.SMTPMarketingEnabled = true
+        form.reset({ ...form.getValues(), ...enabledUpdates })
+        void queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      }
+      const channelLabels: Record<SMTPChannel, string> = {
+        security: t('Security mail'),
+        primary: t('Notification mail'),
+        marketing: t('Marketing mail'),
+        backup: t('Backup channel'),
+      }
+      const deliveredChannel = result.data?.channel as SMTPChannel | undefined
+      const channelLabel = deliveredChannel
+        ? channelLabels[deliveredChannel]
+        : channelLabels[channel]
+      toast.success(
+        t('Test email sent to {{recipient}} via {{channel}}', {
+          recipient: result.data?.recipient || testRecipient,
+          channel: channelLabel,
+        })
+      )
+    },
+    onError: (error: unknown) =>
+      toast.error(getUserFacingErrorMessage(error, 'SMTP test email failed')),
+  })
 
-    const initial = {
-      SMTPServer: defaultValues.SMTPServer.trim(),
-      SMTPPort: defaultValues.SMTPPort.trim(),
-      SMTPAccount: defaultValues.SMTPAccount.trim(),
-      SMTPFrom: defaultValues.SMTPFrom.trim(),
-      SMTPToken: defaultValues.SMTPToken.trim(),
-      SMTPSSLEnabled: defaultValues.SMTPSSLEnabled,
-      SMTPStartTLSEnabled: defaultValues.SMTPStartTLSEnabled,
-      SMTPInsecureSkipVerify: defaultValues.SMTPInsecureSkipVerify,
-      SMTPForceAuthLogin: defaultValues.SMTPForceAuthLogin,
-    }
-
+  const persistSettings = async (
+    values: EmailFormValues,
+    showNoChanges: boolean
+  ) => {
+    const next = sanitize(values)
+    const initial = sanitize(defaultValues)
     const updates: Array<{ key: string; value: string | boolean }> = []
 
-    if (sanitized.SMTPServer !== initial.SMTPServer) {
-      updates.push({ key: 'SMTPServer', value: sanitized.SMTPServer })
+    for (const key of SMTP_OPTION_KEYS) {
+      const value = next[key]
+      if (key.endsWith('Token') && !value) {
+        continue
+      }
+      if (value !== initial[key]) {
+        updates.push({ key, value })
+      }
     }
 
-    if (sanitized.SMTPPort !== initial.SMTPPort) {
-      updates.push({ key: 'SMTPPort', value: sanitized.SMTPPort })
+    if (updates.length === 0) {
+      if (showNoChanges) toast.info(t('No changes to save'))
+      return true
     }
-
-    if (sanitized.SMTPAccount !== initial.SMTPAccount) {
-      updates.push({ key: 'SMTPAccount', value: sanitized.SMTPAccount })
-    }
-
-    if (sanitized.SMTPFrom !== initial.SMTPFrom) {
-      updates.push({ key: 'SMTPFrom', value: sanitized.SMTPFrom })
-    }
-
-    if (sanitized.SMTPToken && sanitized.SMTPToken !== initial.SMTPToken) {
-      updates.push({ key: 'SMTPToken', value: sanitized.SMTPToken })
-    }
-
-    if (sanitized.SMTPSSLEnabled !== initial.SMTPSSLEnabled) {
-      updates.push({
-        key: 'SMTPSSLEnabled',
-        value: sanitized.SMTPSSLEnabled,
-      })
-    }
-
-    if (sanitized.SMTPStartTLSEnabled !== initial.SMTPStartTLSEnabled) {
-      updates.push({
-        key: 'SMTPStartTLSEnabled',
-        value: sanitized.SMTPStartTLSEnabled,
-      })
-    }
-
-    if (sanitized.SMTPInsecureSkipVerify !== initial.SMTPInsecureSkipVerify) {
-      updates.push({
-        key: 'SMTPInsecureSkipVerify',
-        value: sanitized.SMTPInsecureSkipVerify,
-      })
-    }
-
-    if (sanitized.SMTPForceAuthLogin !== initial.SMTPForceAuthLogin) {
-      updates.push({
-        key: 'SMTPForceAuthLogin',
-        value: sanitized.SMTPForceAuthLogin,
-      })
-    }
-
+    const backupConfigurationChanged = updates.some((update) =>
+      SMTP_BACKUP_CONFIGURATION_KEYS.includes(
+        update.key as (typeof SMTP_BACKUP_CONFIGURATION_KEYS)[number]
+      )
+    )
+    const securityConfigurationChanged = updates.some((update) =>
+      update.key.startsWith('SMTPSecurity')
+    )
+    const marketingConfigurationChanged = updates.some((update) =>
+      update.key.startsWith('SMTPMarketing')
+    )
     for (const update of updates) {
-      await updateOption.mutateAsync(update)
+      const response = await updateOption.mutateAsync(update)
+      if (!response.success) return false
     }
+    form.reset({
+      ...next,
+      SMTPToken: '',
+      SMTPBackupToken: '',
+      SMTPSecurityToken: '',
+      SMTPMarketingToken: '',
+      SMTPBackupEnabled: backupConfigurationChanged
+        ? false
+        : next.SMTPBackupEnabled,
+      SMTPSecurityEnabled: securityConfigurationChanged
+        ? false
+        : next.SMTPSecurityEnabled,
+      SMTPMarketingEnabled: marketingConfigurationChanged
+        ? false
+        : next.SMTPMarketingEnabled,
+    })
+    return true
   }
+
+  const onSubmit = async (values: EmailFormValues) => {
+    await persistSettings(values, true)
+  }
+
+  const sendTest = form.handleSubmit(async (values) => {
+    try {
+      if (!(await persistSettings(values, false))) return
+      await testMutation.mutateAsync(activeChannel)
+    } catch {
+      // The update and test mutations already present their own user-facing errors.
+    }
+  })
+
+  const backupConfigurationDirty = SMTP_BACKUP_CONFIGURATION_KEYS.some((key) =>
+    Boolean(form.formState.dirtyFields[key])
+  )
+  const backupEnabled =
+    form.watch('SMTPBackupEnabled') && !backupConfigurationDirty
+  const securityConfigurationDirty = SMTP_OPTION_KEYS.some(
+    (key) =>
+      key.startsWith('SMTPSecurity') && Boolean(form.formState.dirtyFields[key])
+  )
+  const marketingConfigurationDirty = SMTP_OPTION_KEYS.some(
+    (key) =>
+      key.startsWith('SMTPMarketing') &&
+      Boolean(form.formState.dirtyFields[key])
+  )
+  const securityEnabled =
+    form.watch('SMTPSecurityEnabled') && !securityConfigurationDirty
+  const marketingEnabled =
+    form.watch('SMTPMarketingEnabled') && !marketingConfigurationDirty
+  const operationPending = testMutation.isPending || updateOption.isPending
 
   return (
     <SettingsSection title={t('SMTP Email')}>
@@ -187,224 +465,132 @@ export function EmailSettingsSection({
             isSaving={updateOption.isPending}
             saveLabel='Save SMTP settings'
           />
-          <FormField
-            control={form.control}
-            name='SMTPServer'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{t('SMTP Host')}</FormLabel>
-                <FormControl>
-                  <Input
-                    autoComplete='off'
-                    placeholder={t('smtp.example.com')}
-                    {...field}
-                    onChange={(event) => field.onChange(event.target.value)}
-                  />
-                </FormControl>
-                <FormDescription>
-                  {t('Hostname or IP of your SMTP provider')}
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
 
-          <div className='grid gap-6 md:grid-cols-2'>
-            <FormField
-              control={form.control}
-              name='SMTPPort'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Port')}</FormLabel>
-                  <FormControl>
-                    <Input
-                      autoComplete='off'
-                      type='number'
-                      placeholder='587'
-                      {...field}
-                      onChange={(event) => field.onChange(event.target.value)}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    {t('Common ports include 25, 465, and 587')}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+          <Tabs
+            value={activeChannel}
+            onValueChange={(value) => setActiveChannel(value as SMTPChannel)}
+            className='space-y-5'
+          >
+            <TabsList className='grid w-full max-w-3xl grid-cols-2 sm:grid-cols-4'>
+              <TabsTrigger value='security'>{t('Security mail')}</TabsTrigger>
+              <TabsTrigger value='primary'>
+                {t('Notification mail')}
+              </TabsTrigger>
+              <TabsTrigger value='marketing'>{t('Marketing mail')}</TabsTrigger>
+              <TabsTrigger value='backup'>{t('Backup channel')}</TabsTrigger>
+            </TabsList>
 
-            <FormItem>
-              <FormLabel>{t('SMTP encryption')}</FormLabel>
-              <FormControl>
-                <RadioGroup
-                  value={getSmtpSecurityMode({
-                    SMTPSSLEnabled: form.watch('SMTPSSLEnabled'),
-                    SMTPStartTLSEnabled: form.watch('SMTPStartTLSEnabled'),
-                  })}
-                  onValueChange={(value) => {
-                    const mode = value as SmtpSecurityMode
-                    form.setValue('SMTPSSLEnabled', mode === 'ssl_tls', {
-                      shouldDirty: true,
-                    })
-                    form.setValue('SMTPStartTLSEnabled', mode === 'starttls', {
-                      shouldDirty: true,
-                    })
-                  }}
-                  className='gap-3'
+            <TabsContent value='security' className='space-y-6 pt-1'>
+              <SettingsControlGroup className='flex flex-col justify-between gap-3 space-y-0 sm:flex-row sm:items-center'>
+                <div className='min-w-0 space-y-1'>
+                  <p className='text-sm font-medium'>
+                    {t('Security mail profile')}
+                  </p>
+                  <p className='text-muted-foreground text-xs'>
+                    {t(
+                      'Registration codes, email binding and password reset use this sender. A successful test activates the profile.'
+                    )}
+                  </p>
+                </div>
+                <Badge variant='outline'>
+                  {securityEnabled ? t('Enabled') : t('Pending test')}
+                </Badge>
+              </SettingsControlGroup>
+              <SmtpChannelFields form={form} names={SECURITY_FIELDS} />
+            </TabsContent>
+
+            <TabsContent value='primary' className='pt-1'>
+              <p className='text-muted-foreground mb-5 text-xs'>
+                {t(
+                  'Quota warnings, invoices, affiliate notices and operational alerts use this sender.'
+                )}
+              </p>
+              <SmtpChannelFields form={form} names={PRIMARY_FIELDS} />
+            </TabsContent>
+
+            <TabsContent value='marketing' className='space-y-6 pt-1'>
+              <SettingsControlGroup className='flex flex-col justify-between gap-3 space-y-0 sm:flex-row sm:items-center'>
+                <div className='min-w-0 space-y-1'>
+                  <p className='text-sm font-medium'>
+                    {t('Marketing mail profile')}
+                  </p>
+                  <p className='text-muted-foreground text-xs'>
+                    {t(
+                      'Campaigns and bulk messages use this sender. A successful test activates the profile.'
+                    )}
+                  </p>
+                </div>
+                <Badge variant='outline'>
+                  {marketingEnabled ? t('Enabled') : t('Pending test')}
+                </Badge>
+              </SettingsControlGroup>
+              <SmtpChannelFields form={form} names={MARKETING_FIELDS} />
+            </TabsContent>
+
+            <TabsContent value='backup' className='space-y-6 pt-1'>
+              <SettingsControlGroup className='flex flex-col justify-between gap-3 space-y-0 sm:flex-row sm:items-center'>
+                <div className='min-w-0 space-y-1'>
+                  <p className='text-sm font-medium'>
+                    {t('Backup SMTP activation')}
+                  </p>
+                  <p className='text-muted-foreground text-xs'>
+                    {t(
+                      'A successful backup test automatically enables failover. Changing backup settings requires another test.'
+                    )}
+                  </p>
+                </div>
+                <Badge
+                  variant='outline'
+                  className={
+                    backupEnabled
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'
+                      : 'border-amber-500/40 bg-amber-500/10 text-amber-600'
+                  }
                 >
-                  <div className='flex items-center gap-2'>
-                    <RadioGroupItem value='none' id='smtp-security-none' />
-                    <Label
-                      htmlFor='smtp-security-none'
-                      className='cursor-pointer font-normal'
-                    >
-                      {t('No encryption')}
-                    </Label>
-                  </div>
-                  <div className='flex items-center gap-2'>
-                    <RadioGroupItem
-                      value='ssl_tls'
-                      id='smtp-security-ssl-tls'
-                    />
-                    <Label
-                      htmlFor='smtp-security-ssl-tls'
-                      className='cursor-pointer font-normal'
-                    >
-                      {t('SSL/TLS')}
-                    </Label>
-                  </div>
-                  <div className='flex items-center gap-2'>
-                    <RadioGroupItem
-                      value='starttls'
-                      id='smtp-security-starttls'
-                    />
-                    <Label
-                      htmlFor='smtp-security-starttls'
-                      className='cursor-pointer font-normal'
-                    >
-                      {t('STARTTLS')}
-                    </Label>
-                  </div>
-                </RadioGroup>
-              </FormControl>
-              <FormDescription>
-                {t('Choose one SMTP transport security mode')}
-              </FormDescription>
-            </FormItem>
+                  {backupEnabled ? t('Enabled') : t('Pending test')}
+                </Badge>
+              </SettingsControlGroup>
+              <SmtpChannelFields form={form} names={BACKUP_FIELDS} />
+            </TabsContent>
+          </Tabs>
 
-            <FormField
-              control={form.control}
-              name='SMTPInsecureSkipVerify'
-              render={({ field }) => (
-                <SettingsSwitchItem>
-                  <SettingsSwitchContent>
-                    <FormLabel>
-                      {t('Skip SMTP TLS certificate verification')}
-                    </FormLabel>
-                    <FormDescription>
-                      {t(
-                        'Allow self-signed or hostname-mismatched SMTP certificates'
-                      )}
-                    </FormDescription>
-                  </SettingsSwitchContent>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </SettingsSwitchItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name='SMTPForceAuthLogin'
-              render={({ field }) => (
-                <SettingsSwitchItem>
-                  <SettingsSwitchContent>
-                    <FormLabel>{t('Force AUTH LOGIN')}</FormLabel>
-                    <FormDescription>
-                      {t('Force SMTP authentication using AUTH LOGIN method')}
-                    </FormDescription>
-                  </SettingsSwitchContent>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </SettingsSwitchItem>
-              )}
-            />
-          </div>
-
-          <FormField
-            control={form.control}
-            name='SMTPAccount'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{t('Username')}</FormLabel>
-                <FormControl>
-                  <Input
-                    autoComplete='off'
-                    placeholder={t('noreply@example.com')}
-                    {...field}
-                    onChange={(event) => field.onChange(event.target.value)}
-                  />
-                </FormControl>
-                <FormDescription>
-                  {t('Account used when authenticating with the SMTP server')}
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name='SMTPFrom'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{t('From Address')}</FormLabel>
-                <FormControl>
-                  <Input
-                    autoComplete='off'
-                    placeholder={t('New API &lt;noreply@example.com&gt;')}
-                    {...field}
-                    onChange={(event) => field.onChange(event.target.value)}
-                  />
-                </FormControl>
-                <FormDescription>
-                  {t('Display name and email used in outgoing messages')}
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name='SMTPToken'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{t('Password / Access Token')}</FormLabel>
-                <FormControl>
-                  <Input
-                    autoComplete='off'
-                    type='password'
-                    placeholder={t('Enter new token to update')}
-                    {...field}
-                    onChange={(event) => field.onChange(event.target.value)}
-                  />
-                </FormControl>
-                <FormDescription>
-                  {t('Leave blank to keep the existing credential')}
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+          <SettingsControlGroup className='space-y-4'>
+            <div className='space-y-1'>
+              <Label htmlFor='smtp-test-recipient'>{t('Test SMTP')}</Label>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'The test saves current settings first and sends through the selected channel'
+                )}
+              </p>
+            </div>
+            <div className='flex flex-col gap-3 sm:flex-row'>
+              <Input
+                id='smtp-test-recipient'
+                type='email'
+                value={testRecipient}
+                onChange={(event) => setTestRecipient(event.target.value)}
+                placeholder={t(
+                  'Leave blank to use the current administrator email'
+                )}
+                disabled={operationPending}
+              />
+              <Button
+                type='button'
+                className='sm:shrink-0'
+                onClick={sendTest}
+                disabled={operationPending}
+              >
+                {testMutation.isPending ? (
+                  <Loader2 className='animate-spin' />
+                ) : (
+                  <Send />
+                )}
+                {activeChannel === 'primary'
+                  ? t('Send test email')
+                  : t('Test and enable selected profile')}
+              </Button>
+            </div>
+          </SettingsControlGroup>
         </SettingsForm>
       </Form>
     </SettingsSection>

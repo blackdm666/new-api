@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -14,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -123,6 +125,10 @@ func GetStatus(c *gin.Context) {
 		"user_agreement_enabled":      legalSetting.UserAgreement != "",
 		"privacy_policy_enabled":      legalSetting.PrivacyPolicy != "",
 		"checkin_enabled":             operation_setting.GetCheckinSetting().Enabled,
+		"invoice_file_enabled":        setting.InvoiceFileEnabled,
+		"invoice_file_max_size":       setting.InvoiceFileMaxSize,
+		"invoice_file_max_count":      setting.InvoiceFileMaxCount,
+		"invoice_file_allowed_exts":   setting.InvoiceFileAllowedExts,
 	}
 
 	// 根据启用状态注入可选内容
@@ -235,7 +241,18 @@ func GetHomePageContent(c *gin.Context) {
 }
 
 func SendEmailVerification(c *gin.Context) {
-	email := model.NormalizeEmail(c.Query("email"))
+	email := c.Query("email")
+	if c.Request.Method == http.MethodPost {
+		var request struct {
+			Email string `json:"email"`
+		}
+		if err := c.ShouldBindJSON(&request); err != nil {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+		email = request.Email
+	}
+	email = model.NormalizeEmail(email)
 	if err := common.Validate.Var(email, "required,email"); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -281,17 +298,27 @@ func SendEmailVerification(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
 		return
 	}
-	code := common.GenerateVerificationCode(6)
-	common.RegisterVerificationCodeWithKey(email, code, common.EmailVerificationPurpose)
-	subject := fmt.Sprintf("%s邮箱验证邮件", common.SystemName)
-	content := fmt.Sprintf("<p>您好，你正在进行%s邮箱验证。</p>"+
-		"<p>您的验证码为: <strong>%s</strong></p>"+
-		"<p>验证码 %d 分钟内有效，如果不是本人操作，请忽略。</p>", common.SystemName, code, common.VerificationValidMinutes)
-	err := common.SendEmail(subject, email, content)
+	reserved, err := common.ReserveVerificationSend(email, common.EmailVerificationPurpose, common.VerificationResendCooldownSeconds*time.Second)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	if !reserved {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"success": false,
+			"message": "验证码发送过于频繁，请稍后重试",
+		})
+		return
+	}
+	code := common.GenerateVerificationCode(6)
+	subject, content := service.BuildAccountVerificationEmail(i18n.GetLangFromContext(c), code)
+	_, err = service.QueueSystemEmail("email-verification:"+common.NewRequestId(), "email_verification", 0, 0, email, subject, content, common.GetTimestamp()+int64(common.VerificationValidMinutes*60))
+	if err != nil {
+		common.ReleaseVerificationSend(email, common.EmailVerificationPurpose)
+		common.ApiError(c, err)
+		return
+	}
+	common.RegisterVerificationCodeWithKey(email, code, common.EmailVerificationPurpose)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -300,21 +327,31 @@ func SendEmailVerification(c *gin.Context) {
 }
 
 func SendPasswordResetEmail(c *gin.Context) {
-	email := model.NormalizeEmail(c.Query("email"))
+	email := c.Query("email")
+	if c.Request.Method == http.MethodPost {
+		var request struct {
+			Email string `json:"email"`
+		}
+		if err := c.ShouldBindJSON(&request); err != nil {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+		email = request.Email
+	}
+	email = model.NormalizeEmail(email)
 	if err := common.Validate.Var(email, "required,email"); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	if _, err := model.GetUniqueUserByEmail(email); err == nil {
+	if user, err := model.GetUniqueUserByEmail(email); err == nil {
 		code := common.GenerateVerificationCode(0)
 		common.RegisterVerificationCodeWithKey(email, code, common.PasswordResetPurpose)
-		link := fmt.Sprintf("%s/user/reset?email=%s&token=%s", system_setting.ServerAddress, email, code)
-		subject := fmt.Sprintf("%s密码重置", common.SystemName)
-		content := fmt.Sprintf("<p>您好，你正在进行%s密码重置。</p>"+
-			"<p>点击 <a href='%s'>此处</a> 进行密码重置。</p>"+
-			"<p>如果链接无法点击，请尝试点击下面的链接或将其复制到浏览器中打开：<br> %s </p>"+
-			"<p>重置链接 %d 分钟内有效，如果不是本人操作，请忽略。</p>", common.SystemName, link, link, common.VerificationValidMinutes)
-		err := common.SendEmail(subject, email, content)
+		lang := strings.TrimSpace(user.GetSetting().Language)
+		if lang == "" {
+			lang = i18n.GetLangFromContext(c)
+		}
+		subject, content := service.BuildPasswordResetEmail(lang, email, code)
+		_, err := service.QueueSystemEmail("password-reset:"+common.NewRequestId(), "password_reset", 0, user.Id, email, subject, content, common.GetTimestamp()+int64(common.VerificationValidMinutes*60))
 		if err != nil {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("failed to send password reset email to %s: %s", email, err.Error()))
 		}

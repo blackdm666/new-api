@@ -39,6 +39,9 @@ func TestVerifyTelegramAuthorization(t *testing.T) {
 		{name: "expired", authDate: now.Add(-telegramAuthorizationMaxAge - time.Second), wantErr: "expired"},
 		{name: "too far in future", authDate: now.Add(telegramAuthorizationFutureSkew + time.Second), wantErr: "expired"},
 		{name: "invalid signature", authDate: now, mutate: func(values url.Values) { values.Set("hash", "00") }, wantErr: "signature"},
+		{name: "Turnstile token is not part of Telegram signature", authDate: now, mutate: func(values url.Values) {
+			values.Set("turnstile", "proof")
+		}, wantID: "123456"},
 		{name: "unsigned flow token query is rejected", authDate: now, mutate: func(values url.Values) { values.Set("flow_token", "must-be-in-path") }, wantErr: "signature"},
 		{name: "duplicate parameter", authDate: now, mutate: func(values url.Values) { values["id"] = append(values["id"], "654321") }, wantErr: "duplicate"},
 	}

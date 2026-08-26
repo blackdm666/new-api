@@ -10,8 +10,21 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 )
+
+// ResolveUserNotificationEmail returns the explicit notification address, or
+// falls back to the account email when no override is configured.
+func ResolveUserNotificationEmail(user *model.User, userSetting dto.UserSetting) string {
+	if override := strings.TrimSpace(userSetting.NotificationEmail); override != "" {
+		return override
+	}
+	if user == nil {
+		return ""
+	}
+	return strings.TrimSpace(user.Email)
+}
 
 func NotifyRootUser(t string, subject string, content string) {
 	user := model.GetRootUser().ToBaseUser()
@@ -31,7 +44,7 @@ func NotifyUpstreamModelUpdateWatchers(subject string, content string) {
 		return
 	}
 
-	notification := dto.NewNotify(dto.NotifyTypeChannelUpdate, subject, content, nil)
+	notification := dto.NewNotify(dto.NotifyTypeInspectionAlert, subject, content, nil)
 	sentCount := 0
 	for _, user := range users {
 		userSetting := user.GetSetting()
@@ -48,19 +61,31 @@ func NotifyUpstreamModelUpdateWatchers(subject string, content string) {
 }
 
 func NotifyUser(userId int, userEmail string, userSetting dto.UserSetting, data dto.Notify) error {
+	return notifyUser(userId, userEmail, userSetting, data, "")
+}
+
+func NotifyUserWithDeliveryKey(userId int, userEmail string, userSetting dto.UserSetting, data dto.Notify, deliveryKey string) error {
+	return notifyUser(userId, userEmail, userSetting, data, strings.TrimSpace(deliveryKey))
+}
+
+func notifyUser(userId int, userEmail string, userSetting dto.UserSetting, data dto.Notify, deliveryKey string) error {
 	notifyType := userSetting.NotifyType
 	if notifyType == "" {
 		notifyType = dto.NotifyTypeEmail
 	}
 
-	// Check notification limit
-	canSend, err := CheckNotificationLimit(userId, data.Type)
-	if err != nil {
-		common.SysLog(fmt.Sprintf("failed to check notification limit: %s", err.Error()))
-		return err
-	}
-	if !canSend {
-		return fmt.Errorf("notification limit exceeded for user %d with type %s", userId, notifyType)
+	if deliveryKey == "" {
+		// Generic notifications keep the existing rate limit. Domain events with
+		// a deterministic delivery key rely on their state transition and the
+		// outbox unique index instead, avoiding a claimed event being suppressed.
+		canSend, err := CheckNotificationLimit(userId, data.Type)
+		if err != nil {
+			common.SysLog(fmt.Sprintf("failed to check notification limit: %s", err.Error()))
+			return err
+		}
+		if !canSend {
+			return fmt.Errorf("notification limit exceeded for user %d with type %s", userId, notifyType)
+		}
 	}
 
 	switch notifyType {
@@ -74,7 +99,7 @@ func NotifyUser(userId int, userEmail string, userSetting dto.UserSetting, data 
 			common.SysLog(fmt.Sprintf("user %d has no email, skip sending email", userId))
 			return nil
 		}
-		return sendEmailNotify(emailToUse, data)
+		return sendEmailNotify(userId, emailToUse, userSetting.Language, data, deliveryKey)
 	case dto.NotifyTypeWebhook:
 		webhookURLStr := userSetting.WebhookUrl
 		if webhookURLStr == "" {
@@ -104,14 +129,17 @@ func NotifyUser(userId int, userEmail string, userSetting dto.UserSetting, data 
 	return nil
 }
 
-func sendEmailNotify(userEmail string, data dto.Notify) error {
-	// make email content
-	content := data.Content
-	// 处理占位符
-	for _, value := range data.Values {
-		content = strings.Replace(content, dto.ContentValueParam, fmt.Sprintf("%v", value), 1)
+func sendEmailNotify(userId int, userEmail string, lang string, data dto.Notify, deliveryKey string) error {
+	subject, content := BuildSystemAlertEmail(lang, data)
+	templateKey := NotificationEmailTemplateKey(data.Type)
+	if templateKey == "quota_warning_user" && model.HasRecentMarketingBalanceRecipient(userId, common.GetTimestamp()-int64(setting.GetEmailDeliveryRules().MarketingUserCooldownDays)*86400) {
+		return nil
 	}
-	return common.SendEmail(data.Title, userEmail, content)
+	if deliveryKey == "" {
+		deliveryKey = templateKey + ":" + common.NewRequestId()
+	}
+	_, err := QueueSystemEmail(deliveryKey, templateKey, 0, userId, userEmail, subject, content, 0)
+	return err
 }
 
 func sendBarkNotify(barkURL string, data dto.Notify) error {

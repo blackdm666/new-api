@@ -425,6 +425,19 @@ func convertClaudeRequestToOpenAI(_ context.Context, info convmeta.Meta, request
 	return claudemessages.ClaudeMessagesRequestToOpenAIChat(*claudeRequest, info)
 }
 
+func convertClaudeRequestToGemini(c context.Context, info convmeta.Meta, request any) (any, error) {
+	claudeRequest, ok := request.(*dto.ClaudeRequest)
+	if !ok {
+		if value, ok := request.(dto.ClaudeRequest); ok {
+			claudeRequest = &value
+		}
+	}
+	if claudeRequest == nil {
+		return nil, fmt.Errorf("expected Anthropic Messages request, got %T", request)
+	}
+	return claudemessages.ClaudeMessagesRequestToGeminiGenerateContent(c, *claudeRequest, info)
+}
+
 func convertOpenAIRequestToClaude(c context.Context, info convmeta.Meta, request any) (any, error) {
 	openAIRequest, ok := request.(*dto.GeneralOpenAIRequest)
 	if !ok {
