@@ -119,6 +119,7 @@ func createTaskError(err error, code string, statusCode int, localError bool) *d
 
 func storeTaskRequest(c *gin.Context, info *RelayInfo, action string, requestObj TaskSubmitReq) {
 	info.Action = action
+	info.CallbackURL = strings.TrimSpace(requestObj.CallbackURL)
 	c.Set("task_request", requestObj)
 }
 func GetTaskRequest(c *gin.Context) (TaskSubmitReq, error) {
@@ -164,12 +165,13 @@ func validateMultipartTaskRequest(c *gin.Context, info *RelayInfo, action string
 
 	formData := c.Request.PostForm
 	req = TaskSubmitReq{
-		Prompt:   formData.Get("prompt"),
-		Model:    formData.Get("model"),
-		Mode:     formData.Get("mode"),
-		Image:    formData.Get("image"),
-		Size:     formData.Get("size"),
-		Metadata: make(map[string]interface{}),
+		Prompt:      formData.Get("prompt"),
+		Model:       formData.Get("model"),
+		Mode:        formData.Get("mode"),
+		Image:       formData.Get("image"),
+		Size:        formData.Get("size"),
+		CallbackURL: formData.Get("callback_url"),
+		Metadata:    make(map[string]interface{}),
 	}
 
 	if durationStr := formData.Get("seconds"); durationStr != "" {
@@ -276,6 +278,7 @@ func isKnownTaskField(field string) bool {
 		"size":            true,
 		"duration":        true,
 		"input_reference": true, // Sora 特有字段
+		"callback_url":    true,
 	}
 	return knownFields[field]
 }

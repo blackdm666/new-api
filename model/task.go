@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -108,11 +110,12 @@ type TaskPrivateData struct {
 	ResultStorageKey  string `json:"result_storage_key,omitempty"`  // 成品缓存对象键
 	ResultMimeType    string `json:"result_mime_type,omitempty"`    // 成品 MIME 类型
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
-	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
-	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
-	TokenId        int                 `json:"token_id,omitempty"`        // 令牌 ID，用于令牌额度退款
-	NodeName       string              `json:"node_name,omitempty"`       // 发起任务的节点名，轮询结算阶段据此归属日志而非最后查询节点
-	BillingContext *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
+	BillingSource   string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
+	SubscriptionId  int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
+	TokenId         int                 `json:"token_id,omitempty"`        // 令牌 ID，用于令牌额度退款
+	NodeName        string              `json:"node_name,omitempty"`       // 发起任务的节点名，轮询结算阶段据此归属日志而非最后查询节点
+	CallbackEnabled bool                `json:"callback_enabled,omitempty"`
+	BillingContext  *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
 }
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
@@ -371,6 +374,21 @@ func (Task *Task) Insert() error {
 	var err error
 	err = DB.Create(Task).Error
 	return err
+}
+
+func (Task *Task) InsertWithCallback(callbackURL string) error {
+	callbackURL = strings.TrimSpace(callbackURL)
+	if callbackURL == "" {
+		return Task.Insert()
+	}
+	Task.PrivateData.CallbackEnabled = true
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(Task).Error; err != nil {
+			return err
+		}
+		_, err := EnqueueTaskCallbackTx(tx, Task, callbackURL)
+		return err
+	})
 }
 
 type taskSnapshot struct {

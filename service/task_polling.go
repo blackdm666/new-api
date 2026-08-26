@@ -85,6 +85,9 @@ func sweepTimedOutTasks(ctx context.Context) {
 		if !isLegacy && task.Quota != 0 {
 			RefundTaskQuota(ctx, task, reason)
 		}
+		if task.PrivateData.CallbackEnabled {
+			ScheduleTaskCallback(task.TaskID)
+		}
 	}
 
 	if timedOutCount > 0 {
@@ -625,6 +628,9 @@ func FinalizeVideoTaskResult(ctx context.Context, adaptor TaskPollingAdaptor, ta
 	}
 	if shouldRefund {
 		RefundTaskQuota(ctx, task, task.FailReason)
+	}
+	if terminalTransitionWon && task.PrivateData.CallbackEnabled {
+		ScheduleTaskCallback(task.TaskID)
 	}
 
 	return nil

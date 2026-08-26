@@ -159,6 +159,14 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	if taskErr := adaptor.ValidateRequestAndSetAction(c, info); taskErr != nil {
 		return nil, taskErr
 	}
+	if callbackURL := strings.TrimSpace(info.CallbackURL); callbackURL != "" {
+		if len(callbackURL) > 2048 {
+			return nil, service.TaskErrorWrapperLocal(errors.New("callback_url must not exceed 2048 characters"), "invalid_callback_url", http.StatusBadRequest)
+		}
+		if err := service.ValidateSSRFProtectedFetchURL(callbackURL); err != nil {
+			return nil, service.TaskErrorWrapperLocal(fmt.Errorf("callback_url rejected: %w", err), "invalid_callback_url", http.StatusBadRequest)
+		}
+	}
 
 	// 2. 确定模型名称
 	modelName := info.OriginModelName

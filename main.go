@@ -369,6 +369,7 @@ func InitResources() error {
 	service.StartInvoiceFileCleanup()
 	service.StartInvoiceNotificationDelivery()
 	service.StartEmailDelivery()
+	service.StartTaskCallbackDelivery()
 	service.StartInvoiceDataRetention()
 	service.StartAffiliateUpgradeNotificationDelivery()
 

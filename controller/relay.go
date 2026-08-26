@@ -604,7 +604,7 @@ func RelayTask(c *gin.Context) {
 		task.Quota = result.Quota
 		task.Data = result.TaskData
 		task.Action = relayInfo.Action
-		if insertErr := task.Insert(); insertErr != nil {
+		if insertErr := task.InsertWithCallback(relayInfo.CallbackURL); insertErr != nil {
 			common.SysError("insert task error: " + insertErr.Error())
 		}
 	}

@@ -41,6 +41,7 @@ func TestMain(m *testing.M) {
 
 	if err := db.AutoMigrate(
 		&model.Task{},
+		&model.TaskCallbackDelivery{},
 		&model.User{},
 		&model.Token{},
 		&model.Log{},
@@ -78,6 +79,7 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM marketing_suppressions")
 		model.DB.Exec("DELETE FROM email_deliveries")
 		model.DB.Exec("DELETE FROM quota_notification_states")
+		model.DB.Exec("DELETE FROM task_callback_deliveries")
 		model.DB.Exec("DELETE FROM tasks")
 		model.DB.Exec("DELETE FROM users")
 		model.DB.Exec("DELETE FROM tokens")

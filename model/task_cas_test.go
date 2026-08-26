@@ -36,6 +36,7 @@ func TestMain(m *testing.M) {
 
 	if err := db.AutoMigrate(
 		&Task{},
+		&TaskCallbackDelivery{},
 		&User{},
 		&UserSession{},
 		&AuthFlow{},
@@ -104,6 +105,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM quota_notification_states")
 		DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&MarketingEmailDailyQuota{})
 		DB.Exec("DELETE FROM tasks")
+		DB.Exec("DELETE FROM task_callback_deliveries")
 		DB.Exec("DELETE FROM auth_flows")
 		DB.Exec("DELETE FROM external_identity_claims")
 		DB.Exec("DELETE FROM user_sessions")
