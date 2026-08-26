@@ -59,6 +59,7 @@ const (
 	ChannelTypeSub2API        = 59
 	ChannelTypeNewAPI         = 60
 	ChannelTypeGlobalAiOpc    = 61
+	ChannelTypeXinMeng        = 62
 	ChannelTypeDummy          // this one is only for count, do not add any channel after this
 
 )
@@ -126,6 +127,7 @@ var ChannelBaseURLs = []string{
 	"",                                          //59
 	"",                                          //60
 	"https://zcbservice.aizfw.cn/kyyReactApiServer", //61
+	"https://www.jimengvip.online",                  //62
 }
 
 var ChannelTypeNames = map[int]string{
@@ -187,6 +189,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeSub2API:        "Sub2API",
 	ChannelTypeNewAPI:         "New API",
 	ChannelTypeGlobalAiOpc:    "GlobalAiOpc",
+	ChannelTypeXinMeng:        "XinMeng",
 }
 
 func GetChannelTypeName(channelType int) string {

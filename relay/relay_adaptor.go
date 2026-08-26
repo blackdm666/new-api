@@ -45,6 +45,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/task/suno"
 	taskvertex "github.com/QuantumNous/new-api/relay/channel/task/vertex"
 	taskVidu "github.com/QuantumNous/new-api/relay/channel/task/vidu"
+	taskxinmeng "github.com/QuantumNous/new-api/relay/channel/task/xinmeng"
 	"github.com/QuantumNous/new-api/relay/channel/tencent"
 	"github.com/QuantumNous/new-api/relay/channel/vertex"
 	"github.com/QuantumNous/new-api/relay/channel/volcengine"
@@ -174,6 +175,8 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 			return &taskglobalaiopc.TaskAdaptor{}
 		case constant.ChannelTypeSub2API:
 			return &tasksub2api.TaskAdaptor{}
+		case constant.ChannelTypeXinMeng:
+			return &taskxinmeng.TaskAdaptor{}
 		}
 	}
 	return nil
