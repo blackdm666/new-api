@@ -417,6 +417,29 @@ func TestFetchNewAPIModelsUsesOpenAIContract(t *testing.T) {
 	require.Equal(t, []string{"gpt-5", "gpt-5-mini"}, models)
 }
 
+func TestFetchXinMengModelsUsesOpenAIContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/models", r.URL.Path)
+		assert.Equal(t, "Bearer xinmeng-key", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{"object":"list","data":[{"id":"dvc-seedance-2.5"},{"id":" dvc-seedance-2.0 "},{"id":"minimax-h3"},{"id":"minimax-h3"}]}`))
+		assert.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	baseURL := server.URL
+	channel := &model.Channel{
+		Type:    constant.ChannelTypeXinMeng,
+		Key:     "xinmeng-key",
+		BaseURL: &baseURL,
+	}
+
+	models, err := fetchChannelUpstreamModelIDs(channel)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"dvc-seedance-2.5", "dvc-seedance-2.0", "minimax-h3"}, models)
+}
+
 func TestNormalizeModelNames(t *testing.T) {
 	result := normalizeModelNames([]string{
 		" gpt-4o ",

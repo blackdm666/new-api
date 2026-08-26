@@ -22,6 +22,7 @@ For commercial licensing, please contact support@quantumnous.com
 // ============================================================================
 
 export const CHANNEL_TYPE_NEW_API = 60
+export const CHANNEL_TYPE_XINMENG = 62
 
 export const CHANNEL_TYPES = {
   0: 'Unknown',
@@ -390,8 +391,29 @@ export const FIELD_DESCRIPTIONS = {
 // ============================================================================
 
 export const MODEL_FETCHABLE_TYPES = new Set([
-  1, 4, 14, 17, 20, 23, 24, 25, 26, 27, 31, 34, 35, 40, 42, 43, 47, 48, 57, 58,
-  59, 60,
+  1,
+  4,
+  14,
+  17,
+  20,
+  23,
+  24,
+  25,
+  26,
+  27,
+  31,
+  34,
+  35,
+  40,
+  42,
+  43,
+  47,
+  48,
+  57,
+  58,
+  59,
+  60,
+  CHANNEL_TYPE_XINMENG,
 ])
 
 export const FIELD_PASSTHROUGH_TYPES = new Set([

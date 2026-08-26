@@ -164,6 +164,7 @@ import {
   type ChannelFormValues,
   deduplicateKeys,
   getChannelTypeIcon,
+  getChannelTypeSupportedModels,
   getKeyPromptForType,
   parseModelsString,
   formatModelsArray,
@@ -952,6 +953,8 @@ export function ChannelMutateDrawer({
 
   // Get basic models for the current channel type
   const basicModels = useMemo(() => {
+    const configuredModels = getChannelTypeSupportedModels(currentType)
+    if (configuredModels.length) return configuredModels
     if (!allModelsList.length) return []
     // Filter models based on common patterns for specific types
     if (currentType === 1) {

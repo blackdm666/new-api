@@ -202,6 +202,10 @@ export function getChannelTypeConfig(type: number): ChannelTypeConfig {
   )
 }
 
+export function getChannelTypeSupportedModels(type: number): string[] {
+  return [...(CHANNEL_TYPE_CONFIGS[type]?.supportedModels || [])]
+}
+
 /**
  * Check if channel type requires organization field
  */
