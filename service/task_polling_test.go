@@ -175,6 +175,21 @@ func TestFinalizeVideoTaskResultSuccessPersistsFinishTime(t *testing.T) {
 	assert.Equal(t, "https://cdn.example/video.mp4", stored.GetResultURL())
 }
 
+func TestRedactVideoResponseBodyRemovesInteractionVideoData(t *testing.T) {
+	body := []byte(`{
+		"id":"interaction_123",
+		"status":"completed",
+		"steps":[{"type":"model_output","content":[
+			{"type":"video","mime_type":"video/mp4","data":"large-base64-video"},
+			{"type":"text","text":"done"}
+		]}]
+	}`)
+
+	redacted := redactVideoResponseBody(body)
+	assert.NotContains(t, string(redacted), "large-base64-video")
+	assert.Contains(t, string(redacted), `"text":"done"`)
+}
+
 func seedTaskPollingChannel(t *testing.T, id int, disableSleep bool) {
 	t.Helper()
 	ch := &model.Channel{
