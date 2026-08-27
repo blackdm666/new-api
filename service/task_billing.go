@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -20,10 +20,13 @@ import (
 func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	tokenName := c.GetString("token_name")
 	logContent := fmt.Sprintf("操作 %s", info.Action)
-	// 支持任务仅按次计费
-	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
+	billingUnit := billing_setting.ResolveTaskBillingUnit(info.OriginModelName, info.PriceData.UsePrice)
+	if billingUnit == billing_setting.BillingUnitRequest {
 		logContent = fmt.Sprintf("%s，按次计费", logContent)
 	} else {
+		if billingUnit == billing_setting.BillingUnitSecond {
+			logContent = fmt.Sprintf("%s，按秒计费", logContent)
+		}
 		if otherRatios := info.PriceData.OtherRatios(); len(otherRatios) > 0 {
 			var contents []string
 			for key, ra := range otherRatios {
@@ -40,6 +43,12 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	other["is_task"] = true
 	other["request_path"] = c.Request.URL.Path
 	other["model_price"] = info.PriceData.ModelPrice
+	if billingUnit != "" {
+		other["billing_unit"] = billingUnit
+	}
+	if taskRatios := info.PriceData.OtherRatios(); len(taskRatios) > 0 {
+		other["task_ratios"] = taskRatios
+	}
 	if info.PriceData.ModelRatio > 0 {
 		other["model_ratio"] = info.PriceData.ModelRatio
 	}

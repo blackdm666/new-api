@@ -107,3 +107,14 @@ export function replaceModelInPath(path: string, modelName: string): string {
 export function isTokenBasedModel(model: PricingModel): boolean {
   return model.quota_type === QUOTA_TYPE_VALUES.TOKEN
 }
+
+export function isPerSecondModel(model: PricingModel): boolean {
+  return (
+    model.quota_type === QUOTA_TYPE_VALUES.REQUEST &&
+    model.billing_unit === 'second'
+  )
+}
+
+export function getFixedPriceUnitLabel(model: PricingModel): string {
+  return isPerSecondModel(model) ? 'second' : 'request'
+}

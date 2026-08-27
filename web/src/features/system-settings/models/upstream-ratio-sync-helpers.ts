@@ -107,6 +107,16 @@ export function getPreferredSyncField(
   ratioType: RatioType,
   sourceName: string
 ): RatioType {
+  const billingModeValue = ratioTypes.billing_mode?.upstreams?.[sourceName]
+  const fixedPriceValue = ratioTypes.model_price?.upstreams?.[sourceName]
+  if (
+    ratioType === 'billing_mode' &&
+    (billingModeValue === 'per_request' || billingModeValue === 'per_second') &&
+    isSelectableUpstreamValue(fixedPriceValue)
+  ) {
+    return 'model_price'
+  }
+
   const exprValue = ratioTypes.billing_expr?.upstreams?.[sourceName]
   if (
     ratioType !== 'billing_expr' &&
@@ -263,15 +273,38 @@ function applyResolutionSelectionToDraft(
 
   newModelRes[finalType] = finalValue
 
+  if (category === 'price') {
+    delete newModelRes['billing_expr']
+    const modeVal = modelDiffs?.billing_mode?.upstreams?.[selection.sourceName]
+    if (modeVal === 'per_request' || modeVal === 'per_second') {
+      newModelRes['billing_mode'] = modeVal
+    } else {
+      delete newModelRes['billing_mode']
+    }
+  }
+
   if (category === 'tiered' && modelDiffs) {
     const modeVal = modelDiffs.billing_mode?.upstreams?.[selection.sourceName]
     const exprVal = modelDiffs.billing_expr?.upstreams?.[selection.sourceName]
-    if (modeVal !== undefined && modeVal !== null && modeVal !== 'same') {
+    const isFixedMode = modeVal === 'per_request' || modeVal === 'per_second'
+    if (isFixedMode) {
+      newModelRes['billing_mode'] = modeVal
+      delete newModelRes['billing_expr']
+    } else if (
+      modeVal !== undefined &&
+      modeVal !== null &&
+      modeVal !== 'same'
+    ) {
       newModelRes['billing_mode'] = modeVal
     } else if (finalType === 'billing_expr') {
       newModelRes['billing_mode'] = 'tiered_expr'
     }
-    if (exprVal !== undefined && exprVal !== null && exprVal !== 'same') {
+    if (
+      !isFixedMode &&
+      exprVal !== undefined &&
+      exprVal !== null &&
+      exprVal !== 'same'
+    ) {
       newModelRes['billing_expr'] = exprVal
     }
   }

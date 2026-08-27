@@ -30,7 +30,7 @@ import {
   getDynamicPricingSummary,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
-import { isTokenBasedModel } from '../lib/model-helpers'
+import { getFixedPriceUnitLabel, isTokenBasedModel } from '../lib/model-helpers'
 import { formatPrice, formatRequestPrice } from '../lib/price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
@@ -188,7 +188,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             props.selectedGroup
           )}
         </span>{' '}
-        / {t('request')}
+        / {t(getFixedPriceUnitLabel(props.model))}
       </span>
     )
   }
@@ -264,7 +264,9 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             </span>
           ))}
           <span className='text-muted-foreground/50 text-xs'>
-            {tokenUnitLabel}
+            {isTokenBased || isDynamicPricing
+              ? tokenUnitLabel
+              : t(getFixedPriceUnitLabel(props.model))}
           </span>
           {hiddenCount > 0 && (
             <span className='text-muted-foreground/40 text-xs'>

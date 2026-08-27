@@ -34,6 +34,7 @@ type Pricing struct {
 	EnableGroup            []string                `json:"enable_groups"`
 	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
 	BillingMode            string                  `json:"billing_mode,omitempty"`
+	BillingUnit            string                  `json:"billing_unit,omitempty"`
 	BillingExpr            string                  `json:"billing_expr,omitempty"`
 	PricingVersion         string                  `json:"pricing_version,omitempty"`
 }
@@ -377,6 +378,7 @@ func updatePricing() {
 		if findPrice {
 			pricing.ModelPrice = modelPrice
 			pricing.QuotaType = 1
+			pricing.BillingUnit = billing_setting.ResolveFixedPriceBillingUnit(model)
 		} else {
 			modelRatio, _, _ := ratio_setting.GetModelRatio(model)
 			pricing.ModelRatio = modelRatio
@@ -400,18 +402,20 @@ func updatePricing() {
 			audioCompletionRatio := ratio_setting.GetAudioCompletionRatio(model)
 			pricing.AudioCompletionRatio = &audioCompletionRatio
 		}
-		if billingMode := billing_setting.GetBillingMode(model); billingMode == "tiered_expr" {
+		if billingMode := billing_setting.GetBillingMode(model); billingMode == billing_setting.BillingModeTieredExpr {
 			if expr, ok := billing_setting.GetBillingExpr(model); ok && strings.TrimSpace(expr) != "" {
 				pricing.BillingMode = billingMode
 				pricing.BillingExpr = expr
 			}
+		} else if billingMode == billing_setting.BillingModePerRequest || billingMode == billing_setting.BillingModePerSecond {
+			pricing.BillingMode = billingMode
 		}
 		pricingMap = append(pricingMap, pricing)
 	}
 
 	// 防止大更新后数据不通用
 	if len(pricingMap) > 0 {
-		pricingMap[0].PricingVersion = "5a90f2b86c08bd983a9a2e6d66c255f4eaef9c4bc934386d2b6ae84ef0ff1f1f"
+		pricingMap[0].PricingVersion = "0ba9508c616239d6b2f44aac339d140821a25f6e5e29d156c33ddda98f3b2d38"
 	}
 
 	// 刷新缓存映射，供高并发快速查询

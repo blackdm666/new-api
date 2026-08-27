@@ -26,13 +26,13 @@ import {
   formatRatioCompact,
   getEffectiveGroupRatioInfo,
 } from './billing-display'
+import { isPerCallBilling, isPerSecondBilling } from './billing-unit'
 import {
   getTieredBillingSummary,
   hasAnyCacheTokens,
   isViolationFeeLog,
   renderAuditContent,
 } from './format'
-import { isPerCallBilling } from './utils'
 
 export interface DetailSegment {
   text: string
@@ -146,8 +146,13 @@ export function buildTypeDetailSegments(
     }
   } else {
     const modelPrice = other.model_price
-    const isPerCall = isPerCallBilling(modelPrice)
-    if (isPerCall && modelPrice != null) {
+    const isPerSecond = isPerSecondBilling(other.billing_unit)
+    const isPerCall = isPerCallBilling(modelPrice, other.billing_unit)
+    if (isPerSecond && modelPrice != null) {
+      segments.push({
+        text: `${t('Per-second')} · ${formatBillingCurrencyFromUSD(actualPrice(modelPrice), priceOpts)}/${t('second')}`,
+      })
+    } else if (isPerCall && modelPrice != null) {
       segments.push({
         text: `${t('Per-call')} · ${formatBillingCurrencyFromUSD(actualPrice(modelPrice), priceOpts)}`,
       })

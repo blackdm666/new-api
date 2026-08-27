@@ -104,6 +104,14 @@ export type ModelPricingEditorPanelHandle = {
   commitDraft: () => Promise<ModelRatioData | null>
 }
 
+function resolvePricingMode(data?: ModelRatioData | null): PricingMode {
+  if (data?.billingMode === 'tiered_expr') return 'tiered_expr'
+  if (data?.billingMode === 'per-second') return 'per-second'
+  if (data?.billingMode === 'per-request') return 'per-request'
+  if (data?.price) return 'per-request'
+  return 'per-token'
+}
+
 export const ModelPricingSheet = forwardRef<
   ModelPricingEditorPanelHandle,
   ModelPricingSheetProps
@@ -188,13 +196,7 @@ export const ModelPricingEditorPanel = forwardRef<
         audioRatio: editData.audioRatio || '',
         audioCompletionRatio: editData.audioCompletionRatio || '',
       })
-      setPricingMode(
-        editData.billingMode === 'tiered_expr'
-          ? 'tiered_expr'
-          : editData.price
-            ? 'per-request'
-            : 'per-token'
-      )
+      setPricingMode(resolvePricingMode(editData))
       setBillingExpr(editData.billingExpr || '')
       setRequestRuleExpr(editData.requestRuleExpr || '')
     } else {
@@ -476,6 +478,50 @@ export const ModelPricingEditorPanel = forwardRef<
   )
 
   const showActions = Boolean(onSave)
+  const renderFixedPriceFields = (unit: 'request' | 'second') => (
+    <FieldGroup className='gap-5'>
+      <FormField
+        control={form.control}
+        name='price'
+        render={({ field }) => (
+          <FormItem className='contents'>
+            <Field>
+              <FieldLabel>
+                {unit === 'second' ? t('Price per second') : t('Fixed price')}
+              </FieldLabel>
+              <FormControl>
+                <InputGroup>
+                  <InputGroupAddon>$</InputGroupAddon>
+                  <InputGroupInput
+                    inputMode='decimal'
+                    placeholder='0.01'
+                    {...field}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      if (numericDraftRegex.test(value)) {
+                        field.onChange(value)
+                      }
+                    }}
+                  />
+                  <InputGroupAddon align='inline-end'>
+                    {unit === 'second' ? t('per second') : t('per request')}
+                  </InputGroupAddon>
+                </InputGroup>
+              </FormControl>
+              <FieldDescription>
+                {unit === 'second'
+                  ? t(
+                      'Cost in USD per generated second. Requires a task adapter that reports duration.'
+                    )
+                  : t('Cost in USD per request, regardless of tokens used.')}
+              </FieldDescription>
+              <FormMessage />
+            </Field>
+          </FormItem>
+        )}
+      />
+    </FieldGroup>
+  )
 
   return (
     <div
@@ -544,12 +590,15 @@ export const ModelPricingEditorPanel = forwardRef<
                   onValueChange={handleModeChange}
                   className='gap-4'
                 >
-                  <TabsList className='grid w-full grid-cols-3'>
+                  <TabsList className='grid w-full grid-cols-2 sm:grid-cols-4'>
                     <TabsTrigger value='per-token'>
                       {t('Per-token')}
                     </TabsTrigger>
                     <TabsTrigger value='per-request'>
                       {t('Per-request')}
+                    </TabsTrigger>
+                    <TabsTrigger value='per-second'>
+                      {t('Per-second')}
                     </TabsTrigger>
                     <TabsTrigger value='tiered_expr'>
                       {t('Expression')}
@@ -599,44 +648,11 @@ export const ModelPricingEditorPanel = forwardRef<
                   </TabsContent>
 
                   <TabsContent value='per-request' className='pt-0'>
-                    <FieldGroup className='gap-5'>
-                      <FormField
-                        control={form.control}
-                        name='price'
-                        render={({ field }) => (
-                          <FormItem className='contents'>
-                            <Field>
-                              <FieldLabel>{t('Fixed price')}</FieldLabel>
-                              <FormControl>
-                                <InputGroup>
-                                  <InputGroupAddon>$</InputGroupAddon>
-                                  <InputGroupInput
-                                    inputMode='decimal'
-                                    placeholder='0.01'
-                                    {...field}
-                                    onChange={(event) => {
-                                      const value = event.target.value
-                                      if (numericDraftRegex.test(value)) {
-                                        field.onChange(value)
-                                      }
-                                    }}
-                                  />
-                                  <InputGroupAddon align='inline-end'>
-                                    {t('per request')}
-                                  </InputGroupAddon>
-                                </InputGroup>
-                              </FormControl>
-                              <FieldDescription>
-                                {t(
-                                  'Cost in USD per request, regardless of tokens used.'
-                                )}
-                              </FieldDescription>
-                              <FormMessage />
-                            </Field>
-                          </FormItem>
-                        )}
-                      />
-                    </FieldGroup>
+                    {renderFixedPriceFields('request')}
+                  </TabsContent>
+
+                  <TabsContent value='per-second' className='pt-0'>
+                    {renderFixedPriceFields('second')}
                   </TabsContent>
 
                   <TabsContent value='tiered_expr' className='pt-0'>

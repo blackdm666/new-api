@@ -117,4 +117,28 @@ describe('usage log actual price display', () => {
       ]
     )
   })
+
+  test('shows per-second unit and duration without calling it per-call', () => {
+    const other: LogOtherData = {
+      model_price: 0.08,
+      billing_unit: 'second',
+      task_ratios: { seconds: 8, size: 1.5 },
+      group_ratio: 0.5,
+    }
+
+    expect(buildTypeDetailSegments(log, other, t)[0]).toEqual({
+      text: 'Per-second · ¥0.28/second',
+    })
+    expect(buildBillingBreakdownRows(log, other, false, t).slice(0, 4)).toEqual(
+      [
+        { label: 'Billing Mode', value: 'Per-second' },
+        {
+          label: 'Price Explanation',
+          value: 'Adjusted by 0.5x group rate',
+        },
+        { label: 'Model Price', value: '¥0.28/second' },
+        { label: 'Duration', value: '8s' },
+      ]
+    )
+  })
 })

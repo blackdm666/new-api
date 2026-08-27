@@ -67,7 +67,12 @@ import {
   isDynamicPricingModel,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
-import { getAvailableGroups, isTokenBasedModel } from '../lib/model-helpers'
+import {
+  getAvailableGroups,
+  getFixedPriceUnitLabel,
+  isPerSecondModel,
+  isTokenBasedModel,
+} from '../lib/model-helpers'
 import { formatFixedPrice, formatGroupPrice } from '../lib/price'
 import type {
   ModelCapability,
@@ -717,7 +722,7 @@ function PriceSection(props: {
         <SectionTitle>{t('Base Price')}</SectionTitle>
         <div className='flex items-baseline justify-between'>
           <span className='text-muted-foreground text-sm'>
-            {t('Per request')}
+            {isPerSecondModel(props.model) ? t('Per-second') : t('Per request')}
           </span>
           <span className='text-foreground font-mono text-sm font-semibold tabular-nums'>
             {formatFixedPrice(
@@ -1123,6 +1128,11 @@ function GroupPricingSection(props: {
         {isTokenBased && (
           <p className='text-muted-foreground/40 mt-1.5 px-4 text-[10px] sm:px-0'>
             {t('Prices shown per')} {tokenUnitLabel} tokens
+          </p>
+        )}
+        {!isTokenBased && (
+          <p className='text-muted-foreground/40 mt-1.5 px-4 text-[10px] sm:px-0'>
+            {t('Prices shown per')} {t(getFixedPriceUnitLabel(props.model))}
           </p>
         )}
       </div>

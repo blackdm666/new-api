@@ -3,6 +3,7 @@ package billing_setting
 import (
 	"fmt"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/samber/lo"
@@ -10,7 +11,11 @@ import (
 
 const (
 	BillingModeRatio      = "ratio"
+	BillingModePerRequest = "per_request"
+	BillingModePerSecond  = "per_second"
 	BillingModeTieredExpr = "tiered_expr"
+	BillingUnitRequest    = "request"
+	BillingUnitSecond     = "second"
 	BillingModeField      = "billing_mode"
 	BillingExprField      = "billing_expr"
 )
@@ -53,6 +58,62 @@ func GetBillingModeCopy() map[string]string {
 
 func GetBillingExprCopy() map[string]string {
 	return lo.Assign(billingSetting.BillingExpr)
+}
+
+func modelUsesTaskPricePatch(model string) bool {
+	for _, patchedModel := range constant.TaskPricePatches {
+		if patchedModel == model {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveFixedPriceBillingUnit returns the catalog unit for a ModelPrice.
+// Legacy fixed prices remain per-request until an administrator explicitly
+// chooses per-second pricing.
+func ResolveFixedPriceBillingUnit(model string) string {
+	switch GetBillingMode(model) {
+	case BillingModePerSecond:
+		return BillingUnitSecond
+	case BillingModeTieredExpr:
+		return ""
+	default:
+		return BillingUnitRequest
+	}
+}
+
+// IsTaskPerRequestBilling controls whether task adapters' duration,
+// resolution, and other multipliers are skipped. Explicit settings take
+// precedence over the legacy TASK_PRICE_PATCH environment variable.
+func IsTaskPerRequestBilling(model string) bool {
+	switch GetBillingMode(model) {
+	case BillingModePerRequest:
+		return true
+	case BillingModePerSecond, BillingModeTieredExpr:
+		return false
+	default:
+		return modelUsesTaskPricePatch(model)
+	}
+}
+
+// ResolveTaskBillingUnit returns the unit stored in task logs and snapshots.
+// legacyFixedPrice preserves the historical behavior for existing ModelPrice
+// entries that have not selected an explicit billing mode yet.
+func ResolveTaskBillingUnit(model string, legacyFixedPrice bool) string {
+	switch GetBillingMode(model) {
+	case BillingModePerRequest:
+		return BillingUnitRequest
+	case BillingModePerSecond:
+		return BillingUnitSecond
+	case BillingModeTieredExpr:
+		return ""
+	default:
+		if modelUsesTaskPricePatch(model) || legacyFixedPrice {
+			return BillingUnitRequest
+		}
+		return ""
+	}
 }
 
 func GetPricingSyncData(base map[string]any) map[string]any {

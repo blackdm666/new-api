@@ -177,6 +177,8 @@ export interface LogOtherData {
   model_ratio?: number
   completion_ratio?: number
   model_price?: number
+  billing_unit?: 'request' | 'second'
+  task_ratios?: Record<string, number>
   group_ratio?: number
   user_group_ratio?: number
   cache_ratio?: number
