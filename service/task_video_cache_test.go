@@ -42,6 +42,21 @@ func useLocalTaskVideoCache(t *testing.T) invoicefile.Storage {
 	return storage
 }
 
+func useStaticTaskVideoSource(t *testing.T, content string) {
+	t.Helper()
+	previousOpener := OpenTaskVideoSourceFunc
+	OpenTaskVideoSourceFunc = func(context.Context, *model.Task, string) (*TaskVideoSource, error) {
+		return &TaskVideoSource{
+			Body:          io.NopCloser(strings.NewReader(content)),
+			ContentLength: int64(len(content)),
+			ContentType:   "video/mp4",
+			Header:        make(http.Header),
+			StatusCode:    http.StatusOK,
+		}, nil
+	}
+	t.Cleanup(func() { OpenTaskVideoSourceFunc = previousOpener })
+}
+
 func TestPrepareTaskVideoResultPersistsAndReopensDataURL(t *testing.T) {
 	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "true")
 	useLocalTaskVideoCache(t)
@@ -88,6 +103,7 @@ func TestPrepareTaskVideoResultKeepsUpstreamR2URLDirect(t *testing.T) {
 
 func TestPrepareTaskVideoResultKeepsAnonymousOfficialURLDirect(t *testing.T) {
 	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "true")
+	t.Setenv("TASK_VIDEO_DIRECT_HOSTS", "official.example")
 	previousProbe := taskVideoDirectProbe
 	taskVideoDirectProbe = func(context.Context, string) (bool, error) { return true, nil }
 	t.Cleanup(func() { taskVideoDirectProbe = previousProbe })
@@ -102,20 +118,45 @@ func TestPrepareTaskVideoResultKeepsAnonymousOfficialURLDirect(t *testing.T) {
 	assert.Empty(t, task.PrivateData.ResultStorageKey)
 }
 
+func TestPrepareTaskVideoResultCachesUntrustedPublicURL(t *testing.T) {
+	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "true")
+	t.Setenv("TASK_VIDEO_DIRECT_HOSTS", "")
+	useLocalTaskVideoCache(t)
+	useStaticTaskVideoSource(t, "upstream-public-video")
+	previousProbe := taskVideoDirectProbe
+	probeCalled := false
+	taskVideoDirectProbe = func(context.Context, string) (bool, error) {
+		probeCalled = true
+		return true, nil
+	}
+	t.Cleanup(func() { taskVideoDirectProbe = previousProbe })
+	task := &model.Task{TaskID: "task_untrusted_public"}
+
+	prepared, err := PrepareTaskVideoResult(context.Background(), task, "https://media.jimengvip.online/uploads/result.mp4")
+
+	require.NoError(t, err)
+	require.True(t, prepared.Cached)
+	assert.False(t, probeCalled)
+	assert.Empty(t, prepared.DirectURL)
+	assert.NotEmpty(t, task.PrivateData.ResultStorageKey)
+	assert.NotContains(t, task.PrivateData.ResultURL, "jimengvip.online")
+}
+
+func TestTaskVideoDirectHostAllowedRequiresExactOrWildcardMatch(t *testing.T) {
+	t.Setenv("TASK_VIDEO_DIRECT_HOSTS", "official.example, *.cdn.example;ignored.example")
+
+	assert.True(t, taskVideoDirectHostAllowed("official.example"))
+	assert.True(t, taskVideoDirectHostAllowed("media.cdn.example"))
+	assert.True(t, taskVideoDirectHostAllowed("ignored.example"))
+	assert.False(t, taskVideoDirectHostAllowed("cdn.example"))
+	assert.False(t, taskVideoDirectHostAllowed("official.example.evil.test"))
+	assert.False(t, taskVideoDirectHostAllowed("unlisted.example"))
+}
+
 func TestPrepareTaskVideoResultCachesProtectedInternalURL(t *testing.T) {
 	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "true")
 	useLocalTaskVideoCache(t)
-	previousOpener := OpenTaskVideoSourceFunc
-	OpenTaskVideoSourceFunc = func(context.Context, *model.Task, string) (*TaskVideoSource, error) {
-		return &TaskVideoSource{
-			Body:          io.NopCloser(strings.NewReader("protected-video")),
-			ContentLength: int64(len("protected-video")),
-			ContentType:   "video/mp4",
-			Header:        make(http.Header),
-			StatusCode:    http.StatusOK,
-		}, nil
-	}
-	t.Cleanup(func() { OpenTaskVideoSourceFunc = previousOpener })
+	useStaticTaskVideoSource(t, "protected-video")
 	task := &model.Task{TaskID: "task_internal_video"}
 
 	prepared, err := PrepareTaskVideoResult(context.Background(), task, "http://sub2api:8080/v1/videos/upstream/content")
