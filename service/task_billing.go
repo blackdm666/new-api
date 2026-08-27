@@ -20,7 +20,7 @@ import (
 func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	tokenName := c.GetString("token_name")
 	logContent := fmt.Sprintf("操作 %s", info.Action)
-	billingUnit := billing_setting.ResolveTaskBillingUnit(info.OriginModelName, info.PriceData.UsePrice)
+	billingUnit := billing_setting.ResolveTaskBillingUnit(info.OriginModelName)
 	if billingUnit == billing_setting.BillingUnitRequest {
 		logContent = fmt.Sprintf("%s，按次计费", logContent)
 	} else {

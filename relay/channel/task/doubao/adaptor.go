@@ -135,11 +135,24 @@ func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *r
 	return nil
 }
 
-// EstimateBilling 根据请求 metadata 中的输出分辨率与是否包含视频输入，返回相对基准价的计费 OtherRatio。
+// EstimateBilling returns the effective duration plus output/input pricing
+// ratios. Per-second billing must use the same duration that is forwarded to
+// the upstream request.
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
 		return nil
+	}
+	body, err := a.convertToRequestPayload(&req)
+	if err != nil {
+		return nil
+	}
+	ratios := make(map[string]float64, 2)
+	// The upstream gives frames precedence when both fields are present.
+	if body.Frames != nil && *body.Frames > 0 {
+		ratios["seconds"] = float64(*body.Frames) / 24
+	} else if body.Duration != nil && *body.Duration > 0 {
+		ratios["seconds"] = float64(*body.Duration)
 	}
 	hasVideo := hasVideoInMetadata(req.Metadata)
 	resolution, _ := req.Metadata["resolution"].(string)
@@ -151,10 +164,13 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 			break
 		}
 	}
-	if !ok || ratio == 1.0 {
+	if ok && ratio != 1.0 {
+		ratios["video_input"] = ratio
+	}
+	if len(ratios) == 0 {
 		return nil
 	}
-	return map[string]float64{"video_input": ratio}
+	return ratios
 }
 
 // hasVideoInMetadata 直接检查 metadata 的 content 数组是否包含 video_url 条目，
@@ -303,6 +319,8 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq) (*
 
 	if sec, _ := strconv.Atoi(req.Seconds); sec > 0 {
 		r.Duration = lo.ToPtr(dto.IntValue(sec))
+	} else if req.Duration > 0 {
+		r.Duration = lo.ToPtr(dto.IntValue(req.Duration))
 	}
 
 	r.Content = lo.Reject(r.Content, func(c ContentItem, _ int) bool { return c.Type == "text" })

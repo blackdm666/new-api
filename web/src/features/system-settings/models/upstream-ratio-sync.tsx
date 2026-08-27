@@ -50,12 +50,12 @@ import {
   OPENROUTER_ENDPOINT,
 } from './constants'
 import {
-  NUMERIC_SYNC_FIELDS,
   RATIO_SYNC_FIELDS,
   applyResolutionRemovalPlan,
   applyResolutionSelection,
   applyResolutionSelections,
   deleteResolutionField,
+  buildSyncedPricingOptions,
   type ResolutionRemovalPlan,
   type ResolutionSelection,
   type ResolutionsMap,
@@ -93,18 +93,6 @@ function getDefaultEndpointForChannel(channel: UpstreamChannel): string {
   if (channel.id === OFFICIAL_CHANNEL_ID) return OFFICIAL_CHANNEL_ENDPOINT
   if (channel.type === OPENROUTER_CHANNEL_TYPE) return OPENROUTER_ENDPOINT
   return DEFAULT_ENDPOINT
-}
-
-function optionKeyBySyncField(ratioType: string): string {
-  const explicit: Record<string, string> = {
-    billing_mode: 'billing_setting.billing_mode',
-    billing_expr: 'billing_setting.billing_expr',
-  }
-  if (explicit[ratioType]) return explicit[ratioType]
-  return ratioType
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join('')
 }
 
 function parseJsonRecord<T>(raw: string | undefined | null): Record<string, T> {
@@ -147,6 +135,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
 
   useEffect(() => {
     if (channels.length === 0) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate endpoints from the asynchronously loaded channel list
     setChannelEndpoints((prev) => {
       let mutated = false
       const next = { ...prev }
@@ -333,50 +322,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
 
   const performSync = useCallback(
     async (currentRatios: ParsedRatios): Promise<boolean> => {
-      const finalRatios: Record<string, Record<string, number | string>> = {
-        ModelRatio: { ...currentRatios.ModelRatio },
-        CompletionRatio: { ...currentRatios.CompletionRatio },
-        CacheRatio: { ...currentRatios.CacheRatio },
-        CreateCacheRatio: { ...currentRatios.CreateCacheRatio },
-        ImageRatio: { ...currentRatios.ImageRatio },
-        AudioRatio: { ...currentRatios.AudioRatio },
-        AudioCompletionRatio: { ...currentRatios.AudioCompletionRatio },
-        ModelPrice: { ...currentRatios.ModelPrice },
-        'billing_setting.billing_mode': {
-          ...currentRatios['billing_setting.billing_mode'],
-        },
-        'billing_setting.billing_expr': {
-          ...currentRatios['billing_setting.billing_expr'],
-        },
-      }
-
-      Object.entries(resolutions).forEach(([model, ratios]) => {
-        const selectedTypes = Object.keys(ratios)
-        const hasPrice = selectedTypes.includes('model_price')
-        const hasRatio = selectedTypes.some((rt) =>
-          RATIO_SYNC_FIELDS.includes(rt as RatioType)
-        )
-
-        if (hasPrice) {
-          delete finalRatios.ModelRatio[model]
-          delete finalRatios.CompletionRatio[model]
-          delete finalRatios.CacheRatio[model]
-          delete finalRatios.CreateCacheRatio[model]
-          delete finalRatios.ImageRatio[model]
-          delete finalRatios.AudioRatio[model]
-          delete finalRatios.AudioCompletionRatio[model]
-        }
-        if (hasRatio) {
-          delete finalRatios.ModelPrice[model]
-        }
-
-        Object.entries(ratios).forEach(([ratioType, value]) => {
-          const optionKey = optionKeyBySyncField(ratioType)
-          finalRatios[optionKey][model] = NUMERIC_SYNC_FIELDS.has(ratioType)
-            ? Number(value)
-            : value
-        })
-      })
+      const finalRatios = buildSyncedPricingOptions(currentRatios, resolutions)
 
       const updates = Object.entries(finalRatios).map(([key, value]) => ({
         key,

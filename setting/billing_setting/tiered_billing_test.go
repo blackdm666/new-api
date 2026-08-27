@@ -39,20 +39,47 @@ func TestTaskBillingUnitResolution(t *testing.T) {
 	withBillingModes(t, `{
 		"explicit-request":"per_request",
 		"explicit-second":"per_second",
-		"tiered":"tiered_expr"
+		"tiered":"tiered_expr",
+		"malformed":"per_minute"
 	}`, []string{"explicit-second", "legacy-patch"})
 
 	assert.True(t, IsTaskPerRequestBilling("explicit-request"))
 	assert.False(t, IsTaskPerRequestBilling("explicit-second"))
 	assert.True(t, IsTaskPerRequestBilling("legacy-patch"))
+	assert.False(t, IsTaskPerRequestBilling("legacy-fixed"))
+	assert.False(t, IsTaskPerRequestBilling("malformed"))
+	assert.False(t, IsTaskPerRequestBilling("legacy-ratio"))
 	assert.False(t, IsTaskPerRequestBilling("tiered"))
+	assert.True(t, ShouldSkipTaskCompletionAdjustment("legacy-fixed", true))
+	assert.False(t, ShouldSkipTaskCompletionAdjustment("legacy-ratio", false))
+	assert.False(t, ShouldSkipTaskCompletionAdjustment("explicit-second", true))
 
-	assert.Equal(t, BillingUnitRequest, ResolveTaskBillingUnit("explicit-request", true))
-	assert.Equal(t, BillingUnitSecond, ResolveTaskBillingUnit("explicit-second", true))
-	assert.Equal(t, BillingUnitRequest, ResolveTaskBillingUnit("legacy-patch", false))
-	assert.Equal(t, BillingUnitRequest, ResolveTaskBillingUnit("legacy-fixed", true))
-	assert.Empty(t, ResolveTaskBillingUnit("legacy-ratio", false))
-	assert.Empty(t, ResolveTaskBillingUnit("tiered", true))
+	assert.Equal(t, BillingUnitRequest, ResolveTaskBillingUnit("explicit-request"))
+	assert.Equal(t, BillingUnitSecond, ResolveTaskBillingUnit("explicit-second"))
+	assert.Equal(t, BillingUnitRequest, ResolveTaskBillingUnit("legacy-patch"))
+	assert.Empty(t, ResolveTaskBillingUnit("legacy-fixed"))
+	assert.Empty(t, ResolveTaskBillingUnit("malformed"))
+	assert.Empty(t, ResolveTaskBillingUnit("legacy-ratio"))
+	assert.Empty(t, ResolveTaskBillingUnit("tiered"))
+}
+
+func TestValidateBillingModesJSONRejectsUnknownAndNullValues(t *testing.T) {
+	assert.NoError(t, ValidateBillingModesJSON(`{"request":"per_request","second":"per_second","ratio":"ratio","tiered":"tiered_expr"}`))
+	assert.Error(t, ValidateBillingModesJSON(`{"bad":"per_minute"}`))
+	assert.Error(t, ValidateBillingModesJSON(`{"bad":null}`))
+	assert.Error(t, ValidateBillingModesJSON(`null`))
+}
+
+func TestBillingModeConfigDropsInvalidEntriesButKeepsValidOnes(t *testing.T) {
+	withBillingModes(t, `{
+		"valid":"per_second",
+		"unknown":"per_minute",
+		"null-mode":null
+	}`, nil)
+
+	assert.Equal(t, BillingModePerSecond, GetBillingMode("valid"))
+	assert.Equal(t, BillingModeRatio, GetBillingMode("unknown"))
+	assert.Equal(t, BillingModeRatio, GetBillingMode("null-mode"))
 }
 
 func TestFixedPriceCatalogUnit(t *testing.T) {

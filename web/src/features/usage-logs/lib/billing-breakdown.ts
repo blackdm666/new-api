@@ -28,7 +28,11 @@ import {
   formatRatioCompact,
   getEffectiveGroupRatioInfo,
 } from './billing-display'
-import { isPerCallBilling, isPerSecondBilling } from './billing-unit'
+import {
+  isLegacyTaskFixedBilling,
+  isPerCallBilling,
+  isPerSecondBilling,
+} from './billing-unit'
 import { getTieredBillingSummary, hasAnyCacheTokens } from './format'
 
 export interface BillingBreakdownRow {
@@ -71,7 +75,17 @@ export function buildBillingBreakdownRows(
   t: TFunction
 ): BillingBreakdownRow[] {
   const isPerSecond = isPerSecondBilling(other.billing_unit)
-  const isPerCall = isPerCallBilling(other.model_price, other.billing_unit)
+  const isTask = other.is_task === true
+  const isPerCall = isPerCallBilling(
+    other.model_price,
+    other.billing_unit,
+    isTask
+  )
+  const isLegacyTaskFixed = isLegacyTaskFixedBilling(
+    other.model_price,
+    other.billing_unit,
+    isTask
+  )
   const isClaude = other.claude === true
   const isTieredExpr = other.billing_mode === 'tiered_expr'
   const tieredSummary = getTieredBillingSummary(other)
@@ -142,6 +156,17 @@ export function buildBillingBreakdownRows(
         label: t('Model Price'),
         value: fmtPrice(actualPrice(other.model_price)),
       })
+    }
+  } else if (isLegacyTaskFixed) {
+    rows.push({ label: t('Billing Mode'), value: t('Dynamic Pricing') })
+    pushPriceExplanation()
+    rows.push({
+      label: t('Model Price'),
+      value: fmtPrice(actualPrice(other.model_price ?? 0)),
+    })
+    const duration = other.task_ratios?.seconds ?? other.task_ratios?.duration
+    if (duration != null) {
+      rows.push({ label: t('Duration'), value: `${duration}s` })
     }
   } else {
     rows.push({ label: t('Billing Mode'), value: t('Per-token') })

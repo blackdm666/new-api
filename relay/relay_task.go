@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -31,6 +32,8 @@ type TaskSubmitResult struct {
 	Quota          int
 	//PerCallPrice   types.PriceData
 }
+
+const originTaskBillingRatiosContextKey = "origin_task_billing_ratios"
 
 // ResolveOriginTask 处理基于已有任务的提交（remix / continuation）：
 // 查找原始任务、从中提取模型名称、将渠道锁定到原始任务的渠道
@@ -134,6 +137,7 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 				info.PriceData.AddOtherRatio("size", 1.666667)
 			}
 		}
+		c.Set(originTaskBillingRatiosContextKey, info.PriceData.OtherRatios())
 	}
 
 	return nil
@@ -201,19 +205,23 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 6. 价格计算：基础模型价格
 	info.OriginModelName = modelName
+	var preservedRatios map[string]float64
+	if value, ok := c.Get(originTaskBillingRatiosContextKey); ok {
+		preservedRatios, _ = value.(map[string]float64)
+	}
 	priceData, err := helper.ModelPriceHelperPerCall(c, info)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
 	}
 	info.PriceData = priceData
+	mergeTaskBillingRatios(&info.PriceData, preservedRatios)
 
 	// 7. 计费估算：让适配器根据用户请求提供 OtherRatios（时长、分辨率等）
 	//    必须在 ModelPriceHelperPerCall 之后调用（它会重建 PriceData）。
 	//    ResolveOriginTask 可能已在 remix 路径中预设了 OtherRatios，此处合并。
-	if estimatedRatios := adaptor.EstimateBilling(c, info); len(estimatedRatios) > 0 {
-		for k, v := range estimatedRatios {
-			info.PriceData.AddOtherRatio(k, v)
-		}
+	mergeTaskBillingRatios(&info.PriceData, adaptor.EstimateBilling(c, info))
+	if err := ensureTaskBillingRatios(c, modelName, &info.PriceData); err != nil {
+		return nil, service.TaskErrorWrapperLocal(err, "invalid_billing_ratios", http.StatusBadRequest)
 	}
 
 	// 8. 将 OtherRatios 应用到基础额度（饱和转换，防止溢出成负数）
@@ -279,6 +287,50 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		Platform:       platform,
 		Quota:          finalQuota,
 	}, nil
+}
+
+func mergeTaskBillingRatios(priceData *hosttypes.PriceData, ratios map[string]float64) {
+	for name, ratio := range ratios {
+		priceData.AddOtherRatio(name, ratio)
+	}
+}
+
+func ensureTaskBillingRatios(c *gin.Context, modelName string, priceData *hosttypes.PriceData) error {
+	mode := billing_setting.GetBillingMode(modelName)
+	if mode != billing_setting.BillingModePerSecond || priceData.HasOtherRatio("seconds") {
+		return validateTaskBillingRatios(modelName, *priceData)
+	}
+	if req, err := relaycommon.GetTaskRequest(c); err == nil {
+		seconds := req.Duration
+		if seconds == 0 && req.Seconds != "" {
+			seconds, _ = strconv.Atoi(req.Seconds)
+		}
+		if seconds > 0 {
+			priceData.AddOtherRatio("seconds", float64(seconds))
+		}
+	}
+	return validateTaskBillingRatios(modelName, *priceData)
+}
+
+func validateTaskBillingRatios(modelName string, priceData hosttypes.PriceData) error {
+	mode := billing_setting.GetBillingMode(modelName)
+	if mode != billing_setting.BillingModePerRequest && mode != billing_setting.BillingModePerSecond {
+		return nil
+	}
+	if !priceData.UsePrice {
+		return fmt.Errorf("fixed billing mode %s requires ModelPrice for model %s", mode, modelName)
+	}
+	if mode == billing_setting.BillingModePerRequest {
+		return nil
+	}
+	seconds, ok := priceData.OtherRatios()["seconds"]
+	if !ok {
+		return fmt.Errorf("per-second billing requires a seconds ratio for model %s", modelName)
+	}
+	if seconds > relaycommon.MaxTaskDurationSeconds {
+		return fmt.Errorf("per-second billing duration for model %s exceeds %d seconds", modelName, relaycommon.MaxTaskDurationSeconds)
+	}
+	return nil
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

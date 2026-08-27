@@ -22,18 +22,30 @@ import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
 
 import { formatPricingNumber } from './pricing-format'
 
-export const createModelPricingSchema = (t: (key: string) => string) =>
-  z.object({
+const optionalPricingNumber = (t: (key: string) => string) =>
+  z
+    .string()
+    .optional()
+    .refine(
+      (value) =>
+        value === undefined || value === '' || isCompletePricingNumber(value),
+      t('Please enter a valid number')
+    )
+
+export const createModelPricingSchema = (t: (key: string) => string) => {
+  const pricingNumber = optionalPricingNumber(t)
+  return z.object({
     name: z.string().min(1, t('Model name is required')),
-    price: z.string().optional(),
-    ratio: z.string().optional(),
-    cacheRatio: z.string().optional(),
-    createCacheRatio: z.string().optional(),
-    completionRatio: z.string().optional(),
-    imageRatio: z.string().optional(),
-    audioRatio: z.string().optional(),
-    audioCompletionRatio: z.string().optional(),
+    price: pricingNumber,
+    ratio: pricingNumber,
+    cacheRatio: pricingNumber,
+    createCacheRatio: pricingNumber,
+    completionRatio: pricingNumber,
+    imageRatio: pricingNumber,
+    audioRatio: pricingNumber,
+    audioCompletionRatio: pricingNumber,
   })
+}
 
 export type ModelPricingFormValues = z.infer<
   ReturnType<typeof createModelPricingSchema>
@@ -75,7 +87,18 @@ export type PreviewRow = {
   multiline?: boolean
 }
 
-export const numericDraftRegex = /^(\d+(\.\d*)?|\.\d*)?$/
+export const numericDraftRegex = /^(\d+(\.\d*)?|\.\d*)?([eE][+-]?\d*)?$/
+const completePricingNumberRegex = /^(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
+const zeroPricingNumberRegex = /^(0+(\.0*)?|\.0+)([eE][+-]?\d+)?$/
+
+export function isCompletePricingNumber(value: unknown): boolean {
+  if (typeof value !== 'string' && typeof value !== 'number') return false
+  const text = String(value)
+  if (!completePricingNumberRegex.test(text)) return false
+  const numeric = Number(text)
+  if (!Number.isFinite(numeric) || numeric < 0) return false
+  return numeric !== 0 || zeroPricingNumberRegex.test(text)
+}
 
 export const EMPTY_LANE_PRICES: Record<LaneKey, string> = {
   completion: '',

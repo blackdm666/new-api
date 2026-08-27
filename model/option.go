@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
@@ -308,6 +309,17 @@ func validateOptionValue(key string, value string) error {
 	}
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
+	}
+	switch key {
+	case "ModelPrice", "ModelRatio", "CompletionRatio", "CacheRatio", "CreateCacheRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio":
+		return ratio_setting.ValidateNumericPricingMapJSONString(key, value)
+	case "GroupRatio":
+		return ratio_setting.ValidateNumericPricingMapJSONString(key, value)
+	case "GroupGroupRatio":
+		return ratio_setting.ValidateNestedNumericPricingMapJSONString(key, value)
+	}
+	if key == "billing_setting.billing_mode" {
+		return billing_setting.ValidateBillingModesJSON(value)
 	}
 	if key == operation_setting.ChannelTestConcurrencyOptionKey {
 		return operation_setting.ValidateChannelTestConcurrency(value)

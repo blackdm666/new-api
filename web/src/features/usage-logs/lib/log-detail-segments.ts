@@ -26,7 +26,11 @@ import {
   formatRatioCompact,
   getEffectiveGroupRatioInfo,
 } from './billing-display'
-import { isPerCallBilling, isPerSecondBilling } from './billing-unit'
+import {
+  isLegacyTaskFixedBilling,
+  isPerCallBilling,
+  isPerSecondBilling,
+} from './billing-unit'
 import {
   getTieredBillingSummary,
   hasAnyCacheTokens,
@@ -147,7 +151,13 @@ export function buildTypeDetailSegments(
   } else {
     const modelPrice = other.model_price
     const isPerSecond = isPerSecondBilling(other.billing_unit)
-    const isPerCall = isPerCallBilling(modelPrice, other.billing_unit)
+    const isTask = other.is_task === true
+    const isPerCall = isPerCallBilling(modelPrice, other.billing_unit, isTask)
+    const isLegacyTaskFixed = isLegacyTaskFixedBilling(
+      modelPrice,
+      other.billing_unit,
+      isTask
+    )
     if (isPerSecond && modelPrice != null) {
       segments.push({
         text: `${t('Per-second')} · ${formatBillingCurrencyFromUSD(actualPrice(modelPrice), priceOpts)}/${t('second')}`,
@@ -155,6 +165,10 @@ export function buildTypeDetailSegments(
     } else if (isPerCall && modelPrice != null) {
       segments.push({
         text: `${t('Per-call')} · ${formatBillingCurrencyFromUSD(actualPrice(modelPrice), priceOpts)}`,
+      })
+    } else if (isLegacyTaskFixed && modelPrice != null) {
+      segments.push({
+        text: `${t('Dynamic Pricing')} · ${formatBillingCurrencyFromUSD(actualPrice(modelPrice), priceOpts)}`,
       })
     } else if (other.model_ratio != null) {
       const inputPriceUSD = other.model_ratio * 2.0

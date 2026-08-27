@@ -3,6 +3,7 @@ package billing_setting
 import (
 	"fmt"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -23,12 +24,39 @@ const (
 // BillingSetting is managed by config.GlobalConfig.Register.
 // DB keys: billing_setting.billing_mode, billing_setting.billing_expr
 type BillingSetting struct {
-	BillingMode map[string]string `json:"billing_mode"`
+	BillingMode BillingModeMap    `json:"billing_mode"`
 	BillingExpr map[string]string `json:"billing_expr"`
 }
 
+type BillingModeMap map[string]string
+
+func (m *BillingModeMap) UnmarshalJSON(data []byte) error {
+	var rawModes map[string]*string
+	if err := common.Unmarshal(data, &rawModes); err != nil {
+		return err
+	}
+	if rawModes == nil {
+		return fmt.Errorf("billing modes must be a JSON object")
+	}
+	validModes := make(BillingModeMap, len(rawModes))
+	for model, mode := range rawModes {
+		if mode == nil {
+			common.SysError(fmt.Sprintf("ignored null billing mode for model %s", model))
+			continue
+		}
+		switch *mode {
+		case BillingModeRatio, BillingModePerRequest, BillingModePerSecond, BillingModeTieredExpr:
+			validModes[model] = *mode
+		default:
+			common.SysError(fmt.Sprintf("ignored unsupported billing mode %q for model %s", *mode, model))
+		}
+	}
+	*m = validModes
+	return nil
+}
+
 var billingSetting = BillingSetting{
-	BillingMode: make(map[string]string),
+	BillingMode: make(BillingModeMap),
 	BillingExpr: make(map[string]string),
 }
 
@@ -53,11 +81,36 @@ func GetBillingExpr(model string) (string, bool) {
 }
 
 func GetBillingModeCopy() map[string]string {
-	return lo.Assign(billingSetting.BillingMode)
+	modes := make(map[string]string, len(billingSetting.BillingMode))
+	for model, mode := range billingSetting.BillingMode {
+		modes[model] = mode
+	}
+	return modes
 }
 
 func GetBillingExprCopy() map[string]string {
 	return lo.Assign(billingSetting.BillingExpr)
+}
+
+func ValidateBillingModesJSON(jsonStr string) error {
+	var modes map[string]*string
+	if err := common.UnmarshalJsonStr(jsonStr, &modes); err != nil {
+		return fmt.Errorf("invalid billing modes: %w", err)
+	}
+	if modes == nil {
+		return fmt.Errorf("billing modes must be a JSON object")
+	}
+	for model, mode := range modes {
+		if mode == nil {
+			return fmt.Errorf("billing mode for model %s must be a string", model)
+		}
+		switch *mode {
+		case BillingModeRatio, BillingModePerRequest, BillingModePerSecond, BillingModeTieredExpr:
+		default:
+			return fmt.Errorf("unsupported billing mode %q for model %s", *mode, model)
+		}
+	}
+	return nil
 }
 
 func modelUsesTaskPricePatch(model string) bool {
@@ -87,20 +140,27 @@ func ResolveFixedPriceBillingUnit(model string) string {
 // resolution, and other multipliers are skipped. Explicit settings take
 // precedence over the legacy TASK_PRICE_PATCH environment variable.
 func IsTaskPerRequestBilling(model string) bool {
+	return ResolveTaskBillingUnit(model) == BillingUnitRequest
+}
+
+// ShouldSkipTaskCompletionAdjustment preserves the historical rule that a
+// legacy fixed-price task is not recalculated from an upstream total_tokens
+// value, even when its submit-time adaptor ratios remain enabled.
+func ShouldSkipTaskCompletionAdjustment(model string, legacyFixedPrice bool) bool {
 	switch GetBillingMode(model) {
 	case BillingModePerRequest:
 		return true
 	case BillingModePerSecond, BillingModeTieredExpr:
 		return false
 	default:
-		return modelUsesTaskPricePatch(model)
+		return modelUsesTaskPricePatch(model) || legacyFixedPrice
 	}
 }
 
 // ResolveTaskBillingUnit returns the unit stored in task logs and snapshots.
-// legacyFixedPrice preserves the historical behavior for existing ModelPrice
-// entries that have not selected an explicit billing mode yet.
-func ResolveTaskBillingUnit(model string, legacyFixedPrice bool) string {
+// Legacy fixed-price tasks that are not covered by TASK_PRICE_PATCH keep their
+// historical adaptor-ratio arithmetic and therefore have no explicit unit.
+func ResolveTaskBillingUnit(model string) string {
 	switch GetBillingMode(model) {
 	case BillingModePerRequest:
 		return BillingUnitRequest
@@ -109,7 +169,7 @@ func ResolveTaskBillingUnit(model string, legacyFixedPrice bool) string {
 	case BillingModeTieredExpr:
 		return ""
 	default:
-		if modelUsesTaskPricePatch(model) || legacyFixedPrice {
+		if modelUsesTaskPricePatch(model) {
 			return BillingUnitRequest
 		}
 		return ""

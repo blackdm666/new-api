@@ -16,25 +16,28 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export function isPerSecondBilling(billingUnit?: string): boolean {
-  return billingUnit === 'second'
-}
+import { describe, expect, test } from 'vitest'
 
-export function isPerCallBilling(
-  modelPrice?: number,
-  billingUnit?: string,
-  isTask = false
-): boolean {
-  return (
-    (modelPrice ?? 0) > 0 &&
-    (billingUnit === 'request' || (!billingUnit && !isTask))
+import { createModelPricingSchema } from '../model-pricing-core'
+
+const schema = createModelPricingSchema((key) => key)
+
+describe('model pricing numeric validation', () => {
+  test.each(['.', '1abc', '-1', 'NaN', 'Infinity', '1e-324'])(
+    'rejects incomplete or non-finite price %s',
+    (price) => {
+      expect(schema.safeParse({ name: 'video-model', price }).success).toBe(
+        false
+      )
+    }
   )
-}
 
-export function isLegacyTaskFixedBilling(
-  modelPrice?: number,
-  billingUnit?: string,
-  isTask = false
-): boolean {
-  return isTask && (modelPrice ?? 0) > 0 && !billingUnit
-}
+  test.each(['', '0', '0e-999', '1.', '.5', '1.25', '1e-6'])(
+    'accepts empty or complete non-negative price %s',
+    (price) => {
+      expect(schema.safeParse({ name: 'video-model', price }).success).toBe(
+        true
+      )
+    }
+  )
+})

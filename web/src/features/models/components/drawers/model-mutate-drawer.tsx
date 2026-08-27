@@ -83,6 +83,10 @@ import {
 } from '@/features/system-settings/hooks/use-system-options'
 import { useUpdateOption } from '@/features/system-settings/hooks/use-update-option'
 import {
+  isCompletePricingNumber,
+  numericDraftRegex,
+} from '@/features/system-settings/models/model-pricing-core'
+import {
   pricingDisplayToUSD,
   pricingDisplayToModelRatio,
   pricingUSDToDisplay,
@@ -120,6 +124,16 @@ const extendedModelFormSchema = z.object({
 })
 
 type ExtendedModelFormValues = z.infer<typeof extendedModelFormSchema>
+
+const pricingNumberFields = [
+  'price',
+  'ratio',
+  'cacheRatio',
+  'completionRatio',
+  'imageRatio',
+  'audioRatio',
+  'audioCompletionRatio',
+] as const
 
 type PricingMode = 'per-token' | 'per-request' | 'per-second'
 type PricingSubMode = 'ratio' | 'price'
@@ -415,13 +429,12 @@ export function ModelMutateDrawer({
   })
 
   const validateNumber = (value: string) => {
-    if (value === '') return true
-    return !Number.isNaN(Number.parseFloat(value))
+    return numericDraftRegex.test(value)
   }
 
   const handlePromptPriceChange = (value: string) => {
     setPromptPrice(value)
-    if (value && !Number.isNaN(Number.parseFloat(value))) {
+    if (value && isCompletePricingNumber(value)) {
       form.setValue('ratio', pricingDisplayToModelRatio(value, pricingCurrency))
     } else {
       form.setValue('ratio', '')
@@ -432,13 +445,12 @@ export function ModelMutateDrawer({
     setCompletionPrice(value)
     if (
       value &&
-      !Number.isNaN(Number.parseFloat(value)) &&
+      isCompletePricingNumber(value) &&
       promptPrice &&
-      !Number.isNaN(Number.parseFloat(promptPrice)) &&
-      Number.parseFloat(promptPrice) > 0
+      isCompletePricingNumber(promptPrice) &&
+      Number(promptPrice) > 0
     ) {
-      const completionRatio =
-        Number.parseFloat(value) / Number.parseFloat(promptPrice)
+      const completionRatio = Number(value) / Number(promptPrice)
       form.setValue('completionRatio', completionRatio.toString())
     } else {
       form.setValue('completionRatio', '')
@@ -446,6 +458,7 @@ export function ModelMutateDrawer({
   }
 
   // Load model data for editing and ratio configuration
+  /* eslint-disable react-hooks/set-state-in-effect -- the drawer intentionally hydrates form state when the selected model finishes loading */
   useEffect(() => {
     if (open && isEditing && modelData?.data) {
       const model = modelData.data
@@ -513,9 +526,30 @@ export function ModelMutateDrawer({
     hasModelSettings,
     pricingCurrency,
   ])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const onSubmit = useCallback(
     async (values: ExtendedModelFormValues): Promise<void> => {
+      for (const field of pricingNumberFields) {
+        const value = values[field]
+        if (value && !isCompletePricingNumber(value)) {
+          form.setError(field, { message: t('Please enter a valid number') })
+          return
+        }
+      }
+
+      let fixedPriceUSD = ''
+      if (
+        (pricingMode === 'per-request' || pricingMode === 'per-second') &&
+        values.price
+      ) {
+        fixedPriceUSD = pricingDisplayToUSD(values.price, pricingCurrency)
+        if (fixedPriceUSD === '') {
+          form.setError('price', { message: t('Please enter a valid number') })
+          return
+        }
+      }
+
       setIsSubmitting(true)
       try {
         const submitData = {
@@ -635,9 +669,7 @@ export function ModelMutateDrawer({
                 values.price &&
                 values.price !== ''
               ) {
-                priceMap[finalModelName] = Number.parseFloat(
-                  pricingDisplayToUSD(values.price, pricingCurrency)
-                )
+                priceMap[finalModelName] = Number(fixedPriceUSD)
                 billingModeMap[finalModelName] =
                   pricingMode === 'per-second' ? 'per_second' : 'per_request'
               } else if (pricingMode === 'per-token') {
@@ -786,6 +818,8 @@ export function ModelMutateDrawer({
       modelSettings,
       pricingCurrency,
       updateOption,
+      form,
+      t,
     ]
   )
 

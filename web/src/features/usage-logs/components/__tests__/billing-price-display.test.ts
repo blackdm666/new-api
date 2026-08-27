@@ -141,4 +141,28 @@ describe('usage log actual price display', () => {
       ]
     )
   })
+
+  test('does not label a legacy task with adaptor ratios as per-call', () => {
+    const other: LogOtherData = {
+      is_task: true,
+      model_price: 0.5,
+      task_ratios: { seconds: 8 },
+      group_ratio: 0.3,
+    }
+
+    expect(buildTypeDetailSegments(log, other, t)[0]).toEqual({
+      text: 'Dynamic Pricing · ¥1.05',
+    })
+    expect(buildBillingBreakdownRows(log, other, false, t).slice(0, 4)).toEqual(
+      [
+        { label: 'Billing Mode', value: 'Dynamic Pricing' },
+        {
+          label: 'Price Explanation',
+          value: 'Adjusted by 0.3x group rate',
+        },
+        { label: 'Model Price', value: '¥1.05' },
+        { label: 'Duration', value: '8s' },
+      ]
+    )
+  })
 })

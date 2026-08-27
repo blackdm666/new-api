@@ -6,7 +6,7 @@
 
 - 管理端“模型定价”显式选择“按次”时，`billing_setting.billing_mode` 保存为 `per_request`，跳过时长、分辨率及其他任务倍率。
 - 管理端显式选择“按秒”时保存为 `per_second`，基础 `ModelPrice` 表示每秒价格，并继续应用时长、分辨率及其他任务倍率。
-- 显式 `per_request` / `per_second` 优先于 `TASK_PRICE_PATCH`；模型广场和用量日志读取同一计费单位，不再把按秒模型显示成按次。
+- 显式 `per_request` / `per_second` 优先于 `TASK_PRICE_PATCH`；任务快照和用量日志只记录显式单位或 `TASK_PRICE_PATCH` 的按次单位，不再把仍使用历史倍率规则的旧固定价任务误记为按次。
 - 模型名出现在 `TASK_PRICE_PATCH` 中：跳过任务适配器生成的全部 `OtherRatios`，按基础模型价格计费，通常表现为“按次计费”。
 - 模型名不在 `TASK_PRICE_PATCH` 中：应用时长、分辨率等 `OtherRatios`，通常表现为“基础价格 × 秒数 × 其他倍率”。
 - 多个模型使用英文逗号分隔，程序会清理每项两侧空格。
@@ -23,7 +23,7 @@
 - `relay/relay_task.go`：模型命中补丁列表时，不调用 `ApplyOtherRatiosToFloat`，因此时长、分辨率等倍率不会乘入额度。
 - `controller/relay.go`：按显式单位或旧配置生成任务计费快照；只有按次任务记录为 `PerCallBilling`。
 - `service/task_billing.go`：在消费日志中保存 `billing_unit` 和任务倍率，分别标记按次/按秒。
-- `setting/billing_setting/tiered_billing.go`：解析显式 `per_request` / `per_second`，并为旧配置回退到 `TASK_PRICE_PATCH`。
+- `setting/billing_setting/tiered_billing.go`：解析显式 `per_request` / `per_second`；旧任务配置只在命中 `TASK_PRICE_PATCH` 时判定为按次，否则保留原有倍率行为且不写入虚假的任务计费单位。
 - `model/pricing.go`：向模型广场返回 `billing_unit=request|second`。
 
 简化后的计费关系：
@@ -31,14 +31,15 @@
 ```text
 显式 per_second：         基础模型价格 × 分组倍率 × 时长倍率 × 分辨率倍率 × 其他倍率
 显式 per_request：        基础模型价格 × 分组倍率
-未显式配置：              继续按 TASK_PRICE_PATCH 的旧规则判断
+未显式配置且命中补丁：    基础模型价格 × 分组倍率
+未显式配置且未命中补丁：  继续应用适配器倍率（历史兼容，不声明按次/按秒）
 ```
 
 因此，启用按次计费前必须确认“模型定价”中已经为该模型设置了正确的固定价格。分组倍率仍然有效。
 
 新配置应优先通过“系统设置 → 模型定价”选择按次或按秒；`TASK_PRICE_PATCH` 只保留为旧部署和紧急环境覆盖的兼容入口。
 
-按秒模式依赖对应任务适配器返回 `seconds` / `duration` 等时长倍率；没有时长倍率的适配器仍只会收取一次基础价格，因此新增按秒模型后必须用真实请求核对预扣、最终结算和日志中的时长。
+按秒模式依赖对应任务适配器返回 `seconds`，或请求通过标准 `duration` / `seconds` 字段提供可验证时长。显式按秒但最终缺少有效时长时，New API 会在预扣和上游提交前拒绝请求，避免静默退化成一次基础价格。
 
 ## 3. 配置示例
 
