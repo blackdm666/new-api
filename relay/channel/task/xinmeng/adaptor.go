@@ -157,11 +157,11 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if err := relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionTextGenerate); err != nil {
 		return err
 	}
-	req, err := getMappedTaskRequest(c, info)
+	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
 		return localTaskError(err)
 	}
-	body, err := convertToRequestPayload(req)
+	body, err := convertToRequestPayload(req, info)
 	if err != nil {
 		return localTaskError(err)
 	}
@@ -174,11 +174,11 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 }
 
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
-	req, err := getMappedTaskRequest(c, info)
+	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
 		return nil
 	}
-	cfg, ok := modelConfigs[strings.TrimSpace(req.Model)]
+	_, cfg, ok := modelConfigForRequest(info, req.Model)
 	if !ok {
 		return nil
 	}
@@ -197,11 +197,11 @@ func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *r
 }
 
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
-	req, err := getMappedTaskRequest(c, info)
+	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
 		return nil, err
 	}
-	body, err := convertToRequestPayload(req)
+	body, err := convertToRequestPayload(req, info)
 	if err != nil {
 		return nil, err
 	}
@@ -211,43 +211,6 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	}
 	return bytes.NewReader(payload), nil
 }
-
-func getMappedTaskRequest(c *gin.Context, info *relaycommon.RelayInfo) (relaycommon.TaskSubmitReq, error) {
-	req, err := relaycommon.GetTaskRequest(c)
-	if err != nil {
-		return req, err
-	}
-
-	if info != nil && info.ChannelMeta != nil {
-		if modelName := strings.TrimSpace(info.UpstreamModelName); modelConfigs[modelName].upstreamModel != "" {
-			req.Model = modelName
-			return req, nil
-		}
-	}
-
-	modelName := strings.TrimSpace(req.Model)
-	var mapping map[string]string
-	if rawMapping := strings.TrimSpace(c.GetString("model_mapping")); rawMapping != "" {
-		if err := common.Unmarshal([]byte(rawMapping), &mapping); err != nil {
-			return req, fmt.Errorf("invalid model mapping: %w", err)
-		}
-	}
-	seen := make(map[string]struct{})
-	for len(mapping) > 0 {
-		if _, exists := seen[modelName]; exists {
-			return req, fmt.Errorf("model mapping contains cycle")
-		}
-		seen[modelName] = struct{}{}
-		mapped, exists := mapping[modelName]
-		if !exists || strings.TrimSpace(mapped) == "" {
-			break
-		}
-		modelName = strings.TrimSpace(mapped)
-	}
-	req.Model = modelName
-	return req, nil
-}
-
 func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	return channel.DoTaskApiRequest(a, c, info, requestBody)
 }
@@ -362,9 +325,17 @@ func (a *TaskAdaptor) SupportsPromptOnlyVideo(modelName string) bool {
 	return ok
 }
 
-func convertToRequestPayload(req relaycommon.TaskSubmitReq) (*requestPayload, error) {
-	modelName := strings.TrimSpace(req.Model)
-	cfg, ok := modelConfigs[modelName]
+func modelConfigForRequest(info *relaycommon.RelayInfo, requestModel string) (string, modelConfig, bool) {
+	for _, modelName := range taskcommon.ModelConfigCandidates(info, requestModel) {
+		if cfg, ok := modelConfigs[modelName]; ok {
+			return modelName, cfg, true
+		}
+	}
+	return "", modelConfig{}, false
+}
+
+func convertToRequestPayload(req relaycommon.TaskSubmitReq, info *relaycommon.RelayInfo) (*requestPayload, error) {
+	_, cfg, ok := modelConfigForRequest(info, req.Model)
 	if !ok {
 		return nil, fmt.Errorf("model must be one of %s", strings.Join(ModelList, ", "))
 	}

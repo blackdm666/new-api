@@ -809,10 +809,14 @@ func getPlaygroundModelDetails(models []string, groups []string) []playgroundMod
 				continue
 			}
 			adaptor := relay.GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(ability.ChannelType)))
-			if adaptor == nil || !stringSliceContains(adaptor.GetModelList(), ability.Model) {
+			mappedModel, _, mapErr := common.ResolveMappedModelName(ability.Model, ability.ChannelModelMapping)
+			if mapErr != nil {
 				continue
 			}
-			if tester, ok := adaptor.(channel.PromptOnlyVideoTester); ok && !tester.SupportsPromptOnlyVideo(ability.Model) {
+			if adaptor == nil || !stringSliceContains(adaptor.GetModelList(), mappedModel) {
+				continue
+			}
+			if tester, ok := adaptor.(channel.PromptOnlyVideoTester); ok && !tester.SupportsPromptOnlyVideo(mappedModel) {
 				if modes[ability.Model] == modeChat {
 					modes[ability.Model] = modeUnsupported
 				}

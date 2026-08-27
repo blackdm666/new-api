@@ -216,6 +216,9 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 
 	prompt = req.Prompt
 	model = req.Model
+	if info != nil && info.ChannelMeta != nil && strings.TrimSpace(info.UpstreamModelName) != "" {
+		model = info.UpstreamModelName
+	}
 	size = req.Size
 	seconds, _ = strconv.Atoi(req.Seconds)
 	if seconds == 0 {

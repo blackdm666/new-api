@@ -38,7 +38,7 @@ func TestConvertDVCSeedance25Locks720p(t *testing.T) {
 		},
 	}
 
-	body, err := convertToRequestPayload(req)
+	body, err := convertToRequestPayload(req, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, ModelDVCSeedance25, body.Model)
@@ -69,7 +69,7 @@ func TestConvertDVCSeedance20SupportsMixedReferencesAndLocks720p(t *testing.T) {
 		},
 	}
 
-	body, err := convertToRequestPayload(req)
+	body, err := convertToRequestPayload(req, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, "720p", body.Resolution)
@@ -97,7 +97,7 @@ func TestConvertDVCSeedance20RejectsTooManyMixedReferences(t *testing.T) {
 		},
 	}
 
-	_, err := convertToRequestPayload(req)
+	_, err := convertToRequestPayload(req, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "at most 12 items in total")
@@ -112,7 +112,7 @@ func TestConvertDVCSeedance20RejectsGenerateAudioOverride(t *testing.T) {
 		},
 	}
 
-	_, err := convertToRequestPayload(req)
+	_, err := convertToRequestPayload(req, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "generateAudio is not supported")
@@ -130,7 +130,7 @@ func TestConvertMiniMaxH3Validation(t *testing.T) {
 			},
 		}
 
-		body, err := convertToRequestPayload(req)
+		body, err := convertToRequestPayload(req, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, "2k", body.Resolution)
@@ -147,7 +147,7 @@ func TestConvertMiniMaxH3Validation(t *testing.T) {
 			},
 		}
 
-		_, err := convertToRequestPayload(req)
+		_, err := convertToRequestPayload(req, nil)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "require at least one image")
@@ -162,7 +162,7 @@ func TestConvertMiniMaxH3Validation(t *testing.T) {
 			},
 		}
 
-		_, err := convertToRequestPayload(req)
+		_, err := convertToRequestPayload(req, nil)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "at most 0 items")
@@ -183,7 +183,7 @@ func TestEstimateBillingUsesRequestedSecondsForAllInitialModels(t *testing.T) {
 	}
 }
 
-func TestMappedSalesAliasesUseUpstreamModelForValidationBillingAndBody(t *testing.T) {
+func TestResolvedSalesAliasesUseUpstreamModelForValidationBillingAndBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
 		alias    string
@@ -193,19 +193,22 @@ func TestMappedSalesAliasesUseUpstreamModelForValidationBillingAndBody(t *testin
 		{alias: "DC全能视频2.0 720P", upstream: ModelDVCSeedance20},
 		{alias: "MiniMax H3", upstream: ModelMiniMaxH3},
 	}
-	mapping := `{"DC全能视频2.5 720P":"dvc-seedance-2.5","DC全能视频2.0 720P":"dvc-seedance-2.0","MiniMax H3":"minimax-h3"}`
-
 	for _, tt := range tests {
 		t.Run(tt.alias, func(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Set("model_mapping", mapping)
 			c.Set("task_request", relaycommon.TaskSubmitReq{
 				Model:    tt.alias,
 				Prompt:   "mapped sales model",
 				Duration: 6,
 				Size:     "16:9",
 			})
-			info := &relaycommon.RelayInfo{OriginModelName: tt.alias}
+			info := &relaycommon.RelayInfo{
+				OriginModelName: tt.alias,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					UpstreamModelName: tt.upstream,
+					IsModelMapped:     true,
+				},
+			}
 
 			ratios := (&TaskAdaptor{}).EstimateBilling(c, info)
 			assert.Equal(t, map[string]float64{"seconds": 6}, ratios)

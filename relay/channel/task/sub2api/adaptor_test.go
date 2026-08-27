@@ -62,6 +62,30 @@ func TestValidateVideo15AllowsTextToVideo(t *testing.T) {
 	}
 }
 
+func TestArbitraryMappedAliasUsesResolvedModelConfig(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"model":"grok-sales-alias","prompt":"test","duration":5}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	defer common.CleanupBodyStorage(c)
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "grok-sales-alias",
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: ModelGrokImagineVideo,
+			IsModelMapped:     true,
+		},
+	}
+	adaptor := &TaskAdaptor{}
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	assert.Equal(t, map[string]float64{"seconds": 5}, adaptor.EstimateBilling(c, info))
+	body, err := adaptor.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	payload, err := io.ReadAll(body)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"grok-imagine-video","prompt":"test","duration":5,"aspect_ratio":"16:9","resolution":"720p"}`, string(payload))
+}
+
 func TestValidateGrokVideoDefaultsAndLimits(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"model":"grok-imagine-video","prompt":"test","size":"3:2","metadata":{"resolution":"480p"}}`))

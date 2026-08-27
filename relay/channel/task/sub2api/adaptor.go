@@ -103,6 +103,15 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 	a.apiKey = info.ApiKey
 }
 
+func modelConfigForRequest(info *relaycommon.RelayInfo, requestModel string) (modelConfig, bool) {
+	for _, modelName := range taskcommon.ModelConfigCandidates(info, requestModel) {
+		if cfg, ok := modelConfigs[modelName]; ok {
+			return cfg, true
+		}
+	}
+	return modelConfig{}, false
+}
+
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
 	if taskErr := relaycommon.ValidateMultipartDirect(c, info); taskErr != nil {
 		return taskErr
@@ -111,7 +120,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if err != nil {
 		return localTaskError(err)
 	}
-	cfg, ok := modelConfigs[strings.TrimSpace(req.Model)]
+	cfg, ok := modelConfigForRequest(info, req.Model)
 	if !ok {
 		return localTaskError(fmt.Errorf("model must be one of %s", strings.Join(ModelList, ", ")))
 	}
@@ -139,10 +148,7 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	if err != nil {
 		return nil
 	}
-	cfg, ok := modelConfigs[info.OriginModelName]
-	if !ok {
-		cfg, ok = modelConfigs[strings.TrimSpace(req.Model)]
-	}
+	cfg, ok := modelConfigForRequest(info, req.Model)
 	if !ok {
 		return nil
 	}
@@ -169,9 +175,9 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if err != nil {
 		return nil, err
 	}
-	cfg, ok := modelConfigs[info.OriginModelName]
+	cfg, ok := modelConfigForRequest(info, req.Model)
 	if !ok {
-		cfg = modelConfigs[req.Model]
+		return nil, fmt.Errorf("model must be one of %s", strings.Join(ModelList, ", "))
 	}
 	body := createRequest{
 		Model:       info.UpstreamModelName,

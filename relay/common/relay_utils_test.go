@@ -77,6 +77,27 @@ func TestValidateMultipartDirectNormalizesImageField(t *testing.T) {
 	require.Equal(t, constant.TaskActionGenerate, info.Action)
 }
 
+func TestValidateMultipartDirectUsesResolvedSoraModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := strings.NewReader(`{"model":"sora-sales-alias","prompt":"animate","size":"1024x1024","seconds":"4"}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/videos", body)
+	request.Header.Set("Content-Type", "application/json")
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = request
+	info := &RelayInfo{
+		TaskRelayInfo: &TaskRelayInfo{},
+		ChannelMeta: &ChannelMeta{
+			UpstreamModelName: "sora-2",
+			IsModelMapped:     true,
+		},
+	}
+
+	taskErr := ValidateMultipartDirect(context, info)
+
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "invalid_size", taskErr.Code)
+}
+
 func TestValidateBasicTaskRequestStoresCallbackURL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := strings.NewReader(`{"model":"gemini-omni-flash-preview","prompt":"animate","callback_url":"https://example.com/video-callback"}`)

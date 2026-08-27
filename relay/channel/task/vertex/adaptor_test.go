@@ -30,7 +30,7 @@ func TestOmniBuildRequestURL(t *testing.T) {
 	assert.Contains(t, adaptor.GetModelList(), omnitask.ModelGeminiOmniFlashPreview)
 }
 
-func TestOmniMappedAliasRunsReferenceVideoValidation(t *testing.T) {
+func TestOmniResolvedAliasRunsReferenceVideoValidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/videos", strings.NewReader(`{
 		"model":"gemini-omni-flash",
@@ -41,11 +41,13 @@ func TestOmniMappedAliasRunsReferenceVideoValidation(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	context, _ := gin.CreateTestContext(httptest.NewRecorder())
 	context.Request = request
-	context.Set("model_mapping", `{"gemini-omni-flash":"gemini-omni-flash-preview"}`)
 	info := &relaycommon.RelayInfo{
 		OriginModelName: "gemini-omni-flash",
-		ChannelMeta:     &relaycommon.ChannelMeta{},
-		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: omnitask.ModelGeminiOmniFlashPreview,
+			IsModelMapped:     true,
+		},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
 	}
 
 	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(context, info)

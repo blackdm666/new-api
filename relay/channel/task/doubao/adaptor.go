@@ -143,7 +143,14 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	}
 	hasVideo := hasVideoInMetadata(req.Metadata)
 	resolution, _ := req.Metadata["resolution"].(string)
-	ratio, ok := GetVideoInputRatio(info.OriginModelName, resolution, hasVideo)
+	var ratio float64
+	var ok bool
+	for _, modelName := range taskcommon.ModelConfigCandidates(info, req.Model) {
+		ratio, ok = GetVideoInputRatio(modelName, resolution, hasVideo)
+		if ok {
+			break
+		}
+	}
 	if !ok || ratio == 1.0 {
 		return nil
 	}

@@ -17,7 +17,6 @@ import (
 	omnitask "github.com/QuantumNous/new-api/relay/channel/task/omni"
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -46,10 +45,6 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *taskdto.TaskError) {
 	if taskErr := relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionTextGenerate); taskErr != nil {
 		return taskErr
-	}
-	info.UpstreamModelName = info.OriginModelName
-	if err := helper.ModelMappedHelper(c, info, nil); err != nil {
-		return service.TaskErrorWrapperLocal(err, "model_mapping_failed", http.StatusBadRequest)
 	}
 	if omnitask.IsModel(info.UpstreamModelName) {
 		if err := omnitask.ValidateRequest(c, info); err != nil {

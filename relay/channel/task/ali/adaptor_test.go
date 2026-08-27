@@ -170,3 +170,24 @@ func TestConvertToAliRequestWan25I2VKeepsLegacyImgURL(t *testing.T) {
 	require.Contains(t, string(body), `"img_url"`)
 	require.NotContains(t, string(body), `"media"`)
 }
+
+func TestConvertToAliRequestUsesResolvedModelForDefaults(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	req := relaycommon.TaskSubmitReq{
+		Model:  "wan-sales-alias",
+		Prompt: "generate a video",
+	}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "wan-sales-alias",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "wan2.5-t2v-preview",
+			IsModelMapped:     true,
+		},
+	}
+
+	aliReq, err := adaptor.convertToAliRequest(info, req)
+
+	require.NoError(t, err)
+	require.Equal(t, "wan2.5-t2v-preview", aliReq.Model)
+	require.Equal(t, "1920*1080", aliReq.Parameters.Size)
+}
