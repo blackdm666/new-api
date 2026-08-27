@@ -1,6 +1,7 @@
 const MAX_JOB_BODY_BYTES = 32 * 1024;
 const MAX_CLOCK_SKEW_SECONDS = 5 * 60;
 const MAX_REDIRECTS = 3;
+const MAX_SINGLE_UPLOAD_BYTES = 5 * 1024 ** 3 - 5 * 1024 ** 2;
 const VIDEO_EXTENSIONS = new Map([
   ["video/mp4", ".mp4"],
   ["video/webm", ".webm"],
@@ -143,7 +144,7 @@ function validateJob(job) {
   if (
     !Number.isSafeInteger(job.max_bytes) ||
     job.max_bytes < 1024 * 1024 ||
-    job.max_bytes > 10 * 1024 ** 3
+    job.max_bytes > MAX_SINGLE_UPLOAD_BYTES
   ) {
     throw new TransferError(
       400,

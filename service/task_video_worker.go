@@ -25,6 +25,7 @@ const (
 	minTaskVideoWorkerTimeout     = 30 * time.Second
 	maxTaskVideoWorkerTimeout     = 30 * time.Minute
 	maxTaskVideoWorkerResponse    = int64(64 * 1024)
+	maxTaskVideoWorkerBytes       = int64(5*1024*1024*1024 - 5*1024*1024)
 )
 
 type taskVideoWorkerRequest struct {
@@ -110,12 +111,16 @@ func cacheTaskVideoWithWorker(ctx context.Context, task *model.Task, resultURL s
 	if workerURL == "" || secret == "" {
 		return false, errors.New("Cloudflare video transfer is not configured")
 	}
+	maxBytes := TaskVideoCacheMaxBytes()
+	if maxBytes > maxTaskVideoWorkerBytes {
+		maxBytes = maxTaskVideoWorkerBytes
+	}
 	requestData := taskVideoWorkerRequest{
 		Version:   1,
 		TaskID:    task.TaskID,
 		SourceURL: strings.TrimSpace(resultURL),
 		KeyPrefix: taskVideoCacheKeyPrefix(task),
-		MaxBytes:  TaskVideoCacheMaxBytes(),
+		MaxBytes:  maxBytes,
 	}
 	payload, err := common.Marshal(requestData)
 	if err != nil {
