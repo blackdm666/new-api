@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { Music } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { StatusBadge } from '@/components/status-badge'
 import {
@@ -28,6 +29,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
+import { getTaskPreviewURL } from '../../api'
 import { TASK_ACTIONS, TASK_STATUS } from '../../constants'
 import type { LogOtherData, TaskLog } from '../../types'
 import {
@@ -156,16 +158,44 @@ function isVideoTask(log: TaskLog): boolean {
   )
 }
 
-function getVideoHref(log: TaskLog): string {
-  const resultUrl = log.result_url?.trim() || ''
-  if (
-    resultUrl.startsWith('https://') ||
-    resultUrl.startsWith('http://') ||
-    resultUrl.startsWith('/')
-  ) {
-    return resultUrl
+function TaskVideoPreviewButton(props: { log: TaskLog }) {
+  const { t } = useTranslation()
+  const [loading, setLoading] = useState(false)
+
+  const handlePreview = async () => {
+    const previewWindow = window.open('about:blank', '_blank')
+    if (!previewWindow) {
+      toast.error(t('Video preview window was blocked'))
+      return
+    }
+    previewWindow.opener = null
+    setLoading(true)
+    try {
+      const result = await getTaskPreviewURL(props.log.task_id)
+      const previewURL = result.data?.url?.trim()
+      if (!result.success || !previewURL) {
+        throw new Error(result.message || 'preview URL unavailable')
+      }
+      previewWindow.location.replace(previewURL)
+    } catch {
+      previewWindow.close()
+      toast.error(t('Failed to open video preview'))
+    } finally {
+      setLoading(false)
+    }
   }
-  return `/v1/videos/${encodeURIComponent(log.task_id)}/content`
+
+  return (
+    <button
+      type='button'
+      onClick={handlePreview}
+      disabled={loading}
+      aria-busy={loading}
+      className='text-foreground text-xs hover:underline disabled:cursor-wait disabled:opacity-60'
+    >
+      {t('Click to preview video')}
+    </button>
+  )
 }
 
 export function TaskDetailsCell(props: { log: TaskLog }) {
@@ -185,16 +215,7 @@ export function TaskDetailsCell(props: { log: TaskLog }) {
   }
 
   if (isSuccess && isVideoTask(props.log) && props.log.task_id) {
-    return (
-      <a
-        href={getVideoHref(props.log)}
-        target='_blank'
-        rel='noopener noreferrer'
-        className='text-foreground text-xs hover:underline'
-      >
-        {t('Click to preview video')}
-      </a>
-    )
+    return <TaskVideoPreviewButton log={props.log} />
   }
 
   if (!props.log.fail_reason) {

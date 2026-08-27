@@ -321,6 +321,15 @@ export interface TaskLog {
   updated_at?: number
 }
 
+export interface TaskPreviewURLResponse {
+  success: boolean
+  message?: string
+  data?: {
+    url: string
+    expires_in: number
+  }
+}
+
 // ============================================================================
 // Common Log Types
 // ============================================================================

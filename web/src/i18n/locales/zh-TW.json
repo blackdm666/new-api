@@ -1207,6 +1207,8 @@
     "Click to open deployment": "點擊打開部署",
     "Click to preview audio": "點擊預覽音樂",
     "Click to preview video": "點擊預覽影片",
+    "Failed to open video preview": "無法開啟影片預覽",
+    "Video preview window was blocked": "影片預覽視窗遭瀏覽器封鎖",
     "Click to update balance": "點擊更新餘額",
     "Click to view Codex usage": "點擊查看 Codex 使用量",
     "Click to view full details": "點擊查看詳細資訊",

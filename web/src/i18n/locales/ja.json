@@ -1207,6 +1207,8 @@
     "Click to open deployment": "クリックして展開を開く",
     "Click to preview audio": "クリックして音声をプレビュー",
     "Click to preview video": "クリックして動画をプレビュー",
+    "Failed to open video preview": "動画プレビューを開けませんでした",
+    "Video preview window was blocked": "動画プレビューのポップアップがブロックされました",
     "Click to update balance": "クリックして残高を更新",
     "Click to view Codex usage": "Codex利用状況を見る",
     "Click to view full details": "クリックして詳細を表示",

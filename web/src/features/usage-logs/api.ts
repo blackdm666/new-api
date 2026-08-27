@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import { buildQueryParams } from './lib/utils'
+import { buildQueryParams } from './lib/query-params'
 import type {
   GetLogsParams,
   GetLogsResponse,
@@ -26,6 +26,7 @@ import type {
   GetLogStatsResponse,
   GetMidjourneyLogsParams,
   GetTaskLogsParams,
+  TaskPreviewURLResponse,
   UserInfo,
 } from './types'
 
@@ -110,3 +111,12 @@ export const getAllTaskLogs = (params: GetTaskLogsParams) =>
 
 export const getUserTaskLogs = (params: GetTaskLogsParams) =>
   fetchLogs('/api/task', params, false)
+
+export async function getTaskPreviewURL(
+  taskId: string
+): Promise<TaskPreviewURLResponse> {
+  const res = await api.get(
+    `/api/task/${encodeURIComponent(taskId)}/preview-url`
+  )
+  return res.data
+}

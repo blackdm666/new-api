@@ -1207,6 +1207,8 @@
     "Click to open deployment": "点击打开部署",
     "Click to preview audio": "点击预览音乐",
     "Click to preview video": "点击预览视频",
+    "Failed to open video preview": "无法打开视频预览",
+    "Video preview window was blocked": "视频预览窗口被浏览器拦截",
     "Click to update balance": "点击更新余额",
     "Click to view Codex usage": "点击查看 Codex 使用量",
     "Click to view full details": "点击查看详细信息",

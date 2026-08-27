@@ -1207,6 +1207,8 @@
     "Click to open deployment": "Нажмите, чтобы открыть развертывание",
     "Click to preview audio": "Нажмите для предпросмотра аудио",
     "Click to preview video": "Нажмите, чтобы просмотреть видео",
+    "Failed to open video preview": "Не удалось открыть предпросмотр видео",
+    "Video preview window was blocked": "Окно предпросмотра видео заблокировано",
     "Click to update balance": "Нажмите, чтобы обновить баланс",
     "Click to view Codex usage": "Нажмите, чтобы посмотреть использование Codex",
     "Click to view full details": "Нажмите для просмотра подробностей",

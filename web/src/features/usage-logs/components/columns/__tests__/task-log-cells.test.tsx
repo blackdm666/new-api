@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { render, screen } from '@testing-library/react'
-import { describe, expect, test, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { formatLogQuota } from '@/lib/format'
 
@@ -34,6 +34,16 @@ import {
 vi.mock('@/lib/lobe-icon', () => ({
   getLobeIcon: (iconName: string) => <span data-icon={iconName} />,
 }))
+
+const getTaskPreviewURLMock = vi.hoisted(() => vi.fn())
+vi.mock('../../../api', () => ({
+  getTaskPreviewURL: getTaskPreviewURLMock,
+}))
+
+afterEach(() => {
+  getTaskPreviewURLMock.mockReset()
+  vi.restoreAllMocks()
+})
 
 const baseTask: TaskLog = {
   id: 1,
@@ -88,14 +98,34 @@ describe('task log cells', () => {
     )
   })
 
-  test('links a successful video task to its stored result url', () => {
-    const resultUrl = 'https://88api.ai/v1/videos/task_preview_123/content'
-    render(<TaskDetailsCell log={{ ...baseTask, result_url: resultUrl }} />)
+  test('opens a successful video with an on-demand direct storage url', async () => {
+    const previewURL =
+      'https://example.r2.cloudflarestorage.com/bucket/video.mp4?signed=true'
+    const replace = vi.fn()
+    const close = vi.fn()
+    const previewWindow = {
+      close,
+      location: { replace },
+      opener: window,
+    }
+    vi.spyOn(window, 'open').mockReturnValue(previewWindow as unknown as Window)
+    getTaskPreviewURLMock.mockResolvedValue({
+      success: true,
+      data: { url: previewURL, expires_in: 604800 },
+    })
+    render(<TaskDetailsCell log={baseTask} />)
 
-    const preview = screen.getByRole('link', {
+    const preview = screen.getByRole('button', {
       name: 'Click to preview video',
     })
-    expect(preview).toHaveAttribute('href', resultUrl)
-    expect(preview).toHaveAttribute('target', '_blank')
+    fireEvent.click(preview)
+
+    expect(window.open).toHaveBeenCalledWith('about:blank', '_blank')
+    await waitFor(() => {
+      expect(getTaskPreviewURLMock).toHaveBeenCalledWith(baseTask.task_id)
+      expect(replace).toHaveBeenCalledWith(previewURL)
+    })
+    expect(previewWindow.opener).toBeNull()
+    expect(close).not.toHaveBeenCalled()
   })
 })

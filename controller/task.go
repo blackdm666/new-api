@@ -1,13 +1,17 @@
 package controller
 
 import (
+	"errors"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -58,6 +62,57 @@ func GetUserTask(c *gin.Context) {
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(tasksToDto(items, false))
 	common.ApiSuccess(c, pageInfo)
+}
+
+func GetTaskPreviewURL(c *gin.Context) {
+	taskId := strings.TrimSpace(c.Param("task_id"))
+	if taskId == "" {
+		common.ApiError(c, errors.New("task_id is required"))
+		return
+	}
+
+	var task *model.Task
+	var exists bool
+	var err error
+	if c.GetInt("role") >= common.RoleAdminUser {
+		task, exists, err = model.GetTaskByTaskId(taskId)
+	} else {
+		task, exists, err = model.GetByTaskId(c.GetInt("id"), taskId)
+	}
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !exists || task == nil {
+		common.ApiError(c, errors.New("task not found"))
+		return
+	}
+	if task.Status != model.TaskStatusSuccess {
+		common.ApiError(c, errors.New("task is not completed"))
+		return
+	}
+
+	previewURL, cached, err := service.GetTaskVideoPreviewURL(c.Request.Context(), task)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if cached {
+		common.ApiSuccess(c, gin.H{
+			"url":        previewURL,
+			"expires_in": int64(service.TaskVideoPreviewURLTTL().Seconds()),
+		})
+		return
+	}
+
+	resultURL := strings.TrimSpace(task.GetResultURL())
+	parsed, parseErr := url.Parse(resultURL)
+	if parseErr == nil && parsed != nil && (parsed.Scheme == "https" || parsed.Scheme == "http") &&
+		!strings.Contains(parsed.Path, "/v1/videos/"+task.TaskID+"/content") {
+		common.ApiSuccess(c, gin.H{"url": resultURL, "expires_in": 0})
+		return
+	}
+	common.ApiError(c, errors.New("direct video preview is unavailable"))
 }
 
 func tasksToDto(tasks []*model.Task, fillUser bool) []*dto.TaskDto {

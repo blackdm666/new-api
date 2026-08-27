@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,12 @@ import (
 )
 
 const taskVideoCacheKind = "s3"
+
+const (
+	defaultTaskVideoPreviewURLTTL = 7 * 24 * time.Hour
+	minTaskVideoPreviewURLTTL     = time.Minute
+	maxTaskVideoPreviewURLTTL     = 7 * 24 * time.Hour
+)
 
 // TaskVideoCacheEnabled reports whether newly completed data-URL videos must be
 // copied to the configured private S3-compatible bucket before SUCCESS is
@@ -42,6 +49,21 @@ func newTaskVideoCacheStorage() (invoicefile.Storage, error) {
 }
 
 var taskVideoCacheStorageFactory = newTaskVideoCacheStorage
+
+// TaskVideoPreviewURLTTL returns the configured lifetime of an R2/S3 preview
+// link. Cloudflare R2 limits presigned URLs to at most seven days.
+func TaskVideoPreviewURLTTL() time.Duration {
+	raw := strings.TrimSpace(common.GetEnvOrDefaultString("TASK_VIDEO_CACHE_SIGNED_URL_TTL_SECONDS", ""))
+	seconds, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return defaultTaskVideoPreviewURLTTL
+	}
+	ttl := time.Duration(seconds) * time.Second
+	if ttl < minTaskVideoPreviewURLTTL || ttl > maxTaskVideoPreviewURLTTL {
+		return defaultTaskVideoPreviewURLTTL
+	}
+	return ttl
+}
 
 // CacheTaskVideoResult persists a base64 data URL to private object storage.
 // Returning cached=false is expected when caching is disabled or the result is
@@ -122,6 +144,27 @@ func OpenTaskVideoCache(ctx context.Context, task *model.Task) (reader io.ReadCl
 		mimeType = "video/mp4"
 	}
 	return reader, mimeType, true, nil
+}
+
+// GetTaskVideoPreviewURL creates an on-demand presigned URL for a cached task
+// video. The browser downloads directly from R2/S3, so video bytes do not pass
+// through the NewAPI server.
+func GetTaskVideoPreviewURL(ctx context.Context, task *model.Task) (previewURL string, cached bool, err error) {
+	if task == nil || task.PrivateData.ResultStorageKey == "" {
+		return "", false, nil
+	}
+	storage, err := taskVideoCacheStorageFactory()
+	if err != nil {
+		return "", true, err
+	}
+	if task.PrivateData.ResultStorageKind != "" && task.PrivateData.ResultStorageKind != storage.Kind() {
+		return "", true, fmt.Errorf("cached task video storage changed from %q to %q", task.PrivateData.ResultStorageKind, storage.Kind())
+	}
+	previewURL, err = storage.SignedURL(ctx, task.PrivateData.ResultStorageKey, TaskVideoPreviewURLTTL(), "", true)
+	if err != nil {
+		return "", true, err
+	}
+	return previewURL, true, nil
 }
 
 func parseVideoDataURL(value string) (mimeType string, payload string, encoding *base64.Encoding, err error) {
