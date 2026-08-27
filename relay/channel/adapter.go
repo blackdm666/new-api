@@ -88,3 +88,10 @@ type OpenAIVideoConverter interface {
 type PromptOnlyVideoTester interface {
 	SupportsPromptOnlyVideo(modelName string) bool
 }
+
+// DynamicTaskModelAdaptor marks task providers that validate model support
+// against the selected channel's live upstream model catalog at request time.
+// GetModelList remains a recommended-model list for channel creation.
+type DynamicTaskModelAdaptor interface {
+	SupportsDynamicTaskModels() bool
+}

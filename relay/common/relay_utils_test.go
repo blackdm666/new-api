@@ -133,6 +133,30 @@ func TestValidateBasicTaskRequestStoresReferenceVideo(t *testing.T) {
 	assert.Equal(t, "data:video/mp4;base64,AAAA", storedReq.Video)
 }
 
+func TestValidateTaskRequestAllowMediaPreservesXinMengOptionalFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := strings.NewReader(`{"model":"wan3.0-video-prime-720p","media":[{"type":"reference_image","url":"https://example.com/ref.png"}],"negative_prompt":"blur","seed":42,"generate_audio":true,"camera_control":{"pan":2}}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/videos", body)
+	request.Header.Set("Content-Type", "application/json")
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = request
+	info := &RelayInfo{TaskRelayInfo: &TaskRelayInfo{}}
+
+	taskErr := ValidateTaskRequestAllowMedia(context, info, constant.TaskActionReferenceGenerate)
+
+	require.Nil(t, taskErr)
+	storedReq, err := GetTaskRequest(context)
+	require.NoError(t, err)
+	require.Len(t, storedReq.Media, 1)
+	assert.Equal(t, "reference_image", storedReq.Media[0]["type"])
+	assert.Equal(t, "blur", storedReq.NegativePrompt)
+	require.NotNil(t, storedReq.Seed)
+	assert.Equal(t, 42, *storedReq.Seed)
+	require.NotNil(t, storedReq.GenerateAudio)
+	assert.True(t, *storedReq.GenerateAudio)
+	assert.EqualValues(t, 2, storedReq.CameraControl["pan"])
+}
+
 // TestTaskDurationBounds guards the billing invariant that user-supplied
 // video duration (a quota multiplier via OtherRatio "seconds") is bounded, so
 // it can never overflow quota calculation into a negative charge.

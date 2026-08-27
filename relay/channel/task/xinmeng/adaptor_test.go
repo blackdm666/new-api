@@ -1,6 +1,7 @@
 package xinmeng
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,7 +23,19 @@ func TestGetModelListContainsCurrentModels(t *testing.T) {
 		ModelDVCSeedance20,
 		ModelMiniMaxH3768P,
 		ModelMiniMaxH31440P,
+		ModelDoubaoSeedance25,
+		ModelDoubaoSeedance20,
+		ModelDoubaoSeedance20Fast,
+		ModelSeedance20Mini480P,
+		ModelSeedance20Mini720P,
+		ModelWan30Prime720P,
+		ModelWan30Prime1080P,
+		ModelKling30Turbo720P,
+		ModelKling30Turbo1080P,
+		ModelKling30Turbo2K,
+		ModelKling30Turbo4K,
 	}, (&TaskAdaptor{}).GetModelList())
+	assert.NotContains(t, (&TaskAdaptor{}).GetModelList(), ModelKling30Turbo)
 }
 
 func TestConvertDVCSeedance25Locks720p(t *testing.T) {
@@ -201,7 +214,7 @@ func TestConvertMiniMaxH3Variants(t *testing.T) {
 		}, nil)
 
 		require.Error(t, err)
-		assert.Equal(t, "model must be one of dvc-seedance-2.5, dvc-seedance-2.0, minimax-h3-768p, minimax-h3-1440p", err.Error())
+		assert.Equal(t, "model minimax-h3 requires live XinMeng capability discovery", err.Error())
 	})
 
 	t.Run("rejects ratios removed by the current upstream", func(t *testing.T) {
@@ -228,6 +241,185 @@ func TestEstimateBillingUsesRequestedSecondsForAllCurrentModels(t *testing.T) {
 			ratios := (&TaskAdaptor{}).EstimateBilling(c, &relaycommon.RelayInfo{})
 
 			assert.Equal(t, map[string]float64{"seconds": 6}, ratios)
+		})
+	}
+}
+
+func TestNewFixedResolutionProfilesMatchXinMengDocumentation(t *testing.T) {
+	tests := []struct {
+		model      string
+		resolution string
+		minSeconds int
+		maxSeconds int
+	}{
+		{model: ModelDoubaoSeedance25, resolution: "720p", minSeconds: 4, maxSeconds: 30},
+		{model: ModelDoubaoSeedance20, resolution: "720p", minSeconds: 4, maxSeconds: 15},
+		{model: ModelDoubaoSeedance20Fast, resolution: "720p", minSeconds: 4, maxSeconds: 15},
+		{model: ModelSeedance20Mini480P, resolution: "480p", minSeconds: 4, maxSeconds: 15},
+		{model: ModelSeedance20Mini720P, resolution: "720p", minSeconds: 4, maxSeconds: 15},
+		{model: ModelWan30Prime720P, resolution: "720p", minSeconds: 4, maxSeconds: 30},
+		{model: ModelWan30Prime1080P, resolution: "1080p", minSeconds: 4, maxSeconds: 30},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			body, err := convertToRequestPayload(relaycommon.TaskSubmitReq{
+				Model: tt.model, Prompt: "documented request", Duration: tt.maxSeconds,
+				Metadata: map[string]interface{}{"resolution": "4k"},
+			}, nil)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.model, body.Model)
+			assert.Equal(t, tt.resolution, body.Resolution)
+			assert.Equal(t, tt.maxSeconds, body.Duration)
+
+			_, err = convertToRequestPayload(relaycommon.TaskSubmitReq{
+				Model: tt.model, Prompt: "too short", Duration: tt.minSeconds - 1,
+			}, nil)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestKlingSalesAliasesLockResolutionAndUseNativeFields(t *testing.T) {
+	generateAudio := true
+	seed := 42
+	tests := []struct {
+		model      string
+		resolution string
+	}{
+		{model: ModelKling30Turbo720P, resolution: "720p"},
+		{model: ModelKling30Turbo1080P, resolution: "1080p"},
+		{model: ModelKling30Turbo2K, resolution: "2k"},
+		{model: ModelKling30Turbo4K, resolution: "4k"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			info := &relaycommon.RelayInfo{
+				OriginModelName: tt.model,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					UpstreamModelName: ModelKling30Turbo,
+					IsModelMapped:     true,
+				},
+			}
+			body, err := convertToRequestPayload(relaycommon.TaskSubmitReq{
+				Model: tt.model, Prompt: "Kling native request", Duration: 6,
+				NegativePrompt: "blur", Seed: &seed, GenerateAudio: &generateAudio,
+				Metadata: map[string]interface{}{
+					"resolution": "720p",
+					"images": []interface{}{
+						map[string]interface{}{"url": "https://example.com/first.png", "role": "first_frame"},
+					},
+					"camera_control": map[string]interface{}{"pan": 2},
+				},
+			}, info)
+
+			require.NoError(t, err)
+			assert.Equal(t, ModelKling30Turbo, body.Model)
+			assert.Equal(t, tt.resolution, body.Resolution)
+			assert.Equal(t, "blur", body.NegativePrompt)
+			assert.Equal(t, &seed, body.Seed)
+			assert.Equal(t, &generateAudio, body.GenerateAudioNative)
+			assert.Len(t, body.Images, 1)
+			assert.Empty(t, body.ReferenceImages)
+			assert.EqualValues(t, 2, body.CameraControl["pan"])
+		})
+	}
+}
+
+func TestKlingSalesAliasFollowsRenamedMappedUpstreamModel(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		OriginModelName: ModelKling30Turbo720P,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "kling-v3-omni-renamed",
+			IsModelMapped:     true,
+		},
+	}
+
+	body, err := convertToRequestPayload(relaycommon.TaskSubmitReq{
+		Model: ModelKling30Turbo720P, Prompt: "renamed upstream", Duration: 5,
+	}, info)
+
+	require.NoError(t, err)
+	assert.Equal(t, "kling-v3-omni-renamed", body.Model)
+	assert.Equal(t, "720p", body.Resolution)
+}
+
+func TestDynamicXinMengModelUsesLiveCapabilities(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var authorization string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		assert.Equal(t, "/v1/models", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, err := io.WriteString(w, `{"object":"list","data":[{"id":"renamed-video-720p","category":"video","supportedRatios":["16:9","9:16"],"supportedQualities":["720p"],"supportedDurations":[4,6,8],"defaultRatio":"16:9","defaultQuality":"720p","defaultDuration":6,"videoModes":["text_only","reference_image"],"supportsVideoRef":0,"supportsAudioRef":0}]}`)
+		assert.NoError(t, err)
+	}))
+	defer server.Close()
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{"model":"renamed-video-720p","prompt":"dynamic model","duration":8,"size":"9:16"}`))
+	request.Header.Set("Content-Type", "application/json")
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = request
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "renamed-video-720p",
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelBaseUrl:    server.URL,
+			ApiKey:            "dynamic-key",
+			UpstreamModelName: "renamed-video-720p",
+		},
+	}
+	adaptor := &TaskAdaptor{}
+	adaptor.Init(info)
+
+	taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+	require.Nil(t, taskErr)
+	assert.Equal(t, "Bearer dynamic-key", authorization)
+	assert.Equal(t, map[string]float64{"seconds": 8}, adaptor.EstimateBilling(c, info))
+	bodyReader, err := adaptor.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	bodyBytes, err := io.ReadAll(bodyReader)
+	require.NoError(t, err)
+	var body requestPayload
+	require.NoError(t, common.Unmarshal(bodyBytes, &body))
+	assert.Equal(t, "renamed-video-720p", body.Model)
+	assert.Equal(t, "720p", body.Resolution)
+	assert.Equal(t, "9:16", body.Ratio)
+}
+
+func TestDynamicXinMengModelRejectsUnsafeMultiResolutionAndDirectKling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"id":"multi-quality","category":"video","supportedRatios":["16:9"],"supportedQualities":["720p","1080p"],"supportedDurations":[5],"defaultDuration":5}]}`)
+	}))
+	defer server.Close()
+
+	for _, tt := range []struct {
+		model       string
+		wantMessage string
+	}{
+		{model: "multi-quality", wantMessage: "requires fixed-resolution sales aliases"},
+		{model: ModelKling30Turbo, wantMessage: "must use a fixed-resolution sales alias"},
+	} {
+		t.Run(tt.model, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(fmt.Sprintf(`{"model":%q,"prompt":"test","duration":5}`, tt.model)))
+			request.Header.Set("Content-Type", "application/json")
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = request
+			info := &relaycommon.RelayInfo{
+				OriginModelName: tt.model,
+				TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelBaseUrl: server.URL, UpstreamModelName: tt.model,
+				},
+			}
+			adaptor := &TaskAdaptor{}
+			adaptor.Init(info)
+
+			taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+			require.NotNil(t, taskErr)
+			assert.Contains(t, taskErr.Message, tt.wantMessage)
 		})
 	}
 }
@@ -316,6 +508,8 @@ func TestParseTaskResultSupportsXinMengTerminalStatuses(t *testing.T) {
 	}{
 		{name: "pending", body: `{"id":"vid_1","status":"pending"}`, wantStatus: model.TaskStatusQueued},
 		{name: "success alias", body: `{"id":"vid_2","status":"success","result":"https://example.com/video.mp4"}`, wantStatus: model.TaskStatusSuccess, wantURL: "https://example.com/video.mp4"},
+		{name: "Mini nested data URL", body: `{"task_id":"vid_mini","status":"succeeded","data":{"url":"https://example.com/mini.mp4"}}`, wantStatus: model.TaskStatusSuccess, wantURL: "https://example.com/mini.mp4"},
+		{name: "Kling data array URL", body: `{"task_id":"vid_kling","status":"completed","data":[{"url":"https://example.com/kling.mp4"}]}`, wantStatus: model.TaskStatusSuccess, wantURL: "https://example.com/kling.mp4"},
 		{name: "cancelled", body: `{"id":"vid_3","status":"cancelled","error":{"message":"upstream timeout"}}`, wantStatus: model.TaskStatusFailure, wantReason: "upstream timeout"},
 	}
 	for _, tt := range tests {

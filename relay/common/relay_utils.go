@@ -280,19 +280,24 @@ func isKnownTaskField(field string) bool {
 		"prompt":          true,
 		"model":           true,
 		"mode":            true,
+		"negative_prompt": true,
 		"image":           true,
 		"images":          true,
 		"video":           true,
 		"videos":          true,
+		"media":           true,
 		"size":            true,
 		"duration":        true,
+		"seed":            true,
+		"generate_audio":  true,
+		"camera_control":  true,
 		"input_reference": true, // Sora 特有字段
 		"callback_url":    true,
 	}
 	return knownFields[field]
 }
 
-func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *dto.TaskError {
+func validateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string, allowMediaWithoutPrompt bool) *dto.TaskError {
 	var err error
 	contentType := c.GetHeader("Content-Type")
 	var req TaskSubmitReq
@@ -307,8 +312,11 @@ func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *d
 		return createTaskError(err, "invalid_request", http.StatusBadRequest, true)
 	}
 
-	if taskErr := validatePrompt(req.Prompt); taskErr != nil {
-		return taskErr
+	if strings.TrimSpace(req.Prompt) == "" {
+		hasMedia := len(req.Media) > 0 || req.HasImage() || req.HasVideo()
+		if !allowMediaWithoutPrompt || !hasMedia {
+			return createTaskError(fmt.Errorf("prompt is required"), "invalid_request", http.StatusBadRequest, true)
+		}
 	}
 
 	if taskErr := validateTaskDurationBounds(req); taskErr != nil {
@@ -322,4 +330,14 @@ func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *d
 
 	storeTaskRequest(c, info, action, req)
 	return nil
+}
+
+func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *dto.TaskError {
+	return validateBasicTaskRequest(c, info, action, false)
+}
+
+// ValidateTaskRequestAllowMedia keeps the normal task bounds while allowing
+// providers whose contract accepts either a prompt or an explicit media array.
+func ValidateTaskRequestAllowMedia(c *gin.Context, info *RelayInfo, action string) *dto.TaskError {
+	return validateBasicTaskRequest(c, info, action, true)
 }
