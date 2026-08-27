@@ -250,8 +250,11 @@ func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQ
 	}
 
 	// 获取数据
-	err = query.Omit("channel_id").Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
+	err = query.Omit("channel_id", "private_data", "data").Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
 	if err != nil {
+		return nil
+	}
+	if err = hydrateTaskListData(tasks); err != nil {
 		return nil
 	}
 
@@ -295,12 +298,51 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	}
 
 	// 获取数据
-	err = query.Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
+	err = query.Omit("private_data", "data").Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
 	if err != nil {
+		return nil
+	}
+	if err = hydrateTaskListData(tasks); err != nil {
 		return nil
 	}
 
 	return tasks
+}
+
+// hydrateTaskListData restores the response data required by Suno audio
+// previews without loading large video-provider payloads into list responses.
+func hydrateTaskListData(tasks []*Task) error {
+	ids := make([]int64, 0)
+	for _, task := range tasks {
+		if task != nil && task.Platform == constant.TaskPlatformSuno {
+			ids = append(ids, task.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	var rows []struct {
+		ID   int64
+		Data json.RawMessage
+	}
+	if err := DB.Model(&Task{}).
+		Select("id", "data").
+		Where("id IN ?", ids).
+		Find(&rows).Error; err != nil {
+		return err
+	}
+
+	dataByID := make(map[int64]json.RawMessage, len(rows))
+	for _, row := range rows {
+		dataByID[row.ID] = row.Data
+	}
+	for _, task := range tasks {
+		if data, ok := dataByID[task.ID]; ok {
+			task.Data = data
+		}
+	}
+	return nil
 }
 
 func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {

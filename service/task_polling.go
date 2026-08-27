@@ -662,7 +662,10 @@ func redactVideoResponseBody(body []byte) []byte {
 			step, _ := item.(map[string]any)
 			stepType, _ := step["type"].(string)
 			stepMimeType, _ := step["mime_type"].(string)
-			if stepType == "video" || strings.HasPrefix(stepMimeType, "video/") {
+			if stepType == "image" || stepType == "audio" || stepType == "video" ||
+				strings.HasPrefix(stepMimeType, "image/") ||
+				strings.HasPrefix(stepMimeType, "audio/") ||
+				strings.HasPrefix(stepMimeType, "video/") {
 				delete(step, "data")
 			}
 			contents, _ := step["content"].([]any)
@@ -670,7 +673,10 @@ func redactVideoResponseBody(body []byte) []byte {
 				part, _ := content.(map[string]any)
 				partType, _ := part["type"].(string)
 				mimeType, _ := part["mime_type"].(string)
-				if partType == "video" || strings.HasPrefix(mimeType, "video/") {
+				if partType == "image" || partType == "audio" || partType == "video" ||
+					strings.HasPrefix(mimeType, "image/") ||
+					strings.HasPrefix(mimeType, "audio/") ||
+					strings.HasPrefix(mimeType, "video/") {
 					delete(part, "data")
 				}
 			}
