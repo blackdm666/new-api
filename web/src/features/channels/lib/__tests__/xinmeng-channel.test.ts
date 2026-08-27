@@ -30,7 +30,7 @@ import {
 import { getChannelTypeIcon, getKeyPromptForType } from '../channel-utils'
 
 describe('XinMeng channel', () => {
-  test('registers upstream discovery and the three related models', () => {
+  test('registers upstream discovery and the current related models', () => {
     expect(
       CHANNEL_TYPE_OPTIONS.find((item) => item.value === CHANNEL_TYPE_XINMENG)
     ).toEqual({ value: CHANNEL_TYPE_XINMENG, label: 'XinMeng' })
@@ -41,12 +41,18 @@ describe('XinMeng channel', () => {
     )
     expect(getChannelTypeConfig(CHANNEL_TYPE_XINMENG)).toMatchObject({
       defaultBaseUrl: 'https://www.jimengvip.online',
-      supportedModels: ['dvc-seedance-2.5', 'dvc-seedance-2.0', 'minimax-h3'],
+      supportedModels: [
+        'dvc-seedance-2.5',
+        'dvc-seedance-2.0',
+        'minimax-h3-768p',
+        'minimax-h3-1440p',
+      ],
     })
     expect(getChannelTypeSupportedModels(CHANNEL_TYPE_XINMENG)).toEqual([
       'dvc-seedance-2.5',
       'dvc-seedance-2.0',
-      'minimax-h3',
+      'minimax-h3-768p',
+      'minimax-h3-1440p',
     ])
   })
 })

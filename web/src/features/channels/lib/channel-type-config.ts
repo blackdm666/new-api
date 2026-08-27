@@ -180,11 +180,17 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
     name: CHANNEL_TYPES[62],
     icon: 'video',
     defaultBaseUrl: 'https://www.jimengvip.online',
-    supportedModels: ['dvc-seedance-2.5', 'dvc-seedance-2.0', 'minimax-h3'],
+    supportedModels: [
+      'dvc-seedance-2.5',
+      'dvc-seedance-2.0',
+      'minimax-h3-768p',
+      'minimax-h3-1440p',
+    ],
     hints: {
       baseUrl: 'Default: https://www.jimengvip.online (do not append /v1)',
       key: 'Bearer API key from XinMeng',
-      models: 'dvc-seedance-2.5,dvc-seedance-2.0,minimax-h3',
+      models:
+        'dvc-seedance-2.5,dvc-seedance-2.0,minimax-h3-768p,minimax-h3-1440p',
     },
   },
 }

@@ -16,11 +16,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetModelListContainsOnlyInitialModels(t *testing.T) {
+func TestGetModelListContainsCurrentModels(t *testing.T) {
 	assert.ElementsMatch(t, []string{
 		ModelDVCSeedance25,
 		ModelDVCSeedance20,
-		ModelMiniMaxH3,
+		ModelMiniMaxH3768P,
+		ModelMiniMaxH31440P,
 	}, (&TaskAdaptor{}).GetModelList())
 }
 
@@ -118,29 +119,54 @@ func TestConvertDVCSeedance20RejectsGenerateAudioOverride(t *testing.T) {
 	assert.Contains(t, err.Error(), "generateAudio is not supported")
 }
 
-func TestConvertMiniMaxH3Validation(t *testing.T) {
-	t.Run("valid image and audio", func(t *testing.T) {
+func TestConvertMiniMaxH3Variants(t *testing.T) {
+	t.Run("locks each model to its upstream resolution", func(t *testing.T) {
+		tests := []struct {
+			model      string
+			resolution string
+		}{
+			{model: ModelMiniMaxH3768P, resolution: "768p"},
+			{model: ModelMiniMaxH31440P, resolution: "1440p"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.model, func(t *testing.T) {
+				req := relaycommon.TaskSubmitReq{
+					Model:    tt.model,
+					Prompt:   "Animate the portrait to the music",
+					Duration: 12,
+					Images:   []string{"https://example.com/portrait.png"},
+					Metadata: map[string]interface{}{
+						"resolution":       "2k",
+						"reference_audios": []interface{}{"https://example.com/music.mp3"},
+					},
+				}
+
+				body, err := convertToRequestPayload(req, nil)
+
+				require.NoError(t, err)
+				assert.Equal(t, tt.model, body.Model)
+				assert.Equal(t, tt.resolution, body.Resolution)
+				assert.Equal(t, 12, body.Duration)
+				assert.Equal(t, []string{"https://example.com/music.mp3"}, body.ReferenceAudios)
+			})
+		}
+	})
+
+	t.Run("uses the current four second default", func(t *testing.T) {
 		req := relaycommon.TaskSubmitReq{
-			Model:    ModelMiniMaxH3,
-			Prompt:   "Animate the portrait to the music",
-			Duration: 12,
-			Images:   []string{"https://example.com/portrait.png"},
-			Metadata: map[string]interface{}{
-				"reference_audios": []interface{}{"https://example.com/music.mp3"},
-			},
+			Model:  ModelMiniMaxH3768P,
+			Prompt: "A cinematic landscape",
 		}
 
 		body, err := convertToRequestPayload(req, nil)
 
 		require.NoError(t, err)
-		assert.Equal(t, "2k", body.Resolution)
-		assert.Equal(t, 12, body.Duration)
-		assert.Equal(t, []string{"https://example.com/music.mp3"}, body.ReferenceAudios)
+		assert.Equal(t, 4, body.Duration)
 	})
 
 	t.Run("audio requires image", func(t *testing.T) {
 		req := relaycommon.TaskSubmitReq{
-			Model:  ModelMiniMaxH3,
+			Model:  ModelMiniMaxH3768P,
 			Prompt: "Audio only",
 			Metadata: map[string]interface{}{
 				"referenceAudios": []interface{}{"https://example.com/music.mp3"},
@@ -155,7 +181,7 @@ func TestConvertMiniMaxH3Validation(t *testing.T) {
 
 	t.Run("reference video is rejected", func(t *testing.T) {
 		req := relaycommon.TaskSubmitReq{
-			Model:  ModelMiniMaxH3,
+			Model:  ModelMiniMaxH31440P,
 			Prompt: "Video reference",
 			Metadata: map[string]interface{}{
 				"referenceVideos": []interface{}{"https://example.com/video.mp4"},
@@ -167,9 +193,32 @@ func TestConvertMiniMaxH3Validation(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "at most 0 items")
 	})
+
+	t.Run("legacy base model is rejected", func(t *testing.T) {
+		_, err := convertToRequestPayload(relaycommon.TaskSubmitReq{
+			Model:  "minimax-h3",
+			Prompt: "Legacy model",
+		}, nil)
+
+		require.Error(t, err)
+		assert.Equal(t, "model must be one of dvc-seedance-2.5, dvc-seedance-2.0, minimax-h3-768p, minimax-h3-1440p", err.Error())
+	})
+
+	t.Run("rejects ratios removed by the current upstream", func(t *testing.T) {
+		_, err := convertToRequestPayload(relaycommon.TaskSubmitReq{
+			Model:  ModelMiniMaxH31440P,
+			Prompt: "Unsupported ratio",
+			Metadata: map[string]interface{}{
+				"ratio": "4:3",
+			},
+		}, nil)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ratio 4:3 is not supported")
+	})
 }
 
-func TestEstimateBillingUsesRequestedSecondsForAllInitialModels(t *testing.T) {
+func TestEstimateBillingUsesRequestedSecondsForAllCurrentModels(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, modelName := range ModelList {
 		t.Run(modelName, func(t *testing.T) {
@@ -191,7 +240,8 @@ func TestResolvedSalesAliasesUseUpstreamModelForValidationBillingAndBody(t *test
 	}{
 		{alias: "DC全能视频2.5 720P", upstream: ModelDVCSeedance25},
 		{alias: "DC全能视频2.0 720P", upstream: ModelDVCSeedance20},
-		{alias: "MiniMax H3", upstream: ModelMiniMaxH3},
+		{alias: "MiniMax H3 768P", upstream: ModelMiniMaxH3768P},
+		{alias: "MiniMax H3 1440P", upstream: ModelMiniMaxH31440P},
 	}
 	for _, tt := range tests {
 		t.Run(tt.alias, func(t *testing.T) {

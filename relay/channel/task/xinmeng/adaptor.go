@@ -26,9 +26,10 @@ import (
 const (
 	ChannelName = "XinMeng Video"
 
-	ModelDVCSeedance25 = "dvc-seedance-2.5"
-	ModelDVCSeedance20 = "dvc-seedance-2.0"
-	ModelMiniMaxH3     = "minimax-h3"
+	ModelDVCSeedance25  = "dvc-seedance-2.5"
+	ModelDVCSeedance20  = "dvc-seedance-2.0"
+	ModelMiniMaxH3768P  = "minimax-h3-768p"
+	ModelMiniMaxH31440P = "minimax-h3-1440p"
 
 	defaultBaseURL = "https://www.jimengvip.online"
 	submitPath     = "/v1/videos/generations"
@@ -38,7 +39,8 @@ const (
 var ModelList = []string{
 	ModelDVCSeedance25,
 	ModelDVCSeedance20,
-	ModelMiniMaxH3,
+	ModelMiniMaxH3768P,
+	ModelMiniMaxH31440P,
 }
 
 type modelConfig struct {
@@ -74,11 +76,17 @@ var modelConfigs = map[string]modelConfig{
 		framesExclusive: true,
 		allowedRatios:   stringSet("1:1", "21:9", "16:9", "9:16", "3:4", "4:3"),
 	},
-	ModelMiniMaxH3: {
-		upstreamModel: ModelMiniMaxH3, defaultDuration: 5, minDuration: 5, maxDuration: 15,
-		defaultRatio: "16:9", resolution: "2k", maxPromptLength: 2000,
+	ModelMiniMaxH3768P: {
+		upstreamModel: ModelMiniMaxH3768P, defaultDuration: 4, minDuration: 4, maxDuration: 15,
+		defaultRatio: "16:9", resolution: "768p", maxPromptLength: 2000,
 		maxReferenceImages: 5, maxReferenceAudios: 1, requireVisualWithAudio: true,
-		allowedRatios: stringSet("16:9", "9:16", "1:1", "4:3", "3:4", "21:9"),
+		allowedRatios: stringSet("1:1", "16:9", "9:16"),
+	},
+	ModelMiniMaxH31440P: {
+		upstreamModel: ModelMiniMaxH31440P, defaultDuration: 4, minDuration: 4, maxDuration: 15,
+		defaultRatio: "16:9", resolution: "1440p", maxPromptLength: 2000,
+		maxReferenceImages: 5, maxReferenceAudios: 1, requireVisualWithAudio: true,
+		allowedRatios: stringSet("1:1", "16:9", "9:16"),
 	},
 }
 
