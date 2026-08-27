@@ -8,6 +8,30 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 const encoder = new TextEncoder();
 
+class TestFixedLengthStream {
+  constructor(expectedLength) {
+    let written = 0;
+    const stream = new TransformStream({
+      transform(chunk, controller) {
+        written += chunk.byteLength;
+        if (written > expectedLength)
+          throw new TypeError("fixed-length stream received too many bytes");
+        controller.enqueue(chunk);
+      },
+      flush() {
+        if (written !== expectedLength)
+          throw new TypeError("fixed-length stream received too few bytes");
+      },
+    });
+    this.readable = stream.readable;
+    this.writable = stream.writable;
+  }
+}
+
+const fixedLengthDependencies = {
+  FixedLengthStreamImpl: TestFixedLengthStream,
+};
+
 async function signature(secret, timestamp, body) {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -99,6 +123,7 @@ test("streams a signed public video into the bound R2 bucket", async () => {
     },
     {
       nowSeconds: 1787860000,
+      ...fixedLengthDependencies,
       fetchImpl: async () =>
         new Response(encoder.encode("video-bytes"), {
           status: 200,
@@ -188,13 +213,14 @@ test("rejects a video whose declared size exceeds the signed limit", async () =>
   assert.equal((await response.json()).code, "video_too_large");
 });
 
-test("aborts a streaming upload when the source omits length and exceeds the limit", async () => {
+test("falls back before upload when the source omits a fixed length", async () => {
+  const bucket = new MemoryBucket();
   const request = await signedRequest(validJob({ max_bytes: 1024 * 1024 }));
   const response = await handleRequest(
     request,
     {
       TRANSFER_SECRET: "worker-test-secret",
-      VIDEO_BUCKET: new MemoryBucket(),
+      VIDEO_BUCKET: bucket,
     },
     {
       nowSeconds: 1787860000,
@@ -206,8 +232,9 @@ test("aborts a streaming upload when the source omits length and exceeds the lim
     },
   );
 
-  assert.equal(response.status, 413);
-  assert.equal((await response.json()).code, "video_too_large");
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).code, "source_length_required");
+  assert.equal(bucket.putCount, 0);
 });
 
 test("validates every redirect target before following it", async () => {
@@ -240,6 +267,7 @@ test("reuses an existing deterministic object without a second write", async () 
   const bucket = new MemoryBucket();
   const dependencies = {
     nowSeconds: 1787860000,
+    ...fixedLengthDependencies,
     fetchImpl: async () =>
       new Response(encoder.encode("video-bytes"), {
         status: 200,

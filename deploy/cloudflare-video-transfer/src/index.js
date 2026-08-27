@@ -165,7 +165,10 @@ async function fetchSource(sourceURL, fetchImpl) {
     const response = await fetchImpl(currentURL, {
       method: "GET",
       redirect: "manual",
-      headers: { Accept: "video/*, application/octet-stream;q=0.9" },
+      headers: {
+        Accept: "video/*, application/octet-stream;q=0.9",
+        "Accept-Encoding": "identity",
+      },
     });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       await cancelBodyQuietly(response.body, "following validated redirect");
@@ -223,39 +226,6 @@ function resolveVideoType(response, finalURL) {
     "unexpected_content_type",
     "video source did not return supported video content",
   );
-}
-
-function createCountingStream(body, maxBytes, counter) {
-  const reader = body.getReader();
-  return new ReadableStream({
-    async pull(controller) {
-      const { done, value } = await reader.read();
-      if (done) {
-        controller.close();
-        return;
-      }
-      counter.size += value.byteLength;
-      if (counter.size > maxBytes) {
-        try {
-          await reader.cancel("video size limit exceeded");
-        } catch {
-          // The size violation remains authoritative even if cancellation fails.
-        }
-        controller.error(
-          new TransferError(
-            413,
-            "video_too_large",
-            "video source exceeded configured size limit",
-          ),
-        );
-        return;
-      }
-      controller.enqueue(value);
-    },
-    cancel(reason) {
-      return reader.cancel(reason);
-    },
-  });
 }
 
 export async function handleRequest(request, env, dependencies = {}) {
@@ -340,18 +310,6 @@ export async function handleRequest(request, env, dependencies = {}) {
     const fetchImpl = dependencies.fetchImpl || fetch;
     const { response, finalURL } = await fetchSource(job.source_url, fetchImpl);
     const { contentType, extension } = resolveVideoType(response, finalURL);
-    const declaredVideoLength = Number(
-      response.headers.get("Content-Length") || 0,
-    );
-    if (declaredVideoLength > job.max_bytes) {
-      await cancelBodyQuietly(response.body, "video size limit exceeded");
-      throw new TransferError(
-        413,
-        "video_too_large",
-        "video source exceeded configured size limit",
-      );
-    }
-
     const key = `${job.key_prefix}${extension}`;
     const existing = await env.VIDEO_BUCKET.head(key);
     if (existing) {
@@ -366,18 +324,53 @@ export async function handleRequest(request, env, dependencies = {}) {
       });
     }
 
-    const counter = { size: 0 };
-    const stored = await env.VIDEO_BUCKET.put(
-      key,
-      createCountingStream(response.body, job.max_bytes, counter),
-      {
+    const declaredVideoLength = Number(
+      response.headers.get("Content-Length") || 0,
+    );
+    const contentEncoding = (
+      response.headers.get("Content-Encoding") || ""
+    ).toLowerCase();
+    if (
+      !Number.isSafeInteger(declaredVideoLength) ||
+      declaredVideoLength <= 0 ||
+      (contentEncoding && contentEncoding !== "identity")
+    ) {
+      await cancelBodyQuietly(response.body, "fixed source length required");
+      throw new TransferError(
+        502,
+        "source_length_required",
+        "video source did not provide a fixed content length",
+      );
+    }
+    if (declaredVideoLength > job.max_bytes) {
+      await cancelBodyQuietly(response.body, "video size limit exceeded");
+      throw new TransferError(
+        413,
+        "video_too_large",
+        "video source exceeded configured size limit",
+      );
+    }
+
+    const FixedLengthStreamImpl =
+      dependencies.FixedLengthStreamImpl || globalThis.FixedLengthStream;
+    if (!FixedLengthStreamImpl) {
+      throw new TransferError(
+        503,
+        "fixed_stream_unavailable",
+        "fixed-length streaming is unavailable",
+      );
+    }
+    const fixedLengthStream = new FixedLengthStreamImpl(declaredVideoLength);
+    const [, stored] = await Promise.all([
+      response.body.pipeTo(fixedLengthStream.writable),
+      env.VIDEO_BUCKET.put(key, fixedLengthStream.readable, {
         httpMetadata: { contentType },
         customMetadata: {
           taskId: job.task_id,
           transferredBy: "new-api-video-transfer",
         },
-      },
-    );
+      }),
+    ]);
     if (!stored)
       throw new TransferError(
         502,
@@ -385,7 +378,7 @@ export async function handleRequest(request, env, dependencies = {}) {
         "R2 did not persist the video",
       );
     const verified = await env.VIDEO_BUCKET.head(key);
-    if (!verified || verified.size !== counter.size || counter.size <= 0) {
+    if (!verified || verified.size !== declaredVideoLength) {
       throw new TransferError(
         502,
         "r2_verify_failed",
@@ -396,7 +389,7 @@ export async function handleRequest(request, env, dependencies = {}) {
       success: true,
       key,
       mime_type: contentType,
-      size: counter.size,
+      size: declaredVideoLength,
       etag: verified.etag,
       reused: false,
     });
