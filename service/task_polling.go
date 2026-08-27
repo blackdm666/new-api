@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/samber/lo"
@@ -704,6 +705,12 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 	// 1. 优先让 adaptor 决定最终额度
 	if actualQuota := adaptor.AdjustBillingOnComplete(task, taskResult); actualQuota > 0 {
 		RecalculateTaskQuota(ctx, task, actualQuota, "adaptor计费调整")
+		return
+	}
+	// 按秒任务以适配器的时长倍率为权威；部分视频上游会返回
+	// total_tokens 作为生成统计，不能将其误用为文本 Token 计费。
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.BillingUnit == billing_setting.BillingUnitSecond {
+		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按秒计费，跳过 total_tokens 回退结算", task.TaskID))
 		return
 	}
 	// 2. 回退到 token 重算
