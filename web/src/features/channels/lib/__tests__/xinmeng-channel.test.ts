@@ -46,6 +46,17 @@ describe('XinMeng channel', () => {
         'dvc-seedance-2.0',
         'minimax-h3-768p',
         'minimax-h3-1440p',
+        'doubao-seedance-2-5-720p',
+        'doubao-seedance-2-0-720p',
+        'doubao-seedance-2-0-fast-720p',
+        'seedance-2.0-mini-480p',
+        'seedance-2.0-mini-720p',
+        'wan3.0-video-prime-720p',
+        'wan3.0-video-prime-1080p',
+        'kling-3.0-turbo-720p',
+        'kling-3.0-turbo-1080p',
+        'kling-3.0-turbo-2k',
+        'kling-3.0-turbo-4k',
       ],
     })
     expect(getChannelTypeSupportedModels(CHANNEL_TYPE_XINMENG)).toEqual([
@@ -53,6 +64,20 @@ describe('XinMeng channel', () => {
       'dvc-seedance-2.0',
       'minimax-h3-768p',
       'minimax-h3-1440p',
+      'doubao-seedance-2-5-720p',
+      'doubao-seedance-2-0-720p',
+      'doubao-seedance-2-0-fast-720p',
+      'seedance-2.0-mini-480p',
+      'seedance-2.0-mini-720p',
+      'wan3.0-video-prime-720p',
+      'wan3.0-video-prime-1080p',
+      'kling-3.0-turbo-720p',
+      'kling-3.0-turbo-1080p',
+      'kling-3.0-turbo-2k',
+      'kling-3.0-turbo-4k',
     ])
+    expect(getChannelTypeSupportedModels(CHANNEL_TYPE_XINMENG)).not.toContain(
+      'kling-3.0-turbo'
+    )
   })
 })

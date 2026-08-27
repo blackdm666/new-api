@@ -813,7 +813,14 @@ func getPlaygroundModelDetails(models []string, groups []string) []playgroundMod
 			if mapErr != nil {
 				continue
 			}
-			if adaptor == nil || !stringSliceContains(adaptor.GetModelList(), mappedModel) {
+			if adaptor == nil {
+				continue
+			}
+			dynamicModels := false
+			if tester, ok := adaptor.(channel.DynamicTaskModelAdaptor); ok {
+				dynamicModels = tester.SupportsDynamicTaskModels()
+			}
+			if !stringSliceContains(adaptor.GetModelList(), mappedModel) && !dynamicModels {
 				continue
 			}
 			if tester, ok := adaptor.(channel.PromptOnlyVideoTester); ok && !tester.SupportsPromptOnlyVideo(mappedModel) {

@@ -866,19 +866,24 @@ type TaskRelayInfo struct {
 }
 
 type TaskSubmitReq struct {
-	Prompt         string                 `json:"prompt"`
-	Model          string                 `json:"model,omitempty"`
-	Mode           string                 `json:"mode,omitempty"`
-	Image          string                 `json:"image,omitempty"`
-	Images         []string               `json:"images,omitempty"`
-	Video          string                 `json:"video,omitempty"`
-	Videos         []string               `json:"videos,omitempty"`
-	Size           string                 `json:"size,omitempty"`
-	Duration       int                    `json:"duration,omitempty"`
-	Seconds        string                 `json:"seconds,omitempty"`
-	InputReference string                 `json:"input_reference,omitempty"`
-	CallbackURL    string                 `json:"callback_url,omitempty"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	Prompt         string                   `json:"prompt"`
+	Model          string                   `json:"model,omitempty"`
+	Mode           string                   `json:"mode,omitempty"`
+	NegativePrompt string                   `json:"negative_prompt,omitempty"`
+	Image          string                   `json:"image,omitempty"`
+	Images         []string                 `json:"images,omitempty"`
+	Video          string                   `json:"video,omitempty"`
+	Videos         []string                 `json:"videos,omitempty"`
+	Media          []map[string]interface{} `json:"media,omitempty"`
+	Size           string                   `json:"size,omitempty"`
+	Duration       int                      `json:"duration,omitempty"`
+	Seconds        string                   `json:"seconds,omitempty"`
+	Seed           *int                     `json:"seed,omitempty"`
+	GenerateAudio  *bool                    `json:"generate_audio,omitempty"`
+	CameraControl  map[string]interface{}   `json:"camera_control,omitempty"`
+	InputReference string                   `json:"input_reference,omitempty"`
+	CallbackURL    string                   `json:"callback_url,omitempty"`
+	Metadata       map[string]interface{}   `json:"metadata,omitempty"`
 }
 
 func (t *TaskSubmitReq) GetPrompt() string {
