@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	"github.com/QuantumNous/new-api/service/invoicefile"
@@ -34,10 +35,9 @@ const (
 	maxTaskVideoCacheMaxBytes     = int64(10 * 1024 * 1024 * 1024)
 )
 
-// TaskVideoCacheEnabled reports whether protected/internal video results and
-// data URLs must be copied to the configured private S3-compatible bucket.
-// Anonymous public results stay direct. Cloudflare R2 uses the same S3
-// protocol and configuration.
+// TaskVideoCacheEnabled reports whether protected, untrusted or data-URL video
+// results must be copied to the configured private S3-compatible bucket.
+// Cloudflare R2 and explicitly trusted official hosts may stay direct.
 func TaskVideoCacheEnabled() bool {
 	return common.GetEnvOrDefaultBool("TASK_VIDEO_CACHE_ENABLED", false)
 }
@@ -105,6 +105,20 @@ func cacheTaskVideoDataURL(ctx context.Context, task *model.Task, resultURL stri
 }
 
 func cacheTaskVideoRemoteSource(ctx context.Context, task *model.Task, resultURL string) (bool, error) {
+	if taskVideoWorkerEligible(task, resultURL) {
+		cached, err := cacheTaskVideoWithWorker(ctx, task, resultURL)
+		if err == nil && cached {
+			return true, nil
+		}
+		if err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf(
+				"Cloudflare video transfer failed for task %s (source host %s), falling back to VPS: %v",
+				task.TaskID,
+				taskVideoResultHost(resultURL),
+				err,
+			))
+		}
+	}
 	if OpenTaskVideoSourceFunc == nil {
 		return false, errors.New("task video source opener is not configured")
 	}
@@ -155,13 +169,7 @@ func storeTaskVideo(ctx context.Context, task *model.Task, reader io.Reader, siz
 	if err != nil {
 		return false, err
 	}
-	digest := sha256.Sum256([]byte(task.TaskID))
-	createdAt := task.CreatedAt
-	if createdAt <= 0 {
-		createdAt = time.Now().Unix()
-	}
-	createdMonth := time.Unix(createdAt, 0).UTC()
-	key := fmt.Sprintf("task-videos/%s/%s/%s%s", createdMonth.Format("2006"), createdMonth.Format("01"), hex.EncodeToString(digest[:]), videoExtension(mimeType))
+	key := taskVideoCacheKeyPrefix(task) + videoExtension(mimeType)
 	exists, err := storage.Exists(ctx, key)
 	if err != nil {
 		return false, fmt.Errorf("check cached object: %w", err)
@@ -178,11 +186,25 @@ func storeTaskVideo(ctx context.Context, task *model.Task, reader io.Reader, siz
 	if !exists {
 		return false, errors.New("cached object is not readable after upload")
 	}
-	task.PrivateData.ResultStorageKind = storage.Kind()
+	installTaskVideoCacheResult(task, storage.Kind(), key, mimeType)
+	return true, nil
+}
+
+func taskVideoCacheKeyPrefix(task *model.Task) string {
+	digest := sha256.Sum256([]byte(task.TaskID))
+	createdAt := task.CreatedAt
+	if createdAt <= 0 {
+		createdAt = time.Now().Unix()
+	}
+	createdMonth := time.Unix(createdAt, 0).UTC()
+	return fmt.Sprintf("task-videos/%s/%s/%s", createdMonth.Format("2006"), createdMonth.Format("01"), hex.EncodeToString(digest[:]))
+}
+
+func installTaskVideoCacheResult(task *model.Task, storageKind string, key string, mimeType string) {
+	task.PrivateData.ResultStorageKind = storageKind
 	task.PrivateData.ResultStorageKey = key
 	task.PrivateData.ResultMimeType = mimeType
 	task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
-	return true, nil
 }
 
 func taskVideoSourceMIMEType(contentType string, resultURL string, file *os.File) (string, error) {
