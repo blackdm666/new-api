@@ -157,7 +157,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if err := relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionTextGenerate); err != nil {
 		return err
 	}
-	req, err := relaycommon.GetTaskRequest(c)
+	req, err := getMappedTaskRequest(c, info)
 	if err != nil {
 		return localTaskError(err)
 	}
@@ -173,8 +173,8 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	return nil
 }
 
-func (a *TaskAdaptor) EstimateBilling(c *gin.Context, _ *relaycommon.RelayInfo) map[string]float64 {
-	req, err := relaycommon.GetTaskRequest(c)
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	req, err := getMappedTaskRequest(c, info)
 	if err != nil {
 		return nil
 	}
@@ -196,8 +196,8 @@ func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *r
 	return nil
 }
 
-func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, _ *relaycommon.RelayInfo) (io.Reader, error) {
-	req, err := relaycommon.GetTaskRequest(c)
+func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
+	req, err := getMappedTaskRequest(c, info)
 	if err != nil {
 		return nil, err
 	}
@@ -210,6 +210,42 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, _ *relaycommon.RelayInfo)
 		return nil, err
 	}
 	return bytes.NewReader(payload), nil
+}
+
+func getMappedTaskRequest(c *gin.Context, info *relaycommon.RelayInfo) (relaycommon.TaskSubmitReq, error) {
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return req, err
+	}
+
+	if info != nil && info.ChannelMeta != nil {
+		if modelName := strings.TrimSpace(info.UpstreamModelName); modelConfigs[modelName].upstreamModel != "" {
+			req.Model = modelName
+			return req, nil
+		}
+	}
+
+	modelName := strings.TrimSpace(req.Model)
+	var mapping map[string]string
+	if rawMapping := strings.TrimSpace(c.GetString("model_mapping")); rawMapping != "" {
+		if err := common.Unmarshal([]byte(rawMapping), &mapping); err != nil {
+			return req, fmt.Errorf("invalid model mapping: %w", err)
+		}
+	}
+	seen := make(map[string]struct{})
+	for len(mapping) > 0 {
+		if _, exists := seen[modelName]; exists {
+			return req, fmt.Errorf("model mapping contains cycle")
+		}
+		seen[modelName] = struct{}{}
+		mapped, exists := mapping[modelName]
+		if !exists || strings.TrimSpace(mapped) == "" {
+			break
+		}
+		modelName = strings.TrimSpace(mapped)
+	}
+	req.Model = modelName
+	return req, nil
 }
 
 func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (*http.Response, error) {

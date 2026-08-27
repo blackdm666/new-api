@@ -183,6 +183,45 @@ func TestEstimateBillingUsesRequestedSecondsForAllInitialModels(t *testing.T) {
 	}
 }
 
+func TestMappedSalesAliasesUseUpstreamModelForValidationBillingAndBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		alias    string
+		upstream string
+	}{
+		{alias: "DC全能视频2.5 720P", upstream: ModelDVCSeedance25},
+		{alias: "DC全能视频2.0 720P", upstream: ModelDVCSeedance20},
+		{alias: "MiniMax H3", upstream: ModelMiniMaxH3},
+	}
+	mapping := `{"DC全能视频2.5 720P":"dvc-seedance-2.5","DC全能视频2.0 720P":"dvc-seedance-2.0","MiniMax H3":"minimax-h3"}`
+
+	for _, tt := range tests {
+		t.Run(tt.alias, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Set("model_mapping", mapping)
+			c.Set("task_request", relaycommon.TaskSubmitReq{
+				Model:    tt.alias,
+				Prompt:   "mapped sales model",
+				Duration: 6,
+				Size:     "16:9",
+			})
+			info := &relaycommon.RelayInfo{OriginModelName: tt.alias}
+
+			ratios := (&TaskAdaptor{}).EstimateBilling(c, info)
+			assert.Equal(t, map[string]float64{"seconds": 6}, ratios)
+
+			bodyReader, err := (&TaskAdaptor{}).BuildRequestBody(c, info)
+			require.NoError(t, err)
+			bodyBytes, err := io.ReadAll(bodyReader)
+			require.NoError(t, err)
+			var body requestPayload
+			require.NoError(t, common.Unmarshal(bodyBytes, &body))
+			assert.Equal(t, tt.upstream, body.Model)
+			assert.Equal(t, 6, body.Duration)
+		})
+	}
+}
+
 func TestXinMengChannelMetadata(t *testing.T) {
 	endpoints := common.GetEndpointTypesByChannelType(constant.ChannelTypeXinMeng, ModelDVCSeedance25)
 	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAIVideo}, endpoints)
