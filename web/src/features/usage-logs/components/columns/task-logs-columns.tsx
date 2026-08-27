@@ -17,9 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { Music } from 'lucide-react'
 /* eslint-disable react-refresh/only-export-components */
-import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
@@ -28,67 +26,16 @@ import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { TASK_ACTIONS, TASK_STATUS } from '../../constants'
 import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
 import type { TaskLog } from '../../types'
-import {
-  AudioPreviewDialog,
-  type AudioClip,
-} from '../dialogs/audio-preview-dialog'
-import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
 import { useUsageLogsContext } from '../usage-logs-provider'
+import { createDurationColumn, createProgressColumn } from './column-helpers'
 import {
-  createDurationColumn,
-  createChannelColumn,
-  createProgressColumn,
-} from './column-helpers'
-
-function parseTaskData(data: unknown): unknown[] {
-  if (Array.isArray(data)) return data
-  if (typeof data === 'string') {
-    try {
-      const parsed = JSON.parse(data)
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  }
-  return []
-}
-
-function AudioPreviewCell({ log }: { log: TaskLog }) {
-  const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
-  const clips = useMemo(() => {
-    const data = parseTaskData(log.data)
-    return data.filter(
-      (c) =>
-        c && typeof c === 'object' && (c as Record<string, unknown>).audio_url
-    )
-  }, [log.data])
-
-  if (clips.length === 0) return null
-
-  return (
-    <>
-      <button
-        type='button'
-        className='group flex items-center gap-1 text-left text-xs'
-        onClick={() => setOpen(true)}
-      >
-        <Music className='text-muted-foreground size-3' />
-        <span className='text-foreground leading-snug group-hover:underline'>
-          {t('Click to preview audio')}
-        </span>
-      </button>
-      <AudioPreviewDialog
-        open={open}
-        onOpenChange={setOpen}
-        clips={clips as AudioClip[]}
-      />
-    </>
-  )
-}
+  TaskChannelCell,
+  TaskCostCell,
+  TaskDetailsCell,
+  TaskModelCell,
+} from './task-log-cells'
 
 export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
   const { t } = useTranslation()
@@ -120,49 +67,65 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
   ]
 
   if (isAdmin) {
-    columns.push(createChannelColumn<TaskLog>({ headerLabel: t('Channel') }), {
-      id: 'user',
-      header: t('User'),
-      accessorFn: (row) => row.username || row.user_id,
-      cell: function UserCell({ row }) {
-        const { sensitiveVisible, setSelectedUserId, setUserInfoDialogOpen } =
-          useUsageLogsContext()
-        const log = row.original
-        const displayName = log.username || String(log.user_id || '?')
-
-        return (
-          <button
-            type='button'
-            className='flex items-center gap-1.5 text-left'
-            onClick={(e) => {
-              e.stopPropagation()
-              setSelectedUserId(log.user_id)
-              setUserInfoDialogOpen(true)
-            }}
-          >
-            <Avatar className='ring-border/60 size-6 ring-1 max-sm:hidden'>
-              <AvatarFallback
-                className={cn(
-                  'text-[11px] font-semibold',
-                  !sensitiveVisible && 'bg-muted text-muted-foreground'
-                )}
-                style={
-                  sensitiveVisible ? getUserAvatarStyle(displayName) : undefined
-                }
-              >
-                {sensitiveVisible ? getUserAvatarFallback(displayName) : '•'}
-              </AvatarFallback>
-            </Avatar>
-            <span className='text-muted-foreground truncate text-sm hover:underline'>
-              {sensitiveVisible ? displayName : '••••'}
-            </span>
-          </button>
-        )
+    columns.push(
+      {
+        id: 'channel',
+        header: t('Channel'),
+        accessorFn: (row) => row.channel_id,
+        cell: ({ row }) => <TaskChannelCell log={row.original} />,
       },
-    })
+      {
+        id: 'user',
+        header: t('User'),
+        accessorFn: (row) => row.username || row.user_id,
+        cell: function UserCell({ row }) {
+          const { sensitiveVisible, setSelectedUserId, setUserInfoDialogOpen } =
+            useUsageLogsContext()
+          const log = row.original
+          const displayName = log.username || String(log.user_id || '?')
+
+          return (
+            <button
+              type='button'
+              className='flex items-center gap-1.5 text-left'
+              onClick={(e) => {
+                e.stopPropagation()
+                setSelectedUserId(log.user_id)
+                setUserInfoDialogOpen(true)
+              }}
+            >
+              <Avatar className='ring-border/60 size-6 ring-1 max-sm:hidden'>
+                <AvatarFallback
+                  className={cn(
+                    'text-[11px] font-semibold',
+                    !sensitiveVisible && 'bg-muted text-muted-foreground'
+                  )}
+                  style={
+                    sensitiveVisible
+                      ? getUserAvatarStyle(displayName)
+                      : undefined
+                  }
+                >
+                  {sensitiveVisible ? getUserAvatarFallback(displayName) : '•'}
+                </AvatarFallback>
+              </Avatar>
+              <span className='text-muted-foreground truncate text-sm hover:underline'>
+                {sensitiveVisible ? displayName : '••••'}
+              </span>
+            </button>
+          )
+        },
+      }
+    )
   }
 
   columns.push(
+    {
+      id: 'model',
+      header: t('Model'),
+      accessorFn: (row) => row.properties?.origin_model_name,
+      cell: ({ row }) => <TaskModelCell log={row.original} />,
+    },
     {
       accessorKey: 'task_id',
       header: t('Task ID'),
@@ -189,6 +152,12 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
       },
       meta: { mobileTitle: true },
     },
+    {
+      id: 'cost',
+      header: t('Cost'),
+      accessorFn: (row) => row.quota,
+      cell: ({ row }) => <TaskCostCell log={row.original} />,
+    },
     createDurationColumn<TaskLog>({
       submitTimeKey: 'submit_time',
       finishTimeKey: 'finish_time',
@@ -214,77 +183,10 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
     },
     createProgressColumn<TaskLog>({ headerLabel: t('Progress') }),
     {
-      accessorKey: 'fail_reason',
+      id: 'details',
       header: t('Details'),
-      cell: function DetailsCell({ row }) {
-        const log = row.original
-        const failReason = row.getValue('fail_reason') as string
-        const status = log.status
-        const [dialogOpen, setDialogOpen] = useState(false)
-
-        const isSunoSuccess =
-          log.platform === 'suno' && status === TASK_STATUS.SUCCESS
-        if (isSunoSuccess) {
-          const data = parseTaskData(log.data)
-          if (
-            data.some(
-              (c) =>
-                c &&
-                typeof c === 'object' &&
-                (c as Record<string, unknown>).audio_url
-            )
-          ) {
-            return <AudioPreviewCell log={log} />
-          }
-        }
-
-        const isVideoTask =
-          log.action === TASK_ACTIONS.GENERATE ||
-          log.action === TASK_ACTIONS.TEXT_GENERATE ||
-          log.action === TASK_ACTIONS.FIRST_TAIL_GENERATE ||
-          log.action === TASK_ACTIONS.REFERENCE_GENERATE ||
-          log.action === TASK_ACTIONS.REMIX_GENERATE
-        const isSuccess = status === TASK_STATUS.SUCCESS
-        const isUrl = failReason?.startsWith('http')
-
-        if (isSuccess && isVideoTask && isUrl) {
-          const videoUrl = `/v1/videos/${log.task_id}/content`
-          return (
-            <a
-              href={videoUrl}
-              target='_blank'
-              rel='noopener noreferrer'
-              className='text-foreground text-xs hover:underline'
-            >
-              {t('Click to preview video')}
-            </a>
-          )
-        }
-
-        if (!failReason) {
-          return <span className='text-muted-foreground/60 text-xs'>-</span>
-        }
-
-        return (
-          <>
-            <button
-              type='button'
-              className='group flex max-w-[200px] items-center gap-1 text-left text-xs'
-              onClick={() => setDialogOpen(true)}
-              title={t('Click to view full error message')}
-            >
-              <span className='truncate leading-snug text-red-600 group-hover:underline dark:text-red-400'>
-                {failReason}
-              </span>
-            </button>
-            <FailReasonDialog
-              failReason={failReason}
-              open={dialogOpen}
-              onOpenChange={setDialogOpen}
-            />
-          </>
-        )
-      },
+      accessorFn: (row) => row.fail_reason,
+      cell: ({ row }) => <TaskDetailsCell log={row.original} />,
       size: 200,
       maxSize: 220,
     }

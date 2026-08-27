@@ -390,9 +390,32 @@ function TaskLogsCard<TData>({
       <div className='grid grid-cols-2 gap-1.5'>
         <SummaryField label={t('Submit Time')} cell={submitTimeCell} />
         <SummaryField label={t('User')} cell={cells.get('user')} primaryOnly />
+        {cells.has('channel') ? (
+          <SummaryField
+            label={t('Channel')}
+            cell={cells.get('channel')}
+            primaryOnly
+          />
+        ) : null}
+        <SummaryField
+          label={t('Model')}
+          cell={cells.get('model')}
+          primaryOnly
+        />
+        <SummaryField label={t('Cost')} cell={cells.get('cost')} primaryOnly />
+        <SummaryField
+          label={t('Duration')}
+          cell={cells.get('duration')}
+          primaryOnly
+        />
+        <SummaryField
+          label={t('Progress')}
+          cell={cells.get('progress')}
+          primaryOnly
+        />
         <SummaryField
           label={t('Result')}
-          cell={cells.get('fail_reason')}
+          cell={cells.get('details')}
           className='col-span-2 bg-transparent px-0 py-0'
         />
       </div>

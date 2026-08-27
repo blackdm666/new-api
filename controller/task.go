@@ -62,16 +62,26 @@ func GetUserTask(c *gin.Context) {
 
 func tasksToDto(tasks []*model.Task, fillUser bool) []*dto.TaskDto {
 	var userIdMap map[int]*model.UserBase
+	var channelNameMap map[int]string
 	if fillUser {
 		userIdMap = make(map[int]*model.UserBase)
+		channelNameMap = make(map[int]string)
 		userIds := types.NewSet[int]()
+		channelIds := types.NewSet[int]()
 		for _, task := range tasks {
 			userIds.Add(task.UserId)
+			channelIds.Add(task.ChannelId)
 		}
 		for _, userId := range userIds.Items() {
 			cacheUser, err := model.GetUserCache(userId)
 			if err == nil {
 				userIdMap[userId] = cacheUser
+			}
+		}
+		for _, channelId := range channelIds.Items() {
+			cacheChannel, err := model.CacheGetChannel(channelId)
+			if err == nil {
+				channelNameMap[channelId] = cacheChannel.Name
 			}
 		}
 	}
@@ -81,6 +91,7 @@ func tasksToDto(tasks []*model.Task, fillUser bool) []*dto.TaskDto {
 			if user, ok := userIdMap[task.UserId]; ok {
 				task.Username = user.Username
 			}
+			task.ChannelName = channelNameMap[task.ChannelId]
 		}
 		result[i] = relay.TaskModel2Dto(task)
 	}

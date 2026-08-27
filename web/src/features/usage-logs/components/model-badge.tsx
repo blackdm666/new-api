@@ -44,6 +44,18 @@ function resolveModelProvider(modelName: string): ModelProvider | null {
   const hasAny = (keywords: string[]) =>
     keywords.some((keyword) => model.includes(keyword))
 
+  if (hasAny(['codex'])) {
+    return { icon: 'Codex.Color', label: 'Codex' }
+  }
+  if (
+    hasAny(['seedance', 'seedream', 'seededit']) ||
+    /^sd2(?:[.\-\s]|$)/.test(model)
+  ) {
+    return { icon: 'Jimeng.Color', label: 'Seedance' }
+  }
+  if (hasAny(['veo-'])) {
+    return { icon: 'VertexAI.Color', label: 'Vertex AI' }
+  }
   if (
     hasAny([
       'gpt-',
