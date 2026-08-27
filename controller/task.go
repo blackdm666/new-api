@@ -2,7 +2,6 @@ package controller
 
 import (
 	"errors"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -92,27 +91,12 @@ func GetTaskPreviewURL(c *gin.Context) {
 		return
 	}
 
-	previewURL, cached, err := service.GetTaskVideoPreviewURL(c.Request.Context(), task)
+	previewURL, expiresIn, err := service.PrepareTaskVideoPreviewURL(c.Request.Context(), task)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if cached {
-		common.ApiSuccess(c, gin.H{
-			"url":        previewURL,
-			"expires_in": int64(service.TaskVideoPreviewURLTTL().Seconds()),
-		})
-		return
-	}
-
-	resultURL := strings.TrimSpace(task.GetResultURL())
-	parsed, parseErr := url.Parse(resultURL)
-	if parseErr == nil && parsed != nil && (parsed.Scheme == "https" || parsed.Scheme == "http") &&
-		!strings.Contains(parsed.Path, "/v1/videos/"+task.TaskID+"/content") {
-		common.ApiSuccess(c, gin.H{"url": resultURL, "expires_in": 0})
-		return
-	}
-	common.ApiError(c, errors.New("direct video preview is unavailable"))
+	common.ApiSuccess(c, gin.H{"url": previewURL, "expires_in": expiresIn})
 }
 
 func tasksToDto(tasks []*model.Task, fillUser bool) []*dto.TaskDto {

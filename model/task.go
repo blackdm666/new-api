@@ -502,6 +502,20 @@ func (t *Task) UpdateQuota() error {
 	return DB.Model(t).Update("quota", t.Quota).Error
 }
 
+// UpdateResultLocation persists only video-result metadata for an already
+// completed task. It is used when a historical result is normalized or cached
+// on first preview without risking unrelated task or billing fields.
+func (t *Task) UpdateResultLocation() (bool, error) {
+	result := DB.Model(t).
+		Where("status = ?", TaskStatusSuccess).
+		Select("private_data").
+		Updates(t)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
 // Returns (true, nil) if this caller won the update, (false, nil) if
 // another process already moved the task out of fromStatus. MySQL commonly

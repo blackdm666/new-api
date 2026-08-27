@@ -8,6 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -24,11 +29,15 @@ const (
 	defaultTaskVideoPreviewURLTTL = 7 * 24 * time.Hour
 	minTaskVideoPreviewURLTTL     = time.Minute
 	maxTaskVideoPreviewURLTTL     = 7 * 24 * time.Hour
+	defaultTaskVideoCacheMaxBytes = int64(2 * 1024 * 1024 * 1024)
+	minTaskVideoCacheMaxBytes     = int64(1024 * 1024)
+	maxTaskVideoCacheMaxBytes     = int64(10 * 1024 * 1024 * 1024)
 )
 
-// TaskVideoCacheEnabled reports whether newly completed data-URL videos must be
-// copied to the configured private S3-compatible bucket before SUCCESS is
-// persisted. Cloudflare R2 uses the same S3 protocol and configuration.
+// TaskVideoCacheEnabled reports whether protected/internal video results and
+// data URLs must be copied to the configured private S3-compatible bucket.
+// Anonymous public results stay direct. Cloudflare R2 uses the same S3
+// protocol and configuration.
 func TaskVideoCacheEnabled() bool {
 	return common.GetEnvOrDefaultBool("TASK_VIDEO_CACHE_ENABLED", false)
 }
@@ -65,14 +74,18 @@ func TaskVideoPreviewURLTTL() time.Duration {
 	return ttl
 }
 
-// CacheTaskVideoResult persists a base64 data URL to private object storage.
-// Returning cached=false is expected when caching is disabled or the result is
-// already a direct URL. A cache error prevents the caller from marking the task
-// successful, so users never receive SUCCESS before the media is readable.
-func CacheTaskVideoResult(ctx context.Context, task *model.Task, resultURL string) (cached bool, err error) {
-	if !TaskVideoCacheEnabled() || !strings.HasPrefix(resultURL, "data:") {
-		return false, nil
+// TaskVideoCacheMaxBytes bounds the one-time transfer from a protected
+// provider result into private object storage.
+func TaskVideoCacheMaxBytes() int64 {
+	raw := strings.TrimSpace(common.GetEnvOrDefaultString("TASK_VIDEO_CACHE_MAX_BYTES", ""))
+	maxBytes, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || maxBytes < minTaskVideoCacheMaxBytes || maxBytes > maxTaskVideoCacheMaxBytes {
+		return defaultTaskVideoCacheMaxBytes
 	}
+	return maxBytes
+}
+
+func cacheTaskVideoDataURL(ctx context.Context, task *model.Task, resultURL string) (bool, error) {
 	if task == nil || strings.TrimSpace(task.TaskID) == "" {
 		return false, errors.New("task id is required")
 	}
@@ -80,11 +93,68 @@ func CacheTaskVideoResult(ctx context.Context, task *model.Task, resultURL strin
 	if err != nil {
 		return false, err
 	}
+	size := decodedBase64Size(payload)
+	if size <= 0 {
+		return false, errors.New("empty decoded video payload")
+	}
+	if size > TaskVideoCacheMaxBytes() {
+		return false, fmt.Errorf("video result exceeds cache limit of %d bytes", TaskVideoCacheMaxBytes())
+	}
+	decoder := base64.NewDecoder(encoding, strings.NewReader(payload))
+	return storeTaskVideo(ctx, task, decoder, size, mimeType)
+}
+
+func cacheTaskVideoRemoteSource(ctx context.Context, task *model.Task, resultURL string) (bool, error) {
+	if OpenTaskVideoSourceFunc == nil {
+		return false, errors.New("task video source opener is not configured")
+	}
+	source, err := OpenTaskVideoSourceFunc(ctx, task, resultURL)
+	if err != nil {
+		return false, err
+	}
+	if source == nil || source.Body == nil {
+		return false, errors.New("task video source is empty")
+	}
+	defer source.Body.Close()
+
+	maxBytes := TaskVideoCacheMaxBytes()
+	if source.ContentLength > maxBytes {
+		return false, fmt.Errorf("video result exceeds cache limit of %d bytes", maxBytes)
+	}
+	temp, err := os.CreateTemp("", "new-api-task-video-*")
+	if err != nil {
+		return false, fmt.Errorf("create video cache temp file: %w", err)
+	}
+	defer func() {
+		_ = temp.Close()
+		_ = os.Remove(temp.Name())
+	}()
+
+	size, err := io.Copy(temp, io.LimitReader(source.Body, maxBytes+1))
+	if err != nil {
+		return false, fmt.Errorf("read task video source: %w", err)
+	}
+	if size <= 0 {
+		return false, errors.New("task video source is empty")
+	}
+	if size > maxBytes {
+		return false, fmt.Errorf("video result exceeds cache limit of %d bytes", maxBytes)
+	}
+	mimeType, err := taskVideoSourceMIMEType(source.ContentType, resultURL, temp)
+	if err != nil {
+		return false, err
+	}
+	if _, err := temp.Seek(0, io.SeekStart); err != nil {
+		return false, fmt.Errorf("rewind video cache temp file: %w", err)
+	}
+	return storeTaskVideo(ctx, task, temp, size, mimeType)
+}
+
+func storeTaskVideo(ctx context.Context, task *model.Task, reader io.Reader, size int64, mimeType string) (bool, error) {
 	storage, err := taskVideoCacheStorageFactory()
 	if err != nil {
 		return false, err
 	}
-
 	digest := sha256.Sum256([]byte(task.TaskID))
 	createdAt := task.CreatedAt
 	if createdAt <= 0 {
@@ -97,12 +167,7 @@ func CacheTaskVideoResult(ctx context.Context, task *model.Task, resultURL strin
 		return false, fmt.Errorf("check cached object: %w", err)
 	}
 	if !exists {
-		size := decodedBase64Size(payload)
-		if size <= 0 {
-			return false, errors.New("empty decoded video payload")
-		}
-		decoder := base64.NewDecoder(encoding, strings.NewReader(payload))
-		if err := storage.Put(ctx, key, decoder, size, mimeType); err != nil {
+		if err := storage.Put(ctx, key, reader, size, mimeType); err != nil {
 			return false, fmt.Errorf("store cached object: %w", err)
 		}
 	}
@@ -113,12 +178,43 @@ func CacheTaskVideoResult(ctx context.Context, task *model.Task, resultURL strin
 	if !exists {
 		return false, errors.New("cached object is not readable after upload")
 	}
-
 	task.PrivateData.ResultStorageKind = storage.Kind()
 	task.PrivateData.ResultStorageKey = key
 	task.PrivateData.ResultMimeType = mimeType
 	task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 	return true, nil
+}
+
+func taskVideoSourceMIMEType(contentType string, resultURL string, file *os.File) (string, error) {
+	if parsed, _, err := mime.ParseMediaType(contentType); err == nil && strings.HasPrefix(parsed, "video/") {
+		return parsed, nil
+	}
+	if parsedURL, err := url.Parse(resultURL); err == nil {
+		switch strings.ToLower(path.Ext(parsedURL.Path)) {
+		case ".webm":
+			return "video/webm", nil
+		case ".mov":
+			return "video/quicktime", nil
+		case ".mp4", ".m4v":
+			return "video/mp4", nil
+		}
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("inspect cached video: %w", err)
+	}
+	header := make([]byte, 512)
+	n, err := file.Read(header)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("inspect cached video: %w", err)
+	}
+	detected := http.DetectContentType(header[:n])
+	if strings.HasPrefix(detected, "video/") {
+		return detected, nil
+	}
+	if parsed, _, err := mime.ParseMediaType(contentType); err == nil && parsed == "application/octet-stream" {
+		return "video/mp4", nil
+	}
+	return "", fmt.Errorf("task result is not video content: %s", detected)
 }
 
 // OpenTaskVideoCache opens an already persisted object. The enabled flag is

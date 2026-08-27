@@ -62,7 +62,7 @@ func TestGetTaskPreviewURLAllowsAdminToOpenAnotherUsersDirectResult(t *testing.T
 		UserId: 8,
 		Status: model.TaskStatusSuccess,
 		PrivateData: model.TaskPrivateData{
-			ResultURL: "https://cdn.example.com/video.mp4",
+			ResultURL: "https://account.r2.cloudflarestorage.com/video.mp4?X-Amz-Signature=signed",
 		},
 	}
 	require.NoError(t, db.Create(task).Error)
@@ -102,4 +102,44 @@ func TestGetTaskPreviewURLAllowsAdminToOpenAnotherUsersDirectResult(t *testing.T
 	}
 	require.NoError(t, common.Unmarshal(userRecorder.Body.Bytes(), &userResponse))
 	assert.False(t, userResponse.Success)
+}
+
+func TestGetTaskPreviewURLExtractsAndPersistsUpstreamR2Result(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupTaskControllerTestDB(t)
+	const directURL = "https://account.r2.cloudflarestorage.com/cdn/video.mp4?X-Amz-Signature=signed"
+	task := &model.Task{
+		TaskID: "task_r2_in_data",
+		UserId: 8,
+		Status: model.TaskStatusSuccess,
+		Data:   []byte(`{"video_url":"` + directURL + `"}`),
+		PrivateData: model.TaskPrivateData{
+			ResultURL: "https://gateway.example/v1/videos/task_r2_in_data/content",
+		},
+	}
+	require.NoError(t, db.Create(task).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/task/task_r2_in_data/preview-url", nil)
+	context.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	context.Set("id", 1)
+	context.Set("role", common.RoleAdminUser)
+
+	GetTaskPreviewURL(context)
+
+	var response struct {
+		Success bool `json:"success"`
+		Data    struct {
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	assert.Equal(t, directURL, response.Data.URL)
+
+	var stored model.Task
+	require.NoError(t, db.First(&stored, task.ID).Error)
+	assert.Equal(t, directURL, stored.PrivateData.ResultURL)
+	assert.Empty(t, stored.PrivateData.ResultStorageKey)
 }

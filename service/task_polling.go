@@ -538,12 +538,12 @@ func FinalizeVideoTaskResult(ctx context.Context, adaptor TaskPollingAdaptor, ta
 	shouldRefund := false
 	shouldSettle := false
 	quota := task.Quota
-	cached := false
+	videoPreparation := TaskVideoPreparation{}
 	if taskResult.Status == model.TaskStatusSuccess {
-		var cacheErr error
-		cached, cacheErr = CacheTaskVideoResult(ctx, task, taskResult.Url)
-		if cacheErr != nil {
-			return fmt.Errorf("cache video result for task %s: %w", task.TaskID, cacheErr)
+		var prepareErr error
+		videoPreparation, prepareErr = PrepareTaskVideoResult(ctx, task, taskResult.Url)
+		if prepareErr != nil {
+			return fmt.Errorf("prepare video result for task %s: %w", task.TaskID, prepareErr)
 		}
 	}
 
@@ -563,8 +563,9 @@ func FinalizeVideoTaskResult(ctx context.Context, adaptor TaskPollingAdaptor, ta
 		if task.FinishTime == 0 {
 			task.FinishTime = now
 		}
-		if cached {
-			// CacheTaskVideoResult has already installed the authenticated proxy URL.
+		if videoPreparation.Cached || videoPreparation.DirectURL != "" {
+			// PrepareTaskVideoResult has installed either a private-cache proxy or
+			// an anonymously readable direct result URL.
 		} else if strings.HasPrefix(taskResult.Url, "data:") {
 			// data: URI (e.g. Vertex base64 encoded video) — keep in Data, not in ResultURL
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
