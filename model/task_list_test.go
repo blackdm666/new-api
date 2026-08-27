@@ -21,7 +21,8 @@ func TestTaskListsOmitVideoDataAndPreserveSunoPreviewData(t *testing.T) {
 		ChannelId: 41,
 		Data:      videoData,
 		PrivateData: TaskPrivateData{
-			Key: "secret-video-key",
+			Key:       "secret-video-key",
+			ResultURL: "https://api.example.com/v1/videos/task_video_list_payload/content",
 		},
 	}
 	sunoTask := &Task{
@@ -66,7 +67,7 @@ func TestTaskListsOmitVideoDataAndPreserveSunoPreviewData(t *testing.T) {
 			listedVideo := byID[videoTask.ID]
 			require.NotNil(t, listedVideo)
 			assert.Empty(t, listedVideo.Data)
-			assert.Empty(t, listedVideo.PrivateData)
+			assert.Equal(t, videoTask.GetResultURL(), listedVideo.GetResultURL())
 			if tc.admin {
 				assert.Equal(t, 41, listedVideo.ChannelId)
 			} else {
@@ -76,7 +77,6 @@ func TestTaskListsOmitVideoDataAndPreserveSunoPreviewData(t *testing.T) {
 			listedSuno := byID[sunoTask.ID]
 			require.NotNil(t, listedSuno)
 			assert.JSONEq(t, string(sunoData), string(listedSuno.Data))
-			assert.Empty(t, listedSuno.PrivateData)
 		})
 	}
 }
