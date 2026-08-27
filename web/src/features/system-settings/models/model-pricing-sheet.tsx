@@ -61,6 +61,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useBillingCurrency } from '@/hooks/use-billing-currency'
 import { cn } from '@/lib/utils'
 
 import {
@@ -79,6 +80,11 @@ import {
   type ModelRatioData,
   type PricingMode,
 } from './model-pricing-core'
+import {
+  pricingDisplayToUSD,
+  pricingDisplayToModelRatio,
+  pricingUSDToDisplay,
+} from './model-pricing-currency'
 import { PriceInput, PriceLane } from './model-pricing-inputs'
 import { formatPricingNumber } from './pricing-format'
 import { TieredPricingEditor } from './tiered-pricing-editor'
@@ -153,6 +159,8 @@ export const ModelPricingEditorPanel = forwardRef<
   ref
 ) {
   const { t } = useTranslation()
+  const pricingCurrency = useBillingCurrency()
+  const pricingCurrencyLabel = t(pricingCurrency.label)
   const [pricingMode, setPricingMode] = useState<PricingMode>('per-token')
   const [promptPrice, setPromptPrice] = useState('')
   const [lanePrices, setLanePrices] = useState<Record<LaneKey, string>>({
@@ -182,12 +190,15 @@ export const ModelPricingEditorPanel = forwardRef<
   })
 
   useEffect(() => {
-    const nextLaneState = createInitialLaneState(editData)
+    const nextLaneState = createInitialLaneState(
+      editData,
+      pricingCurrency.exchangeRate
+    )
 
     if (editData) {
       form.reset({
         name: editData.name,
-        price: editData.price || '',
+        price: pricingUSDToDisplay(editData.price, pricingCurrency),
         ratio: editData.ratio || '',
         cacheRatio: editData.cacheRatio || '',
         createCacheRatio: editData.createCacheRatio || '',
@@ -220,7 +231,7 @@ export const ModelPricingEditorPanel = forwardRef<
     setLanePrices(nextLaneState.prices)
     setLaneEnabled(nextLaneState.enabled)
     setEditorReloadToken((token) => token + 1)
-  }, [editData, form])
+  }, [editData, form, pricingCurrency])
 
   const setFormValue = (field: keyof ModelPricingFormValues, value: string) => {
     form.setValue(field, value, {
@@ -254,10 +265,9 @@ export const ModelPricingEditorPanel = forwardRef<
     nextLanePrices = lanePrices,
     nextLaneEnabled = laneEnabled
   ) => {
-    const inputPrice = toNumberOrNull(nextPromptPrice)
     setFormValue(
       'ratio',
-      inputPrice !== null ? formatPricingNumber(inputPrice / 2) : ''
+      pricingDisplayToModelRatio(nextPromptPrice, pricingCurrency)
     )
 
     laneConfigs.forEach(({ key }) => {
@@ -353,13 +363,15 @@ export const ModelPricingEditorPanel = forwardRef<
         promptPrice,
         lanePrices,
         laneEnabled,
-        t
+        t,
+        pricingCurrency.symbol
       ),
     [
       billingExpr,
       laneEnabled,
       lanePrices,
       pricingMode,
+      pricingCurrency.symbol,
       promptPrice,
       requestRuleExpr,
       t,
@@ -445,7 +457,10 @@ export const ModelPricingEditorPanel = forwardRef<
       const data: ModelRatioData = {
         name: values.name.trim(),
         billingMode: pricingMode,
-        price: values.price || '',
+        price:
+          pricingMode === 'per-request' || pricingMode === 'per-second'
+            ? pricingDisplayToUSD(values.price, pricingCurrency)
+            : values.price || '',
         ratio: values.ratio || '',
         cacheRatio: values.cacheRatio || '',
         createCacheRatio: values.createCacheRatio || '',
@@ -462,7 +477,7 @@ export const ModelPricingEditorPanel = forwardRef<
 
       return data
     },
-    [billingExpr, pricingMode, requestRuleExpr]
+    [billingExpr, pricingCurrency, pricingMode, requestRuleExpr]
   )
 
   useImperativeHandle(
@@ -491,10 +506,10 @@ export const ModelPricingEditorPanel = forwardRef<
               </FieldLabel>
               <FormControl>
                 <InputGroup>
-                  <InputGroupAddon>$</InputGroupAddon>
+                  <InputGroupAddon>{pricingCurrency.symbol}</InputGroupAddon>
                   <InputGroupInput
                     inputMode='decimal'
-                    placeholder='0.01'
+                    placeholder={pricingUSDToDisplay('0.01', pricingCurrency)}
                     {...field}
                     onChange={(event) => {
                       const value = event.target.value
@@ -511,9 +526,13 @@ export const ModelPricingEditorPanel = forwardRef<
               <FieldDescription>
                 {unit === 'second'
                   ? t(
-                      'Cost in USD per generated second. Requires a task adapter that reports duration.'
+                      'Price in {{currency}} per generated second. Requires a task adapter that reports duration.',
+                      { currency: pricingCurrencyLabel }
                     )
-                  : t('Cost in USD per request, regardless of tokens used.')}
+                  : t(
+                      'Price in {{currency}} per request, regardless of tokens used.',
+                      { currency: pricingCurrencyLabel }
+                    )}
               </FieldDescription>
               <FormMessage />
             </Field>
@@ -611,11 +630,17 @@ export const ModelPricingEditorPanel = forwardRef<
                         <FieldLabel>{t('Input price')}</FieldLabel>
                         <PriceInput
                           value={promptPrice}
-                          placeholder='3'
+                          currencySymbol={pricingCurrency.symbol}
+                          placeholder={pricingUSDToDisplay(
+                            '3',
+                            pricingCurrency
+                          )}
                           onChange={handlePromptPriceChange}
                         />
                         <FieldDescription>
-                          {t('USD price per 1M input tokens.')}
+                          {t('{{currency}} price per 1M input tokens.', {
+                            currency: pricingCurrencyLabel,
+                          })}
                         </FieldDescription>
                       </Field>
 
@@ -630,8 +655,13 @@ export const ModelPricingEditorPanel = forwardRef<
                               key={lane.key}
                               title={t(lane.titleKey)}
                               description={t(lane.descriptionKey)}
-                              placeholder={lane.placeholder}
+                              placeholder={pricingUSDToDisplay(
+                                lane.placeholder,
+                                pricingCurrency
+                              )}
                               value={lanePrices[lane.key]}
+                              currencySymbol={pricingCurrency.symbol}
+                              currencyLabel={pricingCurrency.label}
                               enabled={laneEnabled[lane.key]}
                               disabled={disabled}
                               onEnabledChange={(checked) =>

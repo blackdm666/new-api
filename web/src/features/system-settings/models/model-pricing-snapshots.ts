@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { splitBillingExprAndRequestRules } from '@/features/pricing/lib/billing-expr'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 
 import { safeJsonParse } from '../utils/json-parser'
 import { formatPricingNumber } from './pricing-format'
@@ -80,6 +81,13 @@ const ratioToPrice = (ratio?: string, denominator?: string) => {
   return formatPricingNumber(ratioNumber * denominatorNumber)
 }
 
+const formatAdminPrice = (value: string | number) =>
+  formatBillingCurrencyFromUSD(Number(value), {
+    abbreviate: false,
+    digitsLarge: 12,
+    digitsSmall: 12,
+  })
+
 export const getModeLabel = (mode?: string) => {
   if (mode === 'per-request') return 'Per-request'
   if (mode === 'per-second') return 'Per-second'
@@ -115,10 +123,14 @@ export const getPriceSummary = (
     return getExpressionSummary(row, t)
   }
   if (row.billingMode === 'per-request') {
-    return row.price ? `$${row.price} / ${t('request')}` : t('Unset price')
+    return row.price
+      ? `${formatAdminPrice(row.price)} / ${t('request')}`
+      : t('Unset price')
   }
   if (row.billingMode === 'per-second') {
-    return row.price ? `$${row.price} / ${t('second')}` : t('Unset price')
+    return row.price
+      ? `${formatAdminPrice(row.price)} / ${t('second')}`
+      : t('Unset price')
   }
 
   const inputPrice = ratioToPrice(row.ratio)
@@ -134,8 +146,8 @@ export const getPriceSummary = (
   ].filter(hasPricingValue).length
 
   return extraCount > 0
-    ? `${t('Input')} $${inputPrice} · ${extraCount} ${t('extras')}`
-    : `${t('Input')} $${inputPrice}`
+    ? `${t('Input')} ${formatAdminPrice(inputPrice)} · ${extraCount} ${t('extras')}`
+    : `${t('Input')} ${formatAdminPrice(inputPrice)}`
 }
 
 export const getPriceDetail = (
@@ -159,11 +171,17 @@ export const getPriceDetail = (
 
   const details = [
     row.completionRatio &&
-      `${t('Output')} $${ratioToPrice(row.completionRatio, inputPrice)}`,
+      `${t('Output')} ${formatAdminPrice(
+        ratioToPrice(row.completionRatio, inputPrice)
+      )}`,
     row.cacheRatio &&
-      `${t('Cache')} $${ratioToPrice(row.cacheRatio, inputPrice)}`,
+      `${t('Cache')} ${formatAdminPrice(
+        ratioToPrice(row.cacheRatio, inputPrice)
+      )}`,
     row.createCacheRatio &&
-      `${t('Cache write')} $${ratioToPrice(row.createCacheRatio, inputPrice)}`,
+      `${t('Cache write')} ${formatAdminPrice(
+        ratioToPrice(row.createCacheRatio, inputPrice)
+      )}`,
   ]
     .filter(Boolean)
     .slice(0, 2)

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test } from 'vitest'
 
 import {
   EMPTY_LANE_ENABLED,
@@ -27,6 +27,10 @@ import {
   buildModelSnapshots,
   getPriceSummary,
 } from '@/features/system-settings/models/model-pricing-snapshots'
+import {
+  DEFAULT_CURRENCY_CONFIG,
+  useSystemConfigStore,
+} from '@/stores/system-config-store'
 
 import { QUOTA_TYPES } from '../../constants'
 import type { PricingModel } from '../../types'
@@ -34,6 +38,12 @@ import { filterByQuotaType } from '../filters'
 import { getFixedPriceUnitLabel, isPerSecondModel } from '../model-helpers'
 
 const t = (key: string) => key
+
+afterEach(() => {
+  useSystemConfigStore.getState().setConfig({
+    currency: { ...DEFAULT_CURRENCY_CONFIG },
+  })
+})
 
 const fixedModel = (
   modelName: string,
@@ -105,7 +115,29 @@ describe('fixed-price billing units', () => {
       )
     ).toEqual([
       { key: 'mode', label: 'BillingMode', value: 'per_second' },
-      { key: 'price', label: 'ModelPrice', value: '0.08' },
+      { key: 'price', label: 'ModelPrice', value: '$0.08' },
     ])
+  })
+
+  test('formats admin price summaries in the configured display currency', () => {
+    useSystemConfigStore.getState().setConfig({
+      currency: {
+        ...DEFAULT_CURRENCY_CONFIG,
+        quotaDisplayType: 'CNY',
+        usdExchangeRate: 7,
+      },
+    })
+
+    expect(
+      getPriceSummary(
+        {
+          name: 'video-model',
+          price: '0.08',
+          billingMode: 'per-second',
+          hasConflict: false,
+        },
+        t
+      )
+    ).toBe('¥0.56 / second')
   })
 })

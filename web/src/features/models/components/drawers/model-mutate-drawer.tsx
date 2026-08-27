@@ -51,6 +51,11 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from '@/components/ui/input-group'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
@@ -77,9 +82,16 @@ import {
   getOptionValue,
 } from '@/features/system-settings/hooks/use-system-options'
 import { useUpdateOption } from '@/features/system-settings/hooks/use-update-option'
+import {
+  pricingDisplayToUSD,
+  pricingDisplayToModelRatio,
+  pricingUSDToDisplay,
+} from '@/features/system-settings/models/model-pricing-currency'
 import { normalizeJsonString } from '@/features/system-settings/models/utils'
 import type { ModelSettings } from '@/features/system-settings/types'
 import { safeJsonParse } from '@/features/system-settings/utils/json-parser'
+import { useBillingCurrency } from '@/hooks/use-billing-currency'
+import type { BillingCurrencyConversion } from '@/lib/currency'
 
 import { createModel, updateModel, getModel, getVendors } from '../../api'
 import { getNameRuleOptions, ENDPOINT_TEMPLATES } from '../../constants'
@@ -176,7 +188,8 @@ function lookupModelBillingMode(
 // the maps from the form and would otherwise drop pricing it never loaded.
 function readPricingConfig(
   settings: ModelSettings | null,
-  modelName: string
+  modelName: string,
+  pricingCurrency: BillingCurrencyConversion
 ): PricingConfig {
   if (!settings || !modelName) return EMPTY_PRICING_CONFIG
 
@@ -201,7 +214,10 @@ function readPricingConfig(
     return {
       ...EMPTY_PRICING_CONFIG,
       mode: billingMode === 'per_second' ? 'per-second' : 'per-request',
-      fields: { ...EMPTY_PRICING_FIELDS, price: price.toString() },
+      fields: {
+        ...EMPTY_PRICING_FIELDS,
+        price: pricingUSDToDisplay(price, pricingCurrency),
+      },
     }
   }
 
@@ -209,9 +225,12 @@ function readPricingConfig(
   let completionPrice = ''
   if (ratio !== undefined && ratio !== null) {
     const tokenPrice = ratio * 2
-    promptPrice = tokenPrice.toString()
+    promptPrice = pricingUSDToDisplay(tokenPrice, pricingCurrency)
     if (completionRatio !== undefined && completionRatio !== null) {
-      completionPrice = (tokenPrice * completionRatio).toString()
+      completionPrice = pricingUSDToDisplay(
+        tokenPrice * completionRatio,
+        pricingCurrency
+      )
     }
   }
 
@@ -251,6 +270,8 @@ export function ModelMutateDrawer({
   currentRow,
 }: ModelMutateDrawerProps) {
   const { t } = useTranslation()
+  const pricingCurrency = useBillingCurrency()
+  const pricingCurrencyLabel = t(pricingCurrency.label)
   const queryClient = useQueryClient()
   const currentModelId = currentRow?.id
   const isEditing = Boolean(currentModelId)
@@ -401,8 +422,7 @@ export function ModelMutateDrawer({
   const handlePromptPriceChange = (value: string) => {
     setPromptPrice(value)
     if (value && !Number.isNaN(Number.parseFloat(value))) {
-      const ratio = Number.parseFloat(value) / 2
-      form.setValue('ratio', ratio.toString())
+      form.setValue('ratio', pricingDisplayToModelRatio(value, pricingCurrency))
     } else {
       form.setValue('ratio', '')
     }
@@ -433,7 +453,8 @@ export function ModelMutateDrawer({
 
       const pricing = readPricingConfig(
         modelSettingsRef.current,
-        model.model_name
+        model.model_name,
+        pricingCurrency
       )
       setLoadedPricingName(model.model_name)
       setPricingMode(pricing.mode)
@@ -458,7 +479,11 @@ export function ModelMutateDrawer({
       // pricing that name already has, so the user edits it instead of being
       // shown an empty form that hides existing configuration.
       const modelName = currentRow?.model_name || ''
-      const pricing = readPricingConfig(modelSettingsRef.current, modelName)
+      const pricing = readPricingConfig(
+        modelSettingsRef.current,
+        modelName,
+        pricingCurrency
+      )
       setOldModelName('')
       setLoadedPricingName(modelName)
       setPricingSubMode('ratio')
@@ -479,7 +504,15 @@ export function ModelMutateDrawer({
         ...pricing.fields,
       })
     }
-  }, [open, isEditing, modelData, currentRow, form, hasModelSettings])
+  }, [
+    open,
+    isEditing,
+    modelData,
+    currentRow,
+    form,
+    hasModelSettings,
+    pricingCurrency,
+  ])
 
   const onSubmit = useCallback(
     async (values: ExtendedModelFormValues): Promise<void> => {
@@ -602,7 +635,9 @@ export function ModelMutateDrawer({
                 values.price &&
                 values.price !== ''
               ) {
-                priceMap[finalModelName] = Number.parseFloat(values.price)
+                priceMap[finalModelName] = Number.parseFloat(
+                  pricingDisplayToUSD(values.price, pricingCurrency)
+                )
                 billingModeMap[finalModelName] =
                   pricingMode === 'per-second' ? 'per_second' : 'per_request'
               } else if (pricingMode === 'per-token') {
@@ -749,6 +784,7 @@ export function ModelMutateDrawer({
       oldModelName,
       loadedPricingName,
       modelSettings,
+      pricingCurrency,
       updateOption,
     ]
   )
@@ -1059,28 +1095,45 @@ export function ModelMutateDrawer({
                       <FormLabel>
                         {pricingMode === 'per-second'
                           ? t('Price per second')
-                          : t('Fixed price (USD)')}
+                          : t('Fixed price ({{currency}})', {
+                              currency: pricingCurrencyLabel,
+                            })}
                       </FormLabel>
                       <FormControl>
-                        <Input
-                          type='text'
-                          placeholder='0.01'
-                          {...field}
-                          onChange={(e) => {
-                            const value = e.target.value
-                            if (validateNumber(value)) {
-                              field.onChange(value)
-                            }
-                          }}
-                        />
+                        <InputGroup>
+                          <InputGroupAddon>
+                            {pricingCurrency.symbol}
+                          </InputGroupAddon>
+                          <InputGroupInput
+                            inputMode='decimal'
+                            placeholder={pricingUSDToDisplay(
+                              '0.01',
+                              pricingCurrency
+                            )}
+                            {...field}
+                            onChange={(e) => {
+                              const value = e.target.value
+                              if (validateNumber(value)) {
+                                field.onChange(value)
+                              }
+                            }}
+                          />
+                          <InputGroupAddon align='inline-end'>
+                            {pricingMode === 'per-second'
+                              ? t('per second')
+                              : t('per request')}
+                          </InputGroupAddon>
+                        </InputGroup>
                       </FormControl>
                       <FormDescription>
                         {pricingMode === 'per-second'
                           ? t(
-                              'Cost in USD per generated second. Requires a task adapter that reports duration.'
+                              'Price in {{currency}} per generated second. Requires a task adapter that reports duration.',
+                              { currency: pricingCurrencyLabel }
                             )
                           : t(
-                              'Cost in USD per request, regardless of tokens used.'
+                              'Price in {{currency}} per request, regardless of tokens used.',
+                              { currency: pricingCurrencyLabel }
                             )}
                       </FormDescription>
                       <FormMessage />
@@ -1106,7 +1159,9 @@ export function ModelMutateDrawer({
                       <div className='flex items-center space-x-2'>
                         <RadioGroupItem value='price' id='price' />
                         <Label htmlFor='price' className='font-normal'>
-                          {t('Price mode (USD per 1M tokens)')}
+                          {t('Price mode ({{currency}} per 1M tokens)', {
+                            currency: pricingCurrencyLabel,
+                          })}
                         </Label>
                       </div>
                     </RadioGroup>
@@ -1131,9 +1186,10 @@ export function ModelMutateDrawer({
                                     field.onChange(value)
                                     if (value) {
                                       setPromptPrice(
-                                        (
-                                          Number.parseFloat(value) * 2
-                                        ).toString()
+                                        pricingUSDToDisplay(
+                                          Number.parseFloat(value) * 2,
+                                          pricingCurrency
+                                        )
                                       )
                                     } else {
                                       setPromptPrice('')
@@ -1145,7 +1201,10 @@ export function ModelMutateDrawer({
                             <FormDescription>
                               {field.value &&
                               !Number.isNaN(Number.parseFloat(field.value))
-                                ? `Calculated price: $${(Number.parseFloat(field.value) * 2).toFixed(4)} per 1M tokens`
+                                ? `${t('Calculated price')}: ${pricingCurrency.symbol}${pricingUSDToDisplay(
+                                    Number.parseFloat(field.value) * 2,
+                                    pricingCurrency
+                                  )} / 1M ${t('tokens')}`
                                 : t('Multiplier for prompt tokens.')}
                             </FormDescription>
                             <FormMessage />
@@ -1174,7 +1233,12 @@ export function ModelMutateDrawer({
                                         Number.parseFloat(ratio) *
                                         2 *
                                         Number.parseFloat(value)
-                                      setCompletionPrice(compPrice.toString())
+                                      setCompletionPrice(
+                                        pricingUSDToDisplay(
+                                          compPrice,
+                                          pricingCurrency
+                                        )
+                                      )
                                     } else {
                                       setCompletionPrice('')
                                     }
@@ -1187,7 +1251,10 @@ export function ModelMutateDrawer({
                               !Number.isNaN(Number.parseFloat(field.value)) &&
                               promptPrice &&
                               !Number.isNaN(Number.parseFloat(promptPrice))
-                                ? `Calculated price: $${(Number.parseFloat(promptPrice) * Number.parseFloat(field.value)).toFixed(4)} per 1M tokens`
+                                ? `${t('Calculated price')}: ${pricingCurrency.symbol}${(
+                                    Number.parseFloat(promptPrice) *
+                                    Number.parseFloat(field.value)
+                                  ).toFixed(4)} / 1M ${t('tokens')}`
                                 : t('Multiplier for completion tokens.')}
                             </FormDescription>
                             <FormMessage />
@@ -1198,33 +1265,70 @@ export function ModelMutateDrawer({
                   ) : (
                     <div className='space-y-4'>
                       <div className='space-y-2'>
-                        <Label>{t('Prompt price ($/1M tokens)')}</Label>
-                        <Input
-                          type='text'
-                          placeholder='2.0'
-                          value={promptPrice}
-                          onChange={(e) =>
-                            handlePromptPriceChange(e.target.value)
-                          }
-                        />
+                        <Label>
+                          {t('Prompt price ({{currency}}/1M tokens)', {
+                            currency: pricingCurrencyLabel,
+                          })}
+                        </Label>
+                        <InputGroup>
+                          <InputGroupAddon>
+                            {pricingCurrency.symbol}
+                          </InputGroupAddon>
+                          <InputGroupInput
+                            inputMode='decimal'
+                            placeholder={pricingUSDToDisplay(
+                              '2',
+                              pricingCurrency
+                            )}
+                            value={promptPrice}
+                            onChange={(e) =>
+                              handlePromptPriceChange(e.target.value)
+                            }
+                          />
+                          <InputGroupAddon align='inline-end'>
+                            /1M
+                          </InputGroupAddon>
+                        </InputGroup>
                         <p className='text-muted-foreground text-sm'>
                           {promptPrice &&
                           !Number.isNaN(Number.parseFloat(promptPrice))
-                            ? `Calculated ratio: ${(Number.parseFloat(promptPrice) / 2).toFixed(4)}`
+                            ? `Calculated ratio: ${(
+                                Number.parseFloat(
+                                  pricingDisplayToUSD(
+                                    promptPrice,
+                                    pricingCurrency
+                                  )
+                                ) / 2
+                              ).toFixed(4)}`
                             : t('Enter Input price to calculate ratio')}
                         </p>
                       </div>
 
                       <div className='space-y-2'>
-                        <Label>{t('Completion price ($/1M tokens)')}</Label>
-                        <Input
-                          type='text'
-                          placeholder='4.0'
-                          value={completionPrice}
-                          onChange={(e) =>
-                            handleCompletionPriceChange(e.target.value)
-                          }
-                        />
+                        <Label>
+                          {t('Completion price ({{currency}}/1M tokens)', {
+                            currency: pricingCurrencyLabel,
+                          })}
+                        </Label>
+                        <InputGroup>
+                          <InputGroupAddon>
+                            {pricingCurrency.symbol}
+                          </InputGroupAddon>
+                          <InputGroupInput
+                            inputMode='decimal'
+                            placeholder={pricingUSDToDisplay(
+                              '4',
+                              pricingCurrency
+                            )}
+                            value={completionPrice}
+                            onChange={(e) =>
+                              handleCompletionPriceChange(e.target.value)
+                            }
+                          />
+                          <InputGroupAddon align='inline-end'>
+                            /1M
+                          </InputGroupAddon>
+                        </InputGroup>
                         <p className='text-muted-foreground text-sm'>
                           {completionPrice &&
                           !Number.isNaN(Number.parseFloat(completionPrice)) &&
