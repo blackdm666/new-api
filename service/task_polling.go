@@ -16,6 +16,7 @@ import (
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -38,6 +39,16 @@ type TaskPollingAdaptor interface {
 // GetTaskAdaptorFunc 由 main 包注入，用于获取指定平台的任务适配器。
 // 打破 service -> relay -> relay/channel -> service 的循环依赖。
 var GetTaskAdaptorFunc func(platform constant.TaskPlatform) TaskPollingAdaptor
+
+func recordTaskTerminalSampleAsync(task *model.Task) {
+	if task == nil {
+		return
+	}
+	snapshot := *task
+	gopool.Go(func() {
+		perfmetrics.RecordTaskTerminalSample(&snapshot)
+	})
+}
 
 // sweepTimedOutTasks 在主轮询之前独立清理超时任务。
 // 每次最多处理 100 条，剩余的下个周期继续处理。
@@ -83,6 +94,7 @@ func sweepTimedOutTasks(ctx context.Context) {
 			continue
 		}
 		timedOutCount++
+		recordTaskTerminalSampleAsync(task)
 		if !isLegacy && task.Quota != 0 {
 			RefundTaskQuota(ctx, task, reason)
 		}
@@ -631,8 +643,11 @@ func FinalizeVideoTaskResult(ctx context.Context, adaptor TaskPollingAdaptor, ta
 	if shouldRefund {
 		RefundTaskQuota(ctx, task, task.FailReason)
 	}
-	if terminalTransitionWon && task.PrivateData.CallbackEnabled {
-		ScheduleTaskCallback(task.TaskID)
+	if terminalTransitionWon {
+		recordTaskTerminalSampleAsync(task)
+		if task.PrivateData.CallbackEnabled {
+			ScheduleTaskCallback(task.TaskID)
+		}
 	}
 
 	return nil
