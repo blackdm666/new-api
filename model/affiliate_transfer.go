@@ -54,10 +54,10 @@ func TransferLegacyAffQuotaToQuota(userId int, quota int) error {
 		if user.AffQuota < quota {
 			return ErrAffiliateTransferInsufficientBalance
 		}
-		return tx.Model(user).Updates(map[string]any{
-			"aff_quota": user.AffQuota - quota,
-			"quota":     user.Quota + quota,
-		}).Error
+		if err := increaseUserQuotaTx(tx, userId, quota); err != nil {
+			return err
+		}
+		return tx.Model(user).Update("aff_quota", user.AffQuota-quota).Error
 	})
 }
 
@@ -116,6 +116,9 @@ func (user *User) TransferAffiliateCentsToQuotaWithRequestId(amountCents int64, 
 		if account.AvailableCents < amountCents {
 			return ErrAffiliateTransferInsufficientBalance
 		}
+		if lockedUser.Quota > common.MaxWalletQuota-quota {
+			return ErrWalletQuotaLimitExceeded
+		}
 		*record = AffiliateTransfer{
 			UserId:             lockedUser.Id,
 			RequestId:          requestId,
@@ -129,7 +132,7 @@ func (user *User) TransferAffiliateCentsToQuotaWithRequestId(amountCents int64, 
 		if err := tx.Model(account).Update("available_cents", record.BalanceCentsAfter).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(lockedUser).Update("quota", record.QuotaAfter).Error; err != nil {
+		if err := increaseUserQuotaTx(tx, lockedUser.Id, quota); err != nil {
 			return err
 		}
 		if err := tx.Create(record).Error; err != nil {
