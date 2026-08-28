@@ -305,6 +305,9 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				return
 			}
 		}
+		if streamResp.Type == "response.completed" || streamResp.Type == "response.done" {
+			sr.Done()
+		}
 	})
 
 	if streamErr != nil {

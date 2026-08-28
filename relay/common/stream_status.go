@@ -31,9 +31,9 @@ type StreamErrorEntry struct {
 type StreamStatus struct {
 	EndReason StreamEndReason
 	EndError  error
-	endOnce   sync.Once
 
 	mu         sync.Mutex
+	reasonSet  bool
 	Errors     []StreamErrorEntry
 	ErrorCount int
 }
@@ -42,14 +42,26 @@ func NewStreamStatus() *StreamStatus {
 	return &StreamStatus{}
 }
 
+// SetEndReason records why the stream ended. The first reason normally wins,
+// except that a confirmed normal completion can correct an earlier
+// client_gone written by the completion/disconnect race.
 func (s *StreamStatus) SetEndReason(reason StreamEndReason, err error) {
 	if s == nil {
 		return
 	}
-	s.endOnce.Do(func() {
-		s.EndReason = reason
-		s.EndError = err
-	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.reasonSet {
+		if s.EndReason == StreamEndReasonClientGone &&
+			(reason == StreamEndReasonDone || reason == StreamEndReasonEOF) {
+			s.EndReason = reason
+			s.EndError = err
+		}
+		return
+	}
+	s.reasonSet = true
+	s.EndReason = reason
+	s.EndError = err
 }
 
 func (s *StreamStatus) RecordError(msg string) {
@@ -89,6 +101,8 @@ func (s *StreamStatus) IsNormalEnd() bool {
 	if s == nil {
 		return true
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.EndReason == StreamEndReasonDone ||
 		s.EndReason == StreamEndReasonEOF ||
 		s.EndReason == StreamEndReasonHandlerStop
@@ -98,15 +112,15 @@ func (s *StreamStatus) Summary() string {
 	if s == nil {
 		return "StreamStatus<nil>"
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	b := &strings.Builder{}
 	fmt.Fprintf(b, "reason=%s", s.EndReason)
 	if s.EndError != nil {
 		fmt.Fprintf(b, " end_error=%q", s.EndError.Error())
 	}
-	s.mu.Lock()
 	if s.ErrorCount > 0 {
 		fmt.Fprintf(b, " soft_errors=%d", s.ErrorCount)
 	}
-	s.mu.Unlock()
 	return b.String()
 }

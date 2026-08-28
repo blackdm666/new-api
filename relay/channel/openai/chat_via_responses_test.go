@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -85,6 +86,56 @@ func TestOaiResponsesToChatStreamHandlerConvertsSSEOrderAndUsage(t *testing.T) {
 		`"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5`,
 		`data: [DONE]`,
 	)
+}
+
+func TestOaiResponsesToChatStreamHandlerStopsAtCompletedEventWithoutUpstreamEOF(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 1
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	for _, eventType := range []string{"response.completed", "response.done"} {
+		t.Run(eventType, func(t *testing.T) {
+			reader, writer := io.Pipe()
+			t.Cleanup(func() {
+				_ = reader.Close()
+				_ = writer.Close()
+			})
+			go func() {
+				_, _ = io.WriteString(writer, fmt.Sprintf(`data: {"type":%q,"response":{"status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}`+"\n\n", eventType))
+			}()
+
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			c.Set(common.RequestIdKey, "responses-chat-completed-test")
+			info := &relaycommon.RelayInfo{
+				ChannelMeta:        &relaycommon.ChannelMeta{UpstreamModelName: "gpt-test"},
+				IsStream:           true,
+				RelayFormat:        types.RelayFormatOpenAI,
+				ShouldIncludeUsage: true,
+				DisablePing:        true,
+			}
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       reader,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			}
+
+			usage, apiErr := OaiResponsesToChatStreamHandler(c, info, resp)
+
+			require.Nil(t, apiErr)
+			require.NotNil(t, usage)
+			assert.Equal(t, 2, usage.PromptTokens)
+			assert.Equal(t, 3, usage.CompletionTokens)
+			require.NotNil(t, info.StreamStatus)
+			assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+			assert.Contains(t, recorder.Body.String(), `data: [DONE]`)
+		})
+	}
 }
 
 func TestOaiResponsesToChatStreamHandlerConvertsClaudeSSETerminalsAndUsage(t *testing.T) {

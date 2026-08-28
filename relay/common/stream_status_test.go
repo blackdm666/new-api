@@ -1,12 +1,39 @@
 package common
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestStreamStatus_NormalCompletionCorrectsClientGoneRace(t *testing.T) {
+	t.Parallel()
+
+	for _, completed := range []StreamEndReason{StreamEndReasonDone, StreamEndReasonEOF} {
+		s := NewStreamStatus()
+		s.SetEndReason(StreamEndReasonClientGone, context.Canceled)
+		s.SetEndReason(completed, nil)
+
+		assert.Equal(t, completed, s.EndReason)
+		assert.Nil(t, s.EndError)
+		assert.True(t, s.IsNormalEnd())
+	}
+}
+
+func TestStreamStatus_ClientGoneStillWinsOverAbnormalScannerEnd(t *testing.T) {
+	t.Parallel()
+
+	s := NewStreamStatus()
+	s.SetEndReason(StreamEndReasonClientGone, context.Canceled)
+	s.SetEndReason(StreamEndReasonScannerErr, fmt.Errorf("response body closed"))
+
+	assert.Equal(t, StreamEndReasonClientGone, s.EndReason)
+	assert.ErrorIs(t, s.EndError, context.Canceled)
+	assert.False(t, s.IsNormalEnd())
+}
 
 func TestStreamStatus_SetEndReason_FirstWins(t *testing.T) {
 	t.Parallel()
