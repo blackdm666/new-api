@@ -428,6 +428,13 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	v.SetProgressStr(task.Progress)
 	v.CreatedAt = task.CreatedAt
 	v.CompletedAt = task.UpdatedAt
+	if task.Status == model.TaskStatusFailure {
+		message := strings.TrimSpace(task.FailReason)
+		if message == "" {
+			message = "video generation failed"
+		}
+		v.Error = &dto.OpenAIVideoError{Code: omnitask.InteractionFailureCode(message), Message: message}
+	}
 	if resultURL := task.GetResultURL(); strings.HasPrefix(resultURL, "data:") && len(resultURL) > 0 {
 		v.SetMetadata("url", resultURL)
 	}

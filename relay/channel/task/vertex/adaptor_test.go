@@ -7,8 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	omnitask "github.com/QuantumNous/new-api/relay/channel/task/omni"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -56,4 +59,24 @@ func TestOmniResolvedAliasRunsReferenceVideoValidation(t *testing.T) {
 	assert.Equal(t, "invalid_omni_request", taskErr.Code)
 	assert.Contains(t, taskErr.Message, "invalid base64 video data")
 	assert.Equal(t, omnitask.ModelGeminiOmniFlashPreview, info.UpstreamModelName)
+}
+
+func TestConvertToOpenAIVideoIncludesInteractionFailure(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task_failed",
+		Status:     model.TaskStatusFailure,
+		FailReason: "[content_blocked] Unable to show the generated video.",
+		Progress:   "100%",
+		CreatedAt:  100,
+		UpdatedAt:  200,
+	}
+
+	data, err := (&TaskAdaptor{}).ConvertToOpenAIVideo(task)
+	require.NoError(t, err)
+	var video dto.OpenAIVideo
+	require.NoError(t, common.Unmarshal(data, &video))
+	require.NotNil(t, video.Error)
+	assert.Equal(t, dto.VideoStatusFailed, video.Status)
+	assert.Equal(t, "content_blocked", video.Error.Code)
+	assert.Equal(t, "[content_blocked] Unable to show the generated video.", video.Error.Message)
 }

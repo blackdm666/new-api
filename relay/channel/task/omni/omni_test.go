@@ -300,6 +300,48 @@ func TestParseCompletedInteractionWithoutVideoFails(t *testing.T) {
 	assert.Contains(t, result.Reason, "did not contain video")
 }
 
+func TestParseInteractionFailureUsesErrorsArray(t *testing.T) {
+	result, err := ParseTaskResult([]byte(`{
+		"id":"interaction_failed",
+		"status":"failed",
+		"errors":[{
+			"code":"content_blocked",
+			"message":"Unable to show the generated video."
+		}]
+	}`))
+
+	require.NoError(t, err)
+	assert.Equal(t, string(model.TaskStatusFailure), result.Status)
+	assert.Equal(t, "[content_blocked] Unable to show the generated video.", result.Reason)
+	assert.Equal(t, "content_blocked", InteractionFailureCode(result.Reason))
+}
+
+func TestParseSubmitResponseUsesErrorsArray(t *testing.T) {
+	_, err := ParseSubmitResponse([]byte(`{
+		"status":"failed",
+		"errors":[{"code":"invalid_request","message":"Reference video is invalid."}]
+	}`))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "[invalid_request] Reference video is invalid.")
+}
+
+func TestParseInteractionFailurePrefersSingularErrorAndKeepsAdditionalErrors(t *testing.T) {
+	result, err := ParseTaskResult([]byte(`{
+		"id":"interaction_failed",
+		"status":"failed",
+		"error":{"code":"primary","message":"Primary failure"},
+		"errors":[
+			{"code":"primary","message":"Primary failure"},
+			{"code":"secondary","message":"Secondary failure"}
+		]
+	}`))
+
+	require.NoError(t, err)
+	assert.Equal(t, "[primary] Primary failure; [secondary] Secondary failure", result.Reason)
+	assert.Equal(t, "primary", InteractionFailureCode(result.Reason))
+}
+
 func TestParseInteractionChecksOutputsWhenStepsArePresent(t *testing.T) {
 	result, err := ParseTaskResult([]byte(`{
 		"id":"interaction_123",
