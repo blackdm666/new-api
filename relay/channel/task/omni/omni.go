@@ -365,6 +365,17 @@ func interactionFailureReason(interaction interactionResponse) string {
 	return strings.Join(reasons, "; ")
 }
 
+// FailureReasonFromResponse recovers an interaction error from a persisted
+// upstream payload. It is used to repair legacy tasks whose fail_reason was
+// stored before errors[] support was added.
+func FailureReasonFromResponse(body []byte) string {
+	var interaction interactionResponse
+	if err := common.Unmarshal(body, &interaction); err != nil {
+		return ""
+	}
+	return interactionFailureReason(interaction)
+}
+
 // InteractionFailureCode extracts a provider error code persisted in an
 // interaction failure reason. Non-interaction reasons use the generic code.
 func InteractionFailureCode(reason string) string {

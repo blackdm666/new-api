@@ -430,6 +430,11 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	v.CompletedAt = task.UpdatedAt
 	if task.Status == model.TaskStatusFailure {
 		message := strings.TrimSpace(task.FailReason)
+		if message == "" || strings.HasPrefix(message, "interaction ended with status ") {
+			if recovered := omnitask.FailureReasonFromResponse(task.Data); recovered != "" {
+				message = recovered
+			}
+		}
 		if message == "" {
 			message = "video generation failed"
 		}

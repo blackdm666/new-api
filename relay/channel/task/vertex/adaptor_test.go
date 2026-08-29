@@ -80,3 +80,21 @@ func TestConvertToOpenAIVideoIncludesInteractionFailure(t *testing.T) {
 	assert.Equal(t, "content_blocked", video.Error.Code)
 	assert.Equal(t, "[content_blocked] Unable to show the generated video.", video.Error.Message)
 }
+
+func TestConvertToOpenAIVideoRecoversLegacyInteractionFailure(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task_legacy_failed",
+		Status:     model.TaskStatusFailure,
+		FailReason: "interaction ended with status failed",
+		Progress:   "100%",
+		Data:       []byte(`{"status":"failed","errors":[{"code":"content_blocked","message":"Responsible AI blocked the output."}]}`),
+	}
+
+	data, err := (&TaskAdaptor{}).ConvertToOpenAIVideo(task)
+	require.NoError(t, err)
+	var video dto.OpenAIVideo
+	require.NoError(t, common.Unmarshal(data, &video))
+	require.NotNil(t, video.Error)
+	assert.Equal(t, "content_blocked", video.Error.Code)
+	assert.Equal(t, "[content_blocked] Responsible AI blocked the output.", video.Error.Message)
+}

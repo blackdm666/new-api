@@ -326,6 +326,18 @@ func TestParseSubmitResponseUsesErrorsArray(t *testing.T) {
 	assert.Contains(t, err.Error(), "[invalid_request] Reference video is invalid.")
 }
 
+func TestFailureReasonFromPersistedResponse(t *testing.T) {
+	reason := FailureReasonFromResponse([]byte(`{
+		"id":"interaction_failed",
+		"status":"failed",
+		"errors":[{"code":"content_blocked","message":"Responsible AI blocked the output."}]
+	}`))
+
+	assert.Equal(t, "[content_blocked] Responsible AI blocked the output.", reason)
+	assert.Empty(t, FailureReasonFromResponse([]byte(`{"status":"failed"}`)))
+	assert.Empty(t, FailureReasonFromResponse([]byte(`not-json`)))
+}
+
 func TestParseInteractionFailurePrefersSingularErrorAndKeepsAdditionalErrors(t *testing.T) {
 	result, err := ParseTaskResult([]byte(`{
 		"id":"interaction_failed",
