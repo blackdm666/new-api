@@ -22,14 +22,13 @@ func TestGetModelListContainsCurrentModels(t *testing.T) {
 		ModelDVCSeedance25,
 		ModelDVCSeedance20,
 		ModelMiniMaxH3768P,
-		ModelMiniMaxH31440P,
 		ModelDoubaoSeedance25,
 		ModelDoubaoSeedance20,
 		ModelDoubaoSeedance20Fast,
 		ModelSeedance20Mini480P,
 		ModelSeedance20Mini720P,
-		ModelWan30Prime720P,
-		ModelWan30Prime1080P,
+		ModelWan30Video720P,
+		ModelWan30Video1080P,
 		ModelKling30Turbo720P,
 		ModelKling30Turbo1080P,
 		ModelKling30Turbo2K,
@@ -132,37 +131,26 @@ func TestConvertDVCSeedance20RejectsGenerateAudioOverride(t *testing.T) {
 	assert.Contains(t, err.Error(), "generateAudio is not supported")
 }
 
-func TestConvertMiniMaxH3Variants(t *testing.T) {
-	t.Run("locks each model to its upstream resolution", func(t *testing.T) {
-		tests := []struct {
-			model      string
-			resolution string
-		}{
-			{model: ModelMiniMaxH3768P, resolution: "768p"},
-			{model: ModelMiniMaxH31440P, resolution: "1440p"},
+func TestConvertMiniMaxH3768P(t *testing.T) {
+	t.Run("locks the model to 768p", func(t *testing.T) {
+		req := relaycommon.TaskSubmitReq{
+			Model:    ModelMiniMaxH3768P,
+			Prompt:   "Animate the portrait to the music",
+			Duration: 12,
+			Images:   []string{"https://example.com/portrait.png"},
+			Metadata: map[string]interface{}{
+				"resolution":       "2k",
+				"reference_audios": []interface{}{"https://example.com/music.mp3"},
+			},
 		}
-		for _, tt := range tests {
-			t.Run(tt.model, func(t *testing.T) {
-				req := relaycommon.TaskSubmitReq{
-					Model:    tt.model,
-					Prompt:   "Animate the portrait to the music",
-					Duration: 12,
-					Images:   []string{"https://example.com/portrait.png"},
-					Metadata: map[string]interface{}{
-						"resolution":       "2k",
-						"reference_audios": []interface{}{"https://example.com/music.mp3"},
-					},
-				}
 
-				body, err := convertToRequestPayload(req, nil)
+		body, err := convertToRequestPayload(req, nil)
 
-				require.NoError(t, err)
-				assert.Equal(t, tt.model, body.Model)
-				assert.Equal(t, tt.resolution, body.Resolution)
-				assert.Equal(t, 12, body.Duration)
-				assert.Equal(t, []string{"https://example.com/music.mp3"}, body.ReferenceAudios)
-			})
-		}
+		require.NoError(t, err)
+		assert.Equal(t, ModelMiniMaxH3768P, body.Model)
+		assert.Equal(t, "768p", body.Resolution)
+		assert.Equal(t, 12, body.Duration)
+		assert.Equal(t, []string{"https://example.com/music.mp3"}, body.ReferenceAudios)
 	})
 
 	t.Run("uses the current four second default", func(t *testing.T) {
@@ -192,19 +180,21 @@ func TestConvertMiniMaxH3Variants(t *testing.T) {
 		assert.Contains(t, err.Error(), "require at least one image")
 	})
 
-	t.Run("reference video is rejected", func(t *testing.T) {
+	t.Run("accepts up to five reference videos", func(t *testing.T) {
 		req := relaycommon.TaskSubmitReq{
-			Model:  ModelMiniMaxH31440P,
+			Model:  ModelMiniMaxH3768P,
 			Prompt: "Video reference",
 			Metadata: map[string]interface{}{
-				"referenceVideos": []interface{}{"https://example.com/video.mp4"},
+				"referenceVideos": []interface{}{
+					"https://example.com/1.mp4", "https://example.com/2.mp4", "https://example.com/3.mp4",
+					"https://example.com/4.mp4", "https://example.com/5.mp4",
+				},
 			},
 		}
 
 		_, err := convertToRequestPayload(req, nil)
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "at most 0 items")
+		require.NoError(t, err)
 	})
 
 	t.Run("legacy base model is rejected", func(t *testing.T) {
@@ -219,7 +209,7 @@ func TestConvertMiniMaxH3Variants(t *testing.T) {
 
 	t.Run("rejects ratios removed by the current upstream", func(t *testing.T) {
 		_, err := convertToRequestPayload(relaycommon.TaskSubmitReq{
-			Model:  ModelMiniMaxH31440P,
+			Model:  ModelMiniMaxH3768P,
 			Prompt: "Unsupported ratio",
 			Metadata: map[string]interface{}{
 				"ratio": "4:3",
@@ -228,6 +218,28 @@ func TestConvertMiniMaxH3Variants(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "ratio 4:3 is not supported")
+	})
+
+	t.Run("accepts ten images, five videos, and five audios", func(t *testing.T) {
+		images := make([]string, 10)
+		for i := range images {
+			images[i] = fmt.Sprintf("https://example.com/image-%d.png", i)
+		}
+		videos := make([]interface{}, 5)
+		for i := range videos {
+			videos[i] = fmt.Sprintf("https://example.com/video-%d.mp4", i)
+		}
+		audios := make([]interface{}, 5)
+		for i := range audios {
+			audios[i] = fmt.Sprintf("https://example.com/audio-%d.mp3", i)
+		}
+
+		_, err := convertToRequestPayload(relaycommon.TaskSubmitReq{
+			Model: ModelMiniMaxH3768P, Prompt: "Documented maximum", Images: images,
+			Metadata: map[string]interface{}{"referenceVideos": videos, "referenceAudios": audios},
+		}, nil)
+
+		require.NoError(t, err)
 	})
 }
 
@@ -257,8 +269,8 @@ func TestNewFixedResolutionProfilesMatchXinMengDocumentation(t *testing.T) {
 		{model: ModelDoubaoSeedance20Fast, resolution: "720p", minSeconds: 4, maxSeconds: 15},
 		{model: ModelSeedance20Mini480P, resolution: "480p", minSeconds: 4, maxSeconds: 15},
 		{model: ModelSeedance20Mini720P, resolution: "720p", minSeconds: 4, maxSeconds: 15},
-		{model: ModelWan30Prime720P, resolution: "720p", minSeconds: 4, maxSeconds: 30},
-		{model: ModelWan30Prime1080P, resolution: "1080p", minSeconds: 4, maxSeconds: 30},
+		{model: ModelWan30Video720P, resolution: "720p", minSeconds: 4, maxSeconds: 30},
+		{model: ModelWan30Video1080P, resolution: "1080p", minSeconds: 4, maxSeconds: 30},
 	}
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
@@ -278,6 +290,49 @@ func TestNewFixedResolutionProfilesMatchXinMengDocumentation(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestWan30VideoUsesDocumentedReferenceLimits(t *testing.T) {
+	images := make([]interface{}, 10)
+	videos := make([]interface{}, 5)
+	audios := make([]interface{}, 5)
+	for i := range images {
+		images[i] = fmt.Sprintf("https://example.com/image-%d.png", i)
+	}
+	for i := range videos {
+		videos[i] = fmt.Sprintf("https://example.com/video-%d.mp4", i)
+	}
+	for i := range audios {
+		audios[i] = fmt.Sprintf("https://example.com/audio-%d.mp3", i)
+	}
+
+	_, err := convertToRequestPayload(relaycommon.TaskSubmitReq{
+		Model: ModelWan30Video720P, Prompt: "Documented maximum references",
+		Metadata: map[string]interface{}{
+			"referenceImages": images,
+			"referenceVideos": videos,
+			"referenceAudios": audios,
+		},
+	}, nil)
+	require.NoError(t, err)
+
+	images = append(images, "https://example.com/image-10.png")
+	_, err = convertToRequestPayload(relaycommon.TaskSubmitReq{
+		Model: ModelWan30Video720P, Prompt: "Too many images",
+		Metadata: map[string]interface{}{"referenceImages": images},
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at most 10 items")
+
+	_, err = convertToRequestPayload(relaycommon.TaskSubmitReq{
+		Model: ModelWan30Video1080P, Prompt: "Mixed frame and references",
+		Metadata: map[string]interface{}{
+			"firstFrame":      "https://example.com/first.png",
+			"referenceImages": []interface{}{"https://example.com/reference.png"},
+		},
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "first/last frame mode cannot be mixed")
 }
 
 func TestKlingSalesAliasesLockResolutionAndUseNativeFields(t *testing.T) {
@@ -433,7 +488,6 @@ func TestResolvedSalesAliasesUseUpstreamModelForValidationBillingAndBody(t *test
 		{alias: "DC全能视频2.5 720P", upstream: ModelDVCSeedance25},
 		{alias: "DC全能视频2.0 720P", upstream: ModelDVCSeedance20},
 		{alias: "MiniMax H3 768P", upstream: ModelMiniMaxH3768P},
-		{alias: "MiniMax H3 1440P", upstream: ModelMiniMaxH31440P},
 	}
 	for _, tt := range tests {
 		t.Run(tt.alias, func(t *testing.T) {

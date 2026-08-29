@@ -135,7 +135,7 @@ func TestValidateBasicTaskRequestStoresReferenceVideo(t *testing.T) {
 
 func TestValidateTaskRequestAllowMediaPreservesXinMengOptionalFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	body := strings.NewReader(`{"model":"wan3.0-video-prime-720p","media":[{"type":"reference_image","url":"https://example.com/ref.png"}],"negative_prompt":"blur","seed":42,"generate_audio":true,"camera_control":{"pan":2}}`)
+	body := strings.NewReader(`{"model":"wan3.0-video-720p","media":[{"type":"reference_image","url":"https://example.com/ref.png"}],"negative_prompt":"blur","seed":42,"generate_audio":true,"camera_control":{"pan":2}}`)
 	request := httptest.NewRequest(http.MethodPost, "/v1/videos", body)
 	request.Header.Set("Content-Type", "application/json")
 	context, _ := gin.CreateTestContext(httptest.NewRecorder())

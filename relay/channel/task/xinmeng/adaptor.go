@@ -29,14 +29,13 @@ const (
 	ModelDVCSeedance25        = "dvc-seedance-2.5"
 	ModelDVCSeedance20        = "dvc-seedance-2.0"
 	ModelMiniMaxH3768P        = "minimax-h3-768p"
-	ModelMiniMaxH31440P       = "minimax-h3-1440p"
 	ModelDoubaoSeedance25     = "doubao-seedance-2-5-720p"
 	ModelDoubaoSeedance20     = "doubao-seedance-2-0-720p"
 	ModelDoubaoSeedance20Fast = "doubao-seedance-2-0-fast-720p"
 	ModelSeedance20Mini480P   = "seedance-2.0-mini-480p"
 	ModelSeedance20Mini720P   = "seedance-2.0-mini-720p"
-	ModelWan30Prime720P       = "wan3.0-video-prime-720p"
-	ModelWan30Prime1080P      = "wan3.0-video-prime-1080p"
+	ModelWan30Video720P       = "wan3.0-video-720p"
+	ModelWan30Video1080P      = "wan3.0-video-1080p"
 	ModelKling30Turbo         = "kling-3.0-turbo"
 	ModelKling30Turbo720P     = "kling-3.0-turbo-720p"
 	ModelKling30Turbo1080P    = "kling-3.0-turbo-1080p"
@@ -55,14 +54,13 @@ var ModelList = []string{
 	ModelDVCSeedance25,
 	ModelDVCSeedance20,
 	ModelMiniMaxH3768P,
-	ModelMiniMaxH31440P,
 	ModelDoubaoSeedance25,
 	ModelDoubaoSeedance20,
 	ModelDoubaoSeedance20Fast,
 	ModelSeedance20Mini480P,
 	ModelSeedance20Mini720P,
-	ModelWan30Prime720P,
-	ModelWan30Prime1080P,
+	ModelWan30Video720P,
+	ModelWan30Video1080P,
 	ModelKling30Turbo720P,
 	ModelKling30Turbo1080P,
 	ModelKling30Turbo2K,
@@ -107,14 +105,8 @@ var modelConfigs = map[string]modelConfig{
 	},
 	ModelMiniMaxH3768P: {
 		upstreamModel: ModelMiniMaxH3768P, defaultDuration: 4, minDuration: 4, maxDuration: 15,
-		defaultRatio: "16:9", resolution: "768p", maxPromptLength: 2000,
-		maxReferenceImages: 5, maxReferenceAudios: 1, requireVisualWithAudio: true,
-		allowedRatios: stringSet("1:1", "16:9", "9:16"),
-	},
-	ModelMiniMaxH31440P: {
-		upstreamModel: ModelMiniMaxH31440P, defaultDuration: 4, minDuration: 4, maxDuration: 15,
-		defaultRatio: "16:9", resolution: "1440p", maxPromptLength: 2000,
-		maxReferenceImages: 5, maxReferenceAudios: 1, requireVisualWithAudio: true,
+		defaultRatio: "16:9", resolution: "768p", maxPromptLength: 2500,
+		maxReferenceImages: 10, maxReferenceVideos: 5, maxReferenceAudios: 5, requireVisualWithAudio: true,
 		allowedRatios: stringSet("1:1", "16:9", "9:16"),
 	},
 	ModelDoubaoSeedance25: {
@@ -150,19 +142,19 @@ var modelConfigs = map[string]modelConfig{
 		maxReferenceImages: 9, maxReferenceVideos: 3, maxReferenceAudios: 3,
 		allowedRatios: stringSet("16:9", "9:16", "1:1", "4:3", "3:4", "21:9"),
 	},
-	ModelWan30Prime720P: {
-		upstreamModel: ModelWan30Prime720P, defaultDuration: 5, minDuration: 4, maxDuration: 30,
+	ModelWan30Video720P: {
+		upstreamModel: ModelWan30Video720P, defaultDuration: 5, minDuration: 4, maxDuration: 30,
 		defaultRatio: "16:9", resolution: "720p", maxPromptLength: 5000,
-		maxReferenceImages: 30, maxReferenceVideos: 10, maxReferenceAudios: 10,
-		allowPromptlessMedia: true,
-		allowedRatios:        stringSet("16:9", "9:16", "1:1", "4:3", "3:4"),
+		maxReferenceImages: 10, maxReferenceVideos: 5, maxReferenceAudios: 5,
+		allowPromptlessMedia: true, framesExclusive: true,
+		allowedRatios: stringSet("16:9", "9:16", "1:1", "4:3", "3:4"),
 	},
-	ModelWan30Prime1080P: {
-		upstreamModel: ModelWan30Prime1080P, defaultDuration: 5, minDuration: 4, maxDuration: 30,
+	ModelWan30Video1080P: {
+		upstreamModel: ModelWan30Video1080P, defaultDuration: 5, minDuration: 4, maxDuration: 30,
 		defaultRatio: "16:9", resolution: "1080p", maxPromptLength: 5000,
-		maxReferenceImages: 30, maxReferenceVideos: 10, maxReferenceAudios: 10,
-		allowPromptlessMedia: true,
-		allowedRatios:        stringSet("16:9", "9:16", "1:1", "4:3", "3:4"),
+		maxReferenceImages: 10, maxReferenceVideos: 5, maxReferenceAudios: 5,
+		allowPromptlessMedia: true, framesExclusive: true,
+		allowedRatios: stringSet("16:9", "9:16", "1:1", "4:3", "3:4"),
 	},
 	ModelKling30Turbo720P:  kling30TurboConfig("720p"),
 	ModelKling30Turbo1080P: kling30TurboConfig("1080p"),
@@ -684,8 +676,8 @@ func validatePayload(body *requestPayload, cfg modelConfig) error {
 	if cfg.maxReferenceMedia > 0 && imageCount+videoCount+len(body.ReferenceAudios) > cfg.maxReferenceMedia {
 		return fmt.Errorf("reference images, videos, and audios must contain at most %d items in total", cfg.maxReferenceMedia)
 	}
-	if cfg.requireVisualWithAudio && len(body.ReferenceAudios) > 0 && len(body.ReferenceImages) == 0 && body.FirstFrame == "" && body.LastFrame == "" {
-		return fmt.Errorf("reference audios require at least one image reference")
+	if cfg.requireVisualWithAudio && len(body.ReferenceAudios) > 0 && len(body.ReferenceImages) == 0 && len(body.ReferenceVideos) == 0 && body.FirstFrame == "" && body.LastFrame == "" {
+		return fmt.Errorf("reference audios require at least one image or video reference")
 	}
 	if cfg.framesExclusive && (body.FirstFrame != "" || body.LastFrame != "") && (len(body.ReferenceImages) > 0 || len(body.ReferenceVideos) > 0 || len(body.ReferenceAudios) > 0) {
 		return fmt.Errorf("first/last frame mode cannot be mixed with reference images, videos, or audios")
