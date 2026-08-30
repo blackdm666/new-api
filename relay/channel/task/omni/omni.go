@@ -193,7 +193,7 @@ func ValidateRequest(c *gin.Context, info *relaycommon.RelayInfo) error {
 		return localizeReferenceVideoError(c, err)
 	}
 	if (imageCount > 0 || referenceVideo.Part != nil) && info != nil {
-		info.Action = constant.TaskActionGenerate
+		info.Action = constant.TaskActionImageToVideo
 	}
 	return nil
 }
@@ -215,7 +215,7 @@ func BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, e
 	}
 	parts = append(parts, images...)
 	if len(images) > 0 && info != nil {
-		info.Action = constant.TaskActionGenerate
+		info.Action = constant.TaskActionImageToVideo
 	}
 	referenceVideo, err := prepareReferenceVideo(c, req)
 	if err != nil {
@@ -227,7 +227,7 @@ func BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, e
 		content = append(content, inputPart{Type: "text", Text: prompt})
 		parts = []inputPart{{Type: "user_input", Content: content}}
 		if info != nil {
-			info.Action = constant.TaskActionGenerate
+			info.Action = constant.TaskActionImageToVideo
 		}
 	}
 

@@ -17,7 +17,7 @@ func TestCopyVideoResponseHeadersPreservesMediaHeadersWithoutOverwritingCORS(t *
 	src.Set("ETag", `"video-etag"`)
 	src.Set("Set-Cookie", "upstream=secret")
 
-	copyVideoResponseHeaders(dst, src)
+	copyTaskMediaResponseHeaders(dst, src)
 
 	assert.Equal(t, []string{"*"}, dst.Values("Access-Control-Allow-Origin"))
 	assert.Equal(t, "video/mp4", dst.Get("Content-Type"))

@@ -43,7 +43,7 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 
 // ValidateRequestAndSetAction parses body, validates fields and sets default action.
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *taskdto.TaskError) {
-	if taskErr := relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionTextGenerate); taskErr != nil {
+	if taskErr := relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionTextToVideo); taskErr != nil {
 		return taskErr
 	}
 	if omnitask.IsModel(info.UpstreamModelName) {
@@ -101,7 +101,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	} else if len(req.Images) > 0 {
 		if parsed := ParseImageInput(req.Images[0]); parsed != nil {
 			instance.Image = parsed
-			info.Action = constant.TaskActionGenerate
+			info.Action = constant.TaskActionImageToVideo
 		}
 	}
 
@@ -138,17 +138,17 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 	return channel.DoTaskApiRequest(a, c, info, requestBody)
 }
 
-// DoResponse handles upstream response, returns taskID etc.
-func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *taskdto.TaskError) {
+// ParseResponse handles the upstream response without writing to the client.
+func (a *TaskAdaptor) ParseResponse(_ *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*channel.TaskSubmitResponse, *taskdto.TaskError) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
 	}
 	_ = resp.Body.Close()
 	if omnitask.IsModel(info.UpstreamModelName) {
 		upstreamName, err := omnitask.ParseSubmitResponse(responseBody)
 		if err != nil {
-			return "", nil, service.TaskErrorWrapper(err, "invalid_interaction_response", http.StatusInternalServerError)
+			return nil, service.TaskErrorWrapper(err, "invalid_interaction_response", http.StatusInternalServerError)
 		}
 		localID := taskcommon.EncodeLocalTaskID(upstreamName)
 		ov := dto.NewOpenAIVideo()
@@ -156,25 +156,23 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 		ov.TaskID = info.PublicTaskID
 		ov.CreatedAt = time.Now().Unix()
 		ov.Model = info.OriginModelName
-		c.JSON(http.StatusOK, ov)
-		return localID, responseBody, nil
+		return &channel.TaskSubmitResponse{UpstreamTaskID: localID, TaskData: responseBody, ClientResponse: ov}, nil
 	}
 
 	var s submitResponse
 	if err := common.Unmarshal(responseBody, &s); err != nil {
-		return "", nil, service.TaskErrorWrapper(err, "unmarshal_response_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(err, "unmarshal_response_failed", http.StatusInternalServerError)
 	}
 	if strings.TrimSpace(s.Name) == "" {
-		return "", nil, service.TaskErrorWrapper(fmt.Errorf("missing operation name"), "invalid_response", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(fmt.Errorf("missing operation name"), "invalid_response", http.StatusInternalServerError)
 	}
-	taskID = taskcommon.EncodeLocalTaskID(s.Name)
+	taskID := taskcommon.EncodeLocalTaskID(s.Name)
 	ov := dto.NewOpenAIVideo()
 	ov.ID = info.PublicTaskID
 	ov.TaskID = info.PublicTaskID
 	ov.CreatedAt = time.Now().Unix()
 	ov.Model = info.OriginModelName
-	c.JSON(http.StatusOK, ov)
-	return taskID, responseBody, nil
+	return &channel.TaskSubmitResponse{UpstreamTaskID: taskID, TaskData: responseBody, ClientResponse: ov}, nil
 }
 
 func (a *TaskAdaptor) GetModelList() []string {

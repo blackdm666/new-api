@@ -96,7 +96,7 @@ func TestBuildRequestBodyIncludesPromptReferenceImagesAndAsyncState(t *testing.T
 	assert.Contains(t, request.Input[0].Text, "Generate exactly a 5-second video.")
 	assert.Equal(t, inputPart{Type: "image", MimeType: "image/png", Data: imageOne}, request.Input[1])
 	assert.Equal(t, inputPart{Type: "image", MimeType: "image/jpeg", Data: imageTwo}, request.Input[2])
-	assert.Equal(t, constant.TaskActionGenerate, info.Action)
+	assert.Equal(t, constant.TaskActionImageToVideo, info.Action)
 }
 
 func TestBuildRequestBodyUsesNestedUserInputForReferenceVideo(t *testing.T) {
@@ -128,7 +128,7 @@ func TestBuildRequestBodyUsesNestedUserInputForReferenceVideo(t *testing.T) {
 	assert.Equal(t, inputPart{Type: "video", MimeType: "video/mp4", Data: videoData}, request.Input[0].Content[0])
 	assert.Equal(t, "image", request.Input[0].Content[1].Type)
 	assert.Contains(t, request.Input[0].Content[2].Text, "Change the sphere to green")
-	assert.Equal(t, constant.TaskActionGenerate, info.Action)
+	assert.Equal(t, constant.TaskActionImageToVideo, info.Action)
 }
 
 func TestValidateReferenceVideoDurationBeforeSubmission(t *testing.T) {

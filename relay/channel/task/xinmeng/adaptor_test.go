@@ -591,17 +591,20 @@ func TestDoResponseReturnsPublicTaskID(t *testing.T) {
 		Body:       io.NopCloser(bytesReader(`{"id":"upstream_private","status":"pending","object":"video"}`)),
 	}
 
-	upstreamID, _, taskErr := (&TaskAdaptor{}).DoResponse(c, resp, info)
+	parsed, taskErr := (&TaskAdaptor{}).ParseResponse(c, resp, info)
 
 	require.Nil(t, taskErr)
-	assert.Equal(t, "upstream_private", upstreamID)
+	require.NotNil(t, parsed)
+	assert.Equal(t, "upstream_private", parsed.UpstreamTaskID)
+	payloadBody, err := common.Marshal(parsed.ClientResponse)
+	require.NoError(t, err)
 	var payload map[string]any
-	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.NoError(t, common.Unmarshal(payloadBody, &payload))
 	assert.Equal(t, "task_public", payload["id"])
 	assert.Equal(t, "task_public", payload["task_id"])
 }
 
-func TestConvertToOpenAIVideoUsesStoredResultURL(t *testing.T) {
+func TestConvertToOpenAIVideoDoesNotExposeStoredResultURL(t *testing.T) {
 	task := &model.Task{
 		TaskID:   "task_public",
 		Status:   model.TaskStatusSuccess,
@@ -617,9 +620,8 @@ func TestConvertToOpenAIVideoUsesStoredResultURL(t *testing.T) {
 	require.NoError(t, err)
 	var payload map[string]any
 	require.NoError(t, common.Unmarshal(data, &payload))
-	metadata, ok := payload["metadata"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "https://example.com/proxy.mp4", metadata["url"])
+	assert.Equal(t, "task_public", payload["id"])
+	assert.NotContains(t, payload, "metadata")
 }
 
 func bytesReader(value string) io.Reader {

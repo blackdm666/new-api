@@ -74,7 +74,7 @@ func TestValidateMultipartDirectNormalizesImageField(t *testing.T) {
 	storedReq, err := GetTaskRequest(context)
 	require.NoError(t, err)
 	require.Equal(t, []string{"https://example.com/first.png"}, storedReq.Images)
-	require.Equal(t, constant.TaskActionGenerate, info.Action)
+	require.Equal(t, constant.TaskActionImageToVideo, info.Action)
 }
 
 func TestValidateMultipartDirectUsesResolvedSoraModel(t *testing.T) {
@@ -107,7 +107,7 @@ func TestValidateBasicTaskRequestStoresCallbackURL(t *testing.T) {
 	context.Request = request
 	info := &RelayInfo{TaskRelayInfo: &TaskRelayInfo{}}
 
-	taskErr := ValidateBasicTaskRequest(context, info, constant.TaskActionTextGenerate)
+	taskErr := ValidateBasicTaskRequest(context, info, constant.TaskActionTextToVideo)
 
 	require.Nil(t, taskErr)
 	assert.Equal(t, "https://example.com/video-callback", info.CallbackURL)
@@ -125,7 +125,7 @@ func TestValidateBasicTaskRequestStoresReferenceVideo(t *testing.T) {
 	context.Request = request
 	info := &RelayInfo{TaskRelayInfo: &TaskRelayInfo{}}
 
-	taskErr := ValidateBasicTaskRequest(context, info, constant.TaskActionTextGenerate)
+	taskErr := ValidateBasicTaskRequest(context, info, constant.TaskActionTextToVideo)
 
 	require.Nil(t, taskErr)
 	storedReq, err := GetTaskRequest(context)
@@ -142,7 +142,7 @@ func TestValidateTaskRequestAllowMediaPreservesXinMengOptionalFields(t *testing.
 	context.Request = request
 	info := &RelayInfo{TaskRelayInfo: &TaskRelayInfo{}}
 
-	taskErr := ValidateTaskRequestAllowMedia(context, info, constant.TaskActionReferenceGenerate)
+	taskErr := ValidateTaskRequestAllowMedia(context, info, constant.TaskActionReferenceToVideo)
 
 	require.Nil(t, taskErr)
 	storedReq, err := GetTaskRequest(context)
@@ -210,7 +210,7 @@ func TestTaskDurationBounds(t *testing.T) {
 		})
 		t.Run(tt.name+" (basic task request)", func(t *testing.T) {
 			context, info := newContext(t, tt.body)
-			taskErr := ValidateBasicTaskRequest(context, info, constant.TaskActionGenerate)
+			taskErr := ValidateBasicTaskRequest(context, info, constant.TaskActionImageToVideo)
 			if tt.wantErr {
 				require.NotNil(t, taskErr)
 				require.Equal(t, "invalid_seconds", taskErr.Code)

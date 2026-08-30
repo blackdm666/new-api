@@ -154,10 +154,13 @@ func TestDoResponseReturnsPublicTaskID(t *testing.T) {
 	resp := &http.Response{Body: io.NopCloser(bytes.NewBufferString(`{"request_id":"private-upstream-id","status":"pending","progress":0}`))}
 	info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_public"}, OriginModelName: ModelGrokImagineVideo}
 
-	upstreamID, _, taskErr := (&TaskAdaptor{}).DoResponse(c, resp, info)
+	parsed, taskErr := (&TaskAdaptor{}).ParseResponse(c, resp, info)
 	require.Nil(t, taskErr)
-	assert.Equal(t, "private-upstream-id", upstreamID)
-	assert.JSONEq(t, `{"id":"task_public","object":"video","model":"grok-imagine-video","status":"queued"}`, recorder.Body.String())
+	require.NotNil(t, parsed)
+	assert.Equal(t, "private-upstream-id", parsed.UpstreamTaskID)
+	payload, err := common.Marshal(parsed.ClientResponse)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id":"task_public","object":"video","model":"grok-imagine-video","status":"queued"}`, string(payload))
 }
 
 func TestConvertToOpenAIVideoUsesPersistedTaskState(t *testing.T) {

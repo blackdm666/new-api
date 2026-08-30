@@ -41,6 +41,7 @@ import { cn } from '@/lib/utils'
 import { LOG_TYPE_ENUM } from '../constants'
 import type { UsageLog } from '../data/schema'
 import { parseLogOther } from '../lib/format'
+import { TASK_MOBILE_SUMMARY_FIELDS } from '../lib/task-mobile-layout'
 import {
   getLogTypeConfig,
   isDisplayableLogType,
@@ -300,6 +301,7 @@ function MobileStreamTimingField({ log }: { log: UsageLog }) {
       />
       <StreamTpsCell
         isStream={log.is_stream}
+        isTask={other?.is_task === true}
         tokensPerSecond={tokensPerSecond}
         streamStatus={other?.stream_status}
         className='shrink-0'
@@ -378,7 +380,6 @@ function TaskLogsCard<TData>({
 
   const taskIdCell = cells.get('task_id')
   const statusCell = cells.get('status')
-  const submitTimeCell = cells.get('submit_time')
 
   return (
     <div className='space-y-2.5'>
@@ -388,34 +389,17 @@ function TaskLogsCard<TData>({
       </div>
 
       <div className='grid grid-cols-2 gap-1.5'>
-        <SummaryField label={t('Submit Time')} cell={submitTimeCell} />
-        <SummaryField label={t('User')} cell={cells.get('user')} primaryOnly />
-        {cells.has('channel') ? (
+        {TASK_MOBILE_SUMMARY_FIELDS.map((field) => (
           <SummaryField
-            label={t('Channel')}
-            cell={cells.get('channel')}
-            primaryOnly
+            key={field.id}
+            label={t(field.label)}
+            cell={cells.get(field.id)}
+            primaryOnly={field.primaryOnly}
           />
-        ) : null}
+        ))}
         <SummaryField
-          label={t('Model')}
-          cell={cells.get('model')}
-          primaryOnly
-        />
-        <SummaryField label={t('Cost')} cell={cells.get('cost')} primaryOnly />
-        <SummaryField
-          label={t('Duration')}
-          cell={cells.get('duration')}
-          primaryOnly
-        />
-        <SummaryField
-          label={t('Progress')}
-          cell={cells.get('progress')}
-          primaryOnly
-        />
-        <SummaryField
-          label={t('Result')}
-          cell={cells.get('details')}
+          label={t('Details')}
+          cell={cells.get('fail_reason')}
           className='col-span-2 bg-transparent px-0 py-0'
         />
       </div>

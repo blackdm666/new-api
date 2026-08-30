@@ -16,8 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { ViewIcon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import type { ColumnDef } from '@tanstack/react-table'
 /* eslint-disable react-refresh/only-export-components */
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
@@ -28,16 +31,58 @@ import { cn } from '@/lib/utils'
 
 import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
 import type { TaskLog } from '../../types'
+import { TaskDetailsDialog } from '../dialogs/task-details-dialog'
+import { PluginAuthorLink } from '../plugin-author-link'
+import { TaskArtifactsCell } from '../task-artifacts'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import { createDurationColumn, createProgressColumn } from './column-helpers'
-import {
-  TaskChannelCell,
-  TaskCostCell,
-  TaskDetailsCell,
-  TaskModelCell,
-} from './task-log-cells'
+import { TaskChannelCell, TaskCostCell, TaskModelCell } from './task-log-cells'
 
-export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
+function TaskDetailsCell(props: {
+  log: TaskLog
+  isAdmin: boolean
+  isRoot: boolean
+}) {
+  const { t } = useTranslation()
+  const [dialogOpen, setDialogOpen] = useState(false)
+
+  return (
+    <>
+      <div className='flex max-w-[220px] flex-col items-start gap-1'>
+        <button
+          type='button'
+          className='text-foreground inline-flex items-center gap-1 text-xs font-medium hover:underline'
+          onClick={() => setDialogOpen(true)}
+        >
+          <HugeiconsIcon
+            icon={ViewIcon}
+            className='size-3'
+            strokeWidth={2}
+            aria-hidden='true'
+          />
+          {t('View details')}
+        </button>
+        {props.log.fail_reason ? (
+          <span className='max-w-full truncate text-xs text-red-600 dark:text-red-400'>
+            {props.log.fail_reason}
+          </span>
+        ) : null}
+      </div>
+      <TaskDetailsDialog
+        log={props.log}
+        isAdmin={props.isAdmin}
+        isRoot={props.isRoot}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+      />
+    </>
+  )
+}
+
+export function useTaskLogsColumns(
+  isAdmin: boolean,
+  isRoot: boolean
+): ColumnDef<TaskLog>[] {
   const { t } = useTranslation()
   const columns: ColumnDef<TaskLog>[] = [
     {
@@ -69,7 +114,7 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
   if (isAdmin) {
     columns.push(
       {
-        id: 'channel',
+        id: 'channel_id',
         header: t('Channel'),
         accessorFn: (row) => row.channel_id,
         cell: ({ row }) => <TaskChannelCell log={row.original} />,
@@ -113,6 +158,35 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
                 {sensitiveVisible ? displayName : '••••'}
               </span>
             </button>
+          )
+        },
+      },
+      {
+        id: 'plugin',
+        header: t('Plugin'),
+        accessorFn: (row) => row.admin_info?.task_plugin?.key ?? '',
+        cell: ({ row }) => {
+          const plugin = row.original.admin_info?.task_plugin
+          if (!plugin) {
+            return <span className='text-muted-foreground/60 text-xs'>-</span>
+          }
+          return (
+            <div className='flex max-w-[170px] flex-col gap-0.5'>
+              <span className='truncate text-xs font-medium'>
+                {plugin.name || plugin.key}
+              </span>
+              <span className='text-muted-foreground truncate font-mono text-[11px]'>
+                {plugin.key}
+                {plugin.version ? ` @ ${plugin.version}` : ''}
+              </span>
+              {plugin.author ? (
+                <PluginAuthorLink
+                  author={plugin.author}
+                  showUrl
+                  className='text-muted-foreground text-[11px]'
+                />
+              ) : null}
+            </div>
           )
         },
       }
@@ -183,12 +257,27 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
     },
     createProgressColumn<TaskLog>({ headerLabel: t('Progress') }),
     {
-      id: 'details',
+      id: 'artifacts',
+      header: t('Artifacts'),
+      cell: ({ row }) => (
+        <TaskArtifactsCell key={row.original.task_id} log={row.original} />
+      ),
+      size: 120,
+      maxSize: 140,
+    },
+    {
+      accessorKey: 'fail_reason',
       header: t('Details'),
-      accessorFn: (row) => row.fail_reason,
-      cell: ({ row }) => <TaskDetailsCell log={row.original} />,
-      size: 200,
-      maxSize: 220,
+      cell: ({ row }) => (
+        <TaskDetailsCell
+          key={row.original.task_id}
+          log={row.original}
+          isAdmin={isAdmin}
+          isRoot={isRoot}
+        />
+      ),
+      size: 220,
+      maxSize: 240,
     }
   )
 

@@ -200,34 +200,34 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 	return channel.DoTaskApiRequest(a, c, info, requestBody)
 }
 
-func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (string, []byte, *dto.TaskError) {
+func (a *TaskAdaptor) ParseResponse(_ *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*channel.TaskSubmitResponse, *dto.TaskError) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
 	}
 	_ = resp.Body.Close()
 
 	var upstream upstreamResponse
 	if err := common.Unmarshal(responseBody, &upstream); err != nil {
-		return "", nil, service.TaskErrorWrapper(errors.Wrapf(err, "body: %s", responseBody), "unmarshal_response_body_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(errors.Wrapf(err, "body: %s", responseBody), "unmarshal_response_body_failed", http.StatusInternalServerError)
 	}
 	upstreamID := firstNonEmpty(upstream.RequestID, upstream.ID, upstream.TaskID)
 	if upstreamID == "" {
-		return "", nil, service.TaskErrorWrapper(fmt.Errorf("request_id is empty"), "invalid_response", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(fmt.Errorf("request_id is empty"), "invalid_response", http.StatusInternalServerError)
 	}
 
 	status := publicVideoStatus(upstream.Status)
 	if status == "unknown" {
 		status = "queued"
 	}
-	c.JSON(http.StatusOK, publicResponse{
+	clientResponse := publicResponse{
 		ID:       info.PublicTaskID,
 		Object:   "video",
 		Model:    info.OriginModelName,
 		Status:   status,
 		Progress: progressPercent(upstream.Progress),
-	})
-	return upstreamID, responseBody, nil
+	}
+	return &channel.TaskSubmitResponse{UpstreamTaskID: upstreamID, TaskData: responseBody, ClientResponse: clientResponse}, nil
 }
 
 func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy string) (*http.Response, error) {

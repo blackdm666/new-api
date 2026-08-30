@@ -44,7 +44,7 @@ func ExtractMultipartImage(c *gin.Context, info *relaycommon.RelayInfo) *VeoImag
 		mimeType = http.DetectContentType(fileBytes)
 	}
 
-	info.Action = constant.TaskActionGenerate
+	info.Action = constant.TaskActionImageToVideo
 	return &VeoImageInput{
 		BytesBase64Encoded: base64.StdEncoding.EncodeToString(fileBytes),
 		MimeType:           mimeType,

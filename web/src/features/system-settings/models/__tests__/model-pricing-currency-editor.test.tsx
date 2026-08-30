@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import i18next from 'i18next'
 import { createRef } from 'react'
-import { afterEach, beforeAll, describe, expect, test } from 'vitest'
+import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest'
 
 import {
   DEFAULT_CURRENCY_CONFIG,
@@ -30,6 +30,10 @@ import {
   ModelPricingEditorPanel,
   type ModelPricingEditorPanelHandle,
 } from '../model-pricing-sheet'
+
+vi.mock('@/features/pricing/hooks/use-pricing-data', () => ({
+  usePricingData: () => ({ models: [] }),
+}))
 
 describe('model pricing editor currency', () => {
   beforeAll(() => {

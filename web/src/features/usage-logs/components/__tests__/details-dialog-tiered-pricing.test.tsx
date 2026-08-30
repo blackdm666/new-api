@@ -57,6 +57,10 @@ vi.mock('@/features/pricing/components/dynamic-pricing-breakdown', () => ({
   ),
 }))
 
+vi.mock('@/features/pricing/hooks/use-pricing-data', () => ({
+  usePricingData: () => ({ models: [] }),
+}))
+
 describe('usage log tiered price table', () => {
   test('passes the effective logged group ratio to the price table', () => {
     const log = usageLogSchema.parse({

@@ -43,12 +43,12 @@ func TestTasksToDtoAddsAdminChannelName(t *testing.T) {
 	require.NoError(t, db.Create(&model.User{Id: 7, Username: "task-user"}).Error)
 	require.NoError(t, db.Create(&model.Channel{Id: 71, Name: "Vertex video channel"}).Error)
 
-	adminResult := tasksToDto([]*model.Task{{UserId: 7, ChannelId: 71}}, true)
+	adminResult := tasksToDto([]*model.Task{{UserId: 7, ChannelId: 71}}, true, common.RoleAdminUser)
 	require.Len(t, adminResult, 1)
 	assert.Equal(t, "task-user", adminResult[0].Username)
 	assert.Equal(t, "Vertex video channel", adminResult[0].ChannelName)
 
-	userResult := tasksToDto([]*model.Task{{UserId: 7, ChannelId: 71}}, false)
+	userResult := tasksToDto([]*model.Task{{UserId: 7, ChannelId: 71}}, false, common.RoleCommonUser)
 	require.Len(t, userResult, 1)
 	assert.Empty(t, userResult[0].Username)
 	assert.Empty(t, userResult[0].ChannelName)

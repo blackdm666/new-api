@@ -30,6 +30,7 @@ import {
   MailPlus,
   MessageSquare,
   PanelsTopLeft,
+  PlugZap,
   Radio,
   ReceiptText,
   ServerCog,
@@ -185,6 +186,12 @@ export function buildSidebarData(t: TFunction): SidebarData {
             title: t('System Info'),
             url: '/system-info',
             icon: ServerCog,
+            requiredRole: ROLE.SUPER_ADMIN,
+          },
+          {
+            title: t('Task Plugins'),
+            url: '/task-plugins',
+            icon: PlugZap,
             requiredRole: ROLE.SUPER_ADMIN,
           },
           {
