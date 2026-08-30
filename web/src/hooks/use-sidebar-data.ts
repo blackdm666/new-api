@@ -40,13 +40,23 @@ import {
   Users,
   Wallet,
 } from 'lucide-react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
-import { INFINITE_CANVAS_URL } from '@/lib/external-links'
+import { useStatus } from '@/hooks/use-status'
+import { INFINITE_CANVAS_NAME } from '@/lib/external-links'
+import {
+  DEFAULT_INFINITE_CANVAS_LINK,
+  parseHeaderNavModulesFromStatus,
+  type HeaderNavLink,
+} from '@/lib/nav-modules'
 import { ROLE } from '@/lib/roles'
 
-export function buildSidebarData(t: TFunction): SidebarData {
+export function buildSidebarData(
+  t: TFunction,
+  infiniteCanvas: HeaderNavLink = DEFAULT_INFINITE_CANVAS_LINK
+): SidebarData {
   return {
     navGroups: [
       {
@@ -54,8 +64,11 @@ export function buildSidebarData(t: TFunction): SidebarData {
         title: t('Chat'),
         items: [
           {
-            title: t('Infinite Canvas'),
-            url: INFINITE_CANVAS_URL,
+            title:
+              infiniteCanvas.name === INFINITE_CANVAS_NAME
+                ? t(INFINITE_CANVAS_NAME)
+                : infiniteCanvas.name,
+            url: infiniteCanvas.url,
             icon: PanelsTopLeft,
             external: true,
           },
@@ -215,5 +228,12 @@ export function buildSidebarData(t: TFunction): SidebarData {
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
-  return buildSidebarData(t)
+  const { status } = useStatus()
+  const infiniteCanvas = useMemo(
+    () =>
+      parseHeaderNavModulesFromStatus(status as Record<string, unknown> | null)
+        .infiniteCanvas,
+    [status]
+  )
+  return buildSidebarData(t, infiniteCanvas)
 }

@@ -16,6 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import {
+  DEFAULT_INFINITE_CANVAS_LINK,
+  parseHeaderNavLink,
+  type HeaderNavLink,
+} from '@/lib/nav-modules'
+
 export type HeaderNavAccessConfig = {
   enabled: boolean
   requireAuth: boolean
@@ -26,9 +32,10 @@ export type HeaderNavModulesConfig = {
   console: boolean
   pricing: HeaderNavAccessConfig
   rankings: HeaderNavAccessConfig
+  infiniteCanvas: HeaderNavLink
   docs: boolean
   about: boolean
-  [key: string]: boolean | HeaderNavAccessConfig
+  [key: string]: boolean | HeaderNavAccessConfig | HeaderNavLink
 }
 
 export type SidebarSectionConfig = {
@@ -49,6 +56,7 @@ export const HEADER_NAV_DEFAULT: HeaderNavModulesConfig = {
     enabled: true,
     requireAuth: false,
   },
+  infiniteCanvas: { ...DEFAULT_INFINITE_CANVAS_LINK },
   docs: true,
   about: true,
 }
@@ -98,6 +106,7 @@ const cloneHeaderNavDefault = (): HeaderNavModulesConfig => ({
   ...HEADER_NAV_DEFAULT,
   pricing: { ...HEADER_NAV_DEFAULT.pricing },
   rankings: { ...HEADER_NAV_DEFAULT.rankings },
+  infiniteCanvas: { ...HEADER_NAV_DEFAULT.infiniteCanvas },
 })
 
 const parseAccessModule = (
@@ -146,6 +155,7 @@ export function parseHeaderNavModules(
       ...base,
       pricing: { ...base.pricing },
       rankings: { ...base.rankings },
+      infiniteCanvas: { ...base.infiniteCanvas },
     }
 
     Object.entries(parsed).forEach(([key, raw]) => {
@@ -155,6 +165,10 @@ export function parseHeaderNavModules(
       }
       if (key === 'rankings') {
         result.rankings = parseAccessModule(raw, base.rankings)
+        return
+      }
+      if (key === 'infiniteCanvas') {
+        result.infiniteCanvas = parseHeaderNavLink(raw, base.infiniteCanvas)
         return
       }
 

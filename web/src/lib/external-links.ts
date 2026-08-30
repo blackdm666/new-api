@@ -16,4 +16,5 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+export const INFINITE_CANVAS_NAME = 'Infinite Canvas'
 export const INFINITE_CANVAS_URL = 'https://img-pro.88api.ai'

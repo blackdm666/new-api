@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
+import type { TFunction } from 'i18next'
 import { useEffect, useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -27,9 +28,11 @@ import {
   FormControl,
   FormDescription,
   FormField,
+  FormItem,
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 
 import {
@@ -48,18 +51,42 @@ import {
   serializeHeaderNavModules,
 } from './config'
 
-const headerNavSchema = z.object({
-  home: z.boolean(),
-  console: z.boolean(),
-  pricingEnabled: z.boolean(),
-  pricingRequireAuth: z.boolean(),
-  rankingsEnabled: z.boolean(),
-  rankingsRequireAuth: z.boolean(),
-  docs: z.boolean(),
-  about: z.boolean(),
-})
+const createHeaderNavSchema = (t: TFunction) =>
+  z.object({
+    home: z.boolean(),
+    console: z.boolean(),
+    pricingEnabled: z.boolean(),
+    pricingRequireAuth: z.boolean(),
+    rankingsEnabled: z.boolean(),
+    rankingsRequireAuth: z.boolean(),
+    infiniteCanvasName: z
+      .string()
+      .trim()
+      .min(1, t('Button name is required'))
+      .max(80),
+    infiniteCanvasUrl: z
+      .string()
+      .trim()
+      .min(1, t('URL is required'))
+      .max(2048)
+      .refine((value) => {
+        try {
+          const url = new URL(value)
+          return url.protocol === 'http:' || url.protocol === 'https:'
+        } catch {
+          return false
+        }
+      }, t('Must be a valid URL')),
+    docs: z.boolean(),
+    about: z.boolean(),
+  })
 
-type HeaderNavFormValues = z.infer<typeof headerNavSchema>
+type HeaderNavFormValues = z.infer<ReturnType<typeof createHeaderNavSchema>>
+type HeaderNavBooleanField = {
+  [Key in keyof HeaderNavFormValues]: HeaderNavFormValues[Key] extends boolean
+    ? Key
+    : never
+}[keyof HeaderNavFormValues]
 
 type HeaderNavigationSectionProps = {
   config: HeaderNavModulesConfig
@@ -89,6 +116,8 @@ const toFormValues = (config: HeaderNavModulesConfig): HeaderNavFormValues => ({
     config.rankings?.requireAuth === undefined
       ? HEADER_NAV_DEFAULT.rankings.requireAuth
       : Boolean(config.rankings.requireAuth),
+  infiniteCanvasName: config.infiniteCanvas.name,
+  infiniteCanvasUrl: config.infiniteCanvas.url,
   docs:
     config.docs === undefined ? HEADER_NAV_DEFAULT.docs : Boolean(config.docs),
   about:
@@ -103,6 +132,7 @@ export function HeaderNavigationSection({
 }: HeaderNavigationSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const headerNavSchema = useMemo(() => createHeaderNavSchema(t), [t])
   const formDefaults = useMemo(() => toFormValues(config), [config])
 
   const form = useForm<HeaderNavFormValues>({
@@ -131,6 +161,10 @@ export function HeaderNavigationSection({
         enabled: values.rankingsEnabled,
         requireAuth: values.rankingsRequireAuth,
       },
+      infiniteCanvas: {
+        name: values.infiniteCanvasName.trim(),
+        url: values.infiniteCanvasUrl.trim(),
+      },
     }
 
     const serialized = serializeHeaderNavModules(payload)
@@ -149,7 +183,7 @@ export function HeaderNavigationSection({
   }
 
   const simpleModules: Array<{
-    key: keyof HeaderNavFormValues
+    key: HeaderNavBooleanField
     title: string
     description: string
   }> = [
@@ -176,8 +210,8 @@ export function HeaderNavigationSection({
   ]
 
   const accessModules: Array<{
-    enabledKey: keyof HeaderNavFormValues
-    requireAuthKey: keyof HeaderNavFormValues
+    enabledKey: HeaderNavBooleanField
+    requireAuthKey: HeaderNavBooleanField
     requireAuthDependsOn: 'pricingEnabled' | 'rankingsEnabled'
     title: string
     description: string
@@ -243,6 +277,56 @@ export function HeaderNavigationSection({
               />
             ))}
           </div>
+
+          <SettingsControlGroup>
+            <div className='space-y-0.5 py-1'>
+              <FormLabel>{t('Infinite Canvas button')}</FormLabel>
+              <FormDescription>
+                {t(
+                  'Customize the button shown in the top navigation and console sidebar.'
+                )}
+              </FormDescription>
+            </div>
+            <SettingsControlChildren className='grid gap-4 py-2 lg:grid-cols-2'>
+              <FormField
+                control={form.control}
+                name='infiniteCanvasName'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Button name')}</FormLabel>
+                    <FormControl>
+                      <Input {...field} autoComplete='off' />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='infiniteCanvasUrl'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Button URL')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type='url'
+                        inputMode='url'
+                        autoComplete='url'
+                        placeholder='https://example.com'
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Enter a complete http:// or https:// destination URL.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </SettingsControlChildren>
+          </SettingsControlGroup>
 
           <div className='grid gap-4 lg:grid-cols-2'>
             {accessModules.map((module) => (

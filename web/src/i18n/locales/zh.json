@@ -6511,6 +6511,12 @@
     "Versions": "版本",
     "View the complete details for this task": "查看此任务的完整详情",
     "When disabled, all uploaded custom plugins are ignored and every platform falls back to its built-in factory plugin.": "关闭后，所有上传的自定义插件都会被忽略，每个平台均回落到内置的出厂插件。",
-    "When disabled, the entire task plugin system stops serving, including factory and custom plugins.": "关闭后，整个任务插件系统停止服务，包括出厂插件和自定义插件。"
+    "When disabled, the entire task plugin system stops serving, including factory and custom plugins.": "关闭后，整个任务插件系统停止服务，包括出厂插件和自定义插件。",
+    "Button name": "按钮名称",
+    "Button name is required": "按钮名称不能为空",
+    "Button URL": "按钮跳转 URL",
+    "Infinite Canvas button": "无限画布按钮",
+    "Customize the button shown in the top navigation and console sidebar.": "自定义显示在顶部导航和控制台侧边栏中的按钮。",
+    "Enter a complete http:// or https:// destination URL.": "请输入完整的 http:// 或 https:// 跳转 URL。"
   }
 }
