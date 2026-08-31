@@ -186,6 +186,89 @@ func TestDashboardTaskArtifactsReturnsLegacyCapabilityWithoutUpstreamURL(t *test
 	assert.NotContains(t, recorder.Body.String(), "signature=secret")
 }
 
+func TestDashboardTaskArtifactsReturnsTrustedDirectURL(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	task.Action = constant.TaskActionTextToVideo
+	task.PrivateData.ResultURL = "https://official-media.example/video.mp4?signature=short-lived"
+	require.NoError(t, model.DB.Save(task).Error)
+
+	previousPreparePreviewURL := prepareTaskVideoPreviewURL
+	prepareTaskVideoPreviewURL = func(context.Context, *model.Task) (string, int64, error) {
+		return task.PrivateData.ResultURL, 0, nil
+	}
+	t.Cleanup(func() { prepareTaskVideoPreviewURL = previousPreparePreviewURL })
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", task.UserId)
+	c.Set("role", common.RoleCommonUser)
+	c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/task/"+task.TaskID+"/artifacts", nil)
+
+	GetDashboardTaskArtifacts(c)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool `json:"success"`
+		Data    struct {
+			LegacyContentURL string `json:"legacy_content_url"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	assert.Equal(t, task.PrivateData.ResultURL, response.Data.LegacyContentURL)
+}
+
+func TestDashboardTaskArtifactsKeepsCapabilityForCachedVideo(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	previousSecret := common.CryptoSecret
+	previousPublicAddress := system_setting.TaskPublicAddress
+	common.CryptoSecret = "cached-controller-task-artifact-secret"
+	system_setting.TaskPublicAddress = "https://gateway.example"
+	t.Cleanup(func() {
+		common.CryptoSecret = previousSecret
+		system_setting.TaskPublicAddress = previousPublicAddress
+	})
+	task.Action = constant.TaskActionTextToVideo
+	task.PrivateData.ResultURL = "https://gateway.example/v1/videos/" + task.TaskID + "/content"
+	task.PrivateData.ResultStorageKey = "task-videos/cached.mp4"
+	task.PrivateData.ResultStorageKind = "s3"
+	require.NoError(t, model.DB.Save(task).Error)
+
+	previousPreparePreviewURL := prepareTaskVideoPreviewURL
+	prepareTaskVideoPreviewURL = func(context.Context, *model.Task) (string, int64, error) {
+		t.Fatal("cached videos must not probe or expose their storage URL")
+		return "", 0, nil
+	}
+	t.Cleanup(func() { prepareTaskVideoPreviewURL = previousPreparePreviewURL })
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", task.UserId)
+	c.Set("role", common.RoleCommonUser)
+	c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/task/"+task.TaskID+"/artifacts", nil)
+
+	GetDashboardTaskArtifacts(c)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool `json:"success"`
+		Data    struct {
+			LegacyContentURL string `json:"legacy_content_url"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	contentURL, err := url.Parse(response.Data.LegacyContentURL)
+	require.NoError(t, err)
+	assert.Equal(t, "/v1/tasks/"+task.TaskID+"/artifacts/video/content", contentURL.Path)
+	assert.True(t, service.VerifyTaskArtifactAccess(
+		contentURL.Query().Get(service.TaskArtifactAccessQueryParameter),
+		task.TaskID,
+		"video",
+	))
+}
+
 func TestTaskArtifactAccessRequiresActiveOwner(t *testing.T) {
 	task := setupGenericTaskTest(t)
 	task.Action = constant.TaskActionTextToVideo

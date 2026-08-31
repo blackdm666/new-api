@@ -102,6 +102,45 @@ function parseContentUrl(value: unknown): string {
   }
 }
 
+function parseLegacyContentUrl(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new TaskArtifactApiError('invalid_content_url')
+  }
+
+  const contentUrl = value.trim()
+  if (
+    contentUrl.length === 0 ||
+    contentUrl !== value ||
+    contentUrl.includes('#') ||
+    !contentUrl.startsWith('https://')
+  ) {
+    throw new TaskArtifactApiError('invalid_content_url')
+  }
+  for (const character of contentUrl) {
+    const codePoint = character.codePointAt(0) ?? 0
+    if (codePoint <= 0x1f || codePoint === 0x7f || character === '\\') {
+      throw new TaskArtifactApiError('invalid_content_url')
+    }
+  }
+
+  try {
+    const url = new URL(contentUrl)
+    if (
+      url.protocol !== 'https:' ||
+      url.hostname.length === 0 ||
+      url.username ||
+      url.password ||
+      url.hash
+    ) {
+      throw new TaskArtifactApiError('invalid_content_url')
+    }
+    return contentUrl
+  } catch (error) {
+    if (error instanceof TaskArtifactApiError) throw error
+    throw new TaskArtifactApiError('invalid_content_url')
+  }
+}
+
 function parseTaskArtifact(value: unknown): TaskArtifact {
   if (!isRecord(value)) {
     throw new TaskArtifactApiError('invalid_artifact')
@@ -161,7 +200,7 @@ export function parseTaskArtifactsResponse(
   }
   const projection: TaskArtifactProjection = { artifacts }
   if (response.data?.legacy_content_url != null) {
-    projection.legacyContentUrl = parseContentUrl(
+    projection.legacyContentUrl = parseLegacyContentUrl(
       response.data.legacy_content_url
     )
   }

@@ -264,16 +264,40 @@ describe('task artifact projection', () => {
       )
     }
 
-    assert.throws(
-      () =>
-        parseTaskArtifactsResponse({
-          success: true,
-          data: {
-            artifacts: [],
-            legacy_content_url: `https://media.example.com/v1/videos/task-public/content?access=${artifactAccessToken}`,
-          },
-        }),
-      TaskArtifactApiError
+    for (const legacyContentUrl of [
+      'http://media.example.com/video.mp4',
+      'javascript:alert(1)',
+      'data:video/mp4;base64,AAAA',
+      '//media.example.com/video.mp4',
+      'https://user:secret@media.example.com/video.mp4',
+      'https://media.example.com/video.mp4#fragment',
+      ' https://media.example.com/video.mp4',
+      'https://media.example.com/video.mp4\n',
+    ]) {
+      assert.throws(
+        () =>
+          parseTaskArtifactsResponse({
+            success: true,
+            data: {
+              artifacts: [],
+              legacy_content_url: legacyContentUrl,
+            },
+          }),
+        TaskArtifactApiError
+      )
+    }
+
+    const directProjection = parseTaskArtifactsResponse({
+      success: true,
+      data: {
+        artifacts: [],
+        legacy_content_url:
+          'https://official-media.example/video.mp4?signature=short-lived',
+      },
+    })
+    assert.equal(
+      directProjection.legacyContentUrl,
+      'https://official-media.example/video.mp4?signature=short-lived'
     )
   })
 })

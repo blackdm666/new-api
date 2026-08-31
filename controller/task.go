@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,6 +34,7 @@ var (
 	errTaskArtifactPluginUnavailable = errors.New("task artifact plugin unavailable")
 	errTaskArtifactPlugin            = errors.New("task artifact plugin error")
 	getTaskVideoPreviewURL           = service.GetTaskVideoPreviewURL
+	prepareTaskVideoPreviewURL       = service.PrepareTaskVideoPreviewURL
 )
 
 func GetTask(c *gin.Context) {
@@ -113,7 +115,7 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 	}
 	response := gin.H{"task_id": task.TaskID, "artifacts": items}
 	if legacyVideoAvailable(task) {
-		legacyContentURL, buildErr := service.BuildTaskArtifactContentURL(task.TaskID, "video")
+		legacyContentURL, buildErr := buildLegacyTaskContentURL(c, task)
 		if buildErr != nil {
 			writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact content URL")
 			return
@@ -125,6 +127,39 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 		return
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+// buildLegacyTaskContentURL preserves the pre-plugin delivery policy. Videos
+// already copied to private storage keep the same-origin capability route,
+// while allow-listed, anonymously readable official media URLs are returned
+// directly so their bytes do not transit the NewAPI server.
+func buildLegacyTaskContentURL(c *gin.Context, task *model.Task) (string, error) {
+	capabilityURL, err := service.BuildTaskArtifactContentURL(task.TaskID, "video")
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(task.PrivateData.ResultStorageKey) != "" {
+		return capabilityURL, nil
+	}
+
+	previewURL, _, prepareErr := prepareTaskVideoPreviewURL(c.Request.Context(), task)
+	if prepareErr != nil || strings.TrimSpace(task.PrivateData.ResultStorageKey) != "" {
+		return capabilityURL, nil
+	}
+	if isSafeDirectTaskVideoURL(previewURL) {
+		return strings.TrimSpace(previewURL), nil
+	}
+	return capabilityURL, nil
+}
+
+func isSafeDirectTaskVideoURL(rawURL string) bool {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" || len(rawURL) > 64<<10 || strings.ContainsAny(rawURL, "\r\n\\") {
+		return false
+	}
+	parsed, err := url.Parse(rawURL)
+	return err == nil && parsed != nil && parsed.Scheme == "https" &&
+		parsed.Host != "" && parsed.Hostname() != "" && parsed.User == nil && parsed.Fragment == ""
 }
 
 func projectTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, error) {
