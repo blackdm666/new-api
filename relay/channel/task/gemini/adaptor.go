@@ -285,17 +285,22 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		return ti, nil
 	}
 
-	ti.Status = model.TaskStatusSuccess
-	ti.Progress = "100%"
-
 	ti.TaskID = taskcommon.EncodeLocalTaskID(op.Name)
-
 	if len(op.Response.GenerateVideoResponse.GeneratedVideos) > 0 {
 		if uri := op.Response.GenerateVideoResponse.GeneratedVideos[0].Video.URI; uri != "" {
 			ti.RemoteUrl = uri
+			ti.Status = model.TaskStatusSuccess
+			ti.Progress = "100%"
+			return ti, nil
 		}
 	}
 
+	filteredCount := op.Response.RaiMediaFilteredCount + op.Response.GenerateVideoResponse.RaiMediaFilteredCount
+	filteredReasons := append([]string{}, op.Response.RaiMediaFilteredReasons...)
+	filteredReasons = append(filteredReasons, op.Response.GenerateVideoResponse.RaiMediaFilteredReasons...)
+	ti.Status = model.TaskStatusFailure
+	ti.Progress = "100%"
+	ti.Reason = taskcommon.GoogleVideoFailureReason(filteredCount, filteredReasons)
 	return ti, nil
 }
 

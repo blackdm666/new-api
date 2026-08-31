@@ -98,3 +98,16 @@ func TestConvertToOpenAIVideoRecoversLegacyInteractionFailure(t *testing.T) {
 	assert.Equal(t, "content_blocked", video.Error.Code)
 	assert.Equal(t, "[content_blocked] Responsible AI blocked the output.", video.Error.Message)
 }
+
+func TestParseTaskResultTreatsFilteredTerminalResponseAsFailure(t *testing.T) {
+	result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{
+		"name":"projects/project/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/filtered",
+		"done":true,
+		"response":{"raiMediaFilteredCount":1,"raiMediaFilteredReasons":["1 video was filtered; support code: 15236754"]}
+	}`))
+
+	require.NoError(t, err)
+	assert.Equal(t, model.TaskStatusFailure, result.Status)
+	assert.Equal(t, "100%", result.Progress)
+	assert.Contains(t, result.Reason, "15236754")
+}

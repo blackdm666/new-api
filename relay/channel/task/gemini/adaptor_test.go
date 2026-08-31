@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/model"
 	omnitask "github.com/QuantumNous/new-api/relay/channel/task/omni"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
@@ -56,4 +57,17 @@ func TestOmniResolvedAliasRunsReferenceVideoValidation(t *testing.T) {
 	assert.Equal(t, "invalid_omni_request", taskErr.Code)
 	assert.Contains(t, taskErr.Message, "invalid base64 video data")
 	assert.Equal(t, omnitask.ModelGeminiOmniFlashPreview, info.UpstreamModelName)
+}
+
+func TestParseTaskResultTreatsFilteredTerminalResponseAsFailure(t *testing.T) {
+	result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{
+		"name":"models/veo-3.1/operations/filtered",
+		"done":true,
+		"response":{"generateVideoResponse":{"raiMediaFilteredCount":1,"raiMediaFilteredReasons":["blocked by Google safety policy; support code: 123"]}}
+	}`))
+
+	require.NoError(t, err)
+	assert.Equal(t, model.TaskStatusFailure, result.Status)
+	assert.Equal(t, "100%", result.Progress)
+	assert.Contains(t, result.Reason, "support code: 123")
 }

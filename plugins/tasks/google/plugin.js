@@ -210,8 +210,22 @@ export function buildQueryRequest(ctx) {
 export function parseTaskResult(ctx, body) {
   if (body.error && body.error.message) return { status: "FAILURE", progress: "100%", reason: body.error.message };
   if (!body.done) return { status: "IN_PROGRESS", progress: "50%" };
-  const videos = ((body.response || {}).generateVideoResponse || {}).generatedVideos || [];
+  const response = body.response || {};
+  const generated = response.generateVideoResponse || {};
+  const videos = generated.generatedVideos || [];
   const uri = videos.length && videos[0].video ? videos[0].video.uri || "" : "";
+  if (!trimmed(uri)) {
+    const reasons = (response.raiMediaFilteredReasons || []).concat(generated.raiMediaFilteredReasons || []).filter(function (reason) {
+      return trimmed(reason);
+    });
+    const filteredCount = Number(response.raiMediaFilteredCount || 0) + Number(generated.raiMediaFilteredCount || 0);
+    const reason = reasons.length
+      ? reasons.join("; ")
+      : filteredCount > 0
+        ? "Google filtered " + filteredCount + " generated video(s) under its usage guidelines"
+        : "Google video generation completed without video output";
+    return { status: "FAILURE", progress: "100%", reason: reason };
+  }
   return { taskId: utils.base64URL(body.name || ""), status: "SUCCESS", progress: "100%", remoteUrl: uri };
 }
 

@@ -41,18 +41,20 @@ type operationVideo struct {
 	MimeType           string `json:"mimeType"`
 	BytesBase64Encoded string `json:"bytesBase64Encoded"`
 	Encoding           string `json:"encoding"`
+	URI                string `json:"uri"`
 }
 
 type operationResponse struct {
 	Name     string `json:"name"`
 	Done     bool   `json:"done"`
 	Response struct {
-		Type                  string           `json:"@type"`
-		RaiMediaFilteredCount int              `json:"raiMediaFilteredCount"`
-		Videos                []operationVideo `json:"videos"`
-		BytesBase64Encoded    string           `json:"bytesBase64Encoded"`
-		Encoding              string           `json:"encoding"`
-		Video                 string           `json:"video"`
+		Type                    string           `json:"@type"`
+		RaiMediaFilteredCount   int              `json:"raiMediaFilteredCount"`
+		RaiMediaFilteredReasons []string         `json:"raiMediaFilteredReasons"`
+		Videos                  []operationVideo `json:"videos"`
+		BytesBase64Encoded      string           `json:"bytesBase64Encoded"`
+		Encoding                string           `json:"encoding"`
+		Video                   string           `json:"video"`
 	} `json:"response"`
 	Error struct {
 		Message string `json:"message"`
@@ -356,10 +358,14 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		ti.Progress = "50%"
 		return ti, nil
 	}
-	ti.Status = model.TaskStatusSuccess
 	ti.Progress = "100%"
 	if len(op.Response.Videos) > 0 {
 		v0 := op.Response.Videos[0]
+		if strings.TrimSpace(v0.URI) != "" {
+			ti.Url = strings.TrimSpace(v0.URI)
+			ti.Status = model.TaskStatusSuccess
+			return ti, nil
+		}
 		if v0.BytesBase64Encoded != "" {
 			mime := strings.TrimSpace(v0.MimeType)
 			if mime == "" {
@@ -374,6 +380,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 				}
 			}
 			ti.Url = "data:" + mime + ";base64," + v0.BytesBase64Encoded
+			ti.Status = model.TaskStatusSuccess
 			return ti, nil
 		}
 	}
@@ -387,6 +394,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 			mime = "video/" + enc
 		}
 		ti.Url = "data:" + mime + ";base64," + op.Response.BytesBase64Encoded
+		ti.Status = model.TaskStatusSuccess
 		return ti, nil
 	}
 	if op.Response.Video != "" { // some variants use `video` as base64
@@ -399,8 +407,11 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 			mime = "video/" + enc
 		}
 		ti.Url = "data:" + mime + ";base64," + op.Response.Video
+		ti.Status = model.TaskStatusSuccess
 		return ti, nil
 	}
+	ti.Status = model.TaskStatusFailure
+	ti.Reason = taskcommon.GoogleVideoFailureReason(op.Response.RaiMediaFilteredCount, op.Response.RaiMediaFilteredReasons)
 	return ti, nil
 }
 

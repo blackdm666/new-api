@@ -226,7 +226,20 @@ export function buildQueryRequest(ctx) {
 export function parseTaskResult(ctx, body) {
   if (body.error && body.error.message) return { status: "FAILURE", progress: "100%", reason: body.error.message };
   if (!body.done) return { status: "IN_PROGRESS", progress: "50%" };
-  const url = dataVideo(body.response || {});
+  const response = body.response || {};
+  const url = dataVideo(response);
+  if (!trimmed(url)) {
+    const reasons = (response.raiMediaFilteredReasons || []).filter(function (reason) {
+      return trimmed(reason);
+    });
+    const filteredCount = Number(response.raiMediaFilteredCount || 0);
+    const reason = reasons.length
+      ? reasons.join("; ")
+      : filteredCount > 0
+        ? "Google filtered " + filteredCount + " generated video(s) under its usage guidelines"
+        : "Google video generation completed without video output";
+    return { status: "FAILURE", progress: "100%", reason: reason };
+  }
   return { status: "SUCCESS", progress: "100%", url: url, remoteUrl: url };
 }
 export function listArtifacts() {
