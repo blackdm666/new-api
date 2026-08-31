@@ -72,7 +72,7 @@ export function SignUpForm({
   const { status } = useStatus()
   const {
     isTurnstileEnabled,
-    turnstileSiteKey,
+    turnstileConfig,
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
@@ -373,7 +373,7 @@ export function SignUpForm({
           <div className='mt-2'>
             <Turnstile
               key={turnstileWidgetKey}
-              siteKey={turnstileSiteKey}
+              {...turnstileConfig}
               onVerify={setTurnstileToken}
               onExpire={clearTurnstileToken}
             />

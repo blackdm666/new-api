@@ -51,6 +51,7 @@ func GetStatus(c *gin.Context) {
 
 	passkeySetting := system_setting.GetPasskeySettings()
 	legalSetting := system_setting.GetLegalSettings()
+	turnstileConfig := common.CurrentTurnstileConfig()
 
 	data := gin.H{
 		"version":                     common.Version,
@@ -72,8 +73,12 @@ func GetStatus(c *gin.Context) {
 		"wechat_qrcode":               common.WeChatAccountQRCodeImageURL,
 		"wechat_login":                common.WeChatAuthEnabled,
 		"server_address":              system_setting.ServerAddress,
-		"turnstile_check":             common.TurnstileCheckEnabled,
-		"turnstile_site_key":          common.TurnstileSiteKey,
+		"turnstile_check":             turnstileConfig.Enabled,
+		"turnstile_provider":          turnstileConfig.Provider,
+		"turnstile_site_key":          turnstileConfig.SiteKey,
+		"turnstile_widget_script_url": turnstileConfig.WidgetScriptURL,
+		"turnstile_widget_endpoint":   turnstileConfig.WidgetEndpoint,
+		"turnstile_action":            turnstileConfig.Action,
 		"docs_link":                   operation_setting.GetGeneralSetting().DocsLink,
 		"quota_per_unit":              common.QuotaPerUnit,
 		// 兼容旧前端：保留 display_in_currency，同时提供新的 quota_display_type

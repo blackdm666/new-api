@@ -91,7 +91,7 @@ export function UserAuthForm({
       false) === true
   const {
     isTurnstileEnabled,
-    turnstileSiteKey,
+    turnstileConfig,
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
@@ -436,7 +436,7 @@ export function UserAuthForm({
           <div className='mt-2'>
             <Turnstile
               key={turnstileWidgetKey}
-              siteKey={turnstileSiteKey}
+              {...turnstileConfig}
               onVerify={setTurnstileToken}
               onExpire={clearTurnstileToken}
             />

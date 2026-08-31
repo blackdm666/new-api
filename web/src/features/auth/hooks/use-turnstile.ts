@@ -20,6 +20,10 @@ import i18next from 'i18next'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
+import {
+  getTurnstileClientConfig,
+  isTurnstileClientConfigured,
+} from '@/components/turnstile-utils'
 import { useStatus } from '@/hooks/use-status'
 
 /**
@@ -29,11 +33,11 @@ export function useTurnstile() {
   const { status, loading: isStatusLoading } = useStatus()
   const [turnstileToken, setTurnstileToken] = useState('')
 
-  const isTurnstileEnabled = !!(
-    status?.turnstile_check && status?.turnstile_site_key
+  const turnstileConfig = getTurnstileClientConfig(status)
+  const isTurnstileEnabled = Boolean(
+    status?.turnstile_check && isTurnstileClientConfigured(turnstileConfig)
   )
   const isStatusReady = !isStatusLoading && Boolean(status)
-  const turnstileSiteKey = status?.turnstile_site_key || ''
 
   /**
    * Validate if turnstile is ready when required
@@ -56,7 +60,7 @@ export function useTurnstile() {
 
   return {
     isTurnstileEnabled,
-    turnstileSiteKey,
+    turnstileConfig,
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,

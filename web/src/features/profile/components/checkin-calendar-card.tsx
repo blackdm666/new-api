@@ -31,6 +31,7 @@ import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { Turnstile } from '@/components/turnstile'
+import type { TurnstileClientConfig } from '@/components/turnstile-utils'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { IconBadge } from '@/components/ui/icon-badge'
@@ -51,13 +52,13 @@ import type { CheckinRecord } from '../types'
 interface CheckinCalendarCardProps {
   checkinEnabled: boolean
   turnstileEnabled: boolean
-  turnstileSiteKey: string
+  turnstileConfig: TurnstileClientConfig
 }
 
 export function CheckinCalendarCard({
   checkinEnabled,
   turnstileEnabled,
-  turnstileSiteKey,
+  turnstileConfig,
 }: CheckinCalendarCardProps) {
   const { t } = useTranslation()
   const [currentMonth, setCurrentMonth] = useState(() => {
@@ -151,10 +152,6 @@ export function CheckinCalendarCard({
           setTurnstileModalVisible(false)
         } else {
           if (!token && shouldTriggerTurnstile(res.message)) {
-            if (!turnstileSiteKey) {
-              toast.error(t('Turnstile is enabled but site key is empty.'))
-              return
-            }
             setTurnstileModalVisible(true)
             return
           }
@@ -169,7 +166,7 @@ export function CheckinCalendarCard({
         setCheckinLoading(false)
       }
     },
-    [refetch, shouldTriggerTurnstile, t, turnstileSiteKey]
+    [refetch, shouldTriggerTurnstile, t]
   )
 
   const handlePrevMonth = () => {
@@ -270,7 +267,7 @@ export function CheckinCalendarCard({
         <div className='flex justify-center py-4'>
           <Turnstile
             key={turnstileWidgetKey}
-            siteKey={turnstileSiteKey}
+            {...turnstileConfig}
             onVerify={(token) => {
               doCheckin(token)
             }}

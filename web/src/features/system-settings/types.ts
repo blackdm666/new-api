@@ -39,6 +39,18 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type BotProtectionSettingsPayload = {
+  enabled: boolean
+  provider: 'cloudflare' | 'custom'
+  site_key: string
+  secret_key: string
+  widget_script_url: string
+  widget_endpoint: string
+  verify_url: string
+  action: string
+  clear_secret: boolean
+}
+
 export type SMTPTestResponse = {
   success: boolean
   message: string
@@ -207,8 +219,14 @@ export type AuthSettings = {
   WeChatServerToken: string
   WeChatAccountQRCodeImageURL: string
   TurnstileCheckEnabled: boolean
+  TurnstileProvider: 'cloudflare' | 'custom'
   TurnstileSiteKey: string
   TurnstileSecretKey: string
+  TurnstileSecretKeyConfigured: boolean
+  TurnstileWidgetScriptURL: string
+  TurnstileWidgetEndpoint: string
+  TurnstileVerifyURL: string
+  TurnstileAction: string
   'passkey.enabled': boolean
   'passkey.rp_display_name': string
   'passkey.rp_id': string

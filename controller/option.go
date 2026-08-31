@@ -101,6 +101,17 @@ func buildCompletionRatioMetaValue(optionValues map[string]string) string {
 	return string(jsonBytes)
 }
 
+func isSensitiveOptionKey(key string) bool {
+	if key == "TurnstileSiteKey" {
+		return false
+	}
+	return strings.HasSuffix(key, "Token") ||
+		strings.HasSuffix(key, "Secret") ||
+		strings.HasSuffix(key, "Key") ||
+		strings.HasSuffix(key, "secret") ||
+		strings.HasSuffix(key, "api_key")
+}
+
 func GetOptions(c *gin.Context) {
 	var options []*model.Option
 	optionValues := make(map[string]string)
@@ -110,12 +121,7 @@ func GetOptions(c *gin.Context) {
 			continue
 		}
 		value := common.Interface2String(v)
-		isSensitiveKey := strings.HasSuffix(k, "Token") ||
-			strings.HasSuffix(k, "Secret") ||
-			strings.HasSuffix(k, "Key") ||
-			strings.HasSuffix(k, "secret") ||
-			strings.HasSuffix(k, "api_key")
-		if isSensitiveKey {
+		if isSensitiveOptionKey(k) {
 			continue
 		}
 		options = append(options, &model.Option{
@@ -133,6 +139,10 @@ func GetOptions(c *gin.Context) {
 	options = append(options, &model.Option{
 		Key:   "CompletionRatioMeta",
 		Value: buildCompletionRatioMetaValue(optionValues),
+	})
+	options = append(options, &model.Option{
+		Key:   "TurnstileSecretKeyConfigured",
+		Value: strconv.FormatBool(common.CurrentTurnstileConfig().SecretKey != ""),
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -242,10 +252,12 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "TurnstileCheckEnabled":
-		if option.Value == "true" && common.TurnstileSiteKey == "" {
+		config := common.CurrentTurnstileConfig()
+		config.Enabled = option.Value == "true"
+		if err := common.ValidateTurnstileConfig(config); err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
-				"message": "无法启用 Turnstile 校验，请先填入 Turnstile 校验相关配置信息！",
+				"message": err.Error(),
 			})
 
 			return

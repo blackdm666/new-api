@@ -2,8 +2,10 @@ package model
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -24,6 +26,8 @@ type Option struct {
 	Value string `json:"value"`
 }
 
+var turnstileOptionUpdateMutex sync.Mutex
+
 func AllOption() ([]*Option, error) {
 	var options []*Option
 	var err error
@@ -32,6 +36,7 @@ func AllOption() ([]*Option, error) {
 }
 
 func InitOptionMap() {
+	turnstileConfig := common.CurrentTurnstileConfig()
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap = make(map[string]string)
 
@@ -47,7 +52,7 @@ func InitOptionMap() {
 	common.OptionMap["LinuxDOOAuthEnabled"] = strconv.FormatBool(common.LinuxDOOAuthEnabled)
 	common.OptionMap["TelegramOAuthEnabled"] = strconv.FormatBool(common.TelegramOAuthEnabled)
 	common.OptionMap["WeChatAuthEnabled"] = strconv.FormatBool(common.WeChatAuthEnabled)
-	common.OptionMap["TurnstileCheckEnabled"] = strconv.FormatBool(common.TurnstileCheckEnabled)
+	common.OptionMap["TurnstileCheckEnabled"] = strconv.FormatBool(turnstileConfig.Enabled)
 	common.OptionMap["RegisterEnabled"] = strconv.FormatBool(common.RegisterEnabled)
 	common.OptionMap["AutomaticDisableChannelEnabled"] = strconv.FormatBool(common.AutomaticDisableChannelEnabled)
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
@@ -231,8 +236,13 @@ func InitOptionMap() {
 	common.OptionMap["WeChatServerAddress"] = ""
 	common.OptionMap["WeChatServerToken"] = ""
 	common.OptionMap["WeChatAccountQRCodeImageURL"] = ""
-	common.OptionMap["TurnstileSiteKey"] = ""
-	common.OptionMap["TurnstileSecretKey"] = ""
+	common.OptionMap["TurnstileSiteKey"] = turnstileConfig.SiteKey
+	common.OptionMap["TurnstileSecretKey"] = turnstileConfig.SecretKey
+	common.OptionMap["TurnstileProvider"] = turnstileConfig.Provider
+	common.OptionMap["TurnstileWidgetScriptURL"] = turnstileConfig.WidgetScriptURL
+	common.OptionMap["TurnstileWidgetEndpoint"] = turnstileConfig.WidgetEndpoint
+	common.OptionMap["TurnstileVerifyURL"] = turnstileConfig.VerifyURL
+	common.OptionMap["TurnstileAction"] = turnstileConfig.Action
 	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
 	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
@@ -291,11 +301,70 @@ func InitOptionMap() {
 
 func loadOptionsFromDatabase() {
 	options, _ := AllOption()
+	loadedKeys := make(map[string]struct{}, len(options))
+	turnstileValues := make(map[string]string)
 	for _, option := range options {
+		loadedKeys[option.Key] = struct{}{}
+		if isTurnstileOptionKey(option.Key) {
+			turnstileValues[option.Key] = option.Value
+			continue
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
 		}
+	}
+	applyTurnstileOptionValues(turnstileValues)
+	legacyValues := applyLegacyTurnstileCompatibility(loadedKeys)
+	if len(legacyValues) > 0 {
+		if err := UpdateOptionsBulk(legacyValues); err != nil {
+			common.SysLog("failed to persist legacy Turnstile configuration: " + err.Error())
+		}
+	}
+}
+
+func applyLegacyTurnstileCompatibility(loadedKeys map[string]struct{}) map[string]string {
+	if _, explicitlyConfigured := loadedKeys["TurnstileProvider"]; explicitlyConfigured {
+		return nil
+	}
+	config := common.CurrentTurnstileConfig()
+	legacyEndpoint := strings.TrimRight(strings.TrimSpace(config.SiteKey), "/")
+	if common.ValidateTurnstileHTTPURL("legacy Turnstile endpoint", legacyEndpoint, true) != nil {
+		return nil
+	}
+
+	config.Provider = common.TurnstileProviderCustom
+	// Keep the legacy endpoint in SiteKey so an image-only rollback can still
+	// render the self-hosted widget with the old URL-based integration.
+	config.SiteKey = legacyEndpoint
+	config.WidgetEndpoint = legacyEndpoint
+	config.WidgetScriptURL = legacyEndpoint + "/widget.js"
+	legacyVerifyURL := strings.TrimSpace(os.Getenv("TURNSTILE_VERIFY_URL"))
+	if common.ValidateTurnstileHTTPURL("legacy Turnstile verification URL", legacyVerifyURL, true) != nil {
+		legacyVerifyURL = legacyEndpoint + "/turnstile/v0/siteverify"
+	}
+	config.VerifyURL = legacyVerifyURL
+	if strings.TrimSpace(config.Action) == "" {
+		config.Action = "register"
+	}
+	common.ApplyTurnstileConfig(config)
+
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap["TurnstileProvider"] = config.Provider
+	common.OptionMap["TurnstileSiteKey"] = config.SiteKey
+	common.OptionMap["TurnstileWidgetEndpoint"] = config.WidgetEndpoint
+	common.OptionMap["TurnstileWidgetScriptURL"] = config.WidgetScriptURL
+	common.OptionMap["TurnstileVerifyURL"] = config.VerifyURL
+	common.OptionMap["TurnstileAction"] = config.Action
+	common.OptionMapRWMutex.Unlock()
+
+	return map[string]string{
+		"TurnstileProvider":        config.Provider,
+		"TurnstileSiteKey":         config.SiteKey,
+		"TurnstileWidgetEndpoint":  config.WidgetEndpoint,
+		"TurnstileWidgetScriptURL": config.WidgetScriptURL,
+		"TurnstileVerifyURL":       config.VerifyURL,
+		"TurnstileAction":          config.Action,
 	}
 }
 
@@ -340,10 +409,31 @@ func validateOptionValue(key string, value string) error {
 	if key == setting.EmailDeliveryRulesOptionKey {
 		return setting.ValidateEmailDeliveryRulesJSONString(value)
 	}
+	switch key {
+	case "TurnstileCheckEnabled":
+		if value != "true" && value != "false" {
+			return fmt.Errorf("TurnstileCheckEnabled must be true or false")
+		}
+	case "TurnstileProvider":
+		provider := strings.ToLower(strings.TrimSpace(value))
+		if provider != common.TurnstileProviderCloudflare && provider != common.TurnstileProviderCustom {
+			return fmt.Errorf("unsupported human verification provider %q", value)
+		}
+	case "TurnstileWidgetScriptURL", "TurnstileWidgetEndpoint", "TurnstileVerifyURL":
+		return common.ValidateTurnstileHTTPURL(key, value, false)
+	case "TurnstileAction":
+		if len(strings.TrimSpace(value)) > 128 {
+			return fmt.Errorf("TurnstileAction must not exceed 128 characters")
+		}
+	}
 	return nil
 }
 
 func validateRelatedOptionValues(values map[string]string) error {
+	if err := validateTurnstileOptionValues(values); err != nil {
+		return err
+	}
+
 	_, advancedChanged := values[AffiliateUpgradeInviteesThresholdOptionKey]
 	_, goldChanged := values[AffiliateGoldUpgradeInviteesThresholdOptionKey]
 	_, advancedAmountChanged := values[AffiliateUpgradeTopUpAmountThresholdOptionKey]
@@ -369,6 +459,79 @@ func validateRelatedOptionValues(values map[string]string) error {
 		goldAmountCents, _ = strconv.ParseInt(raw, 10, 64)
 	}
 	return ValidateAffiliateUpgradeThresholds(advancedThreshold, goldThreshold, advancedAmountCents, goldAmountCents)
+}
+
+func validateTurnstileOptionValues(values map[string]string) error {
+	config, changed := resolveTurnstileOptionValues(values)
+	if !changed {
+		return nil
+	}
+	return common.ValidateTurnstileConfig(config)
+}
+
+func resolveTurnstileOptionValues(values map[string]string) (common.TurnstileConfig, bool) {
+	config := common.CurrentTurnstileConfig()
+	changed := false
+	for key, value := range values {
+		switch key {
+		case "TurnstileCheckEnabled":
+			config.Enabled = value == "true"
+			changed = true
+		case "TurnstileProvider":
+			config.Provider = strings.ToLower(strings.TrimSpace(value))
+			changed = true
+		case "TurnstileSiteKey":
+			config.SiteKey = strings.TrimSpace(value)
+			changed = true
+		case "TurnstileSecretKey":
+			config.SecretKey = strings.TrimSpace(value)
+			changed = true
+		case "TurnstileWidgetScriptURL":
+			config.WidgetScriptURL = strings.TrimSpace(value)
+			changed = true
+		case "TurnstileWidgetEndpoint":
+			config.WidgetEndpoint = strings.TrimRight(strings.TrimSpace(value), "/")
+			changed = true
+		case "TurnstileVerifyURL":
+			config.VerifyURL = strings.TrimSpace(value)
+			changed = true
+		case "TurnstileAction":
+			config.Action = strings.TrimSpace(value)
+			changed = true
+		}
+	}
+	return config, changed
+}
+
+func isTurnstileOptionKey(key string) bool {
+	switch key {
+	case "TurnstileCheckEnabled",
+		"TurnstileProvider",
+		"TurnstileSiteKey",
+		"TurnstileSecretKey",
+		"TurnstileWidgetScriptURL",
+		"TurnstileWidgetEndpoint",
+		"TurnstileVerifyURL",
+		"TurnstileAction":
+		return true
+	default:
+		return false
+	}
+}
+
+func applyTurnstileOptionValues(values map[string]string) {
+	config, changed := resolveTurnstileOptionValues(values)
+	if !changed {
+		return
+	}
+	common.ApplyTurnstileConfig(config)
+	common.OptionMapRWMutex.Lock()
+	for key, value := range values {
+		if isTurnstileOptionKey(key) {
+			common.OptionMap[key] = value
+		}
+	}
+	common.OptionMapRWMutex.Unlock()
 }
 
 func isSMTPBackupConfigurationOption(key string) bool {
@@ -432,6 +595,10 @@ func withSMTPBackupDeactivated(values map[string]string) map[string]string {
 }
 
 func UpdateOption(key string, value string) error {
+	if isTurnstileOptionKey(key) {
+		turnstileOptionUpdateMutex.Lock()
+		defer turnstileOptionUpdateMutex.Unlock()
+	}
 	if isSMTPBackupConfigurationOption(key) || smtpProfileEnabledOption(key) != "" {
 		return UpdateOptionsBulk(map[string]string{key: value})
 	}
@@ -469,6 +636,17 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
+	turnstileChanged := false
+	for key := range values {
+		if isTurnstileOptionKey(key) {
+			turnstileChanged = true
+			break
+		}
+	}
+	if turnstileChanged {
+		turnstileOptionUpdateMutex.Lock()
+		defer turnstileOptionUpdateMutex.Unlock()
+	}
 	values = withSMTPBackupDeactivated(values)
 	for key, value := range values {
 		if err := validateOptionValue(key, value); err != nil {
@@ -494,7 +672,11 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if err != nil {
 		return err
 	}
+	applyTurnstileOptionValues(values)
 	for k, v := range values {
+		if isTurnstileOptionKey(k) {
+			continue
+		}
 		if err := updateOptionMap(k, v); err != nil {
 			return err
 		}
@@ -512,6 +694,9 @@ func updateOptionMap(key string, value string) (err error) {
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value
+	if common.UpdateTurnstileConfigValue(key, value) {
+		return nil
+	}
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
 	if handleConfigUpdate(key, value) {
@@ -549,8 +734,6 @@ func updateOptionMap(key string, value string) (err error) {
 			common.WeChatAuthEnabled = boolValue
 		case "TelegramOAuthEnabled":
 			common.TelegramOAuthEnabled = boolValue
-		case "TurnstileCheckEnabled":
-			common.TurnstileCheckEnabled = boolValue
 		case "RegisterEnabled":
 			common.RegisterEnabled = boolValue
 		case "EmailDomainRestrictionEnabled":
@@ -925,10 +1108,6 @@ func updateOptionMap(key string, value string) (err error) {
 		common.TelegramBotToken = value
 	case "TelegramBotName":
 		common.TelegramBotName = value
-	case "TurnstileSiteKey":
-		common.TurnstileSiteKey = value
-	case "TurnstileSecretKey":
-		common.TurnstileSecretKey = value
 	case "QuotaForNewUser":
 		common.QuotaForNewUser, _ = strconv.Atoi(value)
 	case "QuotaForInviter":

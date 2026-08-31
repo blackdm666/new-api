@@ -278,6 +278,7 @@ func SetApiRouter(router *gin.Engine) {
 			// tabs can save safely until they are refreshed.
 			optionRoute.POST("", controller.UpdateOption)
 			optionRoute.PUT("/", controller.UpdateOption)
+			optionRoute.PUT("/bot-protection", controller.UpdateBotProtectionSettings)
 			optionRoute.POST("/smtp-test", middleware.CriticalRateLimit(), controller.TestSMTPEmail)
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)

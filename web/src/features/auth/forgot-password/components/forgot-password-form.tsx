@@ -54,7 +54,7 @@ export function ForgotPasswordForm({
 
   const {
     isTurnstileEnabled,
-    turnstileSiteKey,
+    turnstileConfig,
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
@@ -137,7 +137,7 @@ export function ForgotPasswordForm({
           <div className='mt-2'>
             <Turnstile
               key={turnstileWidgetKey}
-              siteKey={turnstileSiteKey}
+              {...turnstileConfig}
               onVerify={setTurnstileToken}
               onExpire={resetTurnstile}
             />

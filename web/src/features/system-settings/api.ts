@@ -23,6 +23,7 @@ import { UserFacingError } from '@/lib/user-facing-error'
 
 import type {
   ConfirmPaymentComplianceResponse,
+  BotProtectionSettingsPayload,
   FetchUpstreamRatiosRequest,
   InvoiceSettingsPayload,
   InvoiceSettingsResponse,
@@ -44,6 +45,16 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function updateBotProtectionSettings(
+  request: BotProtectionSettingsPayload
+) {
+  const res = await api.put<UpdateOptionResponse>(
+    '/api/option/bot-protection',
+    request
+  )
   return res.data
 }
 
