@@ -1169,8 +1169,9 @@ function AutomationDialog(props: {
             <Field label={t('Wait after registration (hours)')}>
               <Input
                 type='number'
-                min={1}
+                min={0.5}
                 max={8760}
+                step={0.5}
                 aria-label={t('Wait after registration (hours)')}
                 value={triggerConfig.registration_wait_hours ?? 24}
                 onChange={(event) =>
@@ -1882,9 +1883,11 @@ function validAutomationTriggerConfig(
   config: MarketingAutomationTriggerConfig
 ) {
   if (scene === 'registration_no_first_call') {
+    const registrationWaitHours = Number(config.registration_wait_hours)
     return (
-      Number(config.registration_wait_hours) >= 1 &&
-      Number(config.registration_wait_hours) <= 8760 &&
+      registrationWaitHours >= 0.5 &&
+      registrationWaitHours <= 8760 &&
+      Number.isInteger(registrationWaitHours * 2) &&
       Number(config.max_sends_per_user) >= 1 &&
       Number(config.max_sends_per_user) <= 10 &&
       Number(config.repeat_interval_days) >= 1 &&

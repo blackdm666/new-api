@@ -658,7 +658,7 @@ func automationAudienceRule(scene string, triggerConfig model.MarketingAutomatio
 	switch scene {
 	case model.MarketingSceneRegistration:
 		return model.MarketingAudienceRule{
-			CreatedBefore:   now - int64(triggerConfig.RegistrationWaitHours)*3600,
+			CreatedBefore:   now - int64(triggerConfig.RegistrationWaitHours*3600),
 			RequestCountMax: &zero,
 		}
 	case model.MarketingSceneSingleTopUp:

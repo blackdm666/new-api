@@ -37,6 +37,9 @@ func TestAutomationAudienceRulesUseFirstCallAndAffiliateActivitySignals(t *testi
 	require.NotNil(t, registration.RequestCountMax)
 	assert.Zero(t, *registration.RequestCountMax)
 
+	halfHourRegistration := automationAudienceRule(model.MarketingSceneRegistration, model.MarketingAutomationTriggerConfig{RegistrationWaitHours: 0.5}, now)
+	assert.Equal(t, now-30*60, halfHourRegistration.CreatedBefore)
+
 	affiliate := automationAudienceRule(model.MarketingSceneAffiliate, model.MarketingAutomationTriggerConfig{ActiveWithinDays: 30, MinRequestCount: 10, MinTopUpCount: 1}, now)
 	assert.True(t, affiliate.RequireAffiliateEnabled)
 	assert.Equal(t, now-30*86400, affiliate.LastAPIUseAfter)
