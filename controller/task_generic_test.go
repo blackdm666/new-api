@@ -286,6 +286,41 @@ func TestLegacyVideoArtifactContentUsesGetResultURL(t *testing.T) {
 	assert.Equal(t, "bytes 0-3/4", recorder.Header().Get("Content-Range"))
 }
 
+func TestLegacyVideoArtifactContentRedirectsCachedResult(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	task.Action = constant.TaskActionTextToVideo
+	task.PrivateData.ResultURL = "https://gateway.example/v1/videos/" + task.TaskID + "/content"
+	task.PrivateData.ResultStorageKey = "tasks/legacy/video.mp4"
+	task.PrivateData.ResultStorageKind = "s3"
+	require.NoError(t, model.DB.Save(task).Error)
+
+	previousPreviewURL := getTaskVideoPreviewURL
+	getTaskVideoPreviewURL = func(context.Context, *model.Task) (string, bool, error) {
+		return "https://storage.example/video.mp4?signature=short-lived", true, nil
+	}
+	t.Cleanup(func() { getTaskVideoPreviewURL = previousPreviewURL })
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set(middleware.TaskArtifactAccessContextKey, true)
+	c.Params = gin.Params{
+		{Key: "key", Value: task.TaskID},
+		{Key: "artifact_key", Value: "video"},
+	}
+	c.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/v1/tasks/"+task.TaskID+"/artifacts/video/content",
+		nil,
+	)
+	c.Request.Header.Set("Range", "bytes=0-")
+
+	TaskArtifactContent(c)
+
+	assert.Equal(t, http.StatusTemporaryRedirect, recorder.Code)
+	assert.Equal(t, "private, no-store", recorder.Header().Get("Cache-Control"))
+	assert.Equal(t, "https://storage.example/video.mp4?signature=short-lived", recorder.Header().Get("Location"))
+}
+
 func TestDisabledArtifactStorePreservesPluginUpstreamContent(t *testing.T) {
 	task := setupGenericTaskTest(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

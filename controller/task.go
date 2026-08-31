@@ -32,6 +32,7 @@ var (
 	taskArtifactKeyPattern           = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$`)
 	errTaskArtifactPluginUnavailable = errors.New("task artifact plugin unavailable")
 	errTaskArtifactPlugin            = errors.New("task artifact plugin error")
+	getTaskVideoPreviewURL           = service.GetTaskVideoPreviewURL
 )
 
 func GetTask(c *gin.Context) {
@@ -298,6 +299,18 @@ func TaskArtifactContent(c *gin.Context) {
 	if !taskHasPluginExecution(task) {
 		if artifactKey != "video" || !legacyVideoAvailable(task) {
 			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
+			return
+		}
+		if previewURL, cached, previewErr := getTaskVideoPreviewURL(c.Request.Context(), task); cached {
+			if previewErr != nil || strings.TrimSpace(previewURL) == "" {
+				writeTaskMediaProxyError(c, &taskMediaProxyError{
+					status: http.StatusBadGateway, code: "artifact_upstream_error",
+					message: "Failed to open cached artifact content", err: previewErr,
+				})
+				return
+			}
+			c.Header("Cache-Control", "private, no-store")
+			c.Redirect(http.StatusTemporaryRedirect, previewURL)
 			return
 		}
 		descriptor := &relaychannel.TaskContentRequest{
