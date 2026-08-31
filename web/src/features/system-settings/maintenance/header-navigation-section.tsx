@@ -59,6 +59,7 @@ const createHeaderNavSchema = (t: TFunction) =>
     pricingRequireAuth: z.boolean(),
     rankingsEnabled: z.boolean(),
     rankingsRequireAuth: z.boolean(),
+    infiniteCanvasEnabled: z.boolean(),
     infiniteCanvasName: z
       .string()
       .trim()
@@ -116,6 +117,7 @@ const toFormValues = (config: HeaderNavModulesConfig): HeaderNavFormValues => ({
     config.rankings?.requireAuth === undefined
       ? HEADER_NAV_DEFAULT.rankings.requireAuth
       : Boolean(config.rankings.requireAuth),
+  infiniteCanvasEnabled: config.infiniteCanvas.enabled,
   infiniteCanvasName: config.infiniteCanvas.name,
   infiniteCanvasUrl: config.infiniteCanvas.url,
   docs:
@@ -162,6 +164,7 @@ export function HeaderNavigationSection({
         requireAuth: values.rankingsRequireAuth,
       },
       infiniteCanvas: {
+        enabled: values.infiniteCanvasEnabled,
         name: values.infiniteCanvasName.trim(),
         url: values.infiniteCanvasUrl.trim(),
       },
@@ -279,15 +282,30 @@ export function HeaderNavigationSection({
           </div>
 
           <SettingsControlGroup>
-            <div className='space-y-0.5 py-1'>
-              <FormLabel>{t('Infinite Canvas button')}</FormLabel>
-              <FormDescription>
-                {t(
-                  'Customize the button shown in the top navigation and console sidebar.'
-                )}
-              </FormDescription>
-            </div>
-            <SettingsControlChildren className='grid gap-4 py-2 lg:grid-cols-2'>
+            <FormField
+              control={form.control}
+              name='infiniteCanvasEnabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Infinite Canvas button')}</FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Customize the button shown in the top navigation and console sidebar.'
+                      )}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </SettingsSwitchItem>
+              )}
+            />
+            <SettingsControlChildren className='grid gap-4 lg:grid-cols-2'>
               <FormField
                 control={form.control}
                 name='infiniteCanvasName'
@@ -295,7 +313,11 @@ export function HeaderNavigationSection({
                   <FormItem>
                     <FormLabel>{t('Button name')}</FormLabel>
                     <FormControl>
-                      <Input {...field} autoComplete='off' />
+                      <Input
+                        {...field}
+                        autoComplete='off'
+                        disabled={!form.watch('infiniteCanvasEnabled')}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -314,6 +336,7 @@ export function HeaderNavigationSection({
                         inputMode='url'
                         autoComplete='url'
                         placeholder='https://example.com'
+                        disabled={!form.watch('infiniteCanvasEnabled')}
                       />
                     </FormControl>
                     <FormDescription>

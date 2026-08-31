@@ -22,6 +22,7 @@ import { INFINITE_CANVAS_NAME, INFINITE_CANVAS_URL } from '@/lib/external-links'
 export type ModuleAccess = { enabled: boolean; requireAuth: boolean }
 
 export type HeaderNavLink = {
+  enabled: boolean
   name: string
   url: string
 }
@@ -40,6 +41,7 @@ export type HeaderNavModules = {
 }
 
 export const DEFAULT_INFINITE_CANVAS_LINK: HeaderNavLink = {
+  enabled: true,
   name: INFINITE_CANVAS_NAME,
   url: INFINITE_CANVAS_URL,
 }
@@ -90,6 +92,7 @@ export function parseHeaderNavLink(
     }
   }
   return {
+    enabled: parseHeaderNavBoolean(record.enabled, fallback.enabled),
     name: name || fallback.name,
     url,
   }

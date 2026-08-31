@@ -37,6 +37,7 @@ test('places Infinite Canvas immediately after Model Square', () => {
       pricing: { enabled: true, requireAuth: false },
       rankings: { enabled: true, requireAuth: false },
       infiniteCanvas: {
+        enabled: true,
         name: 'Infinite Canvas',
         url: INFINITE_CANVAS_URL,
       },
@@ -83,6 +84,38 @@ test('uses the backend Infinite Canvas name and URL in both navigation entries',
   assert.ok(sidebarCanvas && 'url' in sidebarCanvas)
   assert.equal(sidebarCanvas.title, '创作工作台')
   assert.equal(sidebarCanvas.url, 'https://canvas.example.com/workspace')
+})
+
+test('hides Infinite Canvas from both navigation entries when disabled', () => {
+  const modules = parseHeaderNavModules(
+    JSON.stringify({
+      infiniteCanvas: {
+        enabled: false,
+        name: '创作工作台',
+        url: 'https://canvas.example.com/workspace',
+      },
+    })
+  )
+
+  const links = buildTopNavLinks({ modules, isAuthed: true, t: translate })
+  assert.equal(
+    links.some((link) => link.href === 'https://canvas.example.com/workspace'),
+    false
+  )
+
+  const sidebar = buildSidebarData(translate, modules.infiniteCanvas)
+  const chatItems = sidebar.navGroups.find(
+    (group) => group.id === 'chat'
+  )?.items
+  assert.ok(chatItems)
+  assert.equal(
+    chatItems.some(
+      (item) =>
+        'url' in item && item.url === 'https://canvas.example.com/workspace'
+    ),
+    false
+  )
+  assert.equal(chatItems[0]?.title, 'Playground')
 })
 
 test('places Infinite Canvas immediately before Playground', () => {

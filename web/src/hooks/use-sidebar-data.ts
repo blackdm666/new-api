@@ -63,15 +63,19 @@ export function buildSidebarData(
         id: 'chat',
         title: t('Chat'),
         items: [
-          {
-            title:
-              infiniteCanvas.name === INFINITE_CANVAS_NAME
-                ? t(INFINITE_CANVAS_NAME)
-                : infiniteCanvas.name,
-            url: infiniteCanvas.url,
-            icon: PanelsTopLeft,
-            external: true,
-          },
+          ...(infiniteCanvas.enabled
+            ? [
+                {
+                  title:
+                    infiniteCanvas.name === INFINITE_CANVAS_NAME
+                      ? t(INFINITE_CANVAS_NAME)
+                      : infiniteCanvas.name,
+                  url: infiniteCanvas.url,
+                  icon: PanelsTopLeft,
+                  external: true,
+                },
+              ]
+            : []),
           {
             title: t('Playground'),
             url: '/playground',

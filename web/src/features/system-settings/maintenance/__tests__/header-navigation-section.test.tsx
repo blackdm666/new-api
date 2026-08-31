@@ -55,7 +55,7 @@ describe('header navigation Infinite Canvas settings', () => {
     const nameInput = screen.getByRole('textbox', { name: 'Button name' })
     const urlInput = screen.getByRole('textbox', { name: 'Button URL' })
     expect(nameInput).toHaveValue('Infinite Canvas')
-    expect(urlInput).toHaveValue('https://img-pro.88api.ai')
+    expect(urlInput).toHaveValue('https://canvas.best/')
 
     fireEvent.change(nameInput, { target: { value: '创作工作台' } })
     fireEvent.change(urlInput, {
@@ -70,6 +70,7 @@ describe('header navigation Infinite Canvas settings', () => {
     }
     expect(request.key).toBe('HeaderNavModules')
     expect(JSON.parse(request.value).infiniteCanvas).toEqual({
+      enabled: true,
       name: '创作工作台',
       url: 'https://canvas.example.com/workspace',
     })
@@ -90,5 +91,25 @@ describe('header navigation Infinite Canvas settings', () => {
 
     expect(await screen.findByText('Must be a valid URL')).toBeInTheDocument()
     expect(mutateAsync).not.toHaveBeenCalled()
+  })
+
+  test('disables the button and its detail fields together', async () => {
+    render(
+      <HeaderNavigationSection
+        config={HEADER_NAV_DEFAULT}
+        initialSerialized={serializeHeaderNavModules(HEADER_NAV_DEFAULT)}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Infinite Canvas button' })
+    )
+    expect(screen.getByRole('textbox', { name: 'Button name' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: 'Button URL' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Save navigation' }))
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    const request = mutateAsync.mock.calls[0]?.[0] as { value: string }
+    expect(JSON.parse(request.value).infiniteCanvas.enabled).toBe(false)
   })
 })

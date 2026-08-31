@@ -38,6 +38,7 @@ describe('header navigation Infinite Canvas config', () => {
     const config = parseHeaderNavModules(
       JSON.stringify({
         infiniteCanvas: {
+          enabled: true,
           name: '  创作工作台  ',
           url: '  https://canvas.example.com/workspace  ',
         },
@@ -45,6 +46,7 @@ describe('header navigation Infinite Canvas config', () => {
     )
 
     assert.deepEqual(config.infiniteCanvas, {
+      enabled: true,
       name: '创作工作台',
       url: 'https://canvas.example.com/workspace',
     })
@@ -70,8 +72,27 @@ describe('header navigation Infinite Canvas config', () => {
     )
 
     assert.deepEqual(config.infiniteCanvas, {
+      enabled: true,
       name: '安全入口',
       url: HEADER_NAV_DEFAULT.infiniteCanvas.url,
     })
+  })
+
+  test('round-trips a disabled Infinite Canvas button', () => {
+    const config = parseHeaderNavModules(
+      JSON.stringify({
+        infiniteCanvas: {
+          enabled: false,
+          name: '创作工作台',
+          url: 'https://canvas.example.com',
+        },
+      })
+    )
+
+    assert.equal(config.infiniteCanvas.enabled, false)
+    assert.equal(
+      JSON.parse(serializeHeaderNavModules(config)).infiniteCanvas.enabled,
+      false
+    )
   })
 })

@@ -71,14 +71,16 @@ export function buildTopNavLinks(
 
   const infiniteCanvas =
     options.modules.infiniteCanvas ?? DEFAULT_INFINITE_CANVAS_LINK
-  links.push({
-    title:
-      infiniteCanvas.name === INFINITE_CANVAS_NAME
-        ? options.t(INFINITE_CANVAS_NAME)
-        : infiniteCanvas.name,
-    href: infiniteCanvas.url,
-    external: true,
-  })
+  if (infiniteCanvas.enabled) {
+    links.push({
+      title:
+        infiniteCanvas.name === INFINITE_CANVAS_NAME
+          ? options.t(INFINITE_CANVAS_NAME)
+          : infiniteCanvas.name,
+      href: infiniteCanvas.url,
+      external: true,
+    })
+  }
 
   const rankings = options.modules.rankings
   if (rankings && typeof rankings === 'object' && rankings.enabled) {
