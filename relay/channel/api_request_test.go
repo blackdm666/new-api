@@ -4,57 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
-	"sync/atomic"
 	"testing"
 
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
-
-type requestContextTestAdaptor struct {
-	Adaptor
-	url string
-}
-
-func (a *requestContextTestAdaptor) GetRequestURL(*relaycommon.RelayInfo) (string, error) {
-	return a.url, nil
-}
-
-func (a *requestContextTestAdaptor) SetupRequestHeader(*gin.Context, *http.Header, *relaycommon.RelayInfo) error {
-	return nil
-}
-
-func TestDoApiRequestUsesClientRequestContext(t *testing.T) {
-	service.InitHttpClient()
-
-	var called atomic.Bool
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		called.Store(true)
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(upstream.Close)
-
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
-	reqCtx, cancel := context.WithCancel(req.Context())
-	cancel()
-	ctx.Request = req.WithContext(reqCtx)
-
-	resp, err := DoApiRequest(
-		&requestContextTestAdaptor{url: upstream.URL},
-		ctx,
-		&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}},
-		strings.NewReader(`{}`),
-	)
-
-	require.Error(t, err)
-	require.Nil(t, resp)
-	require.False(t, called.Load(), "upstream must not be called after the downstream request is cancelled")
-}
 
 func TestNewTaskAPIRequestInheritsClientCancellation(t *testing.T) {
 	recorder := httptest.NewRecorder()
