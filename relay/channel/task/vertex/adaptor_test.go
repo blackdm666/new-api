@@ -100,7 +100,7 @@ func TestConvertToOpenAIVideoRecoversLegacyInteractionFailure(t *testing.T) {
 }
 
 func TestParseTaskResultTreatsFilteredTerminalResponseAsFailure(t *testing.T) {
-	result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{
+	result, err := (&TaskAdaptor{}).ParseTaskResult(nil, nil, []byte(`{
 		"name":"projects/project/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/filtered",
 		"done":true,
 		"response":{"raiMediaFilteredCount":1,"raiMediaFilteredReasons":["1 video was filtered; support code: 15236754"]}

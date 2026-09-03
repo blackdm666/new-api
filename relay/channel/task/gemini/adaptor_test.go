@@ -60,7 +60,7 @@ func TestOmniResolvedAliasRunsReferenceVideoValidation(t *testing.T) {
 }
 
 func TestParseTaskResultTreatsFilteredTerminalResponseAsFailure(t *testing.T) {
-	result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{
+	result, err := (&TaskAdaptor{}).ParseTaskResult(nil, nil, []byte(`{
 		"name":"models/veo-3.1/operations/filtered",
 		"done":true,
 		"response":{"generateVideoResponse":{"raiMediaFilteredCount":1,"raiMediaFilteredReasons":["blocked by Google safety policy; support code: 123"]}}

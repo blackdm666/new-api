@@ -137,12 +137,12 @@ func TestEstimateBillingUsesGrokVideoDuration(t *testing.T) {
 
 func TestParseTaskResultHandlesSub2APIStatesAndRelativeContentURL(t *testing.T) {
 	adaptor := &TaskAdaptor{baseURL: "https://api.apikey.fun"}
-	pending, err := adaptor.ParseTaskResult([]byte(`{"request_id":"upstream-1","status":"pending","progress":75}`))
+	pending, err := adaptor.ParseTaskResult(nil, nil, []byte(`{"request_id":"upstream-1","status":"pending","progress":75}`))
 	require.NoError(t, err)
 	assert.Equal(t, model.TaskStatusInProgress, pending.Status)
 	assert.Equal(t, "75%", pending.Progress)
 
-	done, err := adaptor.ParseTaskResult([]byte(`{"request_id":"upstream-1","status":"done","progress":100,"video":{"url":"/v1/videos/upstream-1/content","duration":5}}`))
+	done, err := adaptor.ParseTaskResult(nil, nil, []byte(`{"request_id":"upstream-1","status":"done","progress":100,"video":{"url":"/v1/videos/upstream-1/content","duration":5}}`))
 	require.NoError(t, err)
 	assert.Equal(t, model.TaskStatusSuccess, done.Status)
 	assert.Equal(t, "https://api.apikey.fun/v1/videos/upstream-1/content", done.Url)

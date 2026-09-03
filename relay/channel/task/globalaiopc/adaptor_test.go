@@ -219,7 +219,7 @@ func TestFetchTaskUsesDigitalHumanQueryPath(t *testing.T) {
 	}))
 	defer server.Close()
 
-	resp, err := (&TaskAdaptor{}).FetchTask(server.URL, "key", map[string]any{"task_id": "dh_123", "action": taskActionDigitalHuman}, "")
+	resp, err := (&TaskAdaptor{}).FetchTask(server.URL, "key", &model.Task{TaskID: "dh_123", Action: taskActionDigitalHuman}, "")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, "/v1/result/dh_123", gotPath)
@@ -328,7 +328,7 @@ func TestParseTaskResultCompleted(t *testing.T) {
 		"video_url": "https://example.com/video.mp4"
 	}`)
 
-	info, err := (&TaskAdaptor{}).ParseTaskResult(body)
+	info, err := (&TaskAdaptor{}).ParseTaskResult(nil, nil, body)
 
 	require.NoError(t, err)
 	assert.Equal(t, "mcp_example_123456", info.TaskID)
@@ -369,7 +369,7 @@ func TestParseTaskResultFailed(t *testing.T) {
 		"error": {"message": "policy rejected"}
 	}`)
 
-	info, err := (&TaskAdaptor{}).ParseTaskResult(body)
+	info, err := (&TaskAdaptor{}).ParseTaskResult(nil, nil, body)
 
 	require.NoError(t, err)
 	assert.EqualValues(t, model.TaskStatusFailure, info.Status)

@@ -214,17 +214,17 @@ func (a *TaskAdaptor) ParseResponse(_ *gin.Context, resp *http.Response, info *r
 	return &channel.TaskSubmitResponse{UpstreamTaskID: upstream.ID, TaskData: responseBody, ClientResponse: ov}, nil
 }
 
-func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
-	taskID, ok := body["task_id"].(string)
-	if !ok || strings.TrimSpace(taskID) == "" {
+func (a *TaskAdaptor) FetchTask(baseUrl, key string, task *model.Task, proxy string) (*http.Response, error) {
+	if task == nil || strings.TrimSpace(task.GetUpstreamTaskID()) == "" {
 		return nil, fmt.Errorf("invalid task_id")
 	}
+	taskID := task.GetUpstreamTaskID()
 	baseUrl = strings.TrimRight(baseUrl, "/")
 	if baseUrl == "" {
 		baseUrl = defaultBaseURL
 	}
 	queryPath := modelCenterQueryPath
-	if action, _ := body["action"].(string); action == taskActionDigitalHuman {
+	if constant.NormalizeTaskAction(task.Action) == taskActionDigitalHuman {
 		queryPath = digitalHumanQueryPath
 	}
 	req, err := http.NewRequest(http.MethodGet, baseUrl+fmt.Sprintf(queryPath, taskID), nil)
@@ -241,7 +241,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	return client.Do(req)
 }
 
-func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
+func (a *TaskAdaptor) ParseTaskResult(_ *model.Task, _ *http.Response, respBody []byte) (*relaycommon.TaskInfo, error) {
 	var upstream responsePayload
 	if err := common.Unmarshal(respBody, &upstream); err != nil {
 		return nil, errors.Wrap(err, "unmarshal task result failed")

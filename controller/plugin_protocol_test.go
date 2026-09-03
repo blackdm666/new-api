@@ -241,7 +241,8 @@ func TestServeTaskPluginProtocolDisconnectDuringTerminalSettlementStopsOnlyObser
 
 	previousDB := model.DB
 	previousMemoryCache := common.MemoryCacheEnabled
-	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "-" + strconv.FormatInt(time.Now().UnixNano(), 10) + "?mode=memory&cache=shared"
+	database, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, database.AutoMigrate(&model.Channel{}, &model.Task{}))
 	model.DB = database
@@ -366,14 +367,14 @@ type terminalSettlementPollingAdaptor struct {
 
 func (a *terminalSettlementPollingAdaptor) Init(*relaycommon.RelayInfo) {}
 
-func (a *terminalSettlementPollingAdaptor) FetchTask(string, string, map[string]any, string) (*http.Response, error) {
+func (a *terminalSettlementPollingAdaptor) FetchTask(string, string, *model.Task, string) (*http.Response, error) {
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(`{}`)),
 	}, nil
 }
 
-func (a *terminalSettlementPollingAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo, error) {
+func (a *terminalSettlementPollingAdaptor) ParseTaskResult(*model.Task, *http.Response, []byte) (*relaycommon.TaskInfo, error) {
 	return &relaycommon.TaskInfo{
 		Status:   model.TaskStatusSuccess,
 		Progress: "100%",

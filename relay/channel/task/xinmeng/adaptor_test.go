@@ -544,7 +544,7 @@ func TestFetchTaskUsesXinMengTaskPathAndBearerAuth(t *testing.T) {
 	}))
 	defer server.Close()
 
-	resp, err := (&TaskAdaptor{}).FetchTask(server.URL, "secret", map[string]any{"task_id": "vid_123"}, "")
+	resp, err := (&TaskAdaptor{}).FetchTask(server.URL, "secret", &model.Task{TaskID: "vid_123"}, "")
 
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -568,7 +568,7 @@ func TestParseTaskResultSupportsXinMengTerminalStatuses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			info, err := (&TaskAdaptor{}).ParseTaskResult([]byte(tt.body))
+			info, err := (&TaskAdaptor{}).ParseTaskResult(nil, nil, []byte(tt.body))
 
 			require.NoError(t, err)
 			assert.EqualValues(t, tt.wantStatus, info.Status)
