@@ -212,8 +212,11 @@ export function parseTaskResult(ctx, body) {
   // Google long-running operations omit `done` (proto3 default) while still
   // running, so a missing key means in-progress; only a non-operation shape is
   // unrecognized.
-  if (!body || typeof body !== "object" || !String(body.name || "").trim()) return { status: "UNKNOWN", reason: "unrecognized operation state" };
-  if (body.done !== true) return { status: "IN_PROGRESS", progress: "50%" };
+  if (!body || typeof body !== "object") return { status: "UNKNOWN", reason: "unrecognized operation state" };
+  if (body.done !== true) {
+    if (!String(body.name || "").trim()) return { status: "UNKNOWN", reason: "unrecognized operation state" };
+    return { status: "IN_PROGRESS", progress: "50%" };
+  }
   const response = body.response || {};
   const generated = response.generateVideoResponse || {};
   const videos = generated.generatedVideos || [];
