@@ -1,9 +1,14 @@
 package controller
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"math"
 	"net/url"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +28,8 @@ const (
 	providerPricingTokenUnit             = "per_1m_tokens"
 	providerPricingCallUnit              = "per_call"
 	providerPricingClaudeCache1hMultiple = 6.0 / 3.75
+	providerPricingAuthSecretEnv         = "HVOY_PROVIDER_PRICING_AUTH_SECRET"
+	providerPricingAuthWindowSeconds     = int64(60)
 )
 
 type providerPricingResponse struct {
@@ -60,6 +67,30 @@ type providerPricingModel struct {
 // verified linear token rates; billing shapes that the schema cannot represent
 // (for example per-second or task-usage expressions) remain omitted.
 func GetProviderPricing(c *gin.Context) {
+	c.Header("Cache-Control", "private, no-store")
+	authSecret := os.Getenv(providerPricingAuthSecretEnv)
+	if strings.TrimSpace(authSecret) == "" {
+		c.JSON(503, providerPricingResponse{
+			SchemaVersion: providerPricingSchemaVersion,
+			Success:       false,
+			Message:       "provider pricing authentication is not configured",
+		})
+		return
+	}
+	if !validProviderPricingSignature(
+		authSecret,
+		c.GetHeader("X-Hvoy-Ts"),
+		c.GetHeader("X-Hvoy-Sign"),
+		time.Now(),
+	) {
+		c.JSON(401, providerPricingResponse{
+			SchemaVersion: providerPricingSchemaVersion,
+			Success:       false,
+			Message:       "unauthorized",
+		})
+		return
+	}
+
 	usdToCNY := operation_setting.USDExchangeRate
 	if !isFiniteNonNegative(usdToCNY) || usdToCNY == 0 {
 		c.JSON(500, providerPricingResponse{
@@ -71,7 +102,6 @@ func GetProviderPricing(c *gin.Context) {
 	}
 
 	models := buildProviderPricingModels(model.GetPricing(), ratio_setting.GetGroupRatioCopy(), usdToCNY)
-	c.Header("Cache-Control", "public, max-age=60")
 	c.JSON(200, providerPricingResponse{
 		SchemaVersion: providerPricingSchemaVersion,
 		Success:       true,
@@ -85,6 +115,30 @@ func GetProviderPricing(c *gin.Context) {
 			Models:     models,
 		},
 	})
+}
+
+func validProviderPricingSignature(secret, timestamp, signature string, now time.Time) bool {
+	if strings.TrimSpace(secret) == "" || timestamp == "" || signature == "" {
+		return false
+	}
+
+	timestampSeconds, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		return false
+	}
+	nowSeconds := now.Unix()
+	if timestampSeconds < nowSeconds-providerPricingAuthWindowSeconds ||
+		timestampSeconds > nowSeconds+providerPricingAuthWindowSeconds {
+		return false
+	}
+
+	providedSignature, err := hex.DecodeString(signature)
+	if err != nil || len(providedSignature) != sha256.Size {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(timestamp))
+	return hmac.Equal(providedSignature, mac.Sum(nil))
 }
 
 func buildProviderPricingModels(pricing []model.Pricing, groupRatios map[string]float64, usdToCNY float64) []providerPricingModel {

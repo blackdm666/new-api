@@ -1,14 +1,75 @@
 package controller
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"net/http/httptest"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func providerPricingTestSignature(secret, timestamp string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(timestamp))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func TestValidProviderPricingSignature(t *testing.T) {
+	secret := "test-provider-pricing-secret"
+	now := time.Unix(1_747_886_400, 0)
+	timestamp := strconv.FormatInt(now.Unix(), 10)
+	signature := providerPricingTestSignature(secret, timestamp)
+
+	assert.True(t, validProviderPricingSignature(secret, timestamp, signature, now))
+	assert.True(t, validProviderPricingSignature(secret, strconv.FormatInt(now.Unix()-60, 10), providerPricingTestSignature(secret, strconv.FormatInt(now.Unix()-60, 10)), now))
+	assert.True(t, validProviderPricingSignature(secret, strconv.FormatInt(now.Unix()+60, 10), providerPricingTestSignature(secret, strconv.FormatInt(now.Unix()+60, 10)), now))
+	assert.False(t, validProviderPricingSignature(secret, timestamp, "", now))
+	assert.False(t, validProviderPricingSignature(secret, "not-a-timestamp", signature, now))
+	assert.False(t, validProviderPricingSignature(secret, strconv.FormatInt(now.Unix()-61, 10), signature, now))
+	assert.False(t, validProviderPricingSignature(secret, strconv.FormatInt(now.Unix()+61, 10), signature, now))
+	assert.False(t, validProviderPricingSignature(secret, timestamp, providerPricingTestSignature("wrong-secret", timestamp), now))
+}
+
+func TestGetProviderPricingFailsClosedWithoutValidSignature(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("secret not configured", func(t *testing.T) {
+		t.Setenv(providerPricingAuthSecretEnv, "")
+		response := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(response)
+		context.Request = httptest.NewRequest("GET", "/api/provider/pricing", nil)
+
+		GetProviderPricing(context)
+
+		assert.Equal(t, 503, response.Code)
+		assert.Equal(t, "private, no-store", response.Header().Get("Cache-Control"))
+		assert.Contains(t, response.Body.String(), `"success":false`)
+	})
+
+	t.Run("invalid signature", func(t *testing.T) {
+		t.Setenv(providerPricingAuthSecretEnv, "configured-secret")
+		response := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(response)
+		context.Request = httptest.NewRequest("GET", "/api/provider/pricing", nil)
+		context.Request.Header.Set("X-Hvoy-Ts", strconv.FormatInt(time.Now().Unix(), 10))
+		context.Request.Header.Set("X-Hvoy-Sign", "invalid")
+
+		GetProviderPricing(context)
+
+		assert.Equal(t, 401, response.Code)
+		assert.Equal(t, "private, no-store", response.Header().Get("Cache-Control"))
+		assert.Contains(t, response.Body.String(), `"message":"unauthorized"`)
+	})
+}
 
 func TestBuildProviderPricingModels(t *testing.T) {
 	cacheRatio := 0.1
