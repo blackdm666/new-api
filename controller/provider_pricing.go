@@ -125,10 +125,11 @@ func buildProviderPricingModels(pricing []model.Pricing, groupRatios map[string]
 					entry.CacheInputPrice = tiered.CacheInputPrice
 					entry.CacheCreatePrice = tiered.CacheCreatePrice
 					entry.CacheCreatePrice1h = tiered.CacheCreatePrice1h
-					entry.Note = "动态计价；当前标准档"
+					entry.Note = "动态计价；展示最低标准档"
 					if tiered.Tier != "" {
 						entry.Note += "：" + tiered.Tier
 					}
+					entry.Note += "；实际按请求时段/上下文结算"
 					break
 				}
 				if !isFiniteNonNegative(item.ModelRatio) || !isFiniteNonNegative(item.CompletionRatio) {
@@ -192,9 +193,26 @@ func providerTieredTokenPrices(expr string, groupRatio, usdToCNY float64) (provi
 		return providerTieredPrices{}, false
 	}
 
+	var selected providerTieredPrices
+	selectedOK := false
+	for _, evaluationTime := range providerPricingEvaluationTimes(expr) {
+		candidate, ok := providerTieredTokenPricesAt(expr, groupRatio, usdToCNY, evaluationTime)
+		if !ok {
+			return providerTieredPrices{}, false
+		}
+		if !selectedOK || providerTieredPriceLess(candidate, selected) {
+			selected = candidate
+			selectedOK = true
+		}
+	}
+	return selected, selectedOK
+}
+
+func providerTieredTokenPricesAt(expr string, groupRatio, usdToCNY float64, evaluationTime time.Time) (providerTieredPrices, bool) {
 	used := billingexpr.UsedVars(expr)
 	baseParams := billingexpr.TokenParams{Len: 1}
-	baseCost, baseTrace, err := billingexpr.RunExpr(expr, baseParams)
+	request := billingexpr.RequestInput{EvaluationTime: evaluationTime}
+	baseCost, baseTrace, err := billingexpr.RunExprWithRequest(expr, baseParams, request)
 	if err != nil || !approximatelyEqual(baseCost, 0) {
 		return providerTieredPrices{}, false
 	}
@@ -208,8 +226,8 @@ func providerTieredTokenPrices(expr string, groupRatio, usdToCNY float64) (provi
 		two := baseParams
 		setProviderTokenDimension(&one, variable, 1)
 		setProviderTokenDimension(&two, variable, 2)
-		oneCost, oneTrace, oneErr := billingexpr.RunExpr(expr, one)
-		twoCost, twoTrace, twoErr := billingexpr.RunExpr(expr, two)
+		oneCost, oneTrace, oneErr := billingexpr.RunExprWithRequest(expr, one, request)
+		twoCost, twoTrace, twoErr := billingexpr.RunExprWithRequest(expr, two, request)
 		if oneErr != nil || twoErr != nil || !sameProviderTier(tier, oneTrace.MatchedTier, twoTrace.MatchedTier) {
 			return nil, false
 		}
@@ -257,6 +275,55 @@ func providerTieredTokenPrices(expr string, groupRatio, usdToCNY float64) (provi
 		CacheCreatePrice1h: cacheCreate1h,
 		Tier:               tier,
 	}, true
+}
+
+func providerPricingEvaluationTimes(expr string) []time.Time {
+	if !providerExprUsesTime(expr) {
+		return []time.Time{{}}
+	}
+
+	// A fixed full UTC week covers every local weekday/hour combination for
+	// the production peak/off-peak expressions while keeping output stable
+	// across Hvoy fetches. Context length remains fixed at the standard tier.
+	start := time.Date(2026, time.January, 5, 0, 30, 0, 0, time.UTC)
+	times := make([]time.Time, 0, 7*24)
+	for hour := 0; hour < 7*24; hour++ {
+		times = append(times, start.Add(time.Duration(hour)*time.Hour))
+	}
+	return times
+}
+
+func providerExprUsesTime(expr string) bool {
+	for _, function := range []string{"hour(", "minute(", "weekday(", "month(", "day("} {
+		if strings.Contains(expr, function) {
+			return true
+		}
+	}
+	return false
+}
+
+func providerTieredPriceLess(left, right providerTieredPrices) bool {
+	leftInput := providerPriceValue(left.InputPrice)
+	rightInput := providerPriceValue(right.InputPrice)
+	if !approximatelyEqual(leftInput, rightInput) {
+		return leftInput < rightInput
+	}
+	return providerTieredPriceTotal(left) < providerTieredPriceTotal(right)
+}
+
+func providerTieredPriceTotal(prices providerTieredPrices) float64 {
+	return providerPriceValue(prices.InputPrice) +
+		providerPriceValue(prices.OutputPrice) +
+		providerPriceValue(prices.CacheInputPrice) +
+		providerPriceValue(prices.CacheCreatePrice) +
+		providerPriceValue(prices.CacheCreatePrice1h)
+}
+
+func providerPriceValue(price *float64) float64 {
+	if price == nil {
+		return 0
+	}
+	return *price
 }
 
 func setProviderTokenDimension(params *billingexpr.TokenParams, variable string, value float64) {

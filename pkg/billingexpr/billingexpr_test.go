@@ -3,6 +3,7 @@ package billingexpr_test
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -904,6 +905,22 @@ func TestTimeFunctions_WeekdayRange(t *testing.T) {
 	// weekday is always 0-6, so multiplier is always 1
 	if cost != 100 {
 		t.Errorf("cost = %f, want 100", cost)
+	}
+}
+
+func TestTimeFunctions_EvaluationTimeOverride(t *testing.T) {
+	exprStr := `hour("Asia/Shanghai") == 10 && weekday("Asia/Shanghai") == 1 ? tier("peak", p * 2) : tier("offpeak", p)`
+	mondayPeakUTC := time.Date(2026, time.January, 5, 2, 0, 0, 0, time.UTC)
+	cost, trace, err := billingexpr.RunExprWithRequest(
+		exprStr,
+		billingexpr.TokenParams{P: 100},
+		billingexpr.RequestInput{EvaluationTime: mondayPeakUTC},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cost != 200 || trace.MatchedTier != "peak" {
+		t.Fatalf("cost=%f tier=%q, want 200/peak", cost, trace.MatchedTier)
 	}
 }
 

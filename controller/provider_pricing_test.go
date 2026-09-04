@@ -71,7 +71,7 @@ func TestBuildProviderPricingModels(t *testing.T) {
 	assert.InDelta(t, 3.15, *models[2].CacheInputPrice, 1e-9)
 	assert.InDelta(t, 39.375, *models[2].CacheCreatePrice, 1e-9)
 	assert.InDelta(t, 63, *models[2].CacheCreatePrice1h, 1e-9)
-	assert.Equal(t, "动态计价；当前标准档：standard", models[2].Note)
+	assert.Equal(t, "动态计价；展示最低标准档：standard；实际按请求时段/上下文结算", models[2].Note)
 
 	assert.Equal(t, "standard", models[3].GroupName)
 	assert.InDelta(t, 10.5, *models[3].InputPrice, 1e-9)
@@ -135,6 +135,20 @@ func TestProviderTieredTokenPricesMatchesProductionStyleStandardTier(t *testing.
 	assert.InDelta(t, 21, *prices.OutputPrice, 1e-9)
 	assert.InDelta(t, 0.35, *prices.CacheInputPrice, 1e-9)
 	assert.InDelta(t, 4.375, *prices.CacheCreatePrice, 1e-9)
+}
+
+func TestProviderTieredTokenPricesChoosesLowestTimeTier(t *testing.T) {
+	prices, ok := providerTieredTokenPrices(
+		`(weekday("Asia/Shanghai") >= 1 && weekday("Asia/Shanghai") <= 5 && hour("Asia/Shanghai") >= 9 && hour("Asia/Shanghai") < 18) ? tier("高峰", p * 9 + c * 27 + cr * 0.3) : tier("空闲", p * 4.5 + c * 13.5 + cr * 0.15)`,
+		0.7,
+		1,
+	)
+
+	require.True(t, ok)
+	assert.Equal(t, "空闲", prices.Tier)
+	assert.InDelta(t, 3.15, *prices.InputPrice, 1e-9)
+	assert.InDelta(t, 9.45, *prices.OutputPrice, 1e-9)
+	assert.InDelta(t, 0.105, *prices.CacheInputPrice, 1e-9)
 }
 
 func TestProviderPricingSiteDomain(t *testing.T) {

@@ -53,6 +53,10 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, params TokenP
 		RequestRules: append([]RequestRuleTrace(nil), requestRules...),
 	}
 	headers := normalizeHeaders(request.Headers)
+	evaluationTime := request.EvaluationTime
+	if evaluationTime.IsZero() {
+		evaluationTime = time.Now()
+	}
 
 	env := map[string]interface{}{
 		"p":     params.P,
@@ -114,11 +118,11 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, params TokenP
 			}
 			return strings.Contains(fmt.Sprint(source), substr)
 		},
-		"hour":    func(tz string) int { return timeInZone(tz).Hour() },
-		"minute":  func(tz string) int { return timeInZone(tz).Minute() },
-		"weekday": func(tz string) int { return int(timeInZone(tz).Weekday()) },
-		"month":   func(tz string) int { return int(timeInZone(tz).Month()) },
-		"day":     func(tz string) int { return timeInZone(tz).Day() },
+		"hour":    func(tz string) int { return timeInZoneAt(evaluationTime, tz).Hour() },
+		"minute":  func(tz string) int { return timeInZoneAt(evaluationTime, tz).Minute() },
+		"weekday": func(tz string) int { return int(timeInZoneAt(evaluationTime, tz).Weekday()) },
+		"month":   func(tz string) int { return int(timeInZoneAt(evaluationTime, tz).Month()) },
+		"day":     func(tz string) int { return timeInZoneAt(evaluationTime, tz).Day() },
 		"max":     math.Max,
 		"min":     math.Min,
 		"abs":     math.Abs,
@@ -137,16 +141,16 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, params TokenP
 	return f, trace, nil
 }
 
-func timeInZone(tz string) time.Time {
+func timeInZoneAt(now time.Time, tz string) time.Time {
 	tz = strings.TrimSpace(tz)
 	if tz == "" {
-		return time.Now().UTC()
+		return now.UTC()
 	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		return time.Now().UTC()
+		return now.UTC()
 	}
-	return time.Now().In(loc)
+	return now.In(loc)
 }
 
 func normalizeHeaders(headers map[string]string) map[string]string {
