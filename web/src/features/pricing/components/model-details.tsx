@@ -72,6 +72,7 @@ import {
   type DynamicPriceEntry,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
+import { getGroupPricingRatioHeader } from '../lib/group-ratio-label'
 import {
   getAvailableGroups,
   getFixedPriceUnitLabel,
@@ -953,7 +954,7 @@ function GroupPricingSection(props: {
   tokenUnit: TokenUnit
   showRechargePrice?: boolean
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const showRechargePrice = props.showRechargePrice ?? false
 
   const availableGroups = useMemo(
@@ -963,6 +964,11 @@ function GroupPricingSection(props: {
 
   const isTokenBased = isTokenBasedModel(props.model)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
+  const groupRatioHeader = getGroupPricingRatioHeader(
+    availableGroups.map((group) => props.groupRatio[group] ?? 1),
+    i18n.resolvedLanguage || i18n.language,
+    t('Ratio')
+  )
 
   const extraPriceTypes = useMemo(() => {
     const types: { label: string; type: PriceType }[] = []
@@ -1053,7 +1059,7 @@ function GroupPricingSection(props: {
     })
     const formattedPricesByGroup = new Map(
       availableGroups.map((group) => {
-        const ratio = props.groupRatio[group] || 1
+        const ratio = props.groupRatio[group] ?? 1
         return [
           group,
           getDynamicFormattedPricesByTier(dynamicTiers, {
@@ -1074,7 +1080,7 @@ function GroupPricingSection(props: {
         <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
         <div className='space-y-3'>
           {availableGroups.map((group) => {
-            const ratio = props.groupRatio[group] || 1
+            const ratio = props.groupRatio[group] ?? 1
             const formattedPricesByTier =
               formattedPricesByGroup.get(group) ??
               new Map<DynamicPricingTier, Map<string, string>>()
@@ -1240,13 +1246,13 @@ function GroupPricingSection(props: {
           },
           {
             id: 'ratio',
-            header: t('Ratio'),
+            header: groupRatioHeader,
             className: thClass,
             cellClassName: 'py-2.5',
             cell: (group) => (
               <GroupPricingMeta
                 group={group}
-                ratio={props.groupRatio[group] || 1}
+                ratio={props.groupRatio[group] ?? 1}
                 description={props.usableGroup[group]}
               />
             ),

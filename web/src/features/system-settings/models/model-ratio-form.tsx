@@ -315,7 +315,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
                       <FormLabel>{t('Expose ratio API')}</FormLabel>
                       <FormDescription>
                         {t(
-                          'Allow clients to query configured ratios via `/api/ratio`.'
+                          'Allow clients to query configured ratios via `/api/ratio_config`.'
                         )}
                       </FormDescription>
                     </SettingsSwitchContent>
@@ -353,7 +353,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
                     <FormLabel>{t('Expose ratio API')}</FormLabel>
                     <FormDescription>
                       {t(
-                        'Allow clients to query configured ratios via `/api/ratio`.'
+                        'Allow clients to query configured ratios via `/api/ratio_config`.'
                       )}
                     </FormDescription>
                   </SettingsSwitchContent>

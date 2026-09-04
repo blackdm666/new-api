@@ -19,6 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { render, screen } from '@testing-library/react'
 import { describe, expect, test } from 'vitest'
 
+import {
+  formatGroupPricingRatio,
+  getGroupPricingRatioHeader,
+} from '../../lib/group-ratio-label'
 import { GroupPricingMeta } from '../group-pricing-meta'
 
 describe('GroupPricingMeta', () => {
@@ -51,5 +55,29 @@ describe('GroupPricingMeta', () => {
 
     rerender(<GroupPricingMeta group='Grok' ratio={0.3} description='  ' />)
     expect(screen.queryByText(/^grok$/i)).not.toBeInTheDocument()
+  })
+
+  test('formats Chinese discounts while preserving ratios at and above one', () => {
+    expect(formatGroupPricingRatio(0.2, 'zhCN')).toBe('2折')
+    expect(formatGroupPricingRatio(0.3, 'zhCN')).toBe('3折')
+    expect(formatGroupPricingRatio(0.5, 'zhTW')).toBe('5折')
+    expect(formatGroupPricingRatio(0.7, 'zhCN')).toBe('7折')
+    expect(formatGroupPricingRatio(0, 'zhCN')).toBe('0折')
+    expect(formatGroupPricingRatio(1, 'zhCN')).toBe('1x')
+    expect(formatGroupPricingRatio(1.2, 'zhCN')).toBe('1.2x')
+    expect(formatGroupPricingRatio(0.2, 'en')).toBe('0.2x')
+  })
+
+  test('uses the discount header only when every visible Chinese group is discounted', () => {
+    expect(getGroupPricingRatioHeader([0.2, 0.3], 'zhCN', '倍率')).toBe(
+      '优惠折扣'
+    )
+    expect(getGroupPricingRatioHeader([0.2, 0.3], 'zhTW', '倍率')).toBe(
+      '優惠折扣'
+    )
+    expect(getGroupPricingRatioHeader([0.2], 'zh-TW', '倍率')).toBe('優惠折扣')
+    expect(getGroupPricingRatioHeader([0.2, 1], 'zhCN', '倍率')).toBe('倍率')
+    expect(getGroupPricingRatioHeader([1.2], 'zhCN', '倍率')).toBe('倍率')
+    expect(getGroupPricingRatioHeader([0.2], 'en', 'Ratio')).toBe('Ratio')
   })
 })
