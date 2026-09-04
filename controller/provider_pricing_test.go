@@ -40,9 +40,9 @@ func TestBuildProviderPricingModels(t *testing.T) {
 		{
 			ModelName:   "dynamic-test",
 			QuotaType:   0,
-			ModelRatio:  1,
 			BillingMode: billing_setting.BillingModeTieredExpr,
-			EnableGroup: []string{"standard"},
+			BillingExpr: `len <= 200000 ? tier("standard", p * 3 + c * 9 + cr * 0.3 + cc * 3.75 + cc1h * 6) : tier("long", p * 6 + c * 18)`,
+			EnableGroup: []string{"all"},
 		},
 	}
 
@@ -52,7 +52,7 @@ func TestBuildProviderPricingModels(t *testing.T) {
 		"auto":     1,
 	}, 7)
 
-	require.Len(t, models, 3)
+	require.Len(t, models, 5)
 	assert.Equal(t, "claude-test", models[0].ModelName)
 	assert.Equal(t, "premium", models[0].GroupName)
 	assert.InDelta(t, 42, *models[0].InputPrice, 1e-9)
@@ -64,9 +64,21 @@ func TestBuildProviderPricingModels(t *testing.T) {
 	assert.Equal(t, "standard", models[1].GroupName)
 	assert.InDelta(t, 14, *models[1].InputPrice, 1e-9)
 
-	assert.Equal(t, "image-test", models[2].ModelName)
-	assert.Equal(t, providerPricingCallUnit, models[2].PriceUnit)
-	assert.InDelta(t, 0.7, *models[2].UnitPrice, 1e-9)
+	assert.Equal(t, "dynamic-test", models[2].ModelName)
+	assert.Equal(t, "premium", models[2].GroupName)
+	assert.InDelta(t, 31.5, *models[2].InputPrice, 1e-9)
+	assert.InDelta(t, 94.5, *models[2].OutputPrice, 1e-9)
+	assert.InDelta(t, 3.15, *models[2].CacheInputPrice, 1e-9)
+	assert.InDelta(t, 39.375, *models[2].CacheCreatePrice, 1e-9)
+	assert.InDelta(t, 63, *models[2].CacheCreatePrice1h, 1e-9)
+	assert.Equal(t, "动态计价；当前标准档：standard", models[2].Note)
+
+	assert.Equal(t, "standard", models[3].GroupName)
+	assert.InDelta(t, 10.5, *models[3].InputPrice, 1e-9)
+
+	assert.Equal(t, "image-test", models[4].ModelName)
+	assert.Equal(t, providerPricingCallUnit, models[4].PriceUnit)
+	assert.InDelta(t, 0.7, *models[4].UnitPrice, 1e-9)
 }
 
 func TestProviderPricingGroupsExpandsAllAndRemovesDuplicates(t *testing.T) {
@@ -86,6 +98,43 @@ func TestBuildProviderPricingModelsSkipsInvalidAndZeroCallPrices(t *testing.T) {
 
 	assert.Empty(t, models)
 	assert.Empty(t, buildProviderPricingModels(nil, nil, 0))
+}
+
+func TestProviderTieredTokenPricesRejectsUnsupportedExpressions(t *testing.T) {
+	t.Run("fixed fee", func(t *testing.T) {
+		_, ok := providerTieredTokenPrices(`tier("base", 1 + p * 2)`, 1, 1)
+		assert.False(t, ok)
+	})
+
+	t.Run("non linear", func(t *testing.T) {
+		_, ok := providerTieredTokenPrices(`tier("base", p * p)`, 1, 1)
+		assert.False(t, ok)
+	})
+
+	t.Run("task usage", func(t *testing.T) {
+		_, ok := providerTieredTokenPrices(`tier("base", u("seconds") * 2)`, 1, 1)
+		assert.False(t, ok)
+	})
+}
+
+func TestProviderTieredTokenPricesMatchesProductionStyleStandardTier(t *testing.T) {
+	prices, ok := providerTieredTokenPrices(
+		`len <= 272000 ? tier("标准上下文", p * 35 + c * 210 + cr * 3.5 + cc * 43.75) : tier("长上下文", p * 70 + c * 315 + cr * 7 + cc * 87.5)`,
+		0.1,
+		1,
+	)
+
+	require.True(t, ok)
+	require.NotNil(t, prices.InputPrice)
+	require.NotNil(t, prices.OutputPrice)
+	require.NotNil(t, prices.CacheInputPrice)
+	require.NotNil(t, prices.CacheCreatePrice)
+	assert.Nil(t, prices.CacheCreatePrice1h)
+	assert.Equal(t, "标准上下文", prices.Tier)
+	assert.InDelta(t, 3.5, *prices.InputPrice, 1e-9)
+	assert.InDelta(t, 21, *prices.OutputPrice, 1e-9)
+	assert.InDelta(t, 0.35, *prices.CacheInputPrice, 1e-9)
+	assert.InDelta(t, 4.375, *prices.CacheCreatePrice, 1e-9)
 }
 
 func TestProviderPricingSiteDomain(t *testing.T) {
