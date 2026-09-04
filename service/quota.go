@@ -87,6 +87,18 @@ func calculateAudioQuota(info QuotaInfo) (int, *common.QuotaClamp) {
 	return common.QuotaFromDecimalChecked(quota)
 }
 
+func buildAudioQuotaInfo(inputDetails TokenDetails, outputDetails TokenDetails, modelName string, priceData types.PriceData) QuotaInfo {
+	return QuotaInfo{
+		InputDetails:  inputDetails,
+		OutputDetails: outputDetails,
+		ModelName:     modelName,
+		UsePrice:      priceData.UsePrice,
+		ModelPrice:    priceData.ModelPrice,
+		ModelRatio:    priceData.ModelRatio,
+		GroupRatio:    priceData.GroupRatioInfo.GroupRatio,
+	}
+}
+
 func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage) error {
 	if relayInfo.UsePrice {
 		return nil
@@ -186,20 +198,18 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	modelPrice := relayInfo.PriceData.ModelPrice
 	usePrice := relayInfo.PriceData.UsePrice
 
-	quotaInfo := QuotaInfo{
-		InputDetails: TokenDetails{
+	quotaInfo := buildAudioQuotaInfo(
+		TokenDetails{
 			TextTokens:  textInputTokens,
 			AudioTokens: audioInputTokens,
 		},
-		OutputDetails: TokenDetails{
+		TokenDetails{
 			TextTokens:  textOutTokens,
 			AudioTokens: audioOutTokens,
 		},
-		ModelName:  modelName,
-		UsePrice:   usePrice,
-		ModelRatio: modelRatio,
-		GroupRatio: groupRatio,
-	}
+		modelName,
+		relayInfo.PriceData,
+	)
 
 	quota, clamp := calculateAudioQuota(quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
@@ -315,20 +325,18 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	modelPrice := relayInfo.PriceData.ModelPrice
 	usePrice := relayInfo.PriceData.UsePrice
 
-	quotaInfo := QuotaInfo{
-		InputDetails: TokenDetails{
+	quotaInfo := buildAudioQuotaInfo(
+		TokenDetails{
 			TextTokens:  textInputTokens,
 			AudioTokens: audioInputTokens,
 		},
-		OutputDetails: TokenDetails{
+		TokenDetails{
 			TextTokens:  textOutTokens,
 			AudioTokens: audioOutTokens,
 		},
-		ModelName:  billingModelName,
-		UsePrice:   usePrice,
-		ModelRatio: modelRatio,
-		GroupRatio: groupRatio,
-	}
+		billingModelName,
+		relayInfo.PriceData,
+	)
 
 	quota, clamp := calculateAudioQuota(quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
