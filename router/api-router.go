@@ -325,6 +325,7 @@ func SetApiRouter(router *gin.Engine) {
 			marketingRoute.POST("/campaigns/:id/resume", controller.ResumeMarketingCampaign)
 			marketingRoute.POST("/campaigns/:id/cancel", controller.CancelMarketingCampaign)
 			marketingRoute.POST("/campaigns/:id/clone", controller.CloneMarketingCampaign)
+			marketingRoute.POST("/campaigns/:id/retry-untracked", middleware.CriticalRateLimit(), controller.RetryUntrackedMarketingCampaign)
 			marketingRoute.GET("/campaigns/:id/recipients", controller.ListMarketingRecipients)
 			marketingRoute.POST("/test", controller.TestMarketingEmail)
 			marketingRoute.POST("/preview", controller.PreviewMarketingEmail)

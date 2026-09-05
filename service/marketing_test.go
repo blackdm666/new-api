@@ -200,6 +200,62 @@ func TestMarketingDeliveryRejectsUserDisabledAfterQueueing(t *testing.T) {
 	assert.Equal(t, model.MarketingRecipientStatusSkipped, recipient.Status)
 }
 
+func TestCreateMarketingRetryCampaignQueuesOnlySelectedUntrackedDelivery(t *testing.T) {
+	truncate(t)
+	now := common.GetTimestamp()
+	user := &model.User{
+		Username: "retry-untracked", Password: "password", Email: "retry-untracked@example.com",
+		AffCode: "retry-untracked-aff", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default",
+	}
+	require.NoError(t, model.DB.Create(user).Error)
+	content, err := common.Marshal(map[string]model.MarketingLocalizedContent{
+		"zh-CN": {Subject: "Retry subject", Body: "Retry body"},
+	})
+	require.NoError(t, err)
+	sourceCampaign := &model.MarketingCampaign{
+		Name: "source", Scene: model.MarketingSceneCustom, Status: model.MarketingCampaignStatusCompleted,
+		AudienceRule: "{}", LocalizedContent: string(content), ActionPath: "/wallet", CreatedBy: user.Id,
+	}
+	require.NoError(t, model.DB.Create(sourceCampaign).Error)
+	sourceDelivery := &model.EmailDelivery{
+		DeliveryKey: "source-untracked", Category: "marketing_custom", SMTPProfile: "marketing", SMTPChannel: "marketing",
+		RelatedId: sourceCampaign.Id, UserId: user.Id, Recipient: user.Email, RecipientMasked: "r***y@example.com",
+		Subject: "", Body: "", Priority: model.EmailPriorityMarketing, State: model.EmailDeliveryStatusAcceptedUntracked,
+		AcceptedTime: now, DeliveredTime: now, FinalizedTime: now,
+	}
+	require.NoError(t, model.DB.Create(sourceDelivery).Error)
+	sourceRecipient := &model.MarketingRecipient{
+		CampaignId: sourceCampaign.Id, UserId: user.Id, DedupeKey: "source-recipient", Language: "zh-CN",
+		RecipientMasked: "r***y@example.com", ClickTokenHash: "source-click-token", EmailDeliveryId: sourceDelivery.Id,
+		Status: model.MarketingRecipientStatusDelivered, DeliveredTime: now,
+	}
+	require.NoError(t, model.DB.Create(sourceRecipient).Error)
+	result, err := CreateMarketingRetryCampaign(sourceCampaign.Id, []int{sourceDelivery.Id}, "source retry", user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Requested)
+	assert.Equal(t, 1, result.Queued)
+	assert.Zero(t, result.Skipped)
+	assert.False(t, result.AlreadyExists)
+
+	retryCampaign := &model.MarketingCampaign{}
+	require.NoError(t, model.DB.First(retryCampaign, result.CampaignId).Error)
+	assert.Equal(t, model.MarketingCampaignStatusRunning, retryCampaign.Status)
+	retryRecipient := &model.MarketingRecipient{}
+	require.NoError(t, model.DB.Where("campaign_id = ?", result.CampaignId).First(retryRecipient).Error)
+	assert.Equal(t, model.MarketingRecipientStatusQueued, retryRecipient.Status)
+	retryDelivery := &model.EmailDelivery{}
+	require.NoError(t, model.DB.First(retryDelivery, retryRecipient.EmailDeliveryId).Error)
+	assert.Equal(t, model.EmailDeliveryStatusQueued, retryDelivery.State)
+	assert.Contains(t, retryDelivery.Body, "/api/marketing/c/")
+	assert.NotEmpty(t, retryDelivery.Subject)
+
+	repeated, err := CreateMarketingRetryCampaign(sourceCampaign.Id, []int{sourceDelivery.Id}, "source retry", user.Id)
+	require.NoError(t, err)
+	assert.True(t, repeated.AlreadyExists)
+	assert.Equal(t, result.CampaignId, repeated.CampaignId)
+	assert.Equal(t, 1, repeated.Queued)
+}
+
 func TestFixedMarketingTemplateEscapesCustomContentAndUsesFixedLink(t *testing.T) {
 	body := RenderFixedMarketingEmail(`<script>alert("x")</script>`, "<img src=x onerror=alert(1)>\nhello", "https://example.com/wallet", "Top up")
 	assert.NotContains(t, body, "<script>")

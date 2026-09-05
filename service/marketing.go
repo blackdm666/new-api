@@ -3,20 +3,25 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"html"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const marketingDispatchExpiry = 7 * 24 * time.Hour
@@ -28,6 +33,14 @@ type LatestMarketingAnnouncement struct {
 	Content     string `json:"content"`
 	Extra       string `json:"extra"`
 	PublishDate string `json:"publish_date"`
+}
+
+type MarketingRetryResult struct {
+	CampaignId    int  `json:"campaign_id"`
+	Requested     int  `json:"requested"`
+	Queued        int  `json:"queued"`
+	Skipped       int  `json:"skipped"`
+	AlreadyExists bool `json:"already_exists"`
 }
 
 func (marketingDispatchHandler) Type() string            { return model.SystemTaskTypeMarketingDispatch }
@@ -112,6 +125,169 @@ func MaterializeMarketingCampaign(campaign *model.MarketingCampaign) error {
 		offset += len(users)
 	}
 	return nil
+}
+
+func CreateMarketingRetryCampaign(sourceCampaignId int, deliveryIds []int, name string, createdBy int) (*MarketingRetryResult, error) {
+	name = strings.TrimSpace(name)
+	if sourceCampaignId <= 0 || createdBy <= 0 || len(deliveryIds) == 0 || len(deliveryIds) > 2000 || name == "" || utf8.RuneCountInString(name) > 160 {
+		return nil, model.ErrMarketingInvalid
+	}
+	ids := append([]int(nil), deliveryIds...)
+	sort.Ints(ids)
+	uniqueIds := ids[:0]
+	for _, id := range ids {
+		if id <= 0 {
+			return nil, model.ErrMarketingInvalid
+		}
+		if len(uniqueIds) == 0 || uniqueIds[len(uniqueIds)-1] != id {
+			uniqueIds = append(uniqueIds, id)
+		}
+	}
+	digest := sha256.New()
+	for _, id := range uniqueIds {
+		_, _ = fmt.Fprintf(digest, "%d\n", id)
+	}
+	retryKey := hex.EncodeToString(digest.Sum(nil))
+	result := &MarketingRetryResult{Requested: len(uniqueIds)}
+	prefix := fmt.Sprintf("manual-retry:%d:%s:", sourceCampaignId, retryKey)
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		existing := model.MarketingRecipient{}
+		err := tx.Where("dedupe_key LIKE ?", prefix+"%").Order("id ASC").First(&existing).Error
+		if err == nil {
+			result.CampaignId = existing.CampaignId
+			result.AlreadyExists = true
+			var count int64
+			if err := tx.Model(&model.MarketingRecipient{}).Where("campaign_id = ? AND dedupe_key LIKE ?", existing.CampaignId, prefix+"%").Count(&count).Error; err != nil {
+				return err
+			}
+			result.Queued = int(count)
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		sourceCampaign := model.MarketingCampaign{}
+		if err := tx.First(&sourceCampaign, sourceCampaignId).Error; err != nil {
+			return err
+		}
+		sourceDeliveries := []model.EmailDelivery{}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id IN ? AND related_id = ? AND category = ? AND state = ?", uniqueIds, sourceCampaignId, "marketing_custom", model.EmailDeliveryStatusAcceptedUntracked).
+			Find(&sourceDeliveries).Error; err != nil {
+			return err
+		}
+		if len(sourceDeliveries) != len(uniqueIds) {
+			return model.ErrMarketingInvalid
+		}
+		sourceRecipients := []model.MarketingRecipient{}
+		if err := tx.Where("campaign_id = ? AND email_delivery_id IN ?", sourceCampaignId, uniqueIds).Find(&sourceRecipients).Error; err != nil {
+			return err
+		}
+		if len(sourceRecipients) != len(uniqueIds) {
+			return model.ErrMarketingInvalid
+		}
+		recipientsByDelivery := make(map[int]model.MarketingRecipient, len(sourceRecipients))
+		userIds := make([]int, 0, len(sourceRecipients))
+		for _, recipient := range sourceRecipients {
+			recipientsByDelivery[recipient.EmailDeliveryId] = recipient
+			userIds = append(userIds, recipient.UserId)
+		}
+		users := []model.User{}
+		if err := tx.Where("id IN ? AND deleted_at IS NULL", userIds).Find(&users).Error; err != nil {
+			return err
+		}
+		usersById := make(map[int]model.User, len(users))
+		emailHashes := make([]string, 0, len(users))
+		for _, user := range users {
+			usersById[user.Id] = user
+			emailHashes = append(emailHashes, model.HashMarketingToken(strings.ToLower(strings.TrimSpace(user.Email))))
+		}
+		suppressions := []model.MarketingSuppression{}
+		if err := tx.Where("user_id IN ? OR email_hash IN ?", userIds, emailHashes).Find(&suppressions).Error; err != nil {
+			return err
+		}
+		suppressedUsers := make(map[int]struct{}, len(suppressions))
+		suppressedEmails := make(map[string]struct{}, len(suppressions))
+		for _, suppression := range suppressions {
+			suppressedUsers[suppression.UserId] = struct{}{}
+			suppressedEmails[suppression.EmailHash] = struct{}{}
+		}
+
+		now := common.GetTimestamp()
+		retryCampaign := &model.MarketingCampaign{
+			Name: name, Scene: model.MarketingSceneCustom, Status: model.MarketingCampaignStatusRunning,
+			AudienceRule: "{}", LocalizedContent: sourceCampaign.LocalizedContent, ActionPath: sourceCampaign.ActionPath,
+			CreatedBy: createdBy, StartedTime: now,
+		}
+		if err := tx.Create(retryCampaign).Error; err != nil {
+			return err
+		}
+		result.CampaignId = retryCampaign.Id
+		contentByLanguage := map[string]model.MarketingLocalizedContent{}
+		siteURL := strings.TrimRight(systemEmailSiteURL(), "/")
+		for _, sourceDelivery := range sourceDeliveries {
+			sourceRecipient, ok := recipientsByDelivery[sourceDelivery.Id]
+			if !ok {
+				return model.ErrMarketingInvalid
+			}
+			user, ok := usersById[sourceRecipient.UserId]
+			email := strings.TrimSpace(user.Email)
+			emailHash := model.HashMarketingToken(strings.ToLower(email))
+			_, userSuppressed := suppressedUsers[sourceRecipient.UserId]
+			_, emailSuppressed := suppressedEmails[emailHash]
+			if !ok || user.Status != common.UserStatusEnabled || user.Role != common.RoleCommonUser || email == "" || !strings.EqualFold(email, strings.TrimSpace(sourceDelivery.Recipient)) || userSuppressed || emailSuppressed {
+				result.Skipped++
+				continue
+			}
+			language := normalizeMarketingLanguage(sourceRecipient.Language)
+			content, exists := contentByLanguage[language]
+			if !exists {
+				var err error
+				content, err = marketingCampaignContent(sourceCampaign.LocalizedContent, language)
+				if err != nil {
+					return err
+				}
+				contentByLanguage[language] = content
+			}
+			token, err := newMarketingToken()
+			if err != nil {
+				return err
+			}
+			dedupe := fmt.Sprintf("%s%d", prefix, sourceRecipient.UserId)
+			retryRecipient := &model.MarketingRecipient{
+				CampaignId: retryCampaign.Id, UserId: sourceRecipient.UserId, DedupeKey: dedupe,
+				Language: language, RecipientMasked: maskMarketingEmail(email), ClickTokenHash: hashMarketingToken(token),
+				Status: model.MarketingRecipientStatusQueued, QueuedTime: now,
+			}
+			if err := tx.Create(retryRecipient).Error; err != nil {
+				return err
+			}
+			clickURL := siteURL + "/api/marketing/c/" + url.PathEscape(token)
+			delivery := &model.EmailDelivery{
+				DeliveryKey: "marketing:" + dedupe, Category: "marketing_custom", SMTPProfile: "marketing", SMTPChannel: "marketing",
+				RelatedId: retryCampaign.Id, UserId: user.Id, Recipient: email, RecipientMasked: maskMarketingEmail(email),
+				Subject: content.Subject, Body: RenderFixedMarketingEmail(content.Subject, content.Body, clickURL, marketingActionLabel(language)),
+				Priority: model.EmailPriorityMarketing, State: model.EmailDeliveryStatusQueued, NextAttemptTime: now,
+				ExpiresTime: now + int64(marketingDispatchExpiry.Seconds()),
+			}
+			if err := tx.Create(delivery).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(retryRecipient).Update("email_delivery_id", delivery.Id).Error; err != nil {
+				return err
+			}
+			result.Queued++
+		}
+		if result.Queued == 0 {
+			return model.ErrMarketingInvalid
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func materializeMarketingAutomations(now int64) error {
