@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,27 +24,51 @@ type AliyunDirectMailEvent struct {
 	Time   string                    `json:"time"`
 }
 
+type aliyunDirectMailScalarString string
+
+func (value *aliyunDirectMailScalarString) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if bytes.Equal(data, []byte("null")) {
+		*value = ""
+		return nil
+	}
+	if len(data) > 0 && data[0] == '"' {
+		var stringValue string
+		if err := common.Unmarshal(data, &stringValue); err != nil {
+			return err
+		}
+		*value = aliyunDirectMailScalarString(stringValue)
+		return nil
+	}
+	var numberValue json.Number
+	if err := common.Unmarshal(data, &numberValue); err != nil {
+		return fmt.Errorf("expected string or number: %w", err)
+	}
+	*value = aliyunDirectMailScalarString(numberValue.String())
+	return nil
+}
+
 type AliyunDirectMailEventData struct {
 	Header struct {
 		NotifyMessageId string `json:"X-Notify-Message-ID"`
 	} `json:"header"`
-	EnvId        string `json:"env_id"`
-	LegacyEnvId  string `json:"envid"`
-	Account      string `json:"account"`
-	From         string `json:"from"`
-	SendEmail    string `json:"send_email"`
-	Recipient    string `json:"rcpt"`
-	BlockedEmail string `json:"block_email"`
-	MessageId    string `json:"msg_id"`
-	LegacyMsgId  string `json:"message_id"`
-	OutboundIP   string `json:"outbound_ip"`
-	Status       string `json:"status"`
-	Event        string `json:"event"`
-	ErrorCode    string `json:"err_code"`
-	ErrorMessage string `json:"err_msg"`
-	FailureType  string `json:"failed_type"`
-	ESP          string `json:"esp"`
-	DeliverTime  string `json:"deliver_time"`
+	EnvId        string                       `json:"env_id"`
+	LegacyEnvId  string                       `json:"envid"`
+	Account      string                       `json:"account"`
+	From         string                       `json:"from"`
+	SendEmail    string                       `json:"send_email"`
+	Recipient    string                       `json:"rcpt"`
+	BlockedEmail string                       `json:"block_email"`
+	MessageId    string                       `json:"msg_id"`
+	LegacyMsgId  string                       `json:"message_id"`
+	OutboundIP   string                       `json:"outbound_ip"`
+	Status       aliyunDirectMailScalarString `json:"status"`
+	Event        string                       `json:"event"`
+	ErrorCode    aliyunDirectMailScalarString `json:"err_code"`
+	ErrorMessage string                       `json:"err_msg"`
+	FailureType  string                       `json:"failed_type"`
+	ESP          string                       `json:"esp"`
+	DeliverTime  string                       `json:"deliver_time"`
 }
 
 func ProcessAliyunEventBridgeReceipt(body []byte) error {
@@ -69,7 +95,7 @@ func ProcessAliyunEventBridgeReceipt(body []byte) error {
 		SenderAddress:   senderAddress,
 		RecipientMasked: maskReceiptAddress(recipientAddress),
 		RecipientDomain: receiptAddressDomain(recipientAddress),
-		Status:          eventPayload.Data.Status, ErrorCode: eventPayload.Data.ErrorCode,
+		Status:          string(eventPayload.Data.Status), ErrorCode: string(eventPayload.Data.ErrorCode),
 		ErrorMessage: errorMessage,
 		FailureType:  eventPayload.Data.FailureType, ProviderEnvId: environmentID,
 		ESP: eventPayload.Data.ESP, OutboundIP: eventPayload.Data.OutboundIP,
@@ -178,7 +204,7 @@ func receiptErrorMessage(data AliyunDirectMailEventData) string {
 	}
 	parts := make([]string, 0, 2)
 	if data.ErrorCode != "" {
-		parts = append(parts, strings.TrimSpace(data.ErrorCode))
+		parts = append(parts, strings.TrimSpace(string(data.ErrorCode)))
 	}
 	if data.FailureType != "" {
 		parts = append(parts, strings.TrimSpace(data.FailureType))

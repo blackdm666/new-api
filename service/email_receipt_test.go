@@ -243,3 +243,40 @@ func newReceiptTestAccount(t *testing.T) *model.EmailSenderAccount {
 	require.NoError(t, model.CreateEmailSenderAccount(account))
 	return account
 }
+
+func TestAliyunDirectMailEventAcceptsScalarStatusAndErrorCode(t *testing.T) {
+	testCases := []struct {
+		name      string
+		payload   string
+		status    string
+		errorCode string
+	}{
+		{
+			name:      "documented strings",
+			payload:   `{"data":{"status":"0","err_code":"250"}}`,
+			status:    "0",
+			errorCode: "250",
+		},
+		{
+			name:      "live numeric values",
+			payload:   `{"data":{"status":0,"err_code":250}}`,
+			status:    "0",
+			errorCode: "250",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			eventPayload := AliyunDirectMailEvent{}
+			require.NoError(t, common.Unmarshal([]byte(testCase.payload), &eventPayload))
+			assert.Equal(t, testCase.status, string(eventPayload.Data.Status))
+			assert.Equal(t, testCase.errorCode, string(eventPayload.Data.ErrorCode))
+		})
+	}
+}
+
+func TestAliyunDirectMailEventRejectsNonScalarStatus(t *testing.T) {
+	eventPayload := AliyunDirectMailEvent{}
+	err := common.Unmarshal([]byte(`{"data":{"status":true}}`), &eventPayload)
+	require.Error(t, err)
+}
