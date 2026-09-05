@@ -40,7 +40,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { DEFAULT_CURRENCY_CONFIG } from '@/stores/system-config-store'
+import {
+  DEFAULT_CURRENCY_CONFIG,
+  useSystemConfigStore,
+} from '@/stores/system-config-store'
 
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
@@ -104,6 +107,7 @@ type PricingSectionProps = {
 export function PricingSection({ defaultValues }: PricingSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const setSystemConfig = useSystemConfigStore((state) => state.setConfig)
 
   const pricingSchema = createPricingSchema(t)
 
@@ -115,7 +119,7 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
         PricingFormValues
       >,
       defaultValues,
-      onSubmit: async (_data, changedFields) => {
+      onSubmit: async (data, changedFields) => {
         for (const [key, value] of Object.entries(changedFields)) {
           if (value === undefined || value === null) continue
           if (typeof value === 'object') continue
@@ -133,6 +137,22 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
             value: serialized,
           })
         }
+
+        setSystemConfig({
+          displayTokenStatEnabled: data.DisplayTokenStatEnabled,
+          currency: {
+            displayInCurrency: data.DisplayInCurrencyEnabled,
+            quotaDisplayType: data.general_setting.quota_display_type,
+            quotaPerUnit: data.QuotaPerUnit,
+            usdExchangeRate: data.USDExchangeRate,
+            customCurrencySymbol:
+              data.general_setting.custom_currency_symbol?.trim() ||
+              DEFAULT_CURRENCY_CONFIG.customCurrencySymbol,
+            customCurrencyExchangeRate:
+              data.general_setting.custom_currency_exchange_rate ||
+              DEFAULT_CURRENCY_CONFIG.customCurrencyExchangeRate,
+          },
+        })
       },
     })
 

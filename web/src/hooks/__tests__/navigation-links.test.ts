@@ -21,6 +21,7 @@ import assert from 'node:assert/strict'
 import type { TFunction } from 'i18next'
 import { test } from 'vitest'
 
+import { parseHeaderNavModules } from '@/lib/nav-modules'
 import { ROLE } from '@/lib/roles'
 
 import { buildSidebarData } from '../use-sidebar-data'
@@ -35,6 +36,11 @@ test('places Infinite Canvas immediately after Model Square', () => {
       console: true,
       pricing: { enabled: true, requireAuth: false },
       rankings: { enabled: true, requireAuth: false },
+      infiniteCanvas: {
+        enabled: true,
+        name: 'Infinite Canvas',
+        url: INFINITE_CANVAS_URL,
+      },
       docs: true,
       about: true,
     },
@@ -50,6 +56,66 @@ test('places Infinite Canvas immediately after Model Square', () => {
     href: INFINITE_CANVAS_URL,
     external: true,
   })
+})
+
+test('uses the backend Infinite Canvas name and URL in both navigation entries', () => {
+  const modules = parseHeaderNavModules(
+    JSON.stringify({
+      infiniteCanvas: {
+        name: '创作工作台',
+        url: 'https://canvas.example.com/workspace',
+      },
+    })
+  )
+  const links = buildTopNavLinks({ modules, isAuthed: true, t: translate })
+  const canvas = links.find(
+    (link) => link.href === 'https://canvas.example.com/workspace'
+  )
+
+  assert.deepEqual(canvas, {
+    title: '创作工作台',
+    href: 'https://canvas.example.com/workspace',
+    external: true,
+  })
+
+  const sidebar = buildSidebarData(translate, modules.infiniteCanvas)
+  const sidebarCanvas = sidebar.navGroups.find((group) => group.id === 'chat')
+    ?.items[0]
+  assert.ok(sidebarCanvas && 'url' in sidebarCanvas)
+  assert.equal(sidebarCanvas.title, '创作工作台')
+  assert.equal(sidebarCanvas.url, 'https://canvas.example.com/workspace')
+})
+
+test('hides Infinite Canvas from both navigation entries when disabled', () => {
+  const modules = parseHeaderNavModules(
+    JSON.stringify({
+      infiniteCanvas: {
+        enabled: false,
+        name: '创作工作台',
+        url: 'https://canvas.example.com/workspace',
+      },
+    })
+  )
+
+  const links = buildTopNavLinks({ modules, isAuthed: true, t: translate })
+  assert.equal(
+    links.some((link) => link.href === 'https://canvas.example.com/workspace'),
+    false
+  )
+
+  const sidebar = buildSidebarData(translate, modules.infiniteCanvas)
+  const chatItems = sidebar.navGroups.find(
+    (group) => group.id === 'chat'
+  )?.items
+  assert.ok(chatItems)
+  assert.equal(
+    chatItems.some(
+      (item) =>
+        'url' in item && item.url === 'https://canvas.example.com/workspace'
+    ),
+    false
+  )
+  assert.equal(chatItems[0]?.title, 'Playground')
 })
 
 test('places Infinite Canvas immediately before Playground', () => {

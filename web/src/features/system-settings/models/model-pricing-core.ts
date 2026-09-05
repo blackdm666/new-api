@@ -22,24 +22,40 @@ import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
 
 import { formatPricingNumber } from './pricing-format'
 
-export const createModelPricingSchema = (t: (key: string) => string) =>
-  z.object({
+const optionalPricingNumber = (t: (key: string) => string) =>
+  z
+    .string()
+    .optional()
+    .refine(
+      (value) =>
+        value === undefined || value === '' || isCompletePricingNumber(value),
+      t('Please enter a valid number')
+    )
+
+export const createModelPricingSchema = (t: (key: string) => string) => {
+  const pricingNumber = optionalPricingNumber(t)
+  return z.object({
     name: z.string().min(1, t('Model name is required')),
-    price: z.string().optional(),
-    ratio: z.string().optional(),
-    cacheRatio: z.string().optional(),
-    createCacheRatio: z.string().optional(),
-    completionRatio: z.string().optional(),
-    imageRatio: z.string().optional(),
-    audioRatio: z.string().optional(),
-    audioCompletionRatio: z.string().optional(),
+    price: pricingNumber,
+    ratio: pricingNumber,
+    cacheRatio: pricingNumber,
+    createCacheRatio: pricingNumber,
+    completionRatio: pricingNumber,
+    imageRatio: pricingNumber,
+    audioRatio: pricingNumber,
+    audioCompletionRatio: pricingNumber,
   })
+}
 
 export type ModelPricingFormValues = z.infer<
   ReturnType<typeof createModelPricingSchema>
 >
 
-export type PricingMode = 'per-token' | 'per-request' | 'tiered_expr'
+export type PricingMode =
+  | 'per-token'
+  | 'per-request'
+  | 'per-second'
+  | 'tiered_expr'
 
 export type LaneKey =
   | 'completion'
@@ -71,7 +87,18 @@ export type PreviewRow = {
   multiline?: boolean
 }
 
-export const numericDraftRegex = /^(\d+(\.\d*)?|\.\d*)?$/
+export const numericDraftRegex = /^(\d+(\.\d*)?|\.\d*)?([eE][+-]?\d*)?$/
+const completePricingNumberRegex = /^(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
+const zeroPricingNumberRegex = /^(0+(\.0*)?|\.0+)([eE][+-]?\d+)?$/
+
+export function isCompletePricingNumber(value: unknown): boolean {
+  if (typeof value !== 'string' && typeof value !== 'number') return false
+  const text = String(value)
+  if (!completePricingNumberRegex.test(text)) return false
+  const numeric = Number(text)
+  if (!Number.isFinite(numeric) || numeric < 0) return false
+  return numeric !== 0 || zeroPricingNumberRegex.test(text)
+}
 
 export const EMPTY_LANE_PRICES: Record<LaneKey, string> = {
   completion: '',
@@ -156,10 +183,10 @@ export function toNumberOrNull(value: unknown): number | null {
   return Number.isFinite(num) ? num : null
 }
 
-function ratioToBasePrice(ratio: unknown): string {
+function ratioToBasePrice(ratio: unknown, exchangeRate = 1): string {
   const num = toNumberOrNull(ratio)
   if (num === null) return ''
-  return formatPricingNumber(num * 2)
+  return formatPricingNumber(num * 2 * exchangeRate)
 }
 
 function deriveLanePrice(
@@ -173,7 +200,10 @@ function deriveLanePrice(
   return formatPricingNumber(ratioNumber * denominatorNumber)
 }
 
-export function createInitialLaneState(data?: ModelRatioData | null) {
+export function createInitialLaneState(
+  data?: ModelRatioData | null,
+  exchangeRate = 1
+) {
   if (!data) {
     return {
       promptPrice: '',
@@ -182,7 +212,7 @@ export function createInitialLaneState(data?: ModelRatioData | null) {
     }
   }
 
-  const promptPrice = ratioToBasePrice(data.ratio)
+  const promptPrice = ratioToBasePrice(data.ratio, exchangeRate)
   const audioInputPrice = deriveLanePrice(data.audioRatio, promptPrice)
   const prices: Record<LaneKey, string> = {
     completion: deriveLanePrice(data.completionRatio, promptPrice),
@@ -215,7 +245,8 @@ export function buildPreviewRows(
   promptPrice: string,
   lanePrices: Record<LaneKey, string>,
   laneEnabled: Record<LaneKey, boolean>,
-  t: (key: string) => string
+  t: (key: string) => string,
+  currencySymbol = '$'
 ): PreviewRow[] {
   if (mode === 'tiered_expr') {
     const effectiveExpr = combineBillingExpr(billingExpr, requestRuleExpr)
@@ -230,12 +261,17 @@ export function buildPreviewRows(
     ]
   }
 
-  if (mode === 'per-request') {
+  if (mode === 'per-request' || mode === 'per-second') {
     return [
+      {
+        key: 'mode',
+        label: 'BillingMode',
+        value: mode === 'per-second' ? 'per_second' : 'per_request',
+      },
       {
         key: 'price',
         label: 'ModelPrice',
-        value: values.price || t('Empty'),
+        value: values.price ? `${currencySymbol}${values.price}` : t('Empty'),
       },
     ]
   }
@@ -244,14 +280,14 @@ export function buildPreviewRows(
     {
       key: 'inputPrice',
       label: t('Input price'),
-      value: promptPrice ? `$${promptPrice}` : t('Empty'),
+      value: promptPrice ? `${currencySymbol}${promptPrice}` : t('Empty'),
     },
     {
       key: 'completion',
       label: t('Completion price'),
       value:
         laneEnabled.completion && lanePrices.completion
-          ? `$${lanePrices.completion}`
+          ? `${currencySymbol}${lanePrices.completion}`
           : t('Empty'),
     },
     {
@@ -259,7 +295,7 @@ export function buildPreviewRows(
       label: t('Cache read price'),
       value:
         laneEnabled.cache && lanePrices.cache
-          ? `$${lanePrices.cache}`
+          ? `${currencySymbol}${lanePrices.cache}`
           : t('Empty'),
     },
     {
@@ -267,7 +303,7 @@ export function buildPreviewRows(
       label: t('Cache write price'),
       value:
         laneEnabled.createCache && lanePrices.createCache
-          ? `$${lanePrices.createCache}`
+          ? `${currencySymbol}${lanePrices.createCache}`
           : t('Empty'),
     },
     {
@@ -275,7 +311,7 @@ export function buildPreviewRows(
       label: t('Image input price'),
       value:
         laneEnabled.image && lanePrices.image
-          ? `$${lanePrices.image}`
+          ? `${currencySymbol}${lanePrices.image}`
           : t('Empty'),
     },
     {
@@ -283,7 +319,7 @@ export function buildPreviewRows(
       label: t('Audio input price'),
       value:
         laneEnabled.audioInput && lanePrices.audioInput
-          ? `$${lanePrices.audioInput}`
+          ? `${currencySymbol}${lanePrices.audioInput}`
           : t('Empty'),
     },
     {
@@ -291,7 +327,7 @@ export function buildPreviewRows(
       label: t('Audio output price'),
       value:
         laneEnabled.audioOutput && lanePrices.audioOutput
-          ? `$${lanePrices.audioOutput}`
+          ? `${currencySymbol}${lanePrices.audioOutput}`
           : t('Empty'),
     },
   ]

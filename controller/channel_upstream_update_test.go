@@ -422,7 +422,7 @@ func TestFetchXinMengModelsUsesOpenAIContract(t *testing.T) {
 		assert.Equal(t, "/v1/models", r.URL.Path)
 		assert.Equal(t, "Bearer xinmeng-key", r.Header.Get("Authorization"))
 		w.Header().Set("Content-Type", "application/json")
-		_, err := w.Write([]byte(`{"object":"list","data":[{"id":"dvc-seedance-2.5"},{"id":" dvc-seedance-2.0 "},{"id":"minimax-h3"},{"id":"minimax-h3"}]}`))
+		_, err := w.Write([]byte(`{"object":"list","data":[{"id":"dvc-seedance-2.5"},{"id":" dvc-seedance-2.0 "},{"id":"minimax-h3-768p"},{"id":"minimax-h3-1440p"},{"id":"minimax-h3-768p"}]}`))
 		assert.NoError(t, err)
 	}))
 	t.Cleanup(server.Close)
@@ -437,7 +437,7 @@ func TestFetchXinMengModelsUsesOpenAIContract(t *testing.T) {
 	models, err := fetchChannelUpstreamModelIDs(channel)
 
 	require.NoError(t, err)
-	require.Equal(t, []string{"dvc-seedance-2.5", "dvc-seedance-2.0", "minimax-h3"}, models)
+	require.Equal(t, []string{"dvc-seedance-2.5", "dvc-seedance-2.0", "minimax-h3-768p", "minimax-h3-1440p"}, models)
 }
 
 func TestNormalizeModelNames(t *testing.T) {

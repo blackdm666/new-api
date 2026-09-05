@@ -63,7 +63,7 @@ export function EmailBindDialog({
   })
   const {
     isTurnstileEnabled,
-    turnstileSiteKey,
+    turnstileConfig,
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
@@ -227,7 +227,7 @@ export function EmailBindDialog({
         {isTurnstileEnabled && (
           <Turnstile
             key={turnstileWidgetKey}
-            siteKey={turnstileSiteKey}
+            {...turnstileConfig}
             onVerify={setTurnstileToken}
             onExpire={resetTurnstile}
           />

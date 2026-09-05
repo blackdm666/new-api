@@ -17,7 +17,6 @@ import (
 	omnitask "github.com/QuantumNous/new-api/relay/channel/task/omni"
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -44,12 +43,8 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 
 // ValidateRequestAndSetAction parses body, validates fields and sets default action.
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *taskdto.TaskError) {
-	if taskErr := relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionTextGenerate); taskErr != nil {
+	if taskErr := relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionTextToVideo); taskErr != nil {
 		return taskErr
-	}
-	info.UpstreamModelName = info.OriginModelName
-	if err := helper.ModelMappedHelper(c, info, nil); err != nil {
-		return service.TaskErrorWrapperLocal(err, "model_mapping_failed", http.StatusBadRequest)
 	}
 	if omnitask.IsModel(info.UpstreamModelName) {
 		if err := omnitask.ValidateRequest(c, info); err != nil {
@@ -106,7 +101,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	} else if len(req.Images) > 0 {
 		if parsed := ParseImageInput(req.Images[0]); parsed != nil {
 			instance.Image = parsed
-			info.Action = constant.TaskActionGenerate
+			info.Action = constant.TaskActionImageToVideo
 		}
 	}
 
@@ -143,17 +138,17 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 	return channel.DoTaskApiRequest(a, c, info, requestBody)
 }
 
-// DoResponse handles upstream response, returns taskID etc.
-func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *taskdto.TaskError) {
+// ParseResponse handles the upstream response without writing to the client.
+func (a *TaskAdaptor) ParseResponse(_ *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*channel.TaskSubmitResponse, *taskdto.TaskError) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
 	}
 	_ = resp.Body.Close()
 	if omnitask.IsModel(info.UpstreamModelName) {
 		upstreamName, err := omnitask.ParseSubmitResponse(responseBody)
 		if err != nil {
-			return "", nil, service.TaskErrorWrapper(err, "invalid_interaction_response", http.StatusInternalServerError)
+			return nil, service.TaskErrorWrapper(err, "invalid_interaction_response", http.StatusInternalServerError)
 		}
 		localID := taskcommon.EncodeLocalTaskID(upstreamName)
 		ov := dto.NewOpenAIVideo()
@@ -161,25 +156,23 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 		ov.TaskID = info.PublicTaskID
 		ov.CreatedAt = time.Now().Unix()
 		ov.Model = info.OriginModelName
-		c.JSON(http.StatusOK, ov)
-		return localID, responseBody, nil
+		return &channel.TaskSubmitResponse{UpstreamTaskID: localID, TaskData: responseBody, ClientResponse: ov}, nil
 	}
 
 	var s submitResponse
 	if err := common.Unmarshal(responseBody, &s); err != nil {
-		return "", nil, service.TaskErrorWrapper(err, "unmarshal_response_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(err, "unmarshal_response_failed", http.StatusInternalServerError)
 	}
 	if strings.TrimSpace(s.Name) == "" {
-		return "", nil, service.TaskErrorWrapper(fmt.Errorf("missing operation name"), "invalid_response", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(fmt.Errorf("missing operation name"), "invalid_response", http.StatusInternalServerError)
 	}
-	taskID = taskcommon.EncodeLocalTaskID(s.Name)
+	taskID := taskcommon.EncodeLocalTaskID(s.Name)
 	ov := dto.NewOpenAIVideo()
 	ov.ID = info.PublicTaskID
 	ov.TaskID = info.PublicTaskID
 	ov.CreatedAt = time.Now().Unix()
 	ov.Model = info.OriginModelName
-	c.JSON(http.StatusOK, ov)
-	return taskID, responseBody, nil
+	return &channel.TaskSubmitResponse{UpstreamTaskID: taskID, TaskData: responseBody, ClientResponse: ov}, nil
 }
 
 func (a *TaskAdaptor) GetModelList() []string {
@@ -221,11 +214,11 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 }
 
 // FetchTask polls task status via the Gemini operations GET endpoint.
-func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
-	taskID, ok := body["task_id"].(string)
-	if !ok {
+func (a *TaskAdaptor) FetchTask(baseUrl, key string, task *model.Task, proxy string) (*http.Response, error) {
+	if task == nil {
 		return nil, fmt.Errorf("invalid task_id")
 	}
+	taskID := task.GetUpstreamTaskID()
 
 	upstreamName, err := taskcommon.DecodeLocalTaskID(taskID)
 	if err != nil {
@@ -268,7 +261,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	return client.Do(req)
 }
 
-func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
+func (a *TaskAdaptor) ParseTaskResult(_ *model.Task, _ *http.Response, respBody []byte) (*relaycommon.TaskInfo, error) {
 	if omnitask.IsInteractionResponse(respBody) {
 		return omnitask.ParseTaskResult(respBody)
 	}
@@ -292,17 +285,22 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		return ti, nil
 	}
 
-	ti.Status = model.TaskStatusSuccess
-	ti.Progress = "100%"
-
 	ti.TaskID = taskcommon.EncodeLocalTaskID(op.Name)
-
 	if len(op.Response.GenerateVideoResponse.GeneratedVideos) > 0 {
 		if uri := op.Response.GenerateVideoResponse.GeneratedVideos[0].Video.URI; uri != "" {
 			ti.RemoteUrl = uri
+			ti.Status = model.TaskStatusSuccess
+			ti.Progress = "100%"
+			return ti, nil
 		}
 	}
 
+	filteredCount := op.Response.RaiMediaFilteredCount + op.Response.GenerateVideoResponse.RaiMediaFilteredCount
+	filteredReasons := append([]string{}, op.Response.RaiMediaFilteredReasons...)
+	filteredReasons = append(filteredReasons, op.Response.GenerateVideoResponse.RaiMediaFilteredReasons...)
+	ti.Status = model.TaskStatusFailure
+	ti.Progress = "100%"
+	ti.Reason = taskcommon.GoogleVideoFailureReason(filteredCount, filteredReasons)
 	return ti, nil
 }
 

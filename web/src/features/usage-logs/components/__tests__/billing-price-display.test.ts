@@ -117,4 +117,52 @@ describe('usage log actual price display', () => {
       ]
     )
   })
+
+  test('shows per-second unit and duration without calling it per-call', () => {
+    const other: LogOtherData = {
+      model_price: 0.08,
+      billing_unit: 'second',
+      task_ratios: { seconds: 8, size: 1.5 },
+      group_ratio: 0.5,
+    }
+
+    expect(buildTypeDetailSegments(log, other, t)[0]).toEqual({
+      text: 'Per-second · ¥0.28/second',
+    })
+    expect(buildBillingBreakdownRows(log, other, false, t).slice(0, 4)).toEqual(
+      [
+        { label: 'Billing Mode', value: 'Per-second' },
+        {
+          label: 'Price Explanation',
+          value: 'Adjusted by 0.5x group rate',
+        },
+        { label: 'Model Price', value: '¥0.28/second' },
+        { label: 'Duration', value: '8s' },
+      ]
+    )
+  })
+
+  test('does not label a legacy task with adaptor ratios as per-call', () => {
+    const other: LogOtherData = {
+      is_task: true,
+      model_price: 0.5,
+      task_ratios: { seconds: 8 },
+      group_ratio: 0.3,
+    }
+
+    expect(buildTypeDetailSegments(log, other, t)[0]).toEqual({
+      text: 'Dynamic Pricing · ¥1.05',
+    })
+    expect(buildBillingBreakdownRows(log, other, false, t).slice(0, 4)).toEqual(
+      [
+        { label: 'Billing Mode', value: 'Dynamic Pricing' },
+        {
+          label: 'Price Explanation',
+          value: 'Adjusted by 0.3x group rate',
+        },
+        { label: 'Model Price', value: '¥1.05' },
+        { label: 'Duration', value: '8s' },
+      ]
+    )
+  })
 })

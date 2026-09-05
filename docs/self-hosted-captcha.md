@@ -1,24 +1,40 @@
-# 自建人机验证（Cloudflare Turnstile 兼容）
+# 人机验证服务配置
 
-NewAPI 的 Turnstile 接线同时支持 Cloudflare 官方服务和自建的兼容服务。
+NewAPI 支持在后台切换 Cloudflare Turnstile 和兼容 `Captcha88.render()` 的自定义滑块服务。配置保存在数据库中，不再依赖环境变量，也不会根据站点密钥的格式猜测服务商。
 
-## 88API 当前配置
+入口：`系统设置 → 认证设置 → 机器人保护`。
 
-- 在后台开启 Turnstile 校验。
-- “Turnstile 站点密钥”填写自建验证服务地址，例如 `https://verify.88api.ai`。前端会加载 `<地址>/widget.js`，并通过 `Captcha88.render()` 渲染勾选、行为验证、点击或滑块挑战。
-- “Turnstile 私钥”填写与验证服务共享的核销密钥。
-- 部署环境设置：
+## Cloudflare Turnstile
 
-  ```env
-  TURNSTILE_VERIFY_URL=https://verify.88api.ai/turnstile/v0/siteverify
-  ```
+1. 选择 `Cloudflare Turnstile`。
+2. 填写 Cloudflare 提供的站点密钥和私钥。
+3. 开启人机验证并保存。
 
-后端会把前端提交的 `turnstile` 一次性 token 以 Cloudflare 兼容表单发送到该地址，并读取响应中的 `success`。
+前端固定加载 Cloudflare 官方脚本，后端固定调用 Cloudflare 官方 `siteverify` 地址。
 
-## 官方 Cloudflare 回退
+## 自定义滑块
 
-如果站点密钥不是 HTTP(S) URL，前端按标准 Cloudflare site key 处理并加载官方 Turnstile 脚本。不设置 `TURNSTILE_VERIFY_URL` 时，后端默认使用 Cloudflare 官方 siteverify 地址。
+选择 `自定义滑块（兼容 Captcha88）` 后填写：
+
+- 小组件脚本 URL：浏览器加载的完整脚本地址，例如 `https://captcha.example.com/widget.js`。
+- 小组件 API 地址：传给 `Captcha88.render()` 的 `endpoint`。
+- 服务端验证 URL：NewAPI 后端提交一次性 token 和私钥的完整地址。
+- 站点密钥：可选，供支持该参数的自定义小组件使用。
+- 验证动作：传给小组件的 `act`，默认 `register`。
+- 私钥：可选；仅在自定义核销服务要求时填写。`verify.88api.ai` 使用空私钥，不要自行生成或填写假值。
+
+自定义模式只提供 `Captcha88.render()` 兼容协议适配，不会内置或绑定任何具体滑块站点。小组件脚本会在公开登录页面执行，只能配置由管理员确认可信的地址；生产环境应优先使用 HTTPS。
+
+开启验证时，自定义模式要求脚本 URL、小组件 API 地址和服务端验证 URL 全部有效，私钥是否需要由外部服务决定。私钥不会由查询接口返回；以后编辑时留空即可保留现有值。需要删除已保存的私钥时，可开启“清除已保存的私钥”后保存；Cloudflare 模式必须先关闭验证才能清除。
+
+后端使用 Cloudflare 兼容表单字段 `secret`、`response` 和 `remoteip` 请求自定义验证 URL，并读取 JSON 响应中的 `success`。
+
+首次切换服务商时，应保持一个已登录的管理员会话：先保存完整配置，再开启验证，并立即使用无痕窗口验证登录和注册流程。验证失败时使用仍然有效的管理员会话关闭人机验证并修正配置，避免所有管理员会话退出后无法登录。
+
+## 旧配置兼容
+
+升级后，如果数据库中还没有明确的服务商配置，并且旧 `TurnstileSiteKey` 是 HTTP(S) 服务地址，启动时会转换为自定义滑块配置并写回数据库。迁移时会保留原 `TurnstileSiteKey`，确保只回滚镜像时旧版本仍能加载自建组件；同时优先沿用旧 `TURNSTILE_VERIFY_URL` 的完整核销地址。该环境变量只用于一次性旧配置迁移，新配置保存后不再依赖环境变量或地址格式推导。
 
 ## 受保护入口
 
-注册、邮箱验证码、密码登录、找回密码、标准 OAuth 登录、微信和 Telegram 登录均复用这套校验。OAuth 账号绑定依赖已有登录会话，不额外要求挑战。
+注册、邮箱验证码、密码登录、找回密码、标准 OAuth 登录、微信、Telegram 登录和签到均复用这套校验。OAuth 账号绑定依赖已有登录会话，不额外要求挑战。

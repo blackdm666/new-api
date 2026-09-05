@@ -85,9 +85,13 @@ export function UserAuthForm({
     (status?.password_login_enabled ??
       status?.data?.password_login_enabled ??
       true) !== false
+  const passwordLoginEncryptionEnabled =
+    (status?.password_login_encryption_enabled ??
+      status?.data?.password_login_encryption_enabled ??
+      false) === true
   const {
     isTurnstileEnabled,
-    turnstileSiteKey,
+    turnstileConfig,
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
@@ -183,6 +187,7 @@ export function UserAuthForm({
             username: data.username,
             password: data.password,
             turnstile: submittedTurnstileToken,
+            passwordEncryptionEnabled: passwordLoginEncryptionEnabled,
           })
 
           if (!res.success) return false
@@ -431,7 +436,7 @@ export function UserAuthForm({
           <div className='mt-2'>
             <Turnstile
               key={turnstileWidgetKey}
-              siteKey={turnstileSiteKey}
+              {...turnstileConfig}
               onVerify={setTurnstileToken}
               onExpire={clearTurnstileToken}
             />

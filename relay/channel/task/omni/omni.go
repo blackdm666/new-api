@@ -61,6 +61,11 @@ type interactionStep struct {
 	Content  []inputPart `json:"content"`
 }
 
+type interactionError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 type interactionResponse struct {
 	ID      string            `json:"id"`
 	Model   string            `json:"model"`
@@ -71,9 +76,8 @@ type interactionResponse struct {
 		TotalTokens  int `json:"total_tokens"`
 		OutputTokens int `json:"total_output_tokens"`
 	} `json:"usage"`
-	Error struct {
-		Message string `json:"message"`
-	} `json:"error"`
+	Error  interactionError   `json:"error"`
+	Errors []interactionError `json:"errors"`
 }
 
 // IsModel reports whether modelName uses the Omni Interactions protocol.
@@ -189,7 +193,7 @@ func ValidateRequest(c *gin.Context, info *relaycommon.RelayInfo) error {
 		return localizeReferenceVideoError(c, err)
 	}
 	if (imageCount > 0 || referenceVideo.Part != nil) && info != nil {
-		info.Action = constant.TaskActionGenerate
+		info.Action = constant.TaskActionImageToVideo
 	}
 	return nil
 }
@@ -211,7 +215,7 @@ func BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, e
 	}
 	parts = append(parts, images...)
 	if len(images) > 0 && info != nil {
-		info.Action = constant.TaskActionGenerate
+		info.Action = constant.TaskActionImageToVideo
 	}
 	referenceVideo, err := prepareReferenceVideo(c, req)
 	if err != nil {
@@ -223,7 +227,7 @@ func BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, e
 		content = append(content, inputPart{Type: "text", Text: prompt})
 		parts = []inputPart{{Type: "user_input", Content: content}}
 		if info != nil {
-			info.Action = constant.TaskActionGenerate
+			info.Action = constant.TaskActionImageToVideo
 		}
 	}
 
@@ -259,8 +263,8 @@ func ParseSubmitResponse(body []byte) (string, error) {
 	if err := common.Unmarshal(body, &interaction); err != nil {
 		return "", fmt.Errorf("unmarshal interaction response failed: %w", err)
 	}
-	if interaction.Error.Message != "" {
-		return "", fmt.Errorf("interaction request failed: %s", interaction.Error.Message)
+	if reason := interactionFailureReason(interaction); reason != "" {
+		return "", fmt.Errorf("interaction request failed: %s", reason)
 	}
 	return TaskName(interaction.ID)
 }
@@ -284,10 +288,10 @@ func ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error) {
 		return nil, fmt.Errorf("unmarshal interaction response failed: %w", err)
 	}
 	result := &relaycommon.TaskInfo{}
-	if interaction.Error.Message != "" {
+	if reason := interactionFailureReason(interaction); reason != "" {
 		result.Status = model.TaskStatusFailure
 		result.Progress = taskcommon.ProgressComplete
-		result.Reason = interaction.Error.Message
+		result.Reason = reason
 		return result, nil
 	}
 
@@ -303,10 +307,7 @@ func ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error) {
 	case "failed", "cancelled", "incomplete", "budget_exceeded":
 		result.Status = model.TaskStatusFailure
 		result.Progress = taskcommon.ProgressComplete
-		result.Reason = strings.TrimSpace(interaction.Error.Message)
-		if result.Reason == "" {
-			result.Reason = "interaction ended with status " + interaction.Status
-		}
+		result.Reason = "interaction ended with status " + interaction.Status
 		return result, nil
 	case "completed":
 		for _, steps := range [][]interactionStep{interaction.Steps, interaction.Outputs} {
@@ -335,6 +336,65 @@ func ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error) {
 		result.Progress = taskcommon.ProgressInProgress
 		return result, nil
 	}
+}
+
+func interactionFailureReason(interaction interactionResponse) string {
+	errors := append([]interactionError{interaction.Error}, interaction.Errors...)
+	reasons := make([]string, 0, len(errors))
+	seen := make(map[string]struct{}, len(errors))
+	for _, interactionErr := range errors {
+		code := strings.TrimSpace(interactionErr.Code)
+		message := strings.TrimSpace(interactionErr.Message)
+		var reason string
+		switch {
+		case code != "" && message != "":
+			reason = "[" + code + "] " + message
+		case message != "":
+			reason = message
+		case code != "":
+			reason = "[" + code + "]"
+		default:
+			continue
+		}
+		if _, exists := seen[reason]; exists {
+			continue
+		}
+		seen[reason] = struct{}{}
+		reasons = append(reasons, reason)
+	}
+	return strings.Join(reasons, "; ")
+}
+
+// FailureReasonFromResponse recovers an interaction error from a persisted
+// upstream payload. It is used to repair legacy tasks whose fail_reason was
+// stored before errors[] support was added.
+func FailureReasonFromResponse(body []byte) string {
+	var interaction interactionResponse
+	if err := common.Unmarshal(body, &interaction); err != nil {
+		return ""
+	}
+	return interactionFailureReason(interaction)
+}
+
+// InteractionFailureCode extracts a provider error code persisted in an
+// interaction failure reason. Non-interaction reasons use the generic code.
+func InteractionFailureCode(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if !strings.HasPrefix(reason, "[") {
+		return "video_generation_failed"
+	}
+	end := strings.IndexByte(reason, ']')
+	if end <= 1 || end > 65 {
+		return "video_generation_failed"
+	}
+	code := reason[1:end]
+	for _, char := range code {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' || char == '-' || char == '.' {
+			continue
+		}
+		return "video_generation_failed"
+	}
+	return code
 }
 
 func videoPartURL(part inputPart) string {

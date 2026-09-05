@@ -30,6 +30,7 @@ import {
   MailPlus,
   MessageSquare,
   PanelsTopLeft,
+  PlugZap,
   Radio,
   ReceiptText,
   ServerCog,
@@ -39,25 +40,42 @@ import {
   Users,
   Wallet,
 } from 'lucide-react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
-import { INFINITE_CANVAS_URL } from '@/lib/external-links'
+import { useStatus } from '@/hooks/use-status'
+import { INFINITE_CANVAS_NAME } from '@/lib/external-links'
+import {
+  DEFAULT_INFINITE_CANVAS_LINK,
+  parseHeaderNavModulesFromStatus,
+  type HeaderNavLink,
+} from '@/lib/nav-modules'
 import { ROLE } from '@/lib/roles'
 
-export function buildSidebarData(t: TFunction): SidebarData {
+export function buildSidebarData(
+  t: TFunction,
+  infiniteCanvas: HeaderNavLink = DEFAULT_INFINITE_CANVAS_LINK
+): SidebarData {
   return {
     navGroups: [
       {
         id: 'chat',
         title: t('Chat'),
         items: [
-          {
-            title: t('Infinite Canvas'),
-            url: INFINITE_CANVAS_URL,
-            icon: PanelsTopLeft,
-            external: true,
-          },
+          ...(infiniteCanvas.enabled
+            ? [
+                {
+                  title:
+                    infiniteCanvas.name === INFINITE_CANVAS_NAME
+                      ? t(INFINITE_CANVAS_NAME)
+                      : infiniteCanvas.name,
+                  url: infiniteCanvas.url,
+                  icon: PanelsTopLeft,
+                  external: true,
+                },
+              ]
+            : []),
           {
             title: t('Playground'),
             url: '/playground',
@@ -188,6 +206,12 @@ export function buildSidebarData(t: TFunction): SidebarData {
             requiredRole: ROLE.SUPER_ADMIN,
           },
           {
+            title: t('Task Plugins'),
+            url: '/task-plugins',
+            icon: PlugZap,
+            requiredRole: ROLE.SUPER_ADMIN,
+          },
+          {
             title: t('System Settings'),
             url: '/system-settings/site',
             activeUrls: ['/system-settings'],
@@ -208,5 +232,12 @@ export function buildSidebarData(t: TFunction): SidebarData {
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
-  return buildSidebarData(t)
+  const { status } = useStatus()
+  const infiniteCanvas = useMemo(
+    () =>
+      parseHeaderNavModulesFromStatus(status as Record<string, unknown> | null)
+        .infiniteCanvas,
+    [status]
+  )
+  return buildSidebarData(t, infiniteCanvas)
 }

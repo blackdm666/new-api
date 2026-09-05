@@ -26,6 +26,7 @@ export interface LoginPayload {
   username: string
   password: string
   turnstile?: string
+  passwordEncryptionEnabled?: boolean
 }
 
 export interface TwoFAPayload {
@@ -117,7 +118,11 @@ export interface SystemStatus {
     wechat_account_qrcode_image_url?: string
     WeChatAccountQRCodeImageURL?: string
     turnstile_check?: boolean
+    turnstile_provider?: 'cloudflare' | 'custom'
     turnstile_site_key?: string
+    turnstile_widget_script_url?: string
+    turnstile_widget_endpoint?: string
+    turnstile_action?: string
     email_verification?: boolean
     self_use_mode_enabled?: boolean
     display_in_currency?: boolean
@@ -133,6 +138,7 @@ export interface SystemStatus {
     oauth_register_enabled?: boolean
     register_enabled?: boolean
     password_login_enabled?: boolean
+    password_login_encryption_enabled?: boolean
     password_register_enabled?: boolean
     custom_oauth_providers?: CustomOAuthProviderInfo[]
     [key: string]: unknown
@@ -162,7 +168,11 @@ export interface SystemStatus {
   wechat_account_qrcode_image_url?: string
   WeChatAccountQRCodeImageURL?: string
   turnstile_check?: boolean
+  turnstile_provider?: 'cloudflare' | 'custom'
   turnstile_site_key?: string
+  turnstile_widget_script_url?: string
+  turnstile_widget_endpoint?: string
+  turnstile_action?: string
   email_verification?: boolean
   self_use_mode_enabled?: boolean
   display_in_currency?: boolean
@@ -178,6 +188,7 @@ export interface SystemStatus {
   oauth_register_enabled?: boolean
   register_enabled?: boolean
   password_login_enabled?: boolean
+  password_login_encryption_enabled?: boolean
   password_register_enabled?: boolean
   custom_oauth_providers?: CustomOAuthProviderInfo[]
   [key: string]: unknown

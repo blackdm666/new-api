@@ -35,3 +35,18 @@ func TestGPTImageFamilyPrefersImageGenerationEndpoint(t *testing.T) {
 		constant.EndpointTypeOpenAI,
 	}, endpoints)
 }
+
+func TestVideoTaskModelsUseOpenAIVideoEndpoint(t *testing.T) {
+	for _, test := range []struct {
+		channelType int
+		model       string
+	}{
+		{channelType: constant.ChannelTypeVertexAi, model: "veo-3.1-generate-001"},
+		{channelType: constant.ChannelTypeVertexAi, model: "gemini-omni-flash-preview"},
+		{channelType: constant.ChannelTypeSub2API, model: "grok-imagine-video-1.5"},
+	} {
+		t.Run(test.model, func(t *testing.T) {
+			require.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAIVideo}, GetEndpointTypesByChannelType(test.channelType, test.model))
+		})
+	}
+}

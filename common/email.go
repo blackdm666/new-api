@@ -37,6 +37,19 @@ type SMTPDeliveryResult struct {
 	MessageID string `json:"message_id"`
 }
 
+type SMTPAccountConfig struct {
+	Name               string
+	Server             string
+	Port               int
+	Account            string
+	From               string
+	Token              string
+	SSLEnabled         bool
+	StartTLSEnabled    bool
+	InsecureSkipVerify bool
+	ForceAuthLogin     bool
+}
+
 type smtpChannelConfig struct {
 	name               string
 	enabled            bool
@@ -215,6 +228,10 @@ func generateMessageIDFor(from string) (string, error) {
 	return fmt.Sprintf("<%d.%s@%s>", time.Now().UnixNano(), GetRandomString(12), from[at+1:]), nil
 }
 
+func GenerateEmailMessageID(from string) (string, error) {
+	return generateMessageIDFor(from)
+}
+
 func shouldUseSMTPLoginAuth() bool {
 	return primarySMTPChannel().shouldUseLoginAuth()
 }
@@ -316,6 +333,23 @@ func SendEmailViaChannel(subject string, receiver string, content string, channe
 	return SMTPDeliveryResult{Profile: channelProfile(channel), Channel: channel, MessageID: messageID}, nil
 }
 
+func SendEmailViaAccount(config SMTPAccountConfig, subject string, receiver string, content string, messageID string, notifyMessageID string) (SMTPDeliveryResult, error) {
+	channel := smtpChannelConfig{
+		name: strings.TrimSpace(config.Name), enabled: true, server: strings.TrimSpace(config.Server),
+		port: config.Port, account: strings.TrimSpace(config.Account), from: strings.TrimSpace(config.From),
+		token: config.Token, sslEnabled: config.SSLEnabled, startTLSEnabled: config.StartTLSEnabled,
+		insecureSkipVerify: config.InsecureSkipVerify, forceAuthLogin: config.ForceAuthLogin,
+	}
+	if channel.name == "" {
+		channel.name = SMTPChannelMarketing
+	}
+	actualMessageID, err := sendEmailThroughChannelWithIdentifiers(channel, subject, receiver, content, nil, messageID, notifyMessageID)
+	if err != nil {
+		return SMTPDeliveryResult{}, err
+	}
+	return SMTPDeliveryResult{Profile: SMTPProfileMarketing, Channel: channel.name, MessageID: actualMessageID}, nil
+}
+
 func SendEmailWithAttachments(subject string, receiver string, content string, attachments []EmailAttachment) error {
 	_, err := SendEmailWithAttachmentsProfileResult(SMTPProfileNotification, subject, receiver, content, attachments)
 	return err
@@ -379,6 +413,10 @@ func sendEmailWithAttachmentsProfile(profile string, subject string, receiver st
 }
 
 func sendEmailThroughChannel(config smtpChannelConfig, subject string, receiver string, content string, attachments []emailAttachmentData) (string, error) {
+	return sendEmailThroughChannelWithIdentifiers(config, subject, receiver, content, attachments, "", "")
+}
+
+func sendEmailThroughChannelWithIdentifiers(config smtpChannelConfig, subject string, receiver string, content string, attachments []emailAttachmentData, requestedMessageID string, notifyMessageID string) (string, error) {
 	from := config.fromAddress()
 	if strings.TrimSpace(config.server) == "" {
 		return "", fmt.Errorf("SMTP server is not configured")
@@ -393,13 +431,19 @@ func sendEmailThroughChannel(config smtpChannelConfig, subject string, receiver 
 	if strings.ContainsAny(subject+receiver+from+senderName, "\r\n") {
 		return "", fmt.Errorf("invalid email header")
 	}
-	messageID, err := generateMessageIDFor(from)
-	if err != nil {
-		return "", err
+	messageID := strings.TrimSpace(requestedMessageID)
+	if messageID == "" {
+		var err error
+		messageID, err = generateMessageIDFor(from)
+		if err != nil {
+			return "", err
+		}
+	} else if !strings.HasPrefix(messageID, "<") {
+		messageID = "<" + strings.Trim(messageID, "<>") + ">"
 	}
 	encodedSubject := fmt.Sprintf("=?UTF-8?B?%s?=", base64.StdEncoding.EncodeToString([]byte(subject)))
 	var message bytes.Buffer
-	if err := writeEmailMessageData(&message, messageID, encodedSubject, receiver, content, attachments, senderName, from); err != nil {
+	if err := writeEmailMessageData(&message, messageID, encodedSubject, receiver, content, attachments, senderName, from, notifyMessageID); err != nil {
 		return "", err
 	}
 
@@ -449,12 +493,20 @@ func writeEmailMessage(w io.Writer, messageID string, encodedSubject string, rec
 	return writeEmailMessageData(w, messageID, encodedSubject, receiver, content, attachmentData, senderName, primarySMTPChannel().fromAddress())
 }
 
-func writeEmailMessageData(w io.Writer, messageID string, encodedSubject string, receiver string, content string, attachments []emailAttachmentData, senderName string, from string) error {
+func writeEmailMessageData(w io.Writer, messageID string, encodedSubject string, receiver string, content string, attachments []emailAttachmentData, senderName string, from string, notifyMessageID ...string) error {
 	sender := (&mail.Address{Name: senderName, Address: from}).String()
+	notifyHeader := ""
+	if len(notifyMessageID) > 0 && strings.TrimSpace(notifyMessageID[0]) != "" {
+		value := strings.TrimSpace(notifyMessageID[0])
+		if strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("invalid notification message id")
+		}
+		notifyHeader = "X-Notify-Message-ID: " + value + "\r\n"
+	}
 	if len(attachments) == 0 {
 		alternative := multipart.NewWriter(w)
-		if _, err := fmt.Fprintf(w, "To: %s\r\nFrom: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: %s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=%q\r\n\r\n",
-			receiver, sender, encodedSubject, time.Now().Format(time.RFC1123Z), messageID, alternative.Boundary()); err != nil {
+		if _, err := fmt.Fprintf(w, "To: %s\r\nFrom: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: %s\r\n%sMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=%q\r\n\r\n",
+			receiver, sender, encodedSubject, time.Now().Format(time.RFC1123Z), messageID, notifyHeader, alternative.Boundary()); err != nil {
 			return err
 		}
 		if err := writeEmailAlternativeParts(alternative, content); err != nil {
@@ -464,8 +516,8 @@ func writeEmailMessageData(w io.Writer, messageID string, encodedSubject string,
 	}
 
 	mixed := multipart.NewWriter(w)
-	if _, err := fmt.Fprintf(w, "To: %s\r\nFrom: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: %s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=%q\r\n\r\n",
-		receiver, sender, encodedSubject, time.Now().Format(time.RFC1123Z), messageID, mixed.Boundary()); err != nil {
+	if _, err := fmt.Fprintf(w, "To: %s\r\nFrom: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: %s\r\n%sMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=%q\r\n\r\n",
+		receiver, sender, encodedSubject, time.Now().Format(time.RFC1123Z), messageID, notifyHeader, mixed.Boundary()); err != nil {
 		return err
 	}
 	var alternativeBody bytes.Buffer

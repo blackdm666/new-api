@@ -150,7 +150,7 @@ export function UpstreamRatioSyncTable({
           ).forEach((ratioType) => {
             const upstreamVal =
               row.ratioTypes[ratioType]?.upstreams?.[upstreamName]
-            if (isSelectableUpstreamValue(upstreamVal)) {
+            if (isSelectableUpstreamValue(upstreamVal, ratioType)) {
               selections.push({
                 model: row.model,
                 ratioType,

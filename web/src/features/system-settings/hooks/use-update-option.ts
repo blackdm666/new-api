@@ -20,8 +20,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 
-import { updateSystemOption } from '../api'
-import type { UpdateOptionRequest } from '../types'
+import { updateBotProtectionSettings, updateSystemOption } from '../api'
+import type {
+  BotProtectionSettingsPayload,
+  UpdateOptionRequest,
+} from '../types'
 
 // Configuration keys that require status refresh
 const STATUS_RELATED_KEYS = new Set([
@@ -63,6 +66,32 @@ export function useUpdateOption() {
       } else {
         toast.error(data.message || i18next.t('Failed to update setting'))
       }
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || i18next.t('Failed to update setting'))
+    },
+  })
+}
+
+export function useUpdateBotProtectionSettings() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (request: BotProtectionSettingsPayload) =>
+      updateBotProtectionSettings(request),
+    onSuccess: (data) => {
+      if (!data.success) {
+        toast.error(data.message || i18next.t('Failed to update setting'))
+        return
+      }
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      queryClient.invalidateQueries({ queryKey: ['status'] })
+      try {
+        window.localStorage.removeItem('status')
+      } catch {
+        /* empty */
+      }
+      toast.success(i18next.t('Setting updated successfully'))
     },
     onError: (error: Error) => {
       toast.error(error.message || i18next.t('Failed to update setting'))

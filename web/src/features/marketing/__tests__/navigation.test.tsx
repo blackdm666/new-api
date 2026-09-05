@@ -79,6 +79,9 @@ function renderMarketingPage(options: MarketingPageOptions = {}) {
             queued: 0,
             sending: 0,
             retrying: 0,
+            awaiting_receipt: 0,
+            accepted_untracked_24h: 0,
+            final_delivered_24h: 0,
             failed: 0,
             delivered_24h: 0,
             failed_24h: 0,
@@ -103,6 +106,7 @@ function renderMarketingPage(options: MarketingPageOptions = {}) {
             email_max_attempts: 8,
             email_retry_initial_seconds: 30,
             email_retry_max_seconds: 86400,
+            receipt_timeout_hours: 24,
             delivered_retention_days: 30,
             terminal_retention_days: 90,
           },
@@ -154,8 +158,15 @@ describe('email marketing navigation', () => {
       screen.queryByRole('tab', { name: 'Queue monitoring' })
     ).not.toBeInTheDocument()
     expect(
-      screen.queryByRole('button', { name: 'Create campaign' })
-    ).not.toBeInTheDocument()
+      screen.getByRole('button', { name: 'Create campaign' })
+    ).toBeInTheDocument()
+    expect(screen.getByText('Waiting for receipt')).toBeInTheDocument()
+    expect(
+      screen
+        .getByText('Waiting for receipt')
+        .compareDocumentPosition(screen.getByRole('tablist')) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Email queue rules' }))
 
@@ -423,6 +434,58 @@ describe('email marketing navigation', () => {
             match_days: 30,
             max_sends_per_user: 2,
             repeat_interval_days: 30,
+          }),
+        })
+      )
+    })
+  })
+
+  test('saves a 30-minute registration wait', async () => {
+    const user = userEvent.setup()
+    renderMarketingPage({
+      automations: [
+        {
+          id: 1,
+          scene: 'registration_no_first_call',
+          enabled: false,
+          apply_existing: false,
+          baseline_ready: true,
+          trigger_config: JSON.stringify({
+            registration_wait_hours: 1,
+            max_sends_per_user: 1,
+            repeat_interval_days: 2,
+          }),
+          localized_content: JSON.stringify({
+            'zh-CN': { subject: 'First call', body: 'Start using the API' },
+            en: { subject: 'First call', body: 'Start using the API' },
+          }),
+          updated_time: 1,
+        },
+      ],
+    })
+
+    await screen.findByText('Marketing launch')
+    await user.click(screen.getByRole('tab', { name: 'Automations' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Configure automation' })
+    )
+    const waitHours = screen.getByRole('spinbutton', {
+      name: 'Wait after registration (hours)',
+    })
+    expect(waitHours).toHaveAttribute('min', '0.5')
+    expect(waitHours).toHaveAttribute('step', '0.5')
+    await user.clear(waitHours)
+    await user.type(waitHours, '0.5')
+    await user.click(screen.getByRole('button', { name: 'Save automation' }))
+
+    await vi.waitFor(() => {
+      expect(api.put).toHaveBeenCalledWith(
+        '/api/marketing/automations/registration_no_first_call',
+        expect.objectContaining({
+          trigger_config: expect.objectContaining({
+            registration_wait_hours: 0.5,
+            max_sends_per_user: 1,
+            repeat_interval_days: 2,
           }),
         })
       )

@@ -14,15 +14,22 @@ export default defineConfig(({ envMode }) => {
     process.env.VITE_REACT_APP_SERVER_URL ||
     env.rawPublicVars.VITE_REACT_APP_SERVER_URL ||
     'http://localhost:3000'
-  const turnstileDevServerUrl =
-    process.env.VITE_TURNSTILE_DEV_SERVER_URL ||
-    env.rawPublicVars.VITE_TURNSTILE_DEV_SERVER_URL ||
-    'https://verify.88api.ai'
   const serverOrigin = new URL(serverUrl).origin
+  const captchaDevServerUrl =
+    process.env.VITE_CAPTCHA_DEV_SERVER_URL ||
+    env.rawPublicVars.VITE_CAPTCHA_DEV_SERVER_URL
+  const captchaDevOrigin =
+    process.env.VITE_CAPTCHA_DEV_ORIGIN ||
+    env.rawPublicVars.VITE_CAPTCHA_DEV_ORIGIN
 
   const isProd = envMode === 'production'
+  const captchaDevProxyEnabled =
+    !isProd &&
+    Boolean(captchaDevServerUrl) &&
+    (process.env.VITE_CAPTCHA_DEV_PROXY_ENABLED ||
+      env.rawPublicVars.VITE_CAPTCHA_DEV_PROXY_ENABLED) === 'true'
   const devProxy: Record<string, ProxyOptions> = Object.fromEntries(
-    (['/api', '/mj', '/pg'] as const).map((key) => [
+    (['/api', '/v1', '/mj', '/pg'] as const).map((key) => [
       key,
       {
         target: serverUrl,
@@ -31,13 +38,14 @@ export default defineConfig(({ envMode }) => {
       },
     ])
   )
-  devProxy['/__turnstile'] = {
-    target: turnstileDevServerUrl,
-    changeOrigin: true,
-    headers: { origin: serverOrigin },
-    pathRewrite: { '^/__turnstile': '' },
+  if (captchaDevServerUrl) {
+    devProxy['/__captcha'] = {
+      target: captchaDevServerUrl,
+      changeOrigin: true,
+      ...(captchaDevOrigin ? { headers: { origin: captchaDevOrigin } } : {}),
+      pathRewrite: { '^/__captcha': '' },
+    }
   }
-
   return {
     plugins: [pluginReact(), pluginTailwindcss({ optimize: false })],
     // Rsbuild 2: replaces deprecated `performance.chunkSplit` (RSPack 2 aligned)
@@ -70,6 +78,11 @@ export default defineConfig(({ envMode }) => {
     source: {
       entry: {
         index: './src/main.tsx',
+      },
+      define: {
+        'import.meta.env.VITE_CAPTCHA_DEV_PROXY_ENABLED': JSON.stringify(
+          captchaDevProxyEnabled ? 'true' : 'false'
+        ),
       },
     },
     resolve: {

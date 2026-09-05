@@ -26,12 +26,17 @@ import { cn } from '@/lib/utils'
 
 import { DEFAULT_TOKEN_UNIT } from '../constants'
 import {
+  getCardExamplePrice,
   getDynamicDisplayGroupRatio,
+  getDynamicPriceUnitLabelKey,
   getDynamicPricingSummary,
+  isUnconfiguredTaskUsageModel,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
-import { isTokenBasedModel } from '../lib/model-helpers'
+import { getFixedPriceUnitLabel, isTokenBasedModel } from '../lib/model-helpers'
+import { resolvePricingModelIcon } from '../lib/model-icon'
 import { formatPrice, formatRequestPrice } from '../lib/price'
+import { getTaskNumberFields } from '../lib/task-expr'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
@@ -59,25 +64,30 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const tags = parseTags(props.model.tags)
   const groups = props.model.enable_groups || []
   const endpoints = props.model.supported_endpoint_types || []
-  const modelIconKey = props.model.icon || props.model.vendor_icon
+  const modelIconKey = resolvePricingModelIcon(props.model)
   const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 28) : null
   const initial = props.model.model_name?.charAt(0).toUpperCase() || '?'
   const isDynamicPricing =
     props.model.billing_mode === 'tiered_expr' &&
     Boolean(props.model.billing_expr)
+  const isUnconfiguredTaskUsage = isUnconfiguredTaskUsageModel(props.model)
   const hasCachedPrice = isTokenBased && props.model.cache_ratio != null
+  const dynamicPriceOptions = {
+    tokenUnit,
+    showRechargePrice,
+    priceRate,
+    usdExchangeRate,
+    groupRatioMultiplier: getDynamicDisplayGroupRatio(
+      props.model,
+      props.selectedGroup
+    ),
+  }
   const dynamicSummary = isDynamicPricing
-    ? getDynamicPricingSummary(props.model, {
-        tokenUnit,
-        showRechargePrice,
-        priceRate,
-        usdExchangeRate,
-        groupRatioMultiplier: getDynamicDisplayGroupRatio(
-          props.model,
-          props.selectedGroup
-        ),
-      })
+    ? getDynamicPricingSummary(props.model, dynamicPriceOptions)
     : null
+  const cardExamplePrice = getCardExamplePrice(props.model, dynamicPriceOptions)
+  const showTaskFieldLabels =
+    getTaskNumberFields(props.model.billing_usage_schema).length > 1
 
   const primaryGroup = groups[0]
   const bottomTags = [...endpoints.slice(0, 2), ...tags.slice(0, 2)]
@@ -107,17 +117,47 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     } else if (dynamicSummary.primaryEntries.length > 0) {
       priceSummary = (
         <>
-          {dynamicSummary.primaryEntries.map((entry) => (
-            <span
-              key={entry.key}
-              className='text-muted-foreground whitespace-nowrap'
-            >
-              {t(entry.shortLabel)}{' '}
-              <span className='text-foreground font-mono font-semibold'>
-                {entry.formatted}
+          {dynamicSummary.primaryEntries.map((entry) => {
+            const unitLabelKey = getDynamicPriceUnitLabelKey(entry)
+            let fieldPrefix: ReactNode = null
+            if (entry.labelKind !== 'schema') {
+              fieldPrefix = <>{t(entry.shortLabel)} </>
+            } else if (showTaskFieldLabels) {
+              fieldPrefix = (
+                <>
+                  <code className='font-mono text-[11px]'>
+                    {entry.shortLabel}
+                  </code>{' '}
+                </>
+              )
+            }
+            return (
+              <span
+                key={entry.key}
+                className='text-muted-foreground whitespace-nowrap'
+              >
+                {fieldPrefix}
+                <span className='text-foreground font-mono font-semibold'>
+                  {entry.formattedRange ?? entry.formatted}
+                  {unitLabelKey && <>/{t(unitLabelKey)}</>}
+                </span>
               </span>
+            )
+          })}
+          {cardExamplePrice && (
+            <span className='text-muted-foreground/70 max-w-full min-w-0 truncate text-xs'>
+              {cardExamplePrice.label} ≈ {cardExamplePrice.formatted}
             </span>
-          ))}
+          )}
+          {dynamicSummary.isTaskUsage &&
+            dynamicSummary.tier?.label &&
+            !dynamicSummary.primaryEntries.some(
+              (entry) => entry.formattedRange
+            ) && (
+              <span className='text-muted-foreground text-xs'>
+                ({dynamicSummary.tier.label})
+              </span>
+            )}
         </>
       )
     } else {
@@ -127,6 +167,12 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         </span>
       )
     }
+  } else if (isUnconfiguredTaskUsage) {
+    priceSummary = (
+      <span className='text-muted-foreground text-sm'>
+        {t('Usage-based billing · price not configured')}
+      </span>
+    )
   } else if (isTokenBased) {
     priceSummary = (
       <>
@@ -188,7 +234,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             props.selectedGroup
           )}
         </span>{' '}
-        / {t('request')}
+        / {t(getFixedPriceUnitLabel(props.model))}
       </span>
     )
   }
@@ -263,9 +309,13 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
               {item}
             </span>
           ))}
-          <span className='text-muted-foreground/50 text-xs'>
-            {tokenUnitLabel}
-          </span>
+          {!dynamicSummary?.isTaskUsage && !isUnconfiguredTaskUsage && (
+            <span className='text-muted-foreground/50 text-xs'>
+              {isTokenBased || isDynamicPricing
+                ? tokenUnitLabel
+                : t(getFixedPriceUnitLabel(props.model))}
+            </span>
+          )}
           {hiddenCount > 0 && (
             <span className='text-muted-foreground/40 text-xs'>
               +{hiddenCount}

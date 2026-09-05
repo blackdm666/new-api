@@ -108,7 +108,7 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *taskdto.TaskError {
-	if err := relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionTextGenerate); err != nil {
+	if err := relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionTextToVideo); err != nil {
 		return err
 	}
 	req, err := relaycommon.GetTaskRequest(c)
@@ -124,9 +124,9 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		return nil
 	}
 	if hasReferenceInputs(req) {
-		info.Action = constant.TaskActionReferenceGenerate
+		info.Action = constant.TaskActionReferenceToVideo
 	} else {
-		info.Action = constant.TaskActionTextGenerate
+		info.Action = constant.TaskActionTextToVideo
 	}
 	return nil
 }
@@ -189,25 +189,21 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 	return channel.DoTaskApiRequest(a, c, info, requestBody)
 }
 
-func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *taskdto.TaskError) {
+func (a *TaskAdaptor) ParseResponse(_ *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*channel.TaskSubmitResponse, *taskdto.TaskError) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		taskErr = service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
-		return
+		return nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
 	}
 
 	var upstream responsePayload
 	if err := common.Unmarshal(responseBody, &upstream); err != nil {
-		taskErr = service.TaskErrorWrapper(errors.Wrapf(err, "body: %s", responseBody), "unmarshal_response_body_failed", http.StatusInternalServerError)
-		return
+		return nil, service.TaskErrorWrapper(errors.Wrapf(err, "body: %s", responseBody), "unmarshal_response_body_failed", http.StatusInternalServerError)
 	}
 	if upstream.ID == "" {
-		taskErr = service.TaskErrorWrapperLocal(fmt.Errorf("task id is empty"), "invalid_response", http.StatusInternalServerError)
-		return
+		return nil, service.TaskErrorWrapperLocal(fmt.Errorf("task id is empty"), "invalid_response", http.StatusInternalServerError)
 	}
 	if upstream.Status == "failed" {
-		taskErr = service.TaskErrorWrapperLocal(fmt.Errorf("%s", errorMessage(upstream.Error)), "task_failed", http.StatusBadRequest)
-		return
+		return nil, service.TaskErrorWrapperLocal(fmt.Errorf("%s", errorMessage(upstream.Error)), "task_failed", http.StatusBadRequest)
 	}
 
 	ov := dto.NewOpenAIVideo()
@@ -215,21 +211,20 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	ov.TaskID = info.PublicTaskID
 	ov.CreatedAt = time.Now().Unix()
 	ov.Model = info.OriginModelName
-	c.JSON(http.StatusOK, ov)
-	return upstream.ID, responseBody, nil
+	return &channel.TaskSubmitResponse{UpstreamTaskID: upstream.ID, TaskData: responseBody, ClientResponse: ov}, nil
 }
 
-func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
-	taskID, ok := body["task_id"].(string)
-	if !ok || strings.TrimSpace(taskID) == "" {
+func (a *TaskAdaptor) FetchTask(baseUrl, key string, task *model.Task, proxy string) (*http.Response, error) {
+	if task == nil || strings.TrimSpace(task.GetUpstreamTaskID()) == "" {
 		return nil, fmt.Errorf("invalid task_id")
 	}
+	taskID := task.GetUpstreamTaskID()
 	baseUrl = strings.TrimRight(baseUrl, "/")
 	if baseUrl == "" {
 		baseUrl = defaultBaseURL
 	}
 	queryPath := modelCenterQueryPath
-	if action, _ := body["action"].(string); action == taskActionDigitalHuman {
+	if constant.NormalizeTaskAction(task.Action) == taskActionDigitalHuman {
 		queryPath = digitalHumanQueryPath
 	}
 	req, err := http.NewRequest(http.MethodGet, baseUrl+fmt.Sprintf(queryPath, taskID), nil)
@@ -246,7 +241,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	return client.Do(req)
 }
 
-func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
+func (a *TaskAdaptor) ParseTaskResult(_ *model.Task, _ *http.Response, respBody []byte) (*relaycommon.TaskInfo, error) {
 	var upstream responsePayload
 	if err := common.Unmarshal(respBody, &upstream); err != nil {
 		return nil, errors.Wrap(err, "unmarshal task result failed")

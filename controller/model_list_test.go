@@ -382,6 +382,41 @@ func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 	require.Empty(t, missingExprPricing.BillingExpr)
 }
 
+func TestPricingDistinguishesPerRequestAndPerSecondFixedPrices(t *testing.T) {
+	withTieredBillingConfig(t, map[string]string{
+		"zz-fixed-request-model": "per_request",
+		"zz-fixed-second-model":  "per_second",
+	}, nil)
+
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
+		model.InvalidatePricingCache()
+	})
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{
+		"zz-fixed-request-model": 0.5,
+		"zz-fixed-second-model": 0.08
+	}`))
+
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "default", Model: "zz-fixed-request-model", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "zz-fixed-second-model", ChannelId: 1, Enabled: true},
+	}).Error)
+	model.InvalidatePricingCache()
+
+	pricingByName := pricingByModelName(model.GetPricing())
+	requestPricing, ok := pricingByName["zz-fixed-request-model"]
+	require.True(t, ok)
+	assert.Equal(t, "per_request", requestPricing.BillingMode)
+	assert.Equal(t, "request", requestPricing.BillingUnit)
+
+	secondPricing, ok := pricingByName["zz-fixed-second-model"]
+	require.True(t, ok)
+	assert.Equal(t, "per_second", secondPricing.BillingMode)
+	assert.Equal(t, "second", secondPricing.BillingUnit)
+}
+
 func TestListModelsUsesAdvancedCustomEndpointTypesFromPricingCache(t *testing.T) {
 	withSelfUseModeEnabled(t)
 	db := setupModelListControllerTestDB(t)

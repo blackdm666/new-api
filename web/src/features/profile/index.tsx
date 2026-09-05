@@ -21,6 +21,10 @@ import {
   CardStaggerContainer,
   CardStaggerItem,
 } from '@/components/page-transition'
+import {
+  getTurnstileClientConfig,
+  isTurnstileClientConfigured,
+} from '@/components/turnstile-utils'
 import { useStatus } from '@/hooks/use-status'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -41,10 +45,10 @@ export function Profile() {
   const permissions = useAuthStore((s) => s.auth.user?.permissions)
 
   const checkinEnabled = status?.checkin_enabled === true
-  const turnstileEnabled = !!(
-    status?.turnstile_check && status?.turnstile_site_key
+  const turnstileConfig = getTurnstileClientConfig(status)
+  const turnstileEnabled = Boolean(
+    status?.turnstile_check && isTurnstileClientConfigured(turnstileConfig)
   )
-  const turnstileSiteKey = status?.turnstile_site_key || ''
   const canConfigureSidebar = permissions?.sidebar_settings !== false
 
   return (
@@ -76,7 +80,7 @@ export function Profile() {
                   <CheckinCalendarCard
                     checkinEnabled={checkinEnabled}
                     turnstileEnabled={turnstileEnabled}
-                    turnstileSiteKey={turnstileSiteKey}
+                    turnstileConfig={turnstileConfig}
                   />
                 )}
                 {canConfigureSidebar && <SidebarModulesCard />}

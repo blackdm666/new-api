@@ -39,6 +39,18 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type BotProtectionSettingsPayload = {
+  enabled: boolean
+  provider: 'cloudflare' | 'custom'
+  site_key: string
+  secret_key: string
+  widget_script_url: string
+  widget_endpoint: string
+  verify_url: string
+  action: string
+  clear_secret: boolean
+}
+
 export type SMTPTestResponse = {
   success: boolean
   message: string
@@ -47,6 +59,59 @@ export type SMTPTestResponse = {
     profile: 'security' | 'notification' | 'marketing'
     channel: 'security' | 'primary' | 'marketing' | 'backup'
   }
+}
+
+export type MarketingEmailSenderAccount = {
+  id: number
+  name: string
+  profile: 'marketing'
+  provider: 'aliyun_eventbridge'
+  server: string
+  port: number
+  account: string
+  from: string
+  ssl_enabled: boolean
+  starttls_enabled: boolean
+  insecure_skip_verify: boolean
+  force_auth_login: boolean
+  weight: number
+  rate_limit_per_minute: number
+  enabled: boolean
+  tested_time: number
+  receipt_verified_time: number
+  disabled_until: number
+  health_status: 'pending' | 'healthy' | 'degraded' | 'disabled'
+  consecutive_failures: number
+  last_success_time: number
+  last_failure_time: number
+  last_error: string
+  credential_configured: boolean
+}
+
+export type MarketingEmailSenderAccountInput = {
+  name: string
+  provider: 'aliyun_eventbridge'
+  server: string
+  port: number
+  account: string
+  from: string
+  token: string
+  ssl_enabled: boolean
+  starttls_enabled: boolean
+  insecure_skip_verify: boolean
+  force_auth_login: boolean
+  weight: number
+  rate_limit_per_minute: number
+}
+
+export type EmailReceiptEndpoint = {
+  provider: 'aliyun_eventbridge'
+  enabled: boolean
+  token_configured: boolean
+  callback_url: string
+  last_event_time: number
+  last_verified_time: number
+  last_error: string
 }
 
 export type InvoiceSettingsPayload = {
@@ -165,6 +230,7 @@ export type SiteSettings = {
   About: string
   HomePageContent: string
   ServerAddress: string
+  TaskPublicAddress: string
   'legal.user_agreement': string
   'legal.privacy_policy': string
   HeaderNavModules: string
@@ -206,8 +272,14 @@ export type AuthSettings = {
   WeChatServerToken: string
   WeChatAccountQRCodeImageURL: string
   TurnstileCheckEnabled: boolean
+  TurnstileProvider: 'cloudflare' | 'custom'
   TurnstileSiteKey: string
   TurnstileSecretKey: string
+  TurnstileSecretKeyConfigured: boolean
+  TurnstileWidgetScriptURL: string
+  TurnstileWidgetEndpoint: string
+  TurnstileVerifyURL: string
+  TurnstileAction: string
   'passkey.enabled': boolean
   'passkey.rp_display_name': string
   'passkey.rp_id': string

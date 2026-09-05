@@ -21,8 +21,9 @@ import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useStatus } from '@/hooks/use-status'
-import { INFINITE_CANVAS_URL } from '@/lib/external-links'
+import { INFINITE_CANVAS_NAME, INFINITE_CANVAS_URL } from '@/lib/external-links'
 import {
+  DEFAULT_INFINITE_CANVAS_LINK,
   type HeaderNavModules,
   parseHeaderNavModulesFromStatus,
 } from '@/lib/nav-modules'
@@ -68,11 +69,18 @@ export function buildTopNavLinks(
     })
   }
 
-  links.push({
-    title: options.t('Infinite Canvas'),
-    href: INFINITE_CANVAS_URL,
-    external: true,
-  })
+  const infiniteCanvas =
+    options.modules.infiniteCanvas ?? DEFAULT_INFINITE_CANVAS_LINK
+  if (infiniteCanvas.enabled) {
+    links.push({
+      title:
+        infiniteCanvas.name === INFINITE_CANVAS_NAME
+          ? options.t(INFINITE_CANVAS_NAME)
+          : infiniteCanvas.name,
+      href: infiniteCanvas.url,
+      external: true,
+    })
+  }
 
   const rankings = options.modules.rankings
   if (rankings && typeof rankings === 'object' && rankings.enabled) {

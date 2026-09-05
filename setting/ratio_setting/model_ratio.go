@@ -1,6 +1,9 @@
 package ratio_setting
 
 import (
+	"encoding/json"
+	"fmt"
+	"math"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -179,12 +182,10 @@ var defaultModelRatio = map[string]float64{
 	"gemini-2.5-pro-exp-03-25":                  0.625,
 	"gemini-2.5-pro-preview-03-25":              0.625,
 	"gemini-2.5-pro":                            0.625,
-	"gemini-2.5-flash-preview-04-17":            0.075,
-	"gemini-2.5-flash-preview-04-17-thinking":   0.075,
-	"gemini-2.5-flash-preview-04-17-nothinking": 0.075,
-	"gemini-2.5-flash-preview-05-20":            0.075,
-	"gemini-2.5-flash-preview-05-20-thinking":   0.075,
-	"gemini-2.5-flash-preview-05-20-nothinking": 0.075,
+	"gemini-2.5-flash-preview-04-17":          0.075,
+	"gemini-2.5-flash-preview-04-17-thinking": 0.075,
+	"gemini-2.5-flash-preview-05-20":          0.075,
+	"gemini-2.5-flash-preview-05-20-thinking": 0.075,
 	"gemini-2.5-flash-thinking-*":               0.075, // 用于为后续所有2.5 flash thinking budget 模型设置默认倍率
 	"gemini-2.5-pro-thinking-*":                 0.625, // 用于为后续所有2.5 pro thinking budget 模型设置默认倍率
 	"gemini-2.5-flash-lite-preview-thinking-*":  0.05,
@@ -353,7 +354,64 @@ func ModelPrice2JSONString() string {
 	return modelPriceMap.MarshalJSONString()
 }
 
+func ValidateNumericPricingMapJSONString(optionName string, jsonStr string) error {
+	var rawValues map[string]json.RawMessage
+	if err := common.UnmarshalJsonStr(jsonStr, &rawValues); err != nil {
+		return fmt.Errorf("invalid %s: %w", optionName, err)
+	}
+	if rawValues == nil {
+		return fmt.Errorf("%s must be a JSON object", optionName)
+	}
+	return validateNumericPricingValues(optionName, rawValues)
+}
+
+func ValidateNestedNumericPricingMapJSONString(optionName string, jsonStr string) error {
+	var rawGroups map[string]json.RawMessage
+	if err := common.UnmarshalJsonStr(jsonStr, &rawGroups); err != nil {
+		return fmt.Errorf("invalid %s: %w", optionName, err)
+	}
+	if rawGroups == nil {
+		return fmt.Errorf("%s must be a JSON object", optionName)
+	}
+	for group, rawGroup := range rawGroups {
+		if common.GetJsonType(rawGroup) != "object" {
+			return fmt.Errorf("%s value for %s must be a JSON object", optionName, group)
+		}
+		var rawValues map[string]json.RawMessage
+		if err := common.Unmarshal(rawGroup, &rawValues); err != nil {
+			return fmt.Errorf("invalid %s value for %s: %w", optionName, group, err)
+		}
+		if err := validateNumericPricingValues(optionName+"."+group, rawValues); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateNumericPricingValues(optionName string, rawValues map[string]json.RawMessage) error {
+	for model, rawValue := range rawValues {
+		if common.GetJsonType(rawValue) != "number" {
+			return fmt.Errorf("%s value for %s must be a number", optionName, model)
+		}
+		var value float64
+		if err := common.Unmarshal(rawValue, &value); err != nil {
+			return fmt.Errorf("invalid %s value for %s: %w", optionName, model, err)
+		}
+		if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return fmt.Errorf("%s value for %s must be a finite non-negative number", optionName, model)
+		}
+	}
+	return nil
+}
+
+func ValidateModelPriceJSONString(jsonStr string) error {
+	return ValidateNumericPricingMapJSONString("ModelPrice", jsonStr)
+}
+
 func UpdateModelPriceByJSONString(jsonStr string) error {
+	if err := ValidateModelPriceJSONString(jsonStr); err != nil {
+		return err
+	}
 	return types.LoadFromJsonStringWithCallback(modelPriceMap, jsonStr, InvalidateExposedDataCache)
 }
 
@@ -372,6 +430,9 @@ func GetModelPrice(name string, printErr bool) (float64, bool) {
 }
 
 func UpdateModelRatioByJSONString(jsonStr string) error {
+	if err := ValidateNumericPricingMapJSONString("ModelRatio", jsonStr); err != nil {
+		return err
+	}
 	return types.LoadFromJsonStringWithCallback(modelRatioMap, jsonStr, InvalidateExposedDataCache)
 }
 
@@ -414,6 +475,9 @@ func CompletionRatio2JSONString() string {
 }
 
 func UpdateCompletionRatioByJSONString(jsonStr string) error {
+	if err := ValidateNumericPricingMapJSONString("CompletionRatio", jsonStr); err != nil {
+		return err
+	}
 	return types.LoadFromJsonStringWithCallback(completionRatioMap, jsonStr, InvalidateExposedDataCache)
 }
 
@@ -550,9 +614,6 @@ func getHardcodedCompletionModelRatio(name string) (float64, bool) {
 			return 8, false
 		} else if strings.HasPrefix(name, "gemini-2.5-flash") { // 处理不同的flash模型倍率
 			if strings.HasPrefix(name, "gemini-2.5-flash-preview") {
-				if strings.HasSuffix(name, "-nothinking") {
-					return 4, false
-				}
 				return 3.5 / 0.15, false
 			}
 			if strings.HasPrefix(name, "gemini-2.5-flash-lite") {
@@ -648,6 +709,9 @@ func ImageRatio2JSONString() string {
 }
 
 func UpdateImageRatioByJSONString(jsonStr string) error {
+	if err := ValidateNumericPricingMapJSONString("ImageRatio", jsonStr); err != nil {
+		return err
+	}
 	return types.LoadFromJsonString(imageRatioMap, jsonStr)
 }
 
@@ -664,6 +728,9 @@ func AudioRatio2JSONString() string {
 }
 
 func UpdateAudioRatioByJSONString(jsonStr string) error {
+	if err := ValidateNumericPricingMapJSONString("AudioRatio", jsonStr); err != nil {
+		return err
+	}
 	return types.LoadFromJsonStringWithCallback(audioRatioMap, jsonStr, InvalidateExposedDataCache)
 }
 
@@ -672,6 +739,9 @@ func AudioCompletionRatio2JSONString() string {
 }
 
 func UpdateAudioCompletionRatioByJSONString(jsonStr string) error {
+	if err := ValidateNumericPricingMapJSONString("AudioCompletionRatio", jsonStr); err != nil {
+		return err
+	}
 	return types.LoadFromJsonStringWithCallback(audioCompletionRatioMap, jsonStr, InvalidateExposedDataCache)
 }
 

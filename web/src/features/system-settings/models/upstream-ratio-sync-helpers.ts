@@ -24,6 +24,7 @@ import {
   OFFICIAL_CHANNEL_NAME,
   RATIO_TYPE_OPTIONS,
 } from './constants'
+import { isCompletePricingNumber } from './model-pricing-core'
 
 export type RatioDifferenceEntry = {
   current: number | string | null
@@ -39,6 +40,19 @@ export type ModelRow = {
 }
 
 export type ResolutionsMap = Record<string, Record<string, number | string>>
+
+export type PricingOptionMaps = {
+  ModelRatio: Record<string, number>
+  CompletionRatio: Record<string, number>
+  CacheRatio: Record<string, number>
+  CreateCacheRatio: Record<string, number>
+  ImageRatio: Record<string, number>
+  AudioRatio: Record<string, number>
+  AudioCompletionRatio: Record<string, number>
+  ModelPrice: Record<string, number>
+  'billing_setting.billing_mode': Record<string, string>
+  'billing_setting.billing_expr': Record<string, string>
+}
 
 export type ResolutionSelection = {
   model: string
@@ -107,6 +121,16 @@ export function getPreferredSyncField(
   ratioType: RatioType,
   sourceName: string
 ): RatioType {
+  const billingModeValue = ratioTypes.billing_mode?.upstreams?.[sourceName]
+  const fixedPriceValue = ratioTypes.model_price?.upstreams?.[sourceName]
+  if (
+    ratioType === 'billing_mode' &&
+    (billingModeValue === 'per_request' || billingModeValue === 'per_second') &&
+    isSelectableUpstreamValue(fixedPriceValue, 'model_price')
+  ) {
+    return 'model_price'
+  }
+
   const exprValue = ratioTypes.billing_expr?.upstreams?.[sourceName]
   if (
     ratioType !== 'billing_expr' &&
@@ -159,9 +183,13 @@ export function getBillingCategory(
 }
 
 export function isSelectableUpstreamValue(
-  value: number | string | 'same' | null | undefined
+  value: number | string | 'same' | null | undefined,
+  ratioType?: RatioType
 ): boolean {
-  return value !== null && value !== undefined && value !== 'same'
+  if (value === null || value === undefined || value === 'same') return false
+  if (!ratioType || !NUMERIC_SYNC_FIELDS.has(ratioType)) return true
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0
+  return value.trim() !== '' && isCompletePricingNumber(value.trim())
 }
 
 export function getUpstreamDisplayName(sourceName: string): string {
@@ -185,7 +213,7 @@ export function isSelectedResolutionValue(
   ratioType: RatioType,
   upstreamValue: number | string | 'same' | null | undefined
 ): boolean {
-  if (!isSelectableUpstreamValue(upstreamValue)) return false
+  if (!isSelectableUpstreamValue(upstreamValue, ratioType)) return false
 
   const selectedValue = resolutions[model]?.[ratioType]
   if (selectedValue === undefined) return false
@@ -263,15 +291,54 @@ function applyResolutionSelectionToDraft(
 
   newModelRes[finalType] = finalValue
 
+  if (category === 'price') {
+    delete newModelRes['billing_expr']
+    const modeVal = modelDiffs?.billing_mode?.upstreams?.[selection.sourceName]
+    if (modeVal === 'per_request' || modeVal === 'per_second') {
+      newModelRes['billing_mode'] = modeVal
+    } else if (
+      newModelRes['billing_mode'] !== 'per_request' &&
+      newModelRes['billing_mode'] !== 'per_second'
+    ) {
+      delete newModelRes['billing_mode']
+    }
+  }
+
+  if (category === 'ratio') {
+    delete newModelRes['billing_mode']
+    delete newModelRes['billing_expr']
+  }
+
+  if (category === 'tiered') {
+    Object.keys(newModelRes).forEach((ratioType) => {
+      if (getBillingCategory(ratioType) !== 'tiered') {
+        delete newModelRes[ratioType]
+      }
+    })
+  }
+
   if (category === 'tiered' && modelDiffs) {
     const modeVal = modelDiffs.billing_mode?.upstreams?.[selection.sourceName]
     const exprVal = modelDiffs.billing_expr?.upstreams?.[selection.sourceName]
-    if (modeVal !== undefined && modeVal !== null && modeVal !== 'same') {
+    const isFixedMode = modeVal === 'per_request' || modeVal === 'per_second'
+    if (isFixedMode) {
+      newModelRes['billing_mode'] = modeVal
+      delete newModelRes['billing_expr']
+    } else if (
+      modeVal !== undefined &&
+      modeVal !== null &&
+      modeVal !== 'same'
+    ) {
       newModelRes['billing_mode'] = modeVal
     } else if (finalType === 'billing_expr') {
       newModelRes['billing_mode'] = 'tiered_expr'
     }
-    if (exprVal !== undefined && exprVal !== null && exprVal !== 'same') {
+    if (
+      !isFixedMode &&
+      exprVal !== undefined &&
+      exprVal !== null &&
+      exprVal !== 'same'
+    ) {
       newModelRes['billing_expr'] = exprVal
     }
   }
@@ -395,6 +462,13 @@ export function applyResolutionRemovalPlan(
     const draft = { ...current }
     ratioTypes.forEach((ratioType) => {
       delete draft[ratioType]
+      if (
+        ratioType === 'model_price' &&
+        (draft['billing_mode'] === 'per_request' ||
+          draft['billing_mode'] === 'per_second')
+      ) {
+        delete draft['billing_mode']
+      }
       if (ratioType === 'billing_expr') delete draft['billing_mode']
       if (ratioType === 'billing_mode') delete draft['billing_expr']
     })
@@ -406,4 +480,102 @@ export function applyResolutionRemovalPlan(
   })
 
   return next
+}
+
+function optionKeyBySyncField(ratioType: string): keyof PricingOptionMaps {
+  if (ratioType === 'billing_mode') return 'billing_setting.billing_mode'
+  if (ratioType === 'billing_expr') return 'billing_setting.billing_expr'
+  return ratioType
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join('') as keyof PricingOptionMaps
+}
+
+export function buildSyncedPricingOptions(
+  current: PricingOptionMaps,
+  resolutions: ResolutionsMap
+): PricingOptionMaps {
+  const finalRatios: PricingOptionMaps = {
+    ModelRatio: { ...current.ModelRatio },
+    CompletionRatio: { ...current.CompletionRatio },
+    CacheRatio: { ...current.CacheRatio },
+    CreateCacheRatio: { ...current.CreateCacheRatio },
+    ImageRatio: { ...current.ImageRatio },
+    AudioRatio: { ...current.AudioRatio },
+    AudioCompletionRatio: { ...current.AudioCompletionRatio },
+    ModelPrice: { ...current.ModelPrice },
+    'billing_setting.billing_mode': {
+      ...current['billing_setting.billing_mode'],
+    },
+    'billing_setting.billing_expr': {
+      ...current['billing_setting.billing_expr'],
+    },
+  }
+
+  Object.entries(resolutions).forEach(([model, ratios]) => {
+    const selectedTypes = Object.keys(ratios)
+    const hasInvalidNumericValue = Object.entries(ratios).some(
+      ([ratioType, value]) =>
+        NUMERIC_SYNC_FIELDS.has(ratioType) &&
+        !isSelectableUpstreamValue(value, ratioType as RatioType)
+    )
+    if (hasInvalidNumericValue) return
+
+    const hasPrice = selectedTypes.includes('model_price')
+    const hasRatio = selectedTypes.some((ratioType) =>
+      RATIO_SYNC_FIELDS.includes(ratioType as RatioType)
+    )
+    const hasTiered =
+      selectedTypes.includes('billing_expr') ||
+      ratios.billing_mode === 'tiered_expr'
+    if (hasTiered && (hasPrice || hasRatio)) return
+
+    if (hasPrice) {
+      delete finalRatios.ModelRatio[model]
+      delete finalRatios.CompletionRatio[model]
+      delete finalRatios.CacheRatio[model]
+      delete finalRatios.CreateCacheRatio[model]
+      delete finalRatios.ImageRatio[model]
+      delete finalRatios.AudioRatio[model]
+      delete finalRatios.AudioCompletionRatio[model]
+      delete finalRatios['billing_setting.billing_expr'][model]
+
+      const selectedMode = ratios.billing_mode
+      const currentMode = finalRatios['billing_setting.billing_mode'][model]
+      const selectedFixedMode =
+        selectedMode === 'per_request' || selectedMode === 'per_second'
+      const currentFixedMode =
+        currentMode === 'per_request' || currentMode === 'per_second'
+      if (!selectedFixedMode && !currentFixedMode) {
+        delete finalRatios['billing_setting.billing_mode'][model]
+      }
+    }
+    if (hasRatio) {
+      delete finalRatios.ModelPrice[model]
+      delete finalRatios['billing_setting.billing_mode'][model]
+      delete finalRatios['billing_setting.billing_expr'][model]
+    }
+
+    Object.entries(ratios).forEach(([ratioType, value]) => {
+      if (
+        (hasRatio &&
+          (ratioType === 'model_price' ||
+            ratioType === 'billing_mode' ||
+            ratioType === 'billing_expr')) ||
+        (hasPrice && ratioType === 'billing_expr')
+      ) {
+        return
+      }
+      const optionKey = optionKeyBySyncField(ratioType)
+      const optionMap = finalRatios[optionKey] as Record<
+        string,
+        number | string
+      >
+      optionMap[model] = NUMERIC_SYNC_FIELDS.has(ratioType)
+        ? Number(value)
+        : value
+    })
+  })
+
+  return finalRatios
 }

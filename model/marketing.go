@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 
@@ -69,14 +70,14 @@ type MarketingLocalizedContent struct {
 }
 
 type MarketingAutomationTriggerConfig struct {
-	MatchDays             int `json:"match_days,omitempty"`
-	RegistrationWaitHours int `json:"registration_wait_hours,omitempty"`
-	ActiveWithinDays      int `json:"active_within_days,omitempty"`
-	MinRequestCount       int `json:"min_request_count,omitempty"`
-	MinTopUpCount         int `json:"min_topup_count,omitempty"`
-	MaxSendsPerUser       int `json:"max_sends_per_user,omitempty"`
-	RepeatIntervalDays    int `json:"repeat_interval_days,omitempty"`
-	ExpiryHours           int `json:"expiry_hours,omitempty"`
+	MatchDays             int     `json:"match_days,omitempty"`
+	RegistrationWaitHours float64 `json:"registration_wait_hours,omitempty"`
+	ActiveWithinDays      int     `json:"active_within_days,omitempty"`
+	MinRequestCount       int     `json:"min_request_count,omitempty"`
+	MinTopUpCount         int     `json:"min_topup_count,omitempty"`
+	MaxSendsPerUser       int     `json:"max_sends_per_user,omitempty"`
+	RepeatIntervalDays    int     `json:"repeat_interval_days,omitempty"`
+	ExpiryHours           int     `json:"expiry_hours,omitempty"`
 }
 
 type MarketingAudienceRule struct {
@@ -314,7 +315,7 @@ func NormalizeMarketingAutomationTriggerConfig(scene string, raw string) (string
 	}
 	switch scene {
 	case MarketingSceneRegistration:
-		if config.RegistrationWaitHours < 1 || config.RegistrationWaitHours > 8760 || config.MaxSendsPerUser < 1 || config.MaxSendsPerUser > 10 || config.RepeatIntervalDays < 1 || config.RepeatIntervalDays > 3650 {
+		if config.RegistrationWaitHours < 0.5 || config.RegistrationWaitHours > 8760 || math.Mod(config.RegistrationWaitHours*2, 1) != 0 || config.MaxSendsPerUser < 1 || config.MaxSendsPerUser > 10 || config.RepeatIntervalDays < 1 || config.RepeatIntervalDays > 3650 {
 			return "", MarketingAutomationTriggerConfig{}, ErrMarketingInvalid
 		}
 		config.MatchDays = 0
@@ -851,6 +852,15 @@ func CreateMarketingSuppression(userId int, email string, reason string, created
 
 func DeleteMarketingSuppression(id int) error {
 	return DB.Delete(&MarketingSuppression{}, id).Error
+}
+
+func DeleteMarketingSuppressionByEmailAndReasons(email string, reasons []string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" || len(reasons) == 0 {
+		return ErrMarketingInvalid
+	}
+	return DB.Where("email_hash = ? AND reason IN ?", hashMarketingValue(email), reasons).
+		Delete(&MarketingSuppression{}).Error
 }
 
 func ListMarketingSuppressions(pageInfo *common.PageInfo) ([]*MarketingSuppression, int64, error) {

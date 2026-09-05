@@ -5,8 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-gonic/gin"
@@ -22,14 +22,14 @@ type turnstileRequest struct {
 
 const defaultTurnstileVerifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
-// turnstileVerifyURL keeps the upstream Cloudflare endpoint as the default,
-// while allowing the production Captcha88 service to provide a compatible
-// siteverify endpoint through the existing deployment environment.
-func turnstileVerifyURL() string {
-	if verifyURL := strings.TrimSpace(os.Getenv("TURNSTILE_VERIFY_URL")); verifyURL != "" {
-		return verifyURL
+func turnstileVerifyURL(config common.TurnstileConfig) (string, error) {
+	if err := common.ValidateTurnstileConfig(config); err != nil {
+		return "", err
 	}
-	return defaultTurnstileVerifyURL
+	if config.Provider == common.TurnstileProviderCustom {
+		return config.VerifyURL, nil
+	}
+	return defaultTurnstileVerifyURL, nil
 }
 
 // OAuthStateTurnstileCheck requires Turnstile for anonymous login flows while
@@ -65,7 +65,7 @@ func TurnstileCheck() gin.HandlerFunc {
 func TurnstileCheckFromBody() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var request turnstileRequest
-		if common.TurnstileCheckEnabled {
+		if common.CurrentTurnstileConfig().Enabled {
 			body, err := io.ReadAll(c.Request.Body)
 			if err != nil {
 				common.ApiError(c, err)
@@ -94,15 +94,27 @@ func rejectEmptyTurnstile(c *gin.Context) {
 }
 
 func verifyTurnstile(c *gin.Context, response string) bool {
-	if !common.TurnstileCheckEnabled {
+	config := common.CurrentTurnstileConfig()
+	if !config.Enabled {
 		return true
 	}
 	if strings.TrimSpace(response) == "" {
 		rejectEmptyTurnstile(c)
 		return false
 	}
-	rawRes, err := http.PostForm(turnstileVerifyURL(), url.Values{
-		"secret":   {common.TurnstileSecretKey},
+	verifyURL, err := turnstileVerifyURL(config)
+	if err != nil {
+		common.SysLog("human verification configuration error: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "人机验证配置无效，请联系管理员！",
+		})
+		c.Abort()
+		return false
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	rawRes, err := client.PostForm(verifyURL, url.Values{
+		"secret":   {config.SecretKey},
 		"response": {response},
 		"remoteip": {c.ClientIP()},
 	})

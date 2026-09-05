@@ -24,6 +24,7 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 import { useForm } from 'react-hook-form'
@@ -61,6 +62,12 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
+import {
+  createDefaultTaskVisualConfig,
+  generateTaskExprFromConfig,
+} from '@/features/pricing/lib/task-expr'
+import { useBillingCurrency } from '@/hooks/use-billing-currency'
 import { cn } from '@/lib/utils'
 
 import {
@@ -79,8 +86,14 @@ import {
   type ModelRatioData,
   type PricingMode,
 } from './model-pricing-core'
+import {
+  pricingDisplayToUSD,
+  pricingDisplayToModelRatio,
+  pricingUSDToDisplay,
+} from './model-pricing-currency'
 import { PriceInput, PriceLane } from './model-pricing-inputs'
 import { formatPricingNumber } from './pricing-format'
+import { TaskUsagePricingEditor } from './task-usage-pricing-editor'
 import { TieredPricingEditor } from './tiered-pricing-editor'
 
 export type { ModelRatioData } from './model-pricing-core'
@@ -103,6 +116,16 @@ type ModelPricingEditorPanelProps = Omit<
 export type ModelPricingEditorPanelHandle = {
   commitDraft: () => Promise<ModelRatioData | null>
 }
+
+function resolvePricingMode(data?: ModelRatioData | null): PricingMode {
+  if (data?.billingMode === 'tiered_expr') return 'tiered_expr'
+  if (data?.billingMode === 'per-second') return 'per-second'
+  if (data?.billingMode === 'per-request') return 'per-request'
+  if (data?.price) return 'per-request'
+  return 'per-token'
+}
+
+const DEFAULT_TOKEN_BILLING_EXPR = 'tier("base", p * 0 + c * 0)'
 
 export const ModelPricingSheet = forwardRef<
   ModelPricingEditorPanelHandle,
@@ -145,6 +168,8 @@ export const ModelPricingEditorPanel = forwardRef<
   ref
 ) {
   const { t } = useTranslation()
+  const pricingCurrency = useBillingCurrency()
+  const pricingCurrencyLabel = t(pricingCurrency.label)
   const [pricingMode, setPricingMode] = useState<PricingMode>('per-token')
   const [promptPrice, setPromptPrice] = useState('')
   const [lanePrices, setLanePrices] = useState<Record<LaneKey, string>>({
@@ -156,7 +181,9 @@ export const ModelPricingEditorPanel = forwardRef<
   const [billingExpr, setBillingExpr] = useState('')
   const [requestRuleExpr, setRequestRuleExpr] = useState('')
   const [editorReloadToken, setEditorReloadToken] = useState(0)
+  const autoSwitchedForRef = useRef<string | null>(null)
   const isEditMode = !!editData
+  const { models: pricingModels } = usePricingData()
 
   const form = useForm<ModelPricingFormValues>({
     resolver: zodResolver(createModelPricingSchema(t)),
@@ -172,14 +199,55 @@ export const ModelPricingEditorPanel = forwardRef<
       audioCompletionRatio: '',
     },
   })
+  const watchedValues = form.watch()
+  const usageSchemaByModel = useMemo(
+    () =>
+      new Map(
+        pricingModels.map((model) => [
+          model.model_name,
+          model.billing_usage_schema,
+        ])
+      ),
+    [pricingModels]
+  )
+  const usageExamplesByModel = useMemo(
+    () =>
+      new Map(
+        pricingModels.map((model) => [
+          model.model_name,
+          model.billing_usage_examples,
+        ])
+      ),
+    [pricingModels]
+  )
+  const taskUsageSchema = usageSchemaByModel.get(watchedValues.name.trim())
+  const taskUsageExamples = usageExamplesByModel.get(watchedValues.name.trim())
+  const defaultTaskBillingExpr = useMemo(
+    () =>
+      taskUsageSchema
+        ? generateTaskExprFromConfig(
+            createDefaultTaskVisualConfig(taskUsageSchema),
+            taskUsageSchema
+          )
+        : '',
+    [taskUsageSchema]
+  )
+  const resolvedBillingExpr =
+    taskUsageSchema &&
+    (!billingExpr || billingExpr === DEFAULT_TOKEN_BILLING_EXPR)
+      ? defaultTaskBillingExpr
+      : billingExpr
 
   useEffect(() => {
-    const nextLaneState = createInitialLaneState(editData)
+    const nextLaneState = createInitialLaneState(
+      editData,
+      pricingCurrency.exchangeRate
+    )
 
     if (editData) {
       form.reset({
         name: editData.name,
-        price: editData.price || '',
+        price: pricingUSDToDisplay(editData.price, pricingCurrency),
         ratio: editData.ratio || '',
         cacheRatio: editData.cacheRatio || '',
         createCacheRatio: editData.createCacheRatio || '',
@@ -188,13 +256,7 @@ export const ModelPricingEditorPanel = forwardRef<
         audioRatio: editData.audioRatio || '',
         audioCompletionRatio: editData.audioCompletionRatio || '',
       })
-      setPricingMode(
-        editData.billingMode === 'tiered_expr'
-          ? 'tiered_expr'
-          : editData.price
-            ? 'per-request'
-            : 'per-token'
-      )
+      setPricingMode(resolvePricingMode(editData))
       setBillingExpr(editData.billingExpr || '')
       setRequestRuleExpr(editData.requestRuleExpr || '')
     } else {
@@ -218,7 +280,21 @@ export const ModelPricingEditorPanel = forwardRef<
     setLanePrices(nextLaneState.prices)
     setLaneEnabled(nextLaneState.enabled)
     setEditorReloadToken((token) => token + 1)
-  }, [editData, form])
+    autoSwitchedForRef.current = null
+  }, [editData, form, pricingCurrency])
+
+  useEffect(() => {
+    if (!editData) return
+    if (editData.billingMode === 'tiered_expr') return
+    if (editData.price || editData.ratio) return
+
+    const usageSchema = usageSchemaByModel.get(editData.name)
+    if (!usageSchema || Object.keys(usageSchema).length === 0) return
+    if (autoSwitchedForRef.current === editData.name) return
+
+    setPricingMode('tiered_expr')
+    autoSwitchedForRef.current = editData.name
+  }, [editData, usageSchemaByModel])
 
   const setFormValue = (field: keyof ModelPricingFormValues, value: string) => {
     form.setValue(field, value, {
@@ -252,10 +328,9 @@ export const ModelPricingEditorPanel = forwardRef<
     nextLanePrices = lanePrices,
     nextLaneEnabled = laneEnabled
   ) => {
-    const inputPrice = toNumberOrNull(nextPromptPrice)
     setFormValue(
       'ratio',
-      inputPrice !== null ? formatPricingNumber(inputPrice / 2) : ''
+      pricingDisplayToModelRatio(nextPromptPrice, pricingCurrency)
     )
 
     laneConfigs.forEach(({ key }) => {
@@ -336,28 +411,29 @@ export const ModelPricingEditorPanel = forwardRef<
     const nextMode = value as PricingMode
     setPricingMode(nextMode)
     if (nextMode === 'tiered_expr' && !billingExpr) {
-      setBillingExpr('tier("base", p * 0 + c * 0)')
+      setBillingExpr(defaultTaskBillingExpr || DEFAULT_TOKEN_BILLING_EXPR)
     }
   }
 
-  const watchedValues = form.watch()
   const previewRows = useMemo(
     () =>
       buildPreviewRows(
         watchedValues,
         pricingMode,
-        billingExpr,
+        resolvedBillingExpr,
         requestRuleExpr,
         promptPrice,
         lanePrices,
         laneEnabled,
-        t
+        t,
+        pricingCurrency.symbol
       ),
     [
-      billingExpr,
+      resolvedBillingExpr,
       laneEnabled,
       lanePrices,
       pricingMode,
+      pricingCurrency.symbol,
       promptPrice,
       requestRuleExpr,
       t,
@@ -443,7 +519,10 @@ export const ModelPricingEditorPanel = forwardRef<
       const data: ModelRatioData = {
         name: values.name.trim(),
         billingMode: pricingMode,
-        price: values.price || '',
+        price:
+          pricingMode === 'per-request' || pricingMode === 'per-second'
+            ? pricingDisplayToUSD(values.price, pricingCurrency)
+            : values.price || '',
         ratio: values.ratio || '',
         cacheRatio: values.cacheRatio || '',
         createCacheRatio: values.createCacheRatio || '',
@@ -454,13 +533,13 @@ export const ModelPricingEditorPanel = forwardRef<
       }
 
       if (pricingMode === 'tiered_expr') {
-        data.billingExpr = billingExpr
+        data.billingExpr = resolvedBillingExpr
         data.requestRuleExpr = requestRuleExpr
       }
 
       return data
     },
-    [billingExpr, pricingMode, requestRuleExpr]
+    [pricingCurrency, pricingMode, requestRuleExpr, resolvedBillingExpr]
   )
 
   useImperativeHandle(
@@ -476,6 +555,54 @@ export const ModelPricingEditorPanel = forwardRef<
   )
 
   const showActions = Boolean(onSave)
+  const renderFixedPriceFields = (unit: 'request' | 'second') => (
+    <FieldGroup className='gap-5'>
+      <FormField
+        control={form.control}
+        name='price'
+        render={({ field }) => (
+          <FormItem className='contents'>
+            <Field>
+              <FieldLabel>
+                {unit === 'second' ? t('Price per second') : t('Fixed price')}
+              </FieldLabel>
+              <FormControl>
+                <InputGroup>
+                  <InputGroupAddon>{pricingCurrency.symbol}</InputGroupAddon>
+                  <InputGroupInput
+                    inputMode='decimal'
+                    placeholder={pricingUSDToDisplay('0.01', pricingCurrency)}
+                    {...field}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      if (numericDraftRegex.test(value)) {
+                        field.onChange(value)
+                      }
+                    }}
+                  />
+                  <InputGroupAddon align='inline-end'>
+                    {unit === 'second' ? t('per second') : t('per request')}
+                  </InputGroupAddon>
+                </InputGroup>
+              </FormControl>
+              <FieldDescription>
+                {unit === 'second'
+                  ? t(
+                      'Price in {{currency}} per generated second. Requires a task adapter that reports duration.',
+                      { currency: pricingCurrencyLabel }
+                    )
+                  : t(
+                      'Price in {{currency}} per request, regardless of tokens used.',
+                      { currency: pricingCurrencyLabel }
+                    )}
+              </FieldDescription>
+              <FormMessage />
+            </Field>
+          </FormItem>
+        )}
+      />
+    </FieldGroup>
+  )
 
   return (
     <div
@@ -544,12 +671,15 @@ export const ModelPricingEditorPanel = forwardRef<
                   onValueChange={handleModeChange}
                   className='gap-4'
                 >
-                  <TabsList className='grid w-full grid-cols-3'>
+                  <TabsList className='grid w-full grid-cols-2 sm:grid-cols-4'>
                     <TabsTrigger value='per-token'>
                       {t('Per-token')}
                     </TabsTrigger>
                     <TabsTrigger value='per-request'>
                       {t('Per-request')}
+                    </TabsTrigger>
+                    <TabsTrigger value='per-second'>
+                      {t('Per-second')}
                     </TabsTrigger>
                     <TabsTrigger value='tiered_expr'>
                       {t('Expression')}
@@ -557,16 +687,48 @@ export const ModelPricingEditorPanel = forwardRef<
                   </TabsList>
 
                   <TabsContent value='per-token' className='pt-0'>
+                    {taskUsageSchema &&
+                      Object.keys(taskUsageSchema).length > 0 && (
+                        <Alert className='mb-4'>
+                          <AlertDescription className='flex flex-col gap-3 text-xs'>
+                            <p>
+                              {t(
+                                'This is a task model billed by usage (e.g. seconds, resolution). Prices entered here act as a per-call base rate, not per-token prices.'
+                              )}
+                            </p>
+                            <p>
+                              {t(
+                                'Tip: after configuring one model, select others in the table and use bulk copy.'
+                              )}
+                            </p>
+                            <Button
+                              type='button'
+                              variant='outline'
+                              size='sm'
+                              className='w-fit'
+                              onClick={() => handleModeChange('tiered_expr')}
+                            >
+                              {t('Configure task pricing')}
+                            </Button>
+                          </AlertDescription>
+                        </Alert>
+                      )}
                     <FieldGroup className='gap-5'>
                       <Field>
                         <FieldLabel>{t('Input price')}</FieldLabel>
                         <PriceInput
                           value={promptPrice}
-                          placeholder='3'
+                          currencySymbol={pricingCurrency.symbol}
+                          placeholder={pricingUSDToDisplay(
+                            '3',
+                            pricingCurrency
+                          )}
                           onChange={handlePromptPriceChange}
                         />
                         <FieldDescription>
-                          {t('USD price per 1M input tokens.')}
+                          {t('{{currency}} price per 1M input tokens.', {
+                            currency: pricingCurrencyLabel,
+                          })}
                         </FieldDescription>
                       </Field>
 
@@ -581,8 +743,13 @@ export const ModelPricingEditorPanel = forwardRef<
                               key={lane.key}
                               title={t(lane.titleKey)}
                               description={t(lane.descriptionKey)}
-                              placeholder={lane.placeholder}
+                              placeholder={pricingUSDToDisplay(
+                                lane.placeholder,
+                                pricingCurrency
+                              )}
                               value={lanePrices[lane.key]}
+                              currencySymbol={pricingCurrency.symbol}
+                              currencyLabel={pricingCurrency.label}
                               enabled={laneEnabled[lane.key]}
                               disabled={disabled}
                               onEnabledChange={(checked) =>
@@ -599,56 +766,35 @@ export const ModelPricingEditorPanel = forwardRef<
                   </TabsContent>
 
                   <TabsContent value='per-request' className='pt-0'>
-                    <FieldGroup className='gap-5'>
-                      <FormField
-                        control={form.control}
-                        name='price'
-                        render={({ field }) => (
-                          <FormItem className='contents'>
-                            <Field>
-                              <FieldLabel>{t('Fixed price')}</FieldLabel>
-                              <FormControl>
-                                <InputGroup>
-                                  <InputGroupAddon>$</InputGroupAddon>
-                                  <InputGroupInput
-                                    inputMode='decimal'
-                                    placeholder='0.01'
-                                    {...field}
-                                    onChange={(event) => {
-                                      const value = event.target.value
-                                      if (numericDraftRegex.test(value)) {
-                                        field.onChange(value)
-                                      }
-                                    }}
-                                  />
-                                  <InputGroupAddon align='inline-end'>
-                                    {t('per request')}
-                                  </InputGroupAddon>
-                                </InputGroup>
-                              </FormControl>
-                              <FieldDescription>
-                                {t(
-                                  'Cost in USD per request, regardless of tokens used.'
-                                )}
-                              </FieldDescription>
-                              <FormMessage />
-                            </Field>
-                          </FormItem>
-                        )}
-                      />
-                    </FieldGroup>
+                    {renderFixedPriceFields('request')}
+                  </TabsContent>
+
+                  <TabsContent value='per-second' className='pt-0'>
+                    {renderFixedPriceFields('second')}
                   </TabsContent>
 
                   <TabsContent value='tiered_expr' className='pt-0'>
                     <FieldGroup className='gap-5'>
-                      <TieredPricingEditor
-                        key={editorReloadToken}
-                        modelName={watchedValues.name}
-                        billingExpr={billingExpr}
-                        requestRuleExpr={requestRuleExpr}
-                        onBillingExprChange={setBillingExpr}
-                        onRequestRuleExprChange={setRequestRuleExpr}
-                      />
+                      {taskUsageSchema ? (
+                        <TaskUsagePricingEditor
+                          key={`${editorReloadToken}:${watchedValues.name}`}
+                          billingExpr={resolvedBillingExpr}
+                          requestRuleExpr={requestRuleExpr}
+                          usageSchema={taskUsageSchema}
+                          usageExamples={taskUsageExamples}
+                          onBillingExprChange={setBillingExpr}
+                          onRequestRuleExprChange={setRequestRuleExpr}
+                        />
+                      ) : (
+                        <TieredPricingEditor
+                          key={editorReloadToken}
+                          modelName={watchedValues.name}
+                          billingExpr={billingExpr}
+                          requestRuleExpr={requestRuleExpr}
+                          onBillingExprChange={setBillingExpr}
+                          onRequestRuleExprChange={setRequestRuleExpr}
+                        />
+                      )}
                     </FieldGroup>
                   </TabsContent>
                 </Tabs>

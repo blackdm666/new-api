@@ -108,8 +108,14 @@ const AUTH_SECTIONS = [
       <BotProtectionSection
         defaultValues={{
           TurnstileCheckEnabled: settings.TurnstileCheckEnabled,
+          TurnstileProvider: settings.TurnstileProvider,
           TurnstileSiteKey: settings.TurnstileSiteKey,
           TurnstileSecretKey: settings.TurnstileSecretKey,
+          TurnstileSecretKeyConfigured: settings.TurnstileSecretKeyConfigured,
+          TurnstileWidgetScriptURL: settings.TurnstileWidgetScriptURL,
+          TurnstileWidgetEndpoint: settings.TurnstileWidgetEndpoint,
+          TurnstileVerifyURL: settings.TurnstileVerifyURL,
+          TurnstileAction: settings.TurnstileAction,
         }}
       />
     ),

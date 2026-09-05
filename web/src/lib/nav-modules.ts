@@ -17,8 +17,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { getStatus } from '@/lib/api'
+import { INFINITE_CANVAS_NAME, INFINITE_CANVAS_URL } from '@/lib/external-links'
 
 export type ModuleAccess = { enabled: boolean; requireAuth: boolean }
+
+export type HeaderNavLink = {
+  enabled: boolean
+  name: string
+  url: string
+}
 
 export type HeaderNavModule = 'rankings' | 'pricing'
 
@@ -27,9 +34,16 @@ export type HeaderNavModules = {
   console: boolean
   pricing: ModuleAccess
   rankings: ModuleAccess
+  infiniteCanvas: HeaderNavLink
   docs: boolean
   about: boolean
-  [key: string]: boolean | ModuleAccess
+  [key: string]: boolean | ModuleAccess | HeaderNavLink
+}
+
+export const DEFAULT_INFINITE_CANVAS_LINK: HeaderNavLink = {
+  enabled: true,
+  name: INFINITE_CANVAS_NAME,
+  url: INFINITE_CANVAS_URL,
 }
 
 const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
@@ -37,6 +51,7 @@ const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
   console: true,
   pricing: { enabled: true, requireAuth: false },
   rankings: { enabled: true, requireAuth: false },
+  infiniteCanvas: { ...DEFAULT_INFINITE_CANVAS_LINK },
   docs: true,
   about: true,
 }
@@ -51,6 +66,35 @@ function cloneHeaderNavDefaults(): HeaderNavModules {
     ...DEFAULT_HEADER_NAV_MODULES,
     pricing: { ...DEFAULT_HEADER_NAV_MODULES.pricing },
     rankings: { ...DEFAULT_HEADER_NAV_MODULES.rankings },
+    infiniteCanvas: { ...DEFAULT_HEADER_NAV_MODULES.infiniteCanvas },
+  }
+}
+
+export function parseHeaderNavLink(
+  raw: unknown,
+  fallback: HeaderNavLink = DEFAULT_INFINITE_CANVAS_LINK
+): HeaderNavLink {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ...fallback }
+  }
+  const record = raw as Record<string, unknown>
+  const name = typeof record.name === 'string' ? record.name.trim() : ''
+  const candidateUrl = typeof record.url === 'string' ? record.url.trim() : ''
+  let url = fallback.url
+  if (candidateUrl) {
+    try {
+      const parsedUrl = new URL(candidateUrl)
+      if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
+        url = candidateUrl
+      }
+    } catch {
+      // Invalid saved values fall back to the known-safe destination.
+    }
+  }
+  return {
+    enabled: parseHeaderNavBoolean(record.enabled, fallback.enabled),
+    name: name || fallback.name,
+    url,
   }
 }
 
@@ -116,6 +160,10 @@ export function parseHeaderNavModules(raw: unknown): HeaderNavModules {
     }
     if (key === 'rankings') {
       result.rankings = parseAccess(value, result.rankings)
+      return
+    }
+    if (key === 'infiniteCanvas') {
+      result.infiniteCanvas = parseHeaderNavLink(value, result.infiniteCanvas)
       return
     }
 

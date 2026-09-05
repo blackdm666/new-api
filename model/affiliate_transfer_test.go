@@ -65,6 +65,25 @@ func TestAffiliateTransferRejectsConflictAndPreservesBalance(t *testing.T) {
 	assert.Equal(t, amountQuota, fresh.Quota)
 }
 
+func TestAffiliateTransferRejectsWalletOverflowWithoutConsumingCommission(t *testing.T) {
+	user := setupAffiliatePayoutTest(t, 2)
+	require.NoError(t, DB.Model(user).Update("quota", common.MaxWalletQuota-100).Error)
+
+	_, err := user.TransferAffiliateCentsToQuotaWithRequestId(100, "transfer-wallet-overflow")
+	require.ErrorIs(t, err, ErrWalletQuotaLimitExceeded)
+
+	fresh, err := GetUserById(user.Id, false)
+	require.NoError(t, err)
+	account, err := GetAffiliateAccount(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, common.MaxWalletQuota-100, fresh.Quota)
+	assert.Equal(t, int64(200), account.AvailableCents)
+
+	var count int64
+	require.NoError(t, DB.Model(&AffiliateTransfer{}).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
 func TestListAffiliateTransfersSupportsAdminSearch(t *testing.T) {
 	user := setupAffiliatePayoutTest(t, 10)
 	user.DisplayName = "Ledger User"

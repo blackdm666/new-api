@@ -323,9 +323,23 @@ func TestOptimizedMarketingDefaultsCoverAllRecipientLanguages(t *testing.T) {
 func TestMarketingAutomationTriggerConfigUsesSafeDefaultsAndValidation(t *testing.T) {
 	_, registration, err := NormalizeMarketingAutomationTriggerConfig(MarketingSceneRegistration, "")
 	require.NoError(t, err)
-	assert.Equal(t, 24, registration.RegistrationWaitHours)
+	assert.InDelta(t, 24, registration.RegistrationWaitHours, 0)
 	assert.Equal(t, 1, registration.MaxSendsPerUser)
 	assert.Equal(t, 2, registration.RepeatIntervalDays)
+
+	encoded, registration, err := NormalizeMarketingAutomationTriggerConfig(
+		MarketingSceneRegistration,
+		`{"registration_wait_hours":0.5,"max_sends_per_user":1,"repeat_interval_days":2}`,
+	)
+	require.NoError(t, err)
+	assert.InDelta(t, 0.5, registration.RegistrationWaitHours, 0)
+	assert.JSONEq(t, `{"registration_wait_hours":0.5,"max_sends_per_user":1,"repeat_interval_days":2}`, encoded)
+
+	_, _, err = NormalizeMarketingAutomationTriggerConfig(
+		MarketingSceneRegistration,
+		`{"registration_wait_hours":0.25,"max_sends_per_user":1,"repeat_interval_days":2}`,
+	)
+	assert.ErrorIs(t, err, ErrMarketingInvalid)
 
 	encoded, config, err := NormalizeMarketingAutomationTriggerConfig(MarketingSceneInactive, "")
 	require.NoError(t, err)

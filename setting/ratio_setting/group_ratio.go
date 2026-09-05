@@ -1,9 +1,6 @@
 package ratio_setting
 
 import (
-	"encoding/json"
-	"errors"
-
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/types"
@@ -73,6 +70,9 @@ func GroupRatio2JSONString() string {
 }
 
 func UpdateGroupRatioByJSONString(jsonStr string) error {
+	if err := ValidateNumericPricingMapJSONString("GroupRatio", jsonStr); err != nil {
+		return err
+	}
 	return types.LoadFromJsonString(groupRatioMap, jsonStr)
 }
 
@@ -102,19 +102,12 @@ func GroupGroupRatio2JSONString() string {
 }
 
 func UpdateGroupGroupRatioByJSONString(jsonStr string) error {
+	if err := ValidateNestedNumericPricingMapJSONString("GroupGroupRatio", jsonStr); err != nil {
+		return err
+	}
 	return types.LoadFromJsonString(groupGroupRatioMap, jsonStr)
 }
 
 func CheckGroupRatio(jsonStr string) error {
-	checkGroupRatio := make(map[string]float64)
-	err := json.Unmarshal([]byte(jsonStr), &checkGroupRatio)
-	if err != nil {
-		return err
-	}
-	for name, ratio := range checkGroupRatio {
-		if ratio < 0 {
-			return errors.New("group ratio must be not less than 0: " + name)
-		}
-	}
-	return nil
+	return ValidateNumericPricingMapJSONString("GroupRatio", jsonStr)
 }
