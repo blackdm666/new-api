@@ -127,6 +127,7 @@ function renderMarketingPage(options: MarketingPageOptions = {}) {
     throw new Error(`Unexpected POST ${url}`)
   })
   vi.spyOn(api, 'put').mockImplementation(() => successfulResponse({}))
+  vi.spyOn(api, 'delete').mockImplementation(() => successfulResponse({}))
 
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -139,6 +140,21 @@ function renderMarketingPage(options: MarketingPageOptions = {}) {
 }
 
 describe('email marketing navigation', () => {
+  test('archives a completed campaign from the actions column', async () => {
+    const user = userEvent.setup()
+    renderMarketingPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Delete' }))
+    expect(
+      await screen.findByText('Delete this completed campaign?')
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirm deletion' }))
+
+    await vi.waitFor(() => {
+      expect(api.delete).toHaveBeenCalledWith('/api/marketing/campaigns/2')
+    })
+  })
+
   test('shows queue monitoring and queue rules as separate marketing tabs', async () => {
     renderMarketingPage()
 

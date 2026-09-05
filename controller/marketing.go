@@ -176,6 +176,18 @@ func CancelMarketingCampaign(c *gin.Context) {
 	marketingCampaignTransition(c, []string{model.MarketingCampaignStatusDraft, model.MarketingCampaignStatusScheduled, model.MarketingCampaignStatusRunning, model.MarketingCampaignStatusPaused}, model.MarketingCampaignStatusCancelled)
 }
 
+func ArchiveMarketingCampaign(c *gin.Context) {
+	id, ok := marketingID(c)
+	if !ok {
+		return
+	}
+	if err := model.ArchiveMarketingCampaign(id); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"archived": true})
+}
+
 func CloneMarketingCampaign(c *gin.Context) {
 	id, ok := marketingID(c)
 	if !ok {

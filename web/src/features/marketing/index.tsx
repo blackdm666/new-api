@@ -41,6 +41,16 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { MultiSelect } from '@/components/multi-select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -87,6 +97,7 @@ import { formatTimestampToDate } from '@/lib/format'
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error'
 
 import {
+  archiveMarketingCampaign,
   createMarketingCampaign,
   createMarketingSuppression,
   deleteMarketingSuppression,
@@ -405,6 +416,9 @@ function CampaignTable(props: {
 }) {
   const { t } = useTranslation()
   const [workingId, setWorkingId] = useState(0)
+  const [archiveTarget, setArchiveTarget] = useState<MarketingCampaign | null>(
+    null
+  )
   const [renderedAt] = useState(() => Math.floor(Date.now() / 1000))
   const act = async (
     campaign: MarketingCampaign,
@@ -416,6 +430,20 @@ function CampaignTable(props: {
         await scheduleMarketingCampaign(campaign.id, campaign.scheduled_time)
       } else await transitionMarketingCampaign(campaign.id, action)
       toast.success(t('Campaign updated'))
+      await props.onChanged()
+    } catch (error) {
+      toast.error(getUserFacingErrorMessage(error))
+    } finally {
+      setWorkingId(0)
+    }
+  }
+  const archive = async () => {
+    if (!archiveTarget) return
+    setWorkingId(archiveTarget.id)
+    try {
+      await archiveMarketingCampaign(archiveTarget.id)
+      toast.success(t('Campaign deleted'))
+      setArchiveTarget(null)
       await props.onChanged()
     } catch (error) {
       toast.error(getUserFacingErrorMessage(error))
@@ -555,6 +583,17 @@ function CampaignTable(props: {
                         <Ban className='size-4' />
                       </Button>
                     ) : null}
+                    {['completed', 'cancelled'].includes(campaign.status) ? (
+                      <Button
+                        size='icon-sm'
+                        variant='outline'
+                        title={t('Delete')}
+                        disabled={workingId > 0}
+                        onClick={() => setArchiveTarget(campaign)}
+                      >
+                        <Trash2 className='text-destructive size-4' />
+                      </Button>
+                    ) : null}
                   </div>
                 </TableCell>
               </TableRow>
@@ -577,6 +616,35 @@ function CampaignTable(props: {
         total={props.total}
         onPageChange={props.onPageChange}
       />
+      <AlertDialog
+        open={archiveTarget !== null}
+        onOpenChange={(open) => !open && setArchiveTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('Delete this completed campaign?')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(
+                'The campaign will be hidden from the activity list. Sending records, clicks, and attributed top-ups will be retained for audit.'
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={workingId > 0}>
+              {t('Cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant='destructive'
+              disabled={workingId > 0}
+              onClick={() => void archive()}
+            >
+              {t('Confirm deletion')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

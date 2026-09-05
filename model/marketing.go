@@ -24,6 +24,7 @@ const (
 	MarketingCampaignStatusPaused    = "paused"
 	MarketingCampaignStatusCompleted = "completed"
 	MarketingCampaignStatusCancelled = "cancelled"
+	MarketingCampaignStatusArchived  = "archived"
 
 	MarketingRecipientStatusPending       = "pending"
 	MarketingRecipientStatusQueued        = "queued"
@@ -556,10 +557,11 @@ func GetMarketingCampaign(id int) (*MarketingCampaign, error) {
 func ListMarketingCampaigns(pageInfo *common.PageInfo) ([]*MarketingCampaign, int64, error) {
 	rows := []*MarketingCampaign{}
 	var total int64
-	if err := DB.Model(&MarketingCampaign{}).Count(&total).Error; err != nil {
+	query := DB.Model(&MarketingCampaign{}).Where("status <> ?", MarketingCampaignStatusArchived)
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if err := DB.Order("id DESC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&rows).Error; err != nil {
+	if err := query.Order("id DESC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	for _, row := range rows {
@@ -571,6 +573,19 @@ func ListMarketingCampaigns(pageInfo *common.PageInfo) ([]*MarketingCampaign, in
 		_ = DB.Model(&MarketingEvent{}).Where("campaign_id = ? AND event_type = ?", row.Id, MarketingEventConversion).Select("COALESCE(SUM(amount_cents), 0)").Scan(&row.ConvertedCents).Error
 	}
 	return rows, total, nil
+}
+
+func ArchiveMarketingCampaign(id int) error {
+	result := DB.Model(&MarketingCampaign{}).
+		Where("id = ? AND status IN ?", id, []string{MarketingCampaignStatusCompleted, MarketingCampaignStatusCancelled}).
+		Updates(map[string]any{"status": MarketingCampaignStatusArchived, "updated_time": common.GetTimestamp()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrMarketingInvalid
+	}
+	return nil
 }
 
 func SetMarketingCampaignStatus(id int, from []string, status string, reason string) error {
@@ -1105,7 +1120,7 @@ func AttributeMarketingConversion(topUp *TopUp) error {
 
 func GetMarketingOverview() (MarketingOverview, error) {
 	result := MarketingOverview{}
-	if err := DB.Model(&MarketingCampaign{}).Count(&result.Campaigns).Error; err != nil {
+	if err := DB.Model(&MarketingCampaign{}).Where("status <> ?", MarketingCampaignStatusArchived).Count(&result.Campaigns).Error; err != nil {
 		return result, err
 	}
 	counts := []struct {
