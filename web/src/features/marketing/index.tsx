@@ -77,6 +77,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  EmailQueueOverviewStats,
   EmailQueueRulesSection,
   EmailQueueSection,
 } from '@/features/system-settings/integrations/email-queue-section'
@@ -237,7 +238,11 @@ export function MarketingAdminPage() {
     queryFn: fetchMarketingAutomations,
   })
   const refresh = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['marketing'] })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['marketing'] }),
+      queryClient.invalidateQueries({ queryKey: ['email-queue'] }),
+      queryClient.invalidateQueries({ queryKey: ['marketing-email-accounts'] }),
+    ])
   }
   const isEmailOperationsTab =
     activeTab === 'email-queue' || activeTab === 'email-queue-rules'
@@ -256,31 +261,31 @@ export function MarketingAdminPage() {
               )}
             </p>
           </div>
-          {!isEmailOperationsTab ? (
-            <div className='flex gap-2'>
-              <Button
-                type='button'
-                variant='outline'
-                onClick={() => void refresh()}
-              >
-                <RefreshCw className='size-4' />
-                {t('Refresh')}
-              </Button>
-              <Button
-                type='button'
-                onClick={() => {
-                  setCampaignTarget(null)
-                  setCampaignOpen(true)
-                }}
-              >
-                <MailPlus className='size-4' />
-                {t('Create campaign')}
-              </Button>
-            </div>
-          ) : null}
+          <div className='flex gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={() => void refresh()}
+            >
+              <RefreshCw className='size-4' />
+              {t('Refresh')}
+            </Button>
+            <Button
+              type='button'
+              onClick={() => {
+                setCampaignTarget(null)
+                setCampaignOpen(true)
+              }}
+            >
+              <MailPlus className='size-4' />
+              {t('Create campaign')}
+            </Button>
+          </div>
         </header>
 
-        {!isEmailOperationsTab ? (
+        {isEmailOperationsTab ? (
+          <EmailQueueOverviewStats />
+        ) : (
           <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7'>
             <Stat
               label={t('Campaigns')}
@@ -311,7 +316,7 @@ export function MarketingAdminPage() {
               )}
             />
           </div>
-        ) : null}
+        )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className='gap-4'>
           <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>

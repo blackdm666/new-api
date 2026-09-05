@@ -61,6 +61,59 @@ export type SMTPTestResponse = {
   }
 }
 
+export type MarketingEmailSenderAccount = {
+  id: number
+  name: string
+  profile: 'marketing'
+  provider: 'aliyun_eventbridge'
+  server: string
+  port: number
+  account: string
+  from: string
+  ssl_enabled: boolean
+  starttls_enabled: boolean
+  insecure_skip_verify: boolean
+  force_auth_login: boolean
+  weight: number
+  rate_limit_per_minute: number
+  enabled: boolean
+  tested_time: number
+  receipt_verified_time: number
+  disabled_until: number
+  health_status: 'pending' | 'healthy' | 'degraded' | 'disabled'
+  consecutive_failures: number
+  last_success_time: number
+  last_failure_time: number
+  last_error: string
+  credential_configured: boolean
+}
+
+export type MarketingEmailSenderAccountInput = {
+  name: string
+  provider: 'aliyun_eventbridge'
+  server: string
+  port: number
+  account: string
+  from: string
+  token: string
+  ssl_enabled: boolean
+  starttls_enabled: boolean
+  insecure_skip_verify: boolean
+  force_auth_login: boolean
+  weight: number
+  rate_limit_per_minute: number
+}
+
+export type EmailReceiptEndpoint = {
+  provider: 'aliyun_eventbridge'
+  enabled: boolean
+  token_configured: boolean
+  callback_url: string
+  last_event_time: number
+  last_verified_time: number
+  last_error: string
+}
+
 export type InvoiceSettingsPayload = {
   InvoiceApplicationNotifyAdminEnabled: boolean
   InvoiceIssuedNotifyUserEnabled: boolean

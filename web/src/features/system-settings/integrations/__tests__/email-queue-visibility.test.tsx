@@ -45,6 +45,8 @@ function renderEmailQueue() {
             recipient_masked: '21***@qq.com',
             priority: 200,
             status: 'delivered',
+            sender_account_id: 1,
+            sender_account_name: 'Marketing sender A',
             attempts: 0,
             last_error: '',
             next_attempt_time: 0,
@@ -63,6 +65,9 @@ function renderEmailQueue() {
           queued: 0,
           sending: 0,
           retrying: 0,
+          awaiting_receipt: 0,
+          accepted_untracked_24h: 0,
+          final_delivered_24h: 0,
           failed: 0,
           delivered_24h: 1,
           failed_24h: 0,
@@ -105,6 +110,7 @@ describe('email queue recipient visibility', () => {
     expect(await screen.findByText('2708826161@qq.com')).toBeInTheDocument()
     expect(screen.queryByText('21***@qq.com')).not.toBeInTheDocument()
     expect(screen.getByText('#1982')).toBeInTheDocument()
+    expect(screen.getByText('Marketing sender A')).toBeInTheDocument()
     expect(screen.queryByText(/Related ID/)).not.toBeInTheDocument()
   })
 })

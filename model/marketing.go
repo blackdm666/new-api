@@ -854,6 +854,15 @@ func DeleteMarketingSuppression(id int) error {
 	return DB.Delete(&MarketingSuppression{}, id).Error
 }
 
+func DeleteMarketingSuppressionByEmailAndReasons(email string, reasons []string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" || len(reasons) == 0 {
+		return ErrMarketingInvalid
+	}
+	return DB.Where("email_hash = ? AND reason IN ?", hashMarketingValue(email), reasons).
+		Delete(&MarketingSuppression{}).Error
+}
+
 func ListMarketingSuppressions(pageInfo *common.PageInfo) ([]*MarketingSuppression, int64, error) {
 	rows := []*MarketingSuppression{}
 	var total int64

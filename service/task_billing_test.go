@@ -55,6 +55,13 @@ func TestMain(m *testing.M) {
 		&model.Midjourney{},
 		&model.TopUp{},
 		&model.EmailDelivery{},
+		&model.EmailSenderAccount{},
+		&model.EmailDeliveryAttempt{},
+		&model.EmailReceiptEvent{},
+		&model.EmailDeliveryThrottle{},
+		&model.EmailDeliveryMinuteQuota{},
+		&model.EmailReceiptEndpoint{},
+		&model.MarketingEmailDailyQuota{},
 		&model.QuotaNotificationState{},
 		&model.MarketingCampaign{},
 		&model.MarketingRecipient{},
@@ -85,6 +92,13 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM marketing_automations")
 		model.DB.Exec("DELETE FROM marketing_suppressions")
 		model.DB.Exec("DELETE FROM email_deliveries")
+		model.DB.Exec("DELETE FROM email_delivery_attempts")
+		model.DB.Exec("DELETE FROM email_receipt_events")
+		model.DB.Exec("DELETE FROM email_delivery_throttles")
+		model.DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.EmailDeliveryMinuteQuota{})
+		model.DB.Exec("DELETE FROM email_sender_accounts")
+		model.DB.Exec("DELETE FROM email_receipt_endpoints")
+		model.DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.MarketingEmailDailyQuota{})
 		model.DB.Exec("DELETE FROM quota_notification_states")
 		model.DB.Exec("DELETE FROM task_callback_deliveries")
 		model.DB.Exec("DELETE FROM tasks")

@@ -79,6 +79,9 @@ function renderMarketingPage(options: MarketingPageOptions = {}) {
             queued: 0,
             sending: 0,
             retrying: 0,
+            awaiting_receipt: 0,
+            accepted_untracked_24h: 0,
+            final_delivered_24h: 0,
             failed: 0,
             delivered_24h: 0,
             failed_24h: 0,
@@ -103,6 +106,7 @@ function renderMarketingPage(options: MarketingPageOptions = {}) {
             email_max_attempts: 8,
             email_retry_initial_seconds: 30,
             email_retry_max_seconds: 86400,
+            receipt_timeout_hours: 24,
             delivered_retention_days: 30,
             terminal_retention_days: 90,
           },
@@ -154,8 +158,15 @@ describe('email marketing navigation', () => {
       screen.queryByRole('tab', { name: 'Queue monitoring' })
     ).not.toBeInTheDocument()
     expect(
-      screen.queryByRole('button', { name: 'Create campaign' })
-    ).not.toBeInTheDocument()
+      screen.getByRole('button', { name: 'Create campaign' })
+    ).toBeInTheDocument()
+    expect(screen.getByText('Waiting for receipt')).toBeInTheDocument()
+    expect(
+      screen
+        .getByText('Waiting for receipt')
+        .compareDocumentPosition(screen.getByRole('tablist')) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Email queue rules' }))
 

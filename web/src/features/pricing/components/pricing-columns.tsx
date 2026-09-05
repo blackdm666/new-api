@@ -37,6 +37,7 @@ import {
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
 import { getFixedPriceUnitLabel, isTokenBasedModel } from '../lib/model-helpers'
+import { resolvePricingModelIcon } from '../lib/model-icon'
 import {
   formatPrice,
   formatRequestPrice,
@@ -81,7 +82,7 @@ export function usePricingColumns(
       ),
       cell: ({ row }) => {
         const model = row.original
-        const modelIconKey = model.icon || model.vendor_icon
+        const modelIconKey = resolvePricingModelIcon(model)
         const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 14) : null
 
         return (

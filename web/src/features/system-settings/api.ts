@@ -32,6 +32,9 @@ import type {
   SystemTaskListResponse,
   SystemTaskResponse,
   SMTPTestResponse,
+  MarketingEmailSenderAccount,
+  MarketingEmailSenderAccountInput,
+  EmailReceiptEndpoint,
   UpdateOptionRequest,
   UpdateOptionResponse,
   UpstreamChannelsResponse,
@@ -72,6 +75,101 @@ export async function testSMTPEmail(
       res.data.message?.trim() || t('SMTP test email failed')
     )
   }
+  return res.data
+}
+
+export async function listMarketingEmailSenderAccounts() {
+  const res = await api.get<{
+    success: boolean
+    message: string
+    data: MarketingEmailSenderAccount[]
+  }>('/api/option/smtp/marketing-accounts')
+  return res.data
+}
+
+export async function createMarketingEmailSenderAccount(
+  request: MarketingEmailSenderAccountInput
+) {
+  const res = await api.post<{
+    success: boolean
+    message: string
+    data: MarketingEmailSenderAccount
+  }>('/api/option/smtp/marketing-accounts', request)
+  return res.data
+}
+
+export async function updateMarketingEmailSenderAccount(
+  id: number,
+  request: MarketingEmailSenderAccountInput
+) {
+  const res = await api.put<{
+    success: boolean
+    message: string
+    data: MarketingEmailSenderAccount
+  }>(`/api/option/smtp/marketing-accounts/${id}`, request)
+  return res.data
+}
+
+export async function deleteMarketingEmailSenderAccount(id: number) {
+  const res = await api.delete<{ success: boolean; message: string }>(
+    `/api/option/smtp/marketing-accounts/${id}`
+  )
+  return res.data
+}
+
+export async function setMarketingEmailSenderAccountEnabled(
+  id: number,
+  enabled: boolean
+) {
+  const res = await api.put<{
+    success: boolean
+    message: string
+    data: MarketingEmailSenderAccount
+  }>(`/api/option/smtp/marketing-accounts/${id}/enabled`, { enabled })
+  return res.data
+}
+
+export async function testMarketingEmailSenderAccount(
+  id: number,
+  email: string
+) {
+  const res = await api.post<{
+    success: boolean
+    message: string
+    data: {
+      recipient: string
+      attempt_id: number
+      status: string
+      message: string
+    }
+  }>(`/api/option/smtp/marketing-accounts/${id}/test`, { email })
+  return res.data
+}
+
+export async function getEmailReceiptEndpoint() {
+  const res = await api.get<{
+    success: boolean
+    message: string
+    data: EmailReceiptEndpoint
+  }>('/api/option/smtp/receipts')
+  return res.data
+}
+
+export async function updateEmailReceiptEndpoint(enabled: boolean) {
+  const res = await api.put<{
+    success: boolean
+    message: string
+    data: EmailReceiptEndpoint
+  }>('/api/option/smtp/receipts', { enabled })
+  return res.data
+}
+
+export async function rotateEmailReceiptEndpointToken() {
+  const res = await api.post<{
+    success: boolean
+    message: string
+    data: { token: string; callback_url: string }
+  }>('/api/option/smtp/receipts/token')
   return res.data
 }
 

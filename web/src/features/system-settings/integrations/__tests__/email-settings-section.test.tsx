@@ -69,10 +69,10 @@ const settings: EmailFormValues = {
   SMTPMarketingForceAuthLogin: false,
 }
 
-function renderSection() {
+function renderSection(defaultValues = settings) {
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <EmailSettingsSection defaultValues={settings} />
+      <EmailSettingsSection defaultValues={defaultValues} />
     </QueryClientProvider>
   )
 }
@@ -90,6 +90,119 @@ describe('SMTP settings', () => {
       screen.queryByRole('switch', { name: 'Enable backup SMTP channel' })
     ).not.toBeInTheDocument()
     expect(screen.getByText('Pending test')).toBeInTheDocument()
+  })
+
+  test('keeps marketing mail and the receipt interface as the final tabs', () => {
+    renderSection()
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      'Security mail',
+      'Notification mail',
+      'Backup channel',
+      'Marketing mail',
+      'Receipt interface',
+    ])
+  })
+
+  test('exposes enabled state for the shared green status style', () => {
+    renderSection({ ...settings, SMTPSecurityEnabled: true })
+
+    expect(screen.getByText('Enabled')).toHaveAttribute('data-state', 'enabled')
+    expect(screen.getByText('Enabled')).toHaveClass('text-emerald-600')
+  })
+
+  test('shows verified marketing accounts and EventBridge setup separately', async () => {
+    const put = vi.spyOn(api, 'put').mockResolvedValue({
+      data: { success: true, message: '', data: {} },
+    })
+    vi.spyOn(api, 'get').mockImplementation((url) => {
+      if (url === '/api/option/smtp/marketing-accounts') {
+        return Promise.resolve({
+          data: {
+            success: true,
+            message: '',
+            data: [
+              {
+                id: 1,
+                name: 'Alibaba sender A',
+                profile: 'marketing',
+                provider: 'aliyun_eventbridge',
+                server: 'smtpdm.aliyun.com',
+                port: 465,
+                account: 'sender@example.com',
+                from: 'sender@example.com',
+                ssl_enabled: true,
+                starttls_enabled: false,
+                insecure_skip_verify: false,
+                force_auth_login: false,
+                weight: 2,
+                rate_limit_per_minute: 20,
+                enabled: true,
+                tested_time: 1,
+                receipt_verified_time: 1,
+                disabled_until: 0,
+                health_status: 'healthy',
+                consecutive_failures: 0,
+                last_success_time: 1,
+                last_failure_time: 0,
+                last_error: '',
+                credential_configured: true,
+              },
+            ],
+          },
+        })
+      }
+      if (url === '/api/option/smtp/receipts') {
+        return Promise.resolve({
+          data: {
+            success: true,
+            message: '',
+            data: {
+              provider: 'aliyun_eventbridge',
+              enabled: true,
+              token_configured: true,
+              callback_url:
+                'https://example.com/api/email/receipts/aliyun/eventbridge',
+              last_event_time: 1,
+              last_verified_time: 1,
+              last_error: '',
+            },
+          },
+        })
+      }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    renderSection()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Marketing mail' }))
+    expect(await screen.findByText('Alibaba sender A')).toBeInTheDocument()
+    expect(screen.getByText('1 / 1 enabled')).toHaveAttribute(
+      'data-state',
+      'enabled'
+    )
+    fireEvent.click(
+      screen.getByRole('switch', {
+        name: 'Enable marketing account Alibaba sender A',
+      })
+    )
+    await waitFor(() =>
+      expect(put).toHaveBeenCalledWith(
+        '/api/option/smtp/marketing-accounts/1/enabled',
+        { enabled: false }
+      )
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Receipt interface' }))
+    expect(
+      await screen.findByDisplayValue(
+        'https://example.com/api/email/receipts/aliyun/eventbridge'
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Alibaba Cloud Direct Mail (EventBridge event distribution)'
+      )
+    ).toBeInTheDocument()
   })
 
   test('tests the dedicated security profile from the default tab', async () => {

@@ -358,6 +358,12 @@ func migrateDB() error {
 		&InvoiceFileCleanup{},
 		&InvoiceNotificationDelivery{},
 		&EmailDelivery{},
+		&EmailSenderAccount{},
+		&EmailDeliveryAttempt{},
+		&EmailReceiptEvent{},
+		&EmailDeliveryThrottle{},
+		&EmailDeliveryMinuteQuota{},
+		&EmailReceiptEndpoint{},
 		&QuotaNotificationState{},
 		&MarketingEmailDailyQuota{},
 		&MarketingCampaign{},
@@ -392,6 +398,12 @@ func migrateDB() error {
 		return err
 	}
 	if err := backfillAffiliateAccounts(); err != nil {
+		return err
+	}
+	if err := backfillEmailDeliveryStates(); err != nil {
+		return err
+	}
+	if err := BackfillLegacyMarketingEmailSenderAccount(); err != nil {
 		return err
 	}
 	if err := EnsureMarketingAutomations(); err != nil {
@@ -460,6 +472,12 @@ func migrateDBFast() error {
 		{&InvoiceFileCleanup{}, "InvoiceFileCleanup"},
 		{&InvoiceNotificationDelivery{}, "InvoiceNotificationDelivery"},
 		{&EmailDelivery{}, "EmailDelivery"},
+		{&EmailSenderAccount{}, "EmailSenderAccount"},
+		{&EmailDeliveryAttempt{}, "EmailDeliveryAttempt"},
+		{&EmailReceiptEvent{}, "EmailReceiptEvent"},
+		{&EmailDeliveryThrottle{}, "EmailDeliveryThrottle"},
+		{&EmailDeliveryMinuteQuota{}, "EmailDeliveryMinuteQuota"},
+		{&EmailReceiptEndpoint{}, "EmailReceiptEndpoint"},
 		{&QuotaNotificationState{}, "QuotaNotificationState"},
 		{&MarketingEmailDailyQuota{}, "MarketingEmailDailyQuota"},
 		{&MarketingCampaign{}, "MarketingCampaign"},
@@ -512,6 +530,12 @@ func migrateDBFast() error {
 		}
 	}
 	if err := backfillAffiliateAccounts(); err != nil {
+		return err
+	}
+	if err := backfillEmailDeliveryStates(); err != nil {
+		return err
+	}
+	if err := BackfillLegacyMarketingEmailSenderAccount(); err != nil {
 		return err
 	}
 	if err := EnsureMarketingAutomations(); err != nil {

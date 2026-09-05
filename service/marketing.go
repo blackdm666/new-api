@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -21,12 +20,6 @@ import (
 )
 
 const marketingDispatchExpiry = 7 * 24 * time.Hour
-
-var marketingDeliveryMinuteQuota = struct {
-	sync.Mutex
-	minute int64
-	used   int
-}{}
 
 type marketingDispatchHandler struct{}
 
@@ -526,25 +519,14 @@ func marketingEmailDeliveryAllowed(delivery *model.EmailDelivery) (bool, error) 
 	if !reserved {
 		return false, model.DeferEmailDelivery(delivery.Id, nextMarketingSendWindow(nowTime.Add(24*time.Hour)).Unix())
 	}
-	if !reserveMarketingDeliveryMinute(now, rules.MarketingPerMinuteLimit) {
-		return false, nil
+	reserved, err = model.ReserveEmailDeliveryMinuteQuota("marketing-global", now/60*60, rules.MarketingPerMinuteLimit)
+	if err != nil {
+		return false, err
+	}
+	if !reserved {
+		return false, model.DeferEmailDelivery(delivery.Id, (now/60+1)*60)
 	}
 	return true, nil
-}
-
-func reserveMarketingDeliveryMinute(now int64, limit int) bool {
-	minute := now / 60
-	marketingDeliveryMinuteQuota.Lock()
-	defer marketingDeliveryMinuteQuota.Unlock()
-	if marketingDeliveryMinuteQuota.minute != minute {
-		marketingDeliveryMinuteQuota.minute = minute
-		marketingDeliveryMinuteQuota.used = 0
-	}
-	if marketingDeliveryMinuteQuota.used >= limit {
-		return false
-	}
-	marketingDeliveryMinuteQuota.used++
-	return true
 }
 
 func expireMarketingEmailDelivery(delivery *model.EmailDelivery, recipient *model.MarketingRecipient, reason string) (bool, error) {

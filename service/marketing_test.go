@@ -145,16 +145,59 @@ func TestAnnouncementAutomationBackfillsOnlyLatestPublishedEntry(t *testing.T) {
 }
 
 func TestMarketingDeliveryMinuteQuotaIsExactAcrossPolls(t *testing.T) {
-	marketingDeliveryMinuteQuota.Lock()
-	marketingDeliveryMinuteQuota.minute = 0
-	marketingDeliveryMinuteQuota.used = 0
-	marketingDeliveryMinuteQuota.Unlock()
+	truncate(t)
 
 	const minuteStart = int64(1_800_000_000)
-	assert.True(t, reserveMarketingDeliveryMinute(minuteStart, 2))
-	assert.True(t, reserveMarketingDeliveryMinute(minuteStart+30, 2))
-	assert.False(t, reserveMarketingDeliveryMinute(minuteStart+45, 2))
-	assert.True(t, reserveMarketingDeliveryMinute(minuteStart+60, 2))
+	reserved, err := model.ReserveEmailDeliveryMinuteQuota("marketing-global", minuteStart, 2)
+	require.NoError(t, err)
+	assert.True(t, reserved)
+	reserved, err = model.ReserveEmailDeliveryMinuteQuota("marketing-global", minuteStart, 2)
+	require.NoError(t, err)
+	assert.True(t, reserved)
+	reserved, err = model.ReserveEmailDeliveryMinuteQuota("marketing-global", minuteStart, 2)
+	require.NoError(t, err)
+	assert.False(t, reserved)
+	reserved, err = model.ReserveEmailDeliveryMinuteQuota("marketing-global", minuteStart+60, 2)
+	require.NoError(t, err)
+	assert.True(t, reserved)
+}
+
+func TestMarketingDeliveryRejectsUserDisabledAfterQueueing(t *testing.T) {
+	truncate(t)
+	user := &model.User{
+		Username: "disabled-after-queue", Password: "password",
+		Email: "disabled-after-queue@example.com", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default",
+	}
+	require.NoError(t, model.DB.Create(user).Error)
+	campaign := &model.MarketingCampaign{
+		Name: "status recheck", Scene: model.MarketingSceneCustom,
+		Status: model.MarketingCampaignStatusRunning, AudienceRule: `{}`,
+		LocalizedContent: `{}`, ActionPath: "/pricing",
+	}
+	require.NoError(t, model.CreateMarketingCampaign(campaign))
+	delivery, _, err := model.EnqueueEmailDelivery(&model.EmailDelivery{
+		DeliveryKey: "disabled-after-queue", Category: "marketing_custom",
+		RelatedId: campaign.Id, UserId: user.Id, Recipient: user.Email,
+		Subject: "subject", Body: "body", Priority: model.EmailPriorityMarketing,
+	})
+	require.NoError(t, err)
+	recipient := &model.MarketingRecipient{
+		CampaignId: campaign.Id, UserId: user.Id, DedupeKey: "disabled-after-queue",
+		Language: "en", RecipientMasked: "d***@example.com",
+		ClickTokenHash: "disabled-after-queue", EmailDeliveryId: delivery.Id,
+		Status: model.MarketingRecipientStatusQueued,
+	}
+	require.NoError(t, model.DB.Create(recipient).Error)
+	require.NoError(t, model.DB.Model(user).Update("status", common.UserStatusDisabled).Error)
+
+	allowed, err := marketingEmailDeliveryAllowed(delivery)
+	require.NoError(t, err)
+	assert.False(t, allowed)
+	require.NoError(t, model.DB.First(delivery, delivery.Id).Error)
+	require.NoError(t, model.DB.First(recipient, recipient.Id).Error)
+	assert.Equal(t, model.EmailDeliveryStatusExpired, delivery.State)
+	assert.Equal(t, model.MarketingRecipientStatusSkipped, recipient.Status)
 }
 
 func TestFixedMarketingTemplateEscapesCustomContentAndUsesFixedLink(t *testing.T) {

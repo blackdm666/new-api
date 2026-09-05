@@ -43,6 +43,7 @@ export type EmailQueueRules = {
   email_max_attempts: number
   email_retry_initial_seconds: number
   email_retry_max_seconds: number
+  receipt_timeout_hours: number
   delivered_retention_days: number
   terminal_retention_days: number
 }
@@ -56,6 +57,7 @@ const DEFAULT_EMAIL_QUEUE_RULES: EmailQueueRules = {
   email_max_attempts: 8,
   email_retry_initial_seconds: 30,
   email_retry_max_seconds: 86400,
+  receipt_timeout_hours: 24,
   delivered_retention_days: 30,
   terminal_retention_days: 90,
 }
@@ -123,7 +125,7 @@ export function EmailQueueRulesCard(props: EmailQueueRulesCardProps) {
         <CardTitle>{t('Email queue rules')}</CardTitle>
         <CardDescription>
           {t(
-            'Marketing quota is reserved before queueing, while delivered usage counts only messages accepted by SMTP.'
+            'Marketing quota is reserved before queueing; final delivery is counted only after a successful receipt.'
           )}
         </CardDescription>
       </CardHeader>
@@ -196,6 +198,13 @@ export function EmailQueueRulesCard(props: EmailQueueRulesCardProps) {
               min={10}
               max={86400}
               onChange={(value) => update('email_retry_max_seconds', value)}
+            />
+            <RuleNumberField
+              label={t('Receipt timeout (hours)')}
+              value={draft.receipt_timeout_hours}
+              min={1}
+              max={168}
+              onChange={(value) => update('receipt_timeout_hours', value)}
             />
             <RuleNumberField
               label={t('Delivered retention (days)')}
@@ -331,6 +340,13 @@ function validateEmailQueueRules(
     rules.email_retry_max_seconds > 86400
   ) {
     return t('Maximum retry delay must not be shorter than the initial delay')
+  }
+  if (
+    !Number.isInteger(rules.receipt_timeout_hours) ||
+    rules.receipt_timeout_hours < 1 ||
+    rules.receipt_timeout_hours > 168
+  ) {
+    return t('Receipt timeout must be between 1 and 168 hours')
   }
   if (
     !Number.isInteger(rules.delivered_retention_days) ||

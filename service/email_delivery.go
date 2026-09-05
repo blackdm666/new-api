@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -101,6 +102,9 @@ func deliverDueSystemEmails() {
 	if err := model.ExpireEmailDeliveries(now); err != nil {
 		common.SysError("failed to expire email deliveries: " + err.Error())
 	}
+	if err := model.ExpireAwaitingEmailReceipts(now); err != nil {
+		common.SysError("failed to expire EventBridge email receipts: " + err.Error())
+	}
 	deliveries, err := model.ListDueEmailDeliveries(100, now)
 	if err != nil {
 		common.SysError("failed to list pending email deliveries: " + err.Error())
@@ -115,14 +119,6 @@ func deliverSystemEmail(delivery *model.EmailDelivery) {
 	if strings.TrimSpace(delivery.SMTPProfile) == "" {
 		delivery.SMTPProfile = smtpProfileForCategory(delivery.Category)
 	}
-	allowed, err := marketingEmailDeliveryAllowed(delivery)
-	if err != nil {
-		common.SysError(fmt.Sprintf("failed to validate email delivery %d: %s", delivery.Id, err.Error()))
-		return
-	}
-	if !allowed {
-		return
-	}
 	now := common.GetTimestamp()
 	claimed, err := model.ClaimEmailDelivery(delivery.Id, now, time.Now().Add(emailDeliveryLease).Unix())
 	if err != nil || !claimed {
@@ -131,10 +127,29 @@ func deliverSystemEmail(delivery *model.EmailDelivery) {
 		}
 		return
 	}
+	allowed, err := marketingEmailDeliveryAllowed(delivery)
+	if err != nil {
+		common.SysError(fmt.Sprintf("failed to validate email delivery %d: %s", delivery.Id, err.Error()))
+		_ = model.DeferEmailDelivery(delivery.Id, time.Now().Add(time.Minute).Unix())
+		return
+	}
+	if !allowed {
+		return
+	}
+	if delivery.Priority == model.EmailPriorityMarketing || strings.HasPrefix(delivery.Category, "marketing_") {
+		err = SendMarketingEmailDelivery(delivery)
+		if err == nil {
+			return
+		}
+		if errors.Is(err, ErrNoUsableMarketingEmailAccount) || errors.Is(err, ErrEmailReceiptEndpointDisabled) {
+			_ = model.DeferEmailDelivery(delivery.Id, time.Now().Add(5*time.Minute).Unix())
+			return
+		}
+	}
 	result := common.SMTPDeliveryResult{Profile: delivery.SMTPProfile}
 	if delivery.InvoiceDeliveryId > 0 {
 		err = sendInvoiceEmailDelivery(delivery)
-	} else {
+	} else if delivery.Priority != model.EmailPriorityMarketing && !strings.HasPrefix(delivery.Category, "marketing_") {
 		result, err = common.SendEmailWithProfileResult(delivery.SMTPProfile, delivery.Subject, delivery.Recipient, delivery.Body)
 	}
 	if err == nil {

@@ -24,6 +24,7 @@ var defaultVendorRules = map[string]string{
 	"ernie":    "百度",
 	"spark":    "讯飞",
 	"hunyuan":  "腾讯",
+	"混元":       "腾讯",
 	"command":  "Cohere",
 	"@cf/":     "Cloudflare",
 	"360":      "360",

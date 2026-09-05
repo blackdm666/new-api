@@ -79,6 +79,7 @@ import {
   isPerSecondModel,
   isTokenBasedModel,
 } from '../lib/model-helpers'
+import { resolvePricingModelIcon } from '../lib/model-icon'
 import { formatFixedPrice, formatGroupPrice } from '../lib/price'
 import {
   evaluateTaskUsageExamples,
@@ -606,7 +607,7 @@ function ModelBackendDetailsSection(props: { model: PricingModel }) {
 function ModelHeader(props: { model: PricingModel }) {
   const { t } = useTranslation()
   const model = props.model
-  const modelIconKey = model.icon || model.vendor_icon
+  const modelIconKey = resolvePricingModelIcon(model)
   const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 20) : null
   const description = model.description || model.vendor_description || null
 

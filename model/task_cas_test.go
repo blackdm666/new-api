@@ -59,6 +59,12 @@ func TestMain(m *testing.M) {
 		&AffiliatePayout{},
 		&AffiliateTransfer{},
 		&EmailDelivery{},
+		&EmailSenderAccount{},
+		&EmailDeliveryAttempt{},
+		&EmailReceiptEvent{},
+		&EmailDeliveryThrottle{},
+		&EmailDeliveryMinuteQuota{},
+		&EmailReceiptEndpoint{},
 		&QuotaNotificationState{},
 		&MarketingEmailDailyQuota{},
 		&MarketingCampaign{},
@@ -104,6 +110,12 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM affiliate_transfers")
 		DB.Exec("DELETE FROM affiliate_accounts")
 		DB.Exec("DELETE FROM email_deliveries")
+		DB.Exec("DELETE FROM email_delivery_attempts")
+		DB.Exec("DELETE FROM email_receipt_events")
+		DB.Exec("DELETE FROM email_delivery_throttles")
+		DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&EmailDeliveryMinuteQuota{})
+		DB.Exec("DELETE FROM email_sender_accounts")
+		DB.Exec("DELETE FROM email_receipt_endpoints")
 		DB.Exec("DELETE FROM quota_notification_states")
 		DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&MarketingEmailDailyQuota{})
 		DB.Exec("DELETE FROM tasks")

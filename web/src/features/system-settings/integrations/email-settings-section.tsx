@@ -25,7 +25,6 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import * as z from 'zod'
 
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Form } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
@@ -42,10 +41,16 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { EmailReceiptSettings } from './email-receipt-settings'
+import { MarketingEmailAccounts } from './marketing-email-accounts'
 import {
   SmtpChannelFields,
   type SmtpChannelFieldNames,
 } from './smtp-channel-fields'
+import {
+  SMTPProfileStatusCard,
+  type SMTPProfileState,
+} from './smtp-profile-status-card'
 
 const portSchema = (message: string) =>
   z.string().refine((value) => {
@@ -221,18 +226,6 @@ const SECURITY_FIELDS = {
   forceAuthLogin: 'SMTPSecurityForceAuthLogin',
 } as const satisfies SmtpChannelFieldNames
 
-const MARKETING_FIELDS = {
-  server: 'SMTPMarketingServer',
-  port: 'SMTPMarketingPort',
-  account: 'SMTPMarketingAccount',
-  from: 'SMTPMarketingFrom',
-  token: 'SMTPMarketingToken',
-  sslEnabled: 'SMTPMarketingSSLEnabled',
-  startTLSEnabled: 'SMTPMarketingStartTLSEnabled',
-  insecureSkipVerify: 'SMTPMarketingInsecureSkipVerify',
-  forceAuthLogin: 'SMTPMarketingForceAuthLogin',
-} as const satisfies SmtpChannelFieldNames
-
 const SMTP_OPTION_KEYS = [
   'SMTPServer',
   'SMTPPort',
@@ -285,6 +278,12 @@ const SMTP_BACKUP_CONFIGURATION_KEYS = [
 ] as const satisfies ReadonlyArray<keyof EmailFormValues>
 
 type SMTPChannel = 'security' | 'primary' | 'marketing' | 'backup'
+type SMTPSettingsTab =
+  | 'security'
+  | 'primary'
+  | 'backup'
+  | 'marketing'
+  | 'receipt'
 
 function sanitize(values: EmailFormValues): EmailFormValues {
   return {
@@ -326,7 +325,8 @@ export function EmailSettingsSection({
   const updateOption = useUpdateOption()
   const queryClient = useQueryClient()
   const [testRecipient, setTestRecipient] = useState('')
-  const [activeChannel, setActiveChannel] = useState<SMTPChannel>('security')
+  const [activeChannel, setActiveChannel] =
+    useState<SMTPSettingsTab>('security')
   const form = useForm<EmailFormValues>({
     resolver: zodResolver(createEmailSchema(t)),
     defaultValues,
@@ -430,7 +430,13 @@ export function EmailSettingsSection({
   const sendTest = form.handleSubmit(async (values) => {
     try {
       if (!(await persistSettings(values, false))) return
-      await testMutation.mutateAsync(activeChannel)
+      if (
+        activeChannel === 'security' ||
+        activeChannel === 'primary' ||
+        activeChannel === 'backup'
+      ) {
+        await testMutation.mutateAsync(activeChannel)
+      }
     } catch {
       // The update and test mutations already present their own user-facing errors.
     }
@@ -445,15 +451,34 @@ export function EmailSettingsSection({
     (key) =>
       key.startsWith('SMTPSecurity') && Boolean(form.formState.dirtyFields[key])
   )
-  const marketingConfigurationDirty = SMTP_OPTION_KEYS.some(
-    (key) =>
-      key.startsWith('SMTPMarketing') &&
-      Boolean(form.formState.dirtyFields[key])
-  )
   const securityEnabled =
     form.watch('SMTPSecurityEnabled') && !securityConfigurationDirty
-  const marketingEnabled =
-    form.watch('SMTPMarketingEnabled') && !marketingConfigurationDirty
+  const primaryConfigured = Boolean(
+    form.watch('SMTPServer') &&
+    (form.watch('SMTPFrom') || form.watch('SMTPAccount'))
+  )
+  const securityConfigured = Boolean(
+    form.watch('SMTPSecurityServer') &&
+    (form.watch('SMTPSecurityFrom') || form.watch('SMTPSecurityAccount'))
+  )
+  const backupConfigured = Boolean(
+    form.watch('SMTPBackupServer') &&
+    (form.watch('SMTPBackupFrom') || form.watch('SMTPBackupAccount'))
+  )
+  let securityState: SMTPProfileState = 'disabled'
+  if (securityConfigured) {
+    securityState = 'pending'
+  }
+  if (securityEnabled) {
+    securityState = 'enabled'
+  }
+  let backupState: SMTPProfileState = 'disabled'
+  if (backupConfigured) {
+    backupState = 'pending'
+  }
+  if (backupEnabled) {
+    backupState = 'enabled'
+  }
   const operationPending = testMutation.isPending || updateOption.isPending
 
   return (
@@ -468,129 +493,107 @@ export function EmailSettingsSection({
 
           <Tabs
             value={activeChannel}
-            onValueChange={(value) => setActiveChannel(value as SMTPChannel)}
+            onValueChange={(value) =>
+              setActiveChannel(value as SMTPSettingsTab)
+            }
             className='space-y-5'
           >
-            <TabsList className='grid w-full max-w-3xl grid-cols-2 sm:grid-cols-4'>
+            <TabsList className='grid w-full max-w-5xl grid-cols-2 sm:grid-cols-5'>
               <TabsTrigger value='security'>{t('Security mail')}</TabsTrigger>
               <TabsTrigger value='primary'>
                 {t('Notification mail')}
               </TabsTrigger>
-              <TabsTrigger value='marketing'>{t('Marketing mail')}</TabsTrigger>
               <TabsTrigger value='backup'>{t('Backup channel')}</TabsTrigger>
+              <TabsTrigger value='marketing'>{t('Marketing mail')}</TabsTrigger>
+              <TabsTrigger value='receipt'>
+                {t('Receipt interface')}
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value='security' className='space-y-6 pt-1'>
-              <SettingsControlGroup className='flex flex-col justify-between gap-3 space-y-0 sm:flex-row sm:items-center'>
-                <div className='min-w-0 space-y-1'>
-                  <p className='text-sm font-medium'>
-                    {t('Security mail profile')}
-                  </p>
-                  <p className='text-muted-foreground text-xs'>
-                    {t(
-                      'Registration codes, email binding and password reset use this sender. A successful test activates the profile.'
-                    )}
-                  </p>
-                </div>
-                <Badge variant='outline'>
-                  {securityEnabled ? t('Enabled') : t('Pending test')}
-                </Badge>
-              </SettingsControlGroup>
+              <SMTPProfileStatusCard
+                title={t('Verification and security email configuration')}
+                description={t(
+                  'Registration codes, email binding and password reset use this sender. A successful test activates the profile.'
+                )}
+                state={securityState}
+              />
               <SmtpChannelFields form={form} names={SECURITY_FIELDS} />
             </TabsContent>
 
-            <TabsContent value='primary' className='pt-1'>
-              <p className='text-muted-foreground mb-5 text-xs'>
-                {t(
+            <TabsContent value='primary' className='space-y-6 pt-1'>
+              <SMTPProfileStatusCard
+                title={t('Notification and business email configuration')}
+                description={t(
                   'Quota warnings, invoices, affiliate notices and operational alerts use this sender.'
                 )}
-              </p>
+                state={primaryConfigured ? 'enabled' : 'disabled'}
+                status={
+                  primaryConfigured ? t('Configured') : t('Not configured')
+                }
+              />
               <SmtpChannelFields form={form} names={PRIMARY_FIELDS} />
             </TabsContent>
 
-            <TabsContent value='marketing' className='space-y-6 pt-1'>
-              <SettingsControlGroup className='flex flex-col justify-between gap-3 space-y-0 sm:flex-row sm:items-center'>
-                <div className='min-w-0 space-y-1'>
-                  <p className='text-sm font-medium'>
-                    {t('Marketing mail profile')}
-                  </p>
-                  <p className='text-muted-foreground text-xs'>
-                    {t(
-                      'Campaigns and bulk messages use this sender. A successful test activates the profile.'
-                    )}
-                  </p>
-                </div>
-                <Badge variant='outline'>
-                  {marketingEnabled ? t('Enabled') : t('Pending test')}
-                </Badge>
-              </SettingsControlGroup>
-              <SmtpChannelFields form={form} names={MARKETING_FIELDS} />
+            <TabsContent value='backup' className='space-y-6 pt-1'>
+              <SMTPProfileStatusCard
+                title={t('Backup SMTP activation status')}
+                description={t(
+                  'A successful backup test automatically enables failover. Changing backup settings requires another test.'
+                )}
+                state={backupState}
+              />
+              <SmtpChannelFields form={form} names={BACKUP_FIELDS} />
             </TabsContent>
 
-            <TabsContent value='backup' className='space-y-6 pt-1'>
-              <SettingsControlGroup className='flex flex-col justify-between gap-3 space-y-0 sm:flex-row sm:items-center'>
-                <div className='min-w-0 space-y-1'>
-                  <p className='text-sm font-medium'>
-                    {t('Backup SMTP activation')}
-                  </p>
-                  <p className='text-muted-foreground text-xs'>
-                    {t(
-                      'A successful backup test automatically enables failover. Changing backup settings requires another test.'
-                    )}
-                  </p>
-                </div>
-                <Badge
-                  variant='outline'
-                  className={
-                    backupEnabled
-                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'
-                      : 'border-amber-500/40 bg-amber-500/10 text-amber-600'
-                  }
-                >
-                  {backupEnabled ? t('Enabled') : t('Pending test')}
-                </Badge>
-              </SettingsControlGroup>
-              <SmtpChannelFields form={form} names={BACKUP_FIELDS} />
+            <TabsContent value='marketing' className='pt-1'>
+              <MarketingEmailAccounts />
+            </TabsContent>
+
+            <TabsContent value='receipt' className='pt-1'>
+              <EmailReceiptSettings />
             </TabsContent>
           </Tabs>
 
-          <SettingsControlGroup className='space-y-4'>
-            <div className='space-y-1'>
-              <Label htmlFor='smtp-test-recipient'>{t('Test SMTP')}</Label>
-              <p className='text-muted-foreground text-xs'>
-                {t(
-                  'The test saves current settings first and sends through the selected channel'
-                )}
-              </p>
-            </div>
-            <div className='flex flex-col gap-3 sm:flex-row'>
-              <Input
-                id='smtp-test-recipient'
-                type='email'
-                value={testRecipient}
-                onChange={(event) => setTestRecipient(event.target.value)}
-                placeholder={t(
-                  'Leave blank to use the current administrator email'
-                )}
-                disabled={operationPending}
-              />
-              <Button
-                type='button'
-                className='sm:shrink-0'
-                onClick={sendTest}
-                disabled={operationPending}
-              >
-                {testMutation.isPending ? (
-                  <Loader2 className='animate-spin' />
-                ) : (
-                  <Send />
-                )}
-                {activeChannel === 'primary'
-                  ? t('Send test email')
-                  : t('Test and enable selected profile')}
-              </Button>
-            </div>
-          </SettingsControlGroup>
+          {activeChannel !== 'marketing' && activeChannel !== 'receipt' ? (
+            <SettingsControlGroup className='space-y-4'>
+              <div className='space-y-1'>
+                <Label htmlFor='smtp-test-recipient'>{t('Test SMTP')}</Label>
+                <p className='text-muted-foreground text-xs'>
+                  {t(
+                    'The test saves current settings first and sends through the selected channel'
+                  )}
+                </p>
+              </div>
+              <div className='flex flex-col gap-3 sm:flex-row'>
+                <Input
+                  id='smtp-test-recipient'
+                  type='email'
+                  value={testRecipient}
+                  onChange={(event) => setTestRecipient(event.target.value)}
+                  placeholder={t(
+                    'Leave blank to use the current administrator email'
+                  )}
+                  disabled={operationPending}
+                />
+                <Button
+                  type='button'
+                  className='sm:shrink-0'
+                  onClick={sendTest}
+                  disabled={operationPending}
+                >
+                  {testMutation.isPending ? (
+                    <Loader2 className='animate-spin' />
+                  ) : (
+                    <Send />
+                  )}
+                  {activeChannel === 'primary'
+                    ? t('Send test email')
+                    : t('Test and enable selected profile')}
+                </Button>
+              </div>
+            </SettingsControlGroup>
+          ) : null}
         </SettingsForm>
       </Form>
     </SettingsSection>
