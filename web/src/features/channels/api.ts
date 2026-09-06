@@ -329,13 +329,15 @@ export async function deleteDisabledChannels(): Promise<{
  */
 export async function getChannelKey(
   id: number,
-  proofToken?: string
+  proofToken: string,
+  signal?: AbortSignal
 ): Promise<{ success: boolean; message?: string; data?: { key: string } }> {
   const res = await api.post(
     `/api/channel/${id}/key`,
     undefined,
     channelActionConfig({
-      headers: proofToken ? { 'X-Security-Proof': proofToken } : undefined,
+      headers: { 'X-Security-Proof': proofToken },
+      signal,
     })
   )
   return res.data
@@ -344,7 +346,11 @@ export async function getChannelKey(
 /**
  * Get the complete balance-query account token as the root administrator.
  */
-export async function getChannelBalanceQueryToken(id: number): Promise<{
+export async function getChannelBalanceQueryToken(
+  id: number,
+  proofToken: string,
+  signal?: AbortSignal
+): Promise<{
   success: boolean
   message?: string
   data?: { token: string }
@@ -352,7 +358,7 @@ export async function getChannelBalanceQueryToken(id: number): Promise<{
   const res = await api.post(
     `/api/channel/${id}/balance_query/token`,
     undefined,
-    channelActionConfig()
+    channelActionConfig({ headers: { 'X-Security-Proof': proofToken }, signal })
   )
   return res.data
 }

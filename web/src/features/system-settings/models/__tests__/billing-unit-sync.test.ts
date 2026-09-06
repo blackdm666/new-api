@@ -19,255 +19,90 @@ For commercial licensing, please contact support@quantumnous.com
 import { describe, expect, test } from 'vitest'
 
 import {
-  applyResolutionSelection,
-  buildSyncedPricingOptions,
-  deleteResolutionField,
-  isSelectableUpstreamValue,
-  type PricingOptionMaps,
-  resolveResolutionSelection,
-  type RatioDifferenceEntry,
-} from '../upstream-ratio-sync-helpers'
+  applyPriceSyncSelections,
+  pricingOptions,
+} from '@/features/model-pricing/pricing'
 
-const sourceName = 'upstream(1)'
-const entry = (value: number | string): RatioDifferenceEntry => ({
-  current: null,
-  upstreams: { [sourceName]: value },
-  confidence: { [sourceName]: true },
-})
-
-const currentPricing = (): PricingOptionMaps => ({
-  ModelRatio: {},
-  CompletionRatio: {},
-  CacheRatio: {},
-  CreateCacheRatio: {},
-  ImageRatio: {},
-  AudioRatio: {},
-  AudioCompletionRatio: {},
-  ModelPrice: {},
-  'billing_setting.billing_mode': {},
-  'billing_setting.billing_expr': {},
-})
+import { getSyncPriceLines } from '../upstream-ratio-sync-helpers'
 
 describe('upstream fixed-price billing unit sync', () => {
-  const differences = {
-    'video-model': {
-      model_price: entry(0.08),
-      billing_mode: entry('per_second'),
-    },
-  }
-
-  test('folds a fixed billing mode into the model-price selection', () => {
-    expect(
-      resolveResolutionSelection(differences, {
-        model: 'video-model',
-        ratioType: 'billing_mode',
-        value: 'per_second',
-        sourceName,
-      })
-    ).toMatchObject({
-      ratioType: 'model_price',
-      value: 0.08,
+  const current = () =>
+    pricingOptions({
+      ModelPrice: '{"video-model":0.08}',
+      ModelRatio: '{"untouched":2}',
+      BillingMode: '{"video-model":"per_second"}',
+      BillingExpr: '{"video-model":"tier(\\"old\\", p)"}',
     })
-  })
 
-  test('persists price and unit together and removes stale expressions', () => {
-    expect(
-      applyResolutionSelection(
-        {
-          'video-model': {
-            billing_mode: 'tiered_expr',
-            billing_expr: 'tier("old", p)',
-          },
-        },
-        differences,
-        {
-          model: 'video-model',
-          ratioType: 'model_price',
-          value: 0.08,
-          sourceName,
-        }
-      )
-    ).toEqual({
+  test('persists a selected fixed price and unit together, removing stale token and expression fields', () => {
+    const result = applyPriceSyncSelections(current(), {
       'video-model': {
-        model_price: 0.08,
-        billing_mode: 'per_second',
+        model_price: 0,
+        billing_mode: 'per_request',
+        model_ratio: 99,
       },
     })
-  })
-
-  test('preserves an existing fixed unit when a legacy upstream omits it', () => {
-    const legacyDifferences = {
-      'video-model': {
-        model_price: entry(0.1),
-      },
-    }
-
-    expect(
-      applyResolutionSelection(
-        {
-          'video-model': {
-            model_price: 0.08,
-            billing_mode: 'per_second',
-          },
-        },
-        legacyDifferences,
-        {
-          model: 'video-model',
-          ratioType: 'model_price',
-          value: 0.1,
-          sourceName,
-        }
-      )
-    ).toEqual({
-      'video-model': {
-        model_price: 0.1,
-        billing_mode: 'per_second',
-      },
+    expect(JSON.parse(result.ModelPrice)).toEqual({ 'video-model': 0 })
+    expect(JSON.parse(result.ModelRatio)).toEqual({ untouched: 2 })
+    expect(JSON.parse(result['billing_setting.billing_mode'])).toEqual({
+      'video-model': 'per_request',
     })
+    expect(JSON.parse(result['billing_setting.billing_expr'])).toEqual({})
   })
 
-  test('clears fixed and tiered state when switching to token ratios', () => {
-    const ratioDifferences = {
-      'video-model': {
-        model_ratio: entry(2),
-      },
-    }
-
-    expect(
-      applyResolutionSelection(
-        {
-          'video-model': {
-            model_price: 0.08,
-            billing_mode: 'per_second',
-            billing_expr: 'tier("old", p)',
-          },
-        },
-        ratioDifferences,
-        {
-          model: 'video-model',
-          ratioType: 'model_ratio',
-          value: 2,
-          sourceName,
-        }
-      )
-    ).toEqual({
-      'video-model': {
-        model_ratio: 2,
-      },
+  test('preserves an existing explicit unit when a legacy upstream omits it', () => {
+    const result = applyPriceSyncSelections(current(), {
+      'video-model': { model_price: 0.1 },
     })
+    expect(JSON.parse(result.ModelPrice)['video-model']).toBe(0.1)
+    expect(
+      JSON.parse(result['billing_setting.billing_mode'])['video-model']
+    ).toBe('per_second')
   })
 
-  test('removes persisted fixed state when the staged selection switches to ratios', () => {
-    const current = currentPricing()
-    current.ModelPrice['video-model'] = 0.08
-    current['billing_setting.billing_mode']['video-model'] = 'per_second'
-    current['billing_setting.billing_expr']['video-model'] = 'tier("old", p)'
-
-    const result = buildSyncedPricingOptions(current, {
+  test('replacing fixed pricing with token pricing clears the old price and unit', () => {
+    const result = applyPriceSyncSelections(current(), {
       'video-model': { model_ratio: 2 },
     })
-
-    expect(result.ModelPrice['video-model']).toBeUndefined()
+    expect(JSON.parse(result.ModelPrice)).toEqual({})
+    expect(JSON.parse(result['billing_setting.billing_expr'])).toEqual({})
     expect(
-      result['billing_setting.billing_mode']['video-model']
-    ).toBeUndefined()
-    expect(
-      result['billing_setting.billing_expr']['video-model']
-    ).toBeUndefined()
-    expect(result.ModelRatio['video-model']).toBe(2)
+      JSON.parse(result['billing_setting.billing_mode'])['video-model']
+    ).toBe('ratio')
+    expect(JSON.parse(result.ModelRatio)['video-model']).toBe(2)
   })
 
-  test('preserves a persisted fixed unit for a legacy upstream price', () => {
-    const current = currentPricing()
-    current.ModelPrice['video-model'] = 0.08
-    current['billing_setting.billing_mode']['video-model'] = 'per_second'
-
-    const result = buildSyncedPricingOptions(current, {
-      'video-model': { model_price: 0.1 },
+  test('an expression selection replaces fixed fields and preserves the exact expression', () => {
+    const expression = 'tier("premium", p + c)'
+    const result = applyPriceSyncSelections(current(), {
+      'video-model': { billing_mode: 'tiered_expr', billing_expr: expression },
     })
-
-    expect(result.ModelPrice['video-model']).toBe(0.1)
-    expect(result['billing_setting.billing_mode']['video-model']).toBe(
-      'per_second'
-    )
-  })
-
-  test('clears persisted tiered state when applying a legacy upstream price', () => {
-    const current = currentPricing()
-    current['billing_setting.billing_mode']['video-model'] = 'tiered_expr'
-    current['billing_setting.billing_expr']['video-model'] = 'tier("old", p)'
-
-    const result = buildSyncedPricingOptions(current, {
-      'video-model': { model_price: 0.1 },
-    })
-
-    expect(result.ModelPrice['video-model']).toBe(0.1)
+    expect(JSON.parse(result.ModelPrice)).toEqual({})
     expect(
-      result['billing_setting.billing_mode']['video-model']
-    ).toBeUndefined()
+      JSON.parse(result['billing_setting.billing_mode'])['video-model']
+    ).toBe('tiered_expr')
     expect(
-      result['billing_setting.billing_expr']['video-model']
-    ).toBeUndefined()
+      JSON.parse(result['billing_setting.billing_expr'])['video-model']
+    ).toBe(expression)
   })
 
-  test('removes the hidden fixed unit when a folded price selection is canceled', () => {
-    const selected = applyResolutionSelection({}, differences, {
-      model: 'video-model',
-      ratioType: 'model_price',
-      value: 0.08,
-      sourceName,
-    })
-
-    expect(
-      deleteResolutionField(selected, 'video-model', 'model_price')
-    ).toEqual({})
-  })
-
-  test('rejects empty and underflow numeric values from upstream sync', () => {
-    expect(isSelectableUpstreamValue('', 'model_price')).toBe(false)
-    expect(isSelectableUpstreamValue('   ', 'model_ratio')).toBe(false)
-    expect(isSelectableUpstreamValue('1e-324', 'model_price')).toBe(false)
-    expect(isSelectableUpstreamValue('0', 'model_price')).toBe(true)
-
-    const current = currentPricing()
-    current.ModelPrice['video-model'] = 0.08
-    const result = buildSyncedPricingOptions(current, {
-      'video-model': { model_price: '' },
-    })
-    expect(result.ModelPrice['video-model']).toBe(0.08)
-  })
-
-  test('a tiered selection replaces earlier staged fixed fields atomically', () => {
-    const fixedDifferences = {
-      'video-model': {
-        model_price: entry(0.08),
-        billing_mode: entry('per_second'),
-      },
+  test.each(['', '   ', '1e-324', '-1', 'NaN', 'Infinity', '1usd'])(
+    'rejects upstream price %j without changing the original options',
+    (model_price) => {
+      const options = current()
+      expect(() =>
+        applyPriceSyncSelections(options, { 'video-model': { model_price } })
+      ).toThrow()
+      expect(JSON.parse(options.ModelPrice)['video-model']).toBe(0.08)
     }
-    const tieredDifferences = {
-      'video-model': {
-        billing_expr: entry('tier("premium", p + c)'),
-      },
-    }
+  )
 
-    const fixed = applyResolutionSelection({}, fixedDifferences, {
-      model: 'video-model',
-      ratioType: 'model_price',
-      value: 0.08,
-      sourceName,
-    })
-    const tiered = applyResolutionSelection(fixed, tieredDifferences, {
-      model: 'video-model',
-      ratioType: 'billing_expr',
-      value: 'tier("premium", p + c)',
-      sourceName,
-    })
-
-    expect(tiered).toEqual({
-      'video-model': {
-        billing_mode: 'tiered_expr',
-        billing_expr: 'tier("premium", p + c)',
-      },
-    })
+  test('the price preview identifies seconds for an explicitly per-second source', () => {
+    expect(
+      getSyncPriceLines(
+        { model_price: 0.1, billing_mode: 'per_second' },
+        (key) => key
+      )[0].label
+    ).toBe('Per-second')
   })
 })

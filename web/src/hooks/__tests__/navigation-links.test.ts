@@ -158,7 +158,7 @@ test('places referral and invoice pages between Wallet and Profile', () => {
   assert.ok(personalItems)
   assert.deepEqual(
     personalItems.map((item) => ('url' in item ? item.url : undefined)),
-    ['/wallet', '/referral', '/invoices', '/profile']
+    ['/wallet', '/referral', '/invoices', '/profile', '/security']
   )
 })
 

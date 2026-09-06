@@ -41,8 +41,7 @@ func normalizeResponsesCompactModel(requestPath, modelName string) string {
 }
 
 func tokenModelLimitAllowsRequest(tokenModelLimit map[string]bool, modelName, requestPath string) bool {
-	matchName := ratio_setting.FormatMatchingModelName(modelName)
-	if _, ok := tokenModelLimit[matchName]; ok {
+	if tokenModelLimitAllows(tokenModelLimit, modelName) {
 		return true
 	}
 	if !strings.HasPrefix(requestPath, "/v1/responses/compact") || strings.HasSuffix(modelName, legacyResponsesCompactModelSuffix) {
@@ -605,6 +604,19 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 	modelRequest.Model = normalizeResponsesCompactModel(c.Request.URL.Path, modelRequest.Model)
 
 	return &modelRequest, shouldSelectChannel, nil
+}
+
+// tokenModelLimitAllows reports whether a token model-limit map authorizes
+// model. Exact name, wildcard-normalized name, and routing-normalized name
+// (modifiers and legacy aliases stripped) are all accepted.
+func tokenModelLimitAllows(limit map[string]bool, model string) bool {
+	if limit[model] {
+		return true
+	}
+	if formatted := ratio_setting.FormatMatchingModelName(model); limit[formatted] {
+		return true
+	}
+	return limit[ratio_setting.RoutingMatchModelName(model)]
 }
 
 // 修复 #4834: GET /v1/video/generations/:task_id && /v1/video/:task_id 此前不解析 model，

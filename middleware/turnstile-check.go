@@ -42,12 +42,17 @@ func OAuthStateTurnstileCheck() gin.HandlerFunc {
 			var request struct {
 				Intent string `json:"intent"`
 			}
-			if common.Unmarshal(body, &request) == nil && strings.TrimSpace(request.Intent) == "bind" {
-				c.Next()
-				return
+			if common.Unmarshal(body, &request) == nil {
+				intent := strings.TrimSpace(request.Intent)
+				if intent == "bind" || intent == "verify" {
+					// Authenticated security flows enforce their own session and proof
+					// checks in the controller. A login still requires bot verification.
+					c.Next()
+					return
+				}
 			}
 		}
-		TurnstileCheck()(c)
+		TurnstileCheckFromBody()(c)
 	}
 }
 

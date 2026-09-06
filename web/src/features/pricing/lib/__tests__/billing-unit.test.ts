@@ -115,7 +115,7 @@ describe('fixed-price billing units', () => {
       )
     ).toEqual([
       { key: 'mode', label: 'BillingMode', value: 'per_second' },
-      { key: 'price', label: 'ModelPrice', value: '$0.08' },
+      { key: 'price', label: 'Fixed price', value: '$0.08' },
     ])
   })
 

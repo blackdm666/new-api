@@ -1,3 +1,12 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { RotateCcw } from 'lucide-react'
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -16,23 +25,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RotateCcw } from 'lucide-react'
-import { useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
-
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Combobox } from '@/components/ui/combobox'
 import {
   Sheet,
   SheetContent,
@@ -191,27 +184,18 @@ export function PluginDetailSheet(props: PluginDetailSheetProps) {
               </Table>
             </TabsContent>
             <TabsContent value='diff' className='space-y-3'>
-              <Select
+              <Combobox
+                options={versions
+                  .filter((version) => version.version !== detail?.meta.version)
+                  .map((version) => ({
+                    value: version.version,
+                    label: version.version,
+                  }))}
                 value={compareVersion}
                 onValueChange={(value) => setCompareVersion(value ?? '')}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={t('Select a version to compare')} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {versions
-                      .filter(
-                        (version) => version.version !== detail?.meta.version
-                      )
-                      .map((version) => (
-                        <SelectItem key={version.id} value={version.version}>
-                          {version.version}
-                        </SelectItem>
-                      ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+                placeholder={t('Select a version to compare')}
+                aria-label={t('Select a version to compare')}
+              />
               {compareQuery.data && detail && (
                 <SourceDiff
                   before={compareQuery.data.source}

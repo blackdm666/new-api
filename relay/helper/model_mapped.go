@@ -4,6 +4,7 @@ import (
 	basecommon "github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	hostreasoning "github.com/QuantumNous/new-api/setting/reasoning"
 	"github.com/gin-gonic/gin"
 )
 
@@ -12,7 +13,7 @@ func ModelMappedHelper(c *gin.Context, info *relaycommon.RelayInfo, request dto.
 		info.ChannelMeta = &relaycommon.ChannelMeta{}
 	}
 
-	mappedModel, isMapped, err := basecommon.ResolveMappedModelName(info.OriginModelName, c.GetString("model_mapping"))
+	mappedModel, isMapped, err := basecommon.ResolveMappedModelName(info.OriginModelName, c.GetString("model_mapping"), hostreasoning.BaseModelName)
 	if err != nil {
 		return err
 	}
