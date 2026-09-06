@@ -1,7 +1,6 @@
 package common
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -9,12 +8,12 @@ import (
 // ResolveMappedModelName resolves a channel model mapping without mutating
 // relay state. All relay formats and capability discovery paths should share
 // this function so chain and cycle behavior remains consistent.
-func ResolveMappedModelName(originModel, modelMapping string) (string, bool, error) {
+func ResolveMappedModelName(originModel, modelMapping string, fallbackName ...func(string) string) (string, bool, error) {
 	if modelMapping == "" || modelMapping == "{}" {
 		return originModel, false, nil
 	}
 	modelMap := make(map[string]string)
-	if err := json.Unmarshal([]byte(modelMapping), &modelMap); err != nil {
+	if err := Unmarshal([]byte(modelMapping), &modelMap); err != nil {
 		return originModel, false, fmt.Errorf("unmarshal_model_mapping_failed")
 	}
 
@@ -23,6 +22,12 @@ func ResolveMappedModelName(originModel, modelMapping string) (string, bool, err
 	isMapped := false
 	for {
 		mappedModel, exists := modelMap[currentModel]
+		if (!exists || mappedModel == "") && len(fallbackName) > 0 && fallbackName[0] != nil {
+			baseModel := fallbackName[0](currentModel)
+			if baseModel != currentModel {
+				mappedModel, exists = modelMap[baseModel]
+			}
+		}
 		if !exists || mappedModel == "" {
 			break
 		}

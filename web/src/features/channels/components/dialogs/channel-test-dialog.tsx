@@ -1,21 +1,3 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import { useQueryClient } from '@tanstack/react-query'
 import type {
   ColumnDef,
@@ -60,16 +42,27 @@ import {
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import {
   Sheet,
   SheetContent,
@@ -198,10 +191,6 @@ const endpointTypeOptions: Array<{ value: string; label: string }> = [
   },
   { value: 'embeddings', label: 'Embeddings (/v1/embeddings)' },
 ]
-
-const endpointSelectContentClass = 'w-[460px] max-w-[calc(100vw-2rem)]'
-const endpointSelectItemClass =
-  'items-start py-2 [&_[data-slot=select-item-text]]:min-w-0 [&_[data-slot=select-item-text]]:shrink [&_[data-slot=select-item-text]]:whitespace-normal'
 
 const STREAM_INCOMPATIBLE_ENDPOINTS = new Set([
   'embeddings',
@@ -996,36 +985,14 @@ function ChannelTestDialogContent({
           <div className='grid gap-4 md:grid-cols-2'>
             <div className='grid gap-2'>
               <Label htmlFor='endpoint-type'>{t('Endpoint Type')}</Label>
-              <Select
-                items={endpointSelectItems}
+              <Combobox
+                options={endpointSelectItems}
                 value={endpointType}
                 onValueChange={handleEndpointTypeChange}
-              >
-                <SelectTrigger id='endpoint-type' className='w-full min-w-0'>
-                  <SelectValue
-                    className='min-w-0 truncate'
-                    placeholder={t('Auto detect (default)')}
-                  />
-                </SelectTrigger>
-                <SelectContent
-                  alignItemWithTrigger={false}
-                  className={endpointSelectContentClass}
-                >
-                  <SelectGroup>
-                    {endpointSelectItems.map((option) => (
-                      <SelectItem
-                        key={option.value}
-                        value={option.value}
-                        className={endpointSelectItemClass}
-                      >
-                        <span className='min-w-0 leading-snug break-words whitespace-normal'>
-                          {option.label}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+                id='endpoint-type'
+                className='w-full min-w-0'
+                placeholder={t('Auto detect (default)')}
+              />
               <p className='text-muted-foreground text-xs'>
                 {t(
                   'Override the endpoint used for testing. Leave empty to auto detect.'

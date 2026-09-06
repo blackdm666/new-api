@@ -45,7 +45,11 @@ import {
   formatRatioCompact,
   getEffectiveGroupRatioInfo,
 } from '../../lib/billing-display'
-import { formatModelName, parseLogOther } from '../../lib/format'
+import {
+  formatModelName,
+  parseLogOther,
+  renderAuditContent,
+} from '../../lib/format'
 import {
   buildTypeDetailSegments,
   type DetailSegment,
@@ -541,11 +545,14 @@ export function useCommonLogsColumns(
       accessorKey: 'content',
       header: t('Details'),
       cell: function DetailsCell({ row }) {
+        const { t } = useTranslation()
         const [dialogOpen, setDialogOpen] = useState(false)
         const log = row.original
         const other = parseLogOther(log.other)
 
         const segments = buildDetailSegments(log, other, t, isAdmin)
+        const localizedContent =
+          (log.type === 1 ? renderAuditContent(other, t) : null) ?? log.content
         const primary = segments[0]
         const hasMore = segments.length > 1
         let primaryTextClass = 'text-foreground'
@@ -571,10 +578,10 @@ export function useCommonLogsColumns(
               )}
             </span>
           )
-        } else if (log.content) {
+        } else if (localizedContent) {
           detailPreview = (
             <span className='text-muted-foreground truncate group-hover:underline'>
-              {log.content}
+              {localizedContent}
             </span>
           )
         }

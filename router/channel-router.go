@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 )
@@ -31,6 +32,7 @@ func registerChannelRoutes(apiRouter *gin.RouterGroup) {
 		middleware.RootAuth(),
 		middleware.CriticalRateLimit(),
 		middleware.DisableCache(),
+		middleware.SecureVerificationRequired(service.VerificationScopeChannelBalanceTokenRead),
 		controller.GetChannelBalanceQueryToken,
 	)
 

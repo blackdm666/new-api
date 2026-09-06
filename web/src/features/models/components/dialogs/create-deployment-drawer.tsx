@@ -1,21 +1,3 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo } from 'react'
@@ -34,6 +16,25 @@ import {
 import { JsonCodeEditor } from '@/components/json-code-editor'
 import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { Combobox } from '@/components/ui/combobox'
 import {
   Form,
   FormControl,
@@ -196,7 +197,7 @@ export function CreateDeploymentDrawer({
         map.set(key, { label: String(name), value: key })
       }
     })
-    return Array.from(map.values())
+    return [...map.values()]
   }, [replicasData])
 
   const { data: priceData, isLoading: _isLoadingPrice } = useQuery({
@@ -374,6 +375,15 @@ export function CreateDeploymentDrawer({
   }, [priceData])
   void priceSummary
 
+  let nameCheckMessage = ''
+  if (isCheckingName) {
+    nameCheckMessage = t('Checking name...')
+  } else if (nameAvailable === true) {
+    nameCheckMessage = t('Name is available')
+  } else if (nameAvailable === false) {
+    nameCheckMessage = t('Name is not available')
+  }
+
   return (
     <Sheet
       open={open}
@@ -417,13 +427,7 @@ export function CreateDeploymentDrawer({
                     </FormControl>
                     {open && field.value?.trim() ? (
                       <div className='text-muted-foreground text-xs'>
-                        {isCheckingName
-                          ? t('Checking name...')
-                          : nameAvailable === true
-                            ? t('Name is available')
-                            : nameAvailable === false
-                              ? t('Name is not available')
-                              : ''}
+                        {nameCheckMessage}
                       </div>
                     ) : null}
                     <FormMessage />
@@ -459,32 +463,19 @@ export function CreateDeploymentDrawer({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>{t('Hardware type')}</FormLabel>
-                      <Select
-                        items={[
-                          ...hardwareOptions.map((opt) => ({
+                      <FormControl>
+                        <Combobox
+                          options={hardwareOptions.map((opt) => ({
                             value: opt.value,
                             label: opt.label,
-                          })),
-                        ]}
-                        value={field.value}
-                        onValueChange={(v) => field.onChange(v)}
-                        disabled={isLoadingHardware}
-                      >
-                        <FormControl>
-                          <SelectTrigger className='w-full'>
-                            <SelectValue placeholder={t('Select')} />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent alignItemWithTrigger={false}>
-                          <SelectGroup>
-                            {hardwareOptions.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
+                          }))}
+                          value={field.value}
+                          onValueChange={(v) => field.onChange(v)}
+                          disabled={isLoadingHardware}
+                          className='w-full'
+                          placeholder={t('Select')}
+                        />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
