@@ -37,6 +37,7 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from '@/components/ui/input-group'
+import { usePortalContainer } from '@/components/ui/portal-container'
 import { cn } from '@/lib/utils'
 
 type LegacyComboboxProps = {
@@ -265,7 +266,7 @@ function ComboboxContent({
   align = 'start',
   alignOffset = 0,
   anchor,
-  container,
+  container: explicitContainer,
   ...props
 }: ComboboxPrimitive.Popup.Props &
   Pick<ComboboxPrimitive.Portal.Props, 'container'> &
@@ -273,8 +274,9 @@ function ComboboxContent({
     ComboboxPrimitive.Positioner.Props,
     'side' | 'align' | 'sideOffset' | 'alignOffset' | 'anchor'
   >) {
+  const drawerContainer = usePortalContainer()
   return (
-    <ComboboxPrimitive.Portal container={container}>
+    <ComboboxPrimitive.Portal container={explicitContainer ?? drawerContainer}>
       <ComboboxPrimitive.Positioner
         side={side}
         sideOffset={sideOffset}

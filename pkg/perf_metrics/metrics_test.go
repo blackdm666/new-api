@@ -46,6 +46,21 @@ func TestQueriesHideHistoricalMetricsWhenDisabled(t *testing.T) {
 	assert.Empty(t, summary.Models)
 }
 
+func TestRecentSuccessSeriesWeightsBucketsWithinEachHourAndOmitsMissingData(t *testing.T) {
+	assert.Nil(t, recentSuccessSeries(nil))
+	assert.Nil(t, recentSuccessSeries(map[int64]counters{3600: {}}))
+	series := recentSuccessSeries(map[int64]counters{
+		3600:  {requestCount: 1, successCount: 1},
+		3900:  {requestCount: 3, successCount: 1},
+		7200:  {},
+		10800: {requestCount: 3, successCount: 2},
+	})
+	assert.Equal(t, []SuccessRatePoint{
+		{Ts: 3600, SuccessRate: 50},
+		{Ts: 10800, SuccessRate: 66.67},
+	}, series)
+}
+
 func TestTaskTerminalSample(t *testing.T) {
 	tests := []struct {
 		name        string
