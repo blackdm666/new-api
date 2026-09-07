@@ -136,16 +136,7 @@ func RenderGemini(model string, intent Intent, maxOutputTokens *uint, adapterBud
 	}
 
 	if intent.Mode == ModeDisabled || intent.Effort == EffortNone {
-		// Gemini 3 level-based models cannot fully disable thinking. OpenAI-style
-		// clients can still express `reasoning.effort: none`, so degrade only that
-		// unsupported value to the lowest level accepted across the family. An
-		// explicit low/medium/high request continues through the normal path below.
-		level, err := geminiLevelForEffort(model, EffortLow)
-		if err != nil {
-			return GeminiRender{}, err
-		}
-		config.ThinkingLevel = level
-		return GeminiRender{Config: config, EffectiveEffort: EffortLow}, nil
+		return GeminiRender{}, fmt.Errorf("%w for model %q", ErrThinkingNotDisabled, model)
 	}
 	effort := intent.Effort
 	if effort == "" && intent.BudgetTokens != nil {
