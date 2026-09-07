@@ -1,74 +1,94 @@
 package controller
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"net/http/httptest"
-	"strconv"
 	"testing"
-	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func providerPricingTestSignature(secret, timestamp string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(timestamp))
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-func TestValidProviderPricingSignature(t *testing.T) {
-	secret := "test-provider-pricing-secret"
-	now := time.Unix(1_747_886_400, 0)
-	timestamp := strconv.FormatInt(now.Unix(), 10)
-	signature := providerPricingTestSignature(secret, timestamp)
-
-	assert.True(t, validProviderPricingSignature(secret, timestamp, signature, now))
-	assert.True(t, validProviderPricingSignature(secret, strconv.FormatInt(now.Unix()-60, 10), providerPricingTestSignature(secret, strconv.FormatInt(now.Unix()-60, 10)), now))
-	assert.True(t, validProviderPricingSignature(secret, strconv.FormatInt(now.Unix()+60, 10), providerPricingTestSignature(secret, strconv.FormatInt(now.Unix()+60, 10)), now))
-	assert.False(t, validProviderPricingSignature(secret, timestamp, "", now))
-	assert.False(t, validProviderPricingSignature(secret, "not-a-timestamp", signature, now))
-	assert.False(t, validProviderPricingSignature(secret, strconv.FormatInt(now.Unix()-61, 10), signature, now))
-	assert.False(t, validProviderPricingSignature(secret, strconv.FormatInt(now.Unix()+61, 10), signature, now))
-	assert.False(t, validProviderPricingSignature(secret, timestamp, providerPricingTestSignature("wrong-secret", timestamp), now))
-}
-
-func TestGetProviderPricingFailsClosedWithoutValidSignature(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	t.Run("secret not configured", func(t *testing.T) {
-		t.Setenv(providerPricingAuthSecretEnv, "")
-		response := httptest.NewRecorder()
-		context, _ := gin.CreateTestContext(response)
-		context.Request = httptest.NewRequest("GET", "/api/provider/pricing", nil)
-
-		GetProviderPricing(context)
-
-		assert.Equal(t, 503, response.Code)
-		assert.Equal(t, "private, no-store", response.Header().Get("Cache-Control"))
-		assert.Contains(t, response.Body.String(), `"success":false`)
+func TestGetProviderPricingPublicDeepSeekGroups(t *testing.T) {
+	oldDB, oldLogDB := model.DB, model.LOG_DB
+	oldRedis := common.RedisEnabled
+	db := setupModelListControllerTestDB(t)
+	oldGroups := setting.UserUsableGroups2JSONString()
+	oldRatios := ratio_setting.GroupRatio2JSONString()
+	oldExchange := operation_setting.USDExchangeRate
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = oldDB, oldLogDB
+		common.RedisEnabled = oldRedis
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(oldGroups))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(oldRatios))
+		operation_setting.USDExchangeRate = oldExchange
+		model.InvalidatePricingCache()
 	})
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"Deepseek官转":"official","Deepseek开源":"open source","auto":"automatic"}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"Deepseek官转":0.7,"Deepseek开源":0.5,"内部自用":1,"auto":1}`))
+	operation_setting.USDExchangeRate = 1
+	withTieredBillingConfig(t,
+		map[string]string{"deepseek-v4-flash": billing_setting.BillingModeTieredExpr, "deepseek-v4-pro": billing_setting.BillingModeTieredExpr},
+		map[string]string{
+			"deepseek-v4-flash": `hour("Asia/Shanghai") >= 9 && hour("Asia/Shanghai") < 18 ? tier("高峰", p * 3 + c * 9 + cr * 0.1) : tier("空闲", p * 1.5 + c * 4.5 + cr * 0.05)`,
+			"deepseek-v4-pro":   `tier("空闲", p * 4.5 + c * 13.5 + cr * 0.15)`,
+		})
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Model: "deepseek-v4-flash", Group: "Deepseek官转", ChannelId: 1, Enabled: true},
+		{Model: "deepseek-v4-flash", Group: "Deepseek开源", ChannelId: 1, Enabled: true},
+		{Model: "deepseek-v4-flash", Group: "内部自用", ChannelId: 1, Enabled: true},
+		{Model: "deepseek-v4-pro", Group: "all", ChannelId: 1, Enabled: true},
+		{Model: "private-model", Group: "内部自用", ChannelId: 1, Enabled: true},
+	}).Error)
+	model.InvalidatePricingCache()
 
-	t.Run("invalid signature", func(t *testing.T) {
-		t.Setenv(providerPricingAuthSecretEnv, "configured-secret")
-		response := httptest.NewRecorder()
-		context, _ := gin.CreateTestContext(response)
-		context.Request = httptest.NewRequest("GET", "/api/provider/pricing", nil)
-		context.Request.Header.Set("X-Hvoy-Ts", strconv.FormatInt(time.Now().Unix(), 10))
-		context.Request.Header.Set("X-Hvoy-Sign", "invalid")
-
-		GetProviderPricing(context)
-
-		assert.Equal(t, 401, response.Code)
-		assert.Equal(t, "private, no-store", response.Header().Get("Cache-Control"))
-		assert.Contains(t, response.Body.String(), `"message":"unauthorized"`)
-	})
+	for _, tc := range []struct {
+		name, secret string
+		headers      bool
+	}{
+		{"anonymous", "", false},
+		{"legacy secret does not require signature", "obsolete-secret", false},
+		{"test page signature ignored", "obsolete-secret", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HVOY_PROVIDER_PRICING_AUTH_SECRET", tc.secret)
+			response := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(response)
+			ctx.Request = httptest.NewRequest("GET", "/api/provider/pricing", nil)
+			if tc.headers {
+				ctx.Request.Header.Set("X-Hvoy-Ts", "1747886400")
+				ctx.Request.Header.Set("X-Hvoy-Sign", "obsolete-signature")
+			}
+			GetProviderPricing(ctx)
+			require.Equal(t, 200, response.Code)
+			var payload providerPricingResponse
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &payload))
+			require.True(t, payload.Success)
+			require.NotNil(t, payload.Data)
+			require.Len(t, payload.Data.Models, 4)
+			assert.Equal(t, "CNY", payload.Data.Currency)
+			assert.Equal(t, "per_1m_tokens", payload.Data.PriceUnit)
+			expected := [][3]float64{{1.05, 3.15, 0.035}, {0.75, 2.25, 0.025}, {3.15, 9.45, 0.105}, {2.25, 6.75, 0.075}}
+			for i, entry := range payload.Data.Models {
+				assert.NotEqual(t, "内部自用", entry.GroupName)
+				assert.NotEqual(t, "auto", entry.GroupName)
+				require.NotNil(t, entry.InputPrice)
+				require.NotNil(t, entry.OutputPrice)
+				require.NotNil(t, entry.CacheInputPrice)
+				assert.InDelta(t, expected[i][0], *entry.InputPrice, 1e-9)
+				assert.InDelta(t, expected[i][1], *entry.OutputPrice, 1e-9)
+				assert.InDelta(t, expected[i][2], *entry.CacheInputPrice, 1e-9)
+			}
+		})
+	}
+	assert.Contains(t, model.GetModelEnableGroups("deepseek-v4-flash"), "内部自用", "public feed must not mutate the shared cache")
 }
 
 func TestBuildProviderPricingModels(t *testing.T) {
