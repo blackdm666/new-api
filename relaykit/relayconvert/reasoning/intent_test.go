@@ -170,3 +170,61 @@ func TestOpenAIPivotDoesNotTreatMaxAndXHighAsEquivalent(t *testing.T) {
 	_, err = FromOpenAIResponses(responses)
 	require.ErrorIs(t, err, ErrEffortConflict)
 }
+
+func TestRenderGeminiLevelModelsDegradeDisabledToLow(t *testing.T) {
+	t.Parallel()
+
+	for _, model := range []string{
+		"gemini-3.1-pro-preview",
+		"gemini-3.5-flash",
+		"gemini-3.6-flash",
+		"gemini-3.7-flash",
+		"gemini-3.8-flash",
+	} {
+		t.Run(model, func(t *testing.T) {
+			t.Parallel()
+
+			rendered, err := RenderGemini(model, Intent{Mode: ModeDisabled, Effort: EffortNone}, nil, 0)
+			require.NoError(t, err)
+			require.NotNil(t, rendered.Config)
+			assert.Equal(t, string(EffortLow), rendered.Config.ThinkingLevel)
+			assert.Equal(t, EffortLow, rendered.EffectiveEffort)
+		})
+	}
+}
+
+func TestRenderGeminiLevelModelsPreserveExplicitEffort(t *testing.T) {
+	t.Parallel()
+
+	for _, effort := range []Effort{EffortLow, EffortMedium, EffortHigh} {
+		t.Run(string(effort), func(t *testing.T) {
+			t.Parallel()
+
+			rendered, err := RenderGemini(
+				"gemini-3.6-flash",
+				Intent{Mode: ModeEnabled, Effort: effort},
+				nil,
+				0,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, rendered.Config)
+			assert.Equal(t, string(effort), rendered.Config.ThinkingLevel)
+			assert.Equal(t, effort, rendered.EffectiveEffort)
+		})
+	}
+}
+
+func TestRenderGeminiBudgetModelsKeepDisableSemantics(t *testing.T) {
+	t.Parallel()
+
+	disabled := Intent{Mode: ModeDisabled, Effort: EffortNone}
+	rendered, err := RenderGemini("gemini-2.5-flash", disabled, nil, 0)
+	require.NoError(t, err)
+	require.NotNil(t, rendered.Config)
+	require.NotNil(t, rendered.Config.ThinkingBudget)
+	assert.Zero(t, *rendered.Config.ThinkingBudget)
+	assert.Equal(t, EffortNone, rendered.EffectiveEffort)
+
+	_, err = RenderGemini("gemini-2.5-pro", disabled, nil, 0)
+	require.ErrorIs(t, err, ErrThinkingNotDisabled)
+}
