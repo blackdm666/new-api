@@ -54,6 +54,7 @@ const basePayout = {
   updated_time: 1_786_291_200,
   username: 'recipient-user',
   display_name: 'Recipient note',
+  remark: 'Admin payout remark',
 }
 
 function findButton(container: HTMLElement, label: string): HTMLButtonElement {
@@ -105,7 +106,10 @@ describe('administrator payout actions', () => {
     })
 
     assert.equal(container.querySelectorAll('button').length, 1)
-    assert.match(container.textContent ?? '', /recipient-userUID 3/)
+    assert.match(
+      container.textContent ?? '',
+      /recipient-userRemark: Admin payout remarkUID 3/
+    )
     assert.doesNotMatch(container.textContent ?? '', /Recipient note/)
     assert.match(
       findButton(container, 'Settle payout').textContent ?? '',

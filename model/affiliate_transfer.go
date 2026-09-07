@@ -32,11 +32,13 @@ type AffiliateTransfer struct {
 	CreatedTime        int64  `json:"created_time" gorm:"bigint;autoCreateTime;index;index:idx_affiliate_transfer_user_created,priority:2"`
 	Username           string `json:"username" gorm:"->;-:migration"`
 	DisplayName        string `json:"display_name" gorm:"->;-:migration"`
+	Remark             string `json:"remark,omitempty" gorm:"->;-:migration"`
 }
 
 type AffiliateTransferQueryOptions struct {
-	UserId  int
-	Keyword string
+	IncludeAdminRemarks bool
+	UserId              int
+	Keyword             string
 }
 
 // TransferLegacyAffQuotaToQuota preserves NewAPI's original fixed invitation
@@ -152,6 +154,9 @@ func ListAffiliateTransfers(options AffiliateTransferQueryOptions, pageInfo *com
 	query := DB.Model(&AffiliateTransfer{}).
 		Select("affiliate_transfers.*, users.username, users.display_name").
 		Joins("LEFT JOIN users ON users.id = affiliate_transfers.user_id")
+	if options.IncludeAdminRemarks {
+		query = query.Select("affiliate_transfers.*, users.username, users.display_name, users.remark")
+	}
 	if options.UserId > 0 {
 		query = query.Where("affiliate_transfers.user_id = ?", options.UserId)
 	}

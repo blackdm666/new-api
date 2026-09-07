@@ -214,8 +214,9 @@ func GetAdminAffiliateCommissions(c *gin.Context) {
 	status, _ := strconv.Atoi(c.Query("status"))
 	keyword := strings.TrimSpace(c.Query("keyword"))
 	records, total, err := model.ListAffiliateCommissions(model.AffiliateCommissionQueryOptions{
-		Status:  status,
-		Keyword: keyword,
+		IncludeAdminRemarks: true,
+		Status:              status,
+		Keyword:             keyword,
 	}, pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
@@ -241,7 +242,8 @@ func GetAdminAffiliateInviteRecords(c *gin.Context) {
 func GetAdminAffiliateTransfers(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	rows, total, err := model.ListAffiliateTransfers(model.AffiliateTransferQueryOptions{
-		Keyword: strings.TrimSpace(c.Query("keyword")),
+		IncludeAdminRemarks: true,
+		Keyword:             strings.TrimSpace(c.Query("keyword")),
 	}, pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
@@ -265,8 +267,9 @@ func GetAdminAffiliatePayouts(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	status, _ := strconv.Atoi(c.Query("status"))
 	rows, total, err := model.ListAffiliatePayouts(model.AffiliatePayoutQueryOptions{
-		Status:  status,
-		Keyword: c.Query("keyword"),
+		IncludeAdminRemarks: true,
+		Status:              status,
+		Keyword:             c.Query("keyword"),
 	}, pageInfo)
 	if err != nil {
 		common.ApiError(c, err)

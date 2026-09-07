@@ -464,6 +464,7 @@ export function PayoutAdminRow(props: {
         <AdminUserIdentity
           id={props.item.user_id}
           username={props.item.username}
+          remark={props.item.remark}
         />
       </TableCell>
       <TableCell className='font-semibold'>
