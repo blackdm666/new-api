@@ -212,12 +212,14 @@ export function CommissionLedgerRow(props: { item: AffiliateCommission }) {
         <AdminUserIdentity
           id={props.item.inviter_id}
           username={props.item.inviter_username}
+          remark={props.item.inviter_remark}
         />
       </TableCell>
       <TableCell>
         <AdminUserIdentity
           id={props.item.invitee_id}
           username={props.item.invitee_username}
+          remark={props.item.invitee_remark}
         />
       </TableCell>
       <TableCell className='font-mono text-xs'>{props.item.trade_no}</TableCell>

@@ -76,14 +76,17 @@ type AffiliateCommission struct {
 	UpdatedTime        int64  `json:"updated_time" gorm:"autoUpdateTime"`
 	InviterUsername    string `json:"inviter_username" gorm:"->;-:migration"`
 	InviterDisplayName string `json:"inviter_display_name" gorm:"->;-:migration"`
+	InviterRemark      string `json:"inviter_remark,omitempty" gorm:"->;-:migration"`
 	InviteeUsername    string `json:"invitee_username" gorm:"->;-:migration"`
 	InviteeDisplayName string `json:"invitee_display_name" gorm:"->;-:migration"`
+	InviteeRemark      string `json:"invitee_remark,omitempty" gorm:"->;-:migration"`
 }
 
 type AffiliateUpgradeNotice struct {
 	Id                        int    `json:"id"`
 	InviterId                 int    `json:"inviter_id" gorm:"uniqueIndex:idx_affiliate_upgrade_notice;not null"`
 	InviterUsername           string `json:"inviter_username" gorm:"->;-:migration"`
+	InviterRemark             string `json:"inviter_remark,omitempty" gorm:"->;-:migration"`
 	Threshold                 int    `json:"threshold" gorm:"uniqueIndex:idx_affiliate_upgrade_notice;not null"`
 	EffectiveInviteeCount     int    `json:"effective_invitee_count" gorm:"not null;default:0"`
 	TopUpAmountThresholdCents int64  `json:"top_up_amount_threshold_cents" gorm:"bigint;not null;default:0"`
@@ -136,9 +139,10 @@ type AffiliateInviteeStats struct {
 }
 
 type AffiliateCommissionQueryOptions struct {
-	InviterId int
-	Status    int
-	Keyword   string
+	IncludeAdminRemarks bool
+	InviterId           int
+	Status              int
+	Keyword             string
 }
 
 type AffiliateAdminSummary struct {
@@ -155,6 +159,7 @@ type AffiliateUpgradeCandidate struct {
 	InviterId                 int    `json:"inviter_id"`
 	Username                  string `json:"username"`
 	DisplayName               string `json:"display_name"`
+	Remark                    string `json:"remark,omitempty"`
 	CurrentGroup              string `json:"current_group"`
 	EffectiveInviteeCount     int64  `json:"effective_invitee_count"`
 	Threshold                 int    `json:"threshold"`
@@ -683,7 +688,7 @@ func ListFailedAffiliateUpgradeNotices(pageInfo *common.PageInfo) ([]*AffiliateU
 	}
 	rows := []*AffiliateUpgradeNotice{}
 	if err := query.
-		Select("affiliate_upgrade_notices.*, COALESCE(users.username, '') AS inviter_username").
+		Select("affiliate_upgrade_notices.*, COALESCE(users.username, '') AS inviter_username, users.remark AS inviter_remark").
 		Order("affiliate_upgrade_notices.dead_letter_time DESC, affiliate_upgrade_notices.id DESC").
 		Limit(pageInfo.GetPageSize()).
 		Offset(pageInfo.GetStartIdx()).
@@ -825,6 +830,9 @@ func ListAffiliateCommissions(options AffiliateCommissionQueryOptions, pageInfo 
 		Select("affiliate_commissions.*, inviter.username AS inviter_username, inviter.display_name AS inviter_display_name, invitee.username AS invitee_username, invitee.display_name AS invitee_display_name").
 		Joins("LEFT JOIN users AS inviter ON inviter.id = affiliate_commissions.inviter_id").
 		Joins("LEFT JOIN users AS invitee ON invitee.id = affiliate_commissions.invitee_id")
+	if options.IncludeAdminRemarks {
+		query = query.Select("affiliate_commissions.*, inviter.username AS inviter_username, inviter.display_name AS inviter_display_name, inviter.remark AS inviter_remark, invitee.username AS invitee_username, invitee.display_name AS invitee_display_name, invitee.remark AS invitee_remark")
+	}
 	if options.InviterId > 0 {
 		query = query.Where("affiliate_commissions.inviter_id = ?", options.InviterId)
 	}
@@ -1010,7 +1018,7 @@ func ListAffiliateUpgradeCandidates(pageInfo *common.PageInfo) ([]*AffiliateUpgr
 		return nil, 0, err
 	}
 	users := []*User{}
-	if err := query.Select("id", "username", "display_name", commonGroupCol).Order("id ASC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&users).Error; err != nil {
+	if err := query.Select("id", "username", "display_name", "remark", commonGroupCol).Order("id ASC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&users).Error; err != nil {
 		return nil, 0, err
 	}
 	rows := make([]*AffiliateUpgradeCandidate, 0, len(users))
@@ -1025,6 +1033,7 @@ func ListAffiliateUpgradeCandidates(pageInfo *common.PageInfo) ([]*AffiliateUpgr
 		}
 		rows = append(rows, &AffiliateUpgradeCandidate{
 			InviterId: user.Id, Username: user.Username, DisplayName: user.DisplayName,
+			Remark:       user.Remark,
 			CurrentGroup: user.Group, EffectiveInviteeCount: metrics.EffectiveInviteeCount,
 			Threshold: target.Threshold, EffectiveTopUpAmountCents: metrics.EffectiveTopUpAmountCents,
 			TopUpAmountThresholdCents: target.TopUpAmountThresholdCents,

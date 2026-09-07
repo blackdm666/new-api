@@ -82,8 +82,10 @@ export type AffiliateCommission = {
   updated_time: number
   inviter_username?: string
   inviter_display_name?: string
+  inviter_remark?: string
   invitee_username?: string
   invitee_display_name?: string
+  invitee_remark?: string
 }
 
 export type AffiliateInviteeStats = {
@@ -135,6 +137,7 @@ export type AffiliateTransfer = {
   quota_after: number
   created_time: number
   username?: string
+  remark?: string
   display_name?: string
 }
 
@@ -142,6 +145,7 @@ export type AffiliateUpgradeCandidate = {
   inviter_id: number
   username: string
   display_name: string
+  remark?: string
   current_group: string
   effective_invitee_count: number
   threshold: number
@@ -157,6 +161,7 @@ export type AffiliateUpgradeNotice = {
   id: number
   inviter_id: number
   inviter_username?: string
+  inviter_remark?: string
   threshold: number
   effective_invitee_count: number
   top_up_amount_threshold_cents: number
@@ -211,6 +216,7 @@ export type AffiliatePayout = {
   created_time: number
   updated_time: number
   username?: string
+  remark?: string
   display_name?: string
 }
 

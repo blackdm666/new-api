@@ -224,28 +224,12 @@ export function useUsersColumns(): ColumnDef<User>[] {
       header: t('Invite Info'),
       cell: ({ row }) => {
         const user = row.original
-        const affCount = user.aff_count || 0
         const lifetimeCommissionCents =
           user.affiliate_lifetime_earned_cents || 0
         const inviterId = user.inviter_id || 0
 
         return (
           <div className='flex max-w-full min-w-0 flex-wrap items-center gap-1 overflow-hidden'>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <StatusBadge
-                    label={`${t('Invited')}: ${affCount}`}
-                    variant='neutral'
-                    copyable={false}
-                    className='cursor-help'
-                  />
-                }
-              />
-              <TooltipContent>
-                <p className='text-xs'>{t('Number of users invited')}</p>
-              </TooltipContent>
-            </Tooltip>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -262,23 +246,33 @@ export function useUsersColumns(): ColumnDef<User>[] {
               </TooltipContent>
             </Tooltip>
             {inviterId > 0 && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <StatusBadge
-                      label={`${t('Inviter')}: ${inviterId}`}
-                      variant='neutral'
-                      copyable={false}
-                      className='cursor-help'
-                    />
-                  }
-                />
-                <TooltipContent>
-                  <p className='text-xs'>
-                    {t('Invited by user ID')} {inviterId}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
+              <div className='flex min-w-0 flex-col gap-0.5'>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <StatusBadge
+                        label={`${t('Inviter')}: ${inviterId}`}
+                        variant='neutral'
+                        copyable={false}
+                        className='cursor-help'
+                      />
+                    }
+                  />
+                  <TooltipContent>
+                    <p className='text-xs'>
+                      {t('Invited by user ID')} {inviterId}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+                {user.inviter_remark?.trim() ? (
+                  <div
+                    className='text-muted-foreground max-w-56 text-xs break-words'
+                    title={user.inviter_remark}
+                  >
+                    {t('Remark')}: {user.inviter_remark}
+                  </div>
+                ) : null}
+              </div>
             )}
             {inviterId === 0 && (
               <StatusBadge
