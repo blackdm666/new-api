@@ -37,18 +37,21 @@ export type PerformanceMetricsData = {
   success: boolean
   message?: string
   data: {
+    enabled?: boolean
     model_name: string
     series_schema?: string
     groups: PerformanceGroup[]
   }
 }
 
+export type SuccessRatePoint = { ts: number; success_rate: number }
+
 export type PerfModelSummary = {
   model_name: string
   avg_latency_ms: number
   success_rate: number
   avg_tps: number
-  recent_success_rates?: number[]
+  recent_success_series?: SuccessRatePoint[]
   request_count?: number
 }
 
@@ -56,6 +59,7 @@ export type PerfSummaryAllData = {
   success: boolean
   message?: string
   data: {
+    enabled?: boolean
     models: PerfModelSummary[]
   }
 }

@@ -9,10 +9,15 @@ type VeoImageInput struct {
 
 // VeoInstance represents a single instance in the Veo predictLongRunning request.
 type VeoInstance struct {
-	Prompt string         `json:"prompt"`
-	Image  *VeoImageInput `json:"image,omitempty"`
-	// TODO: support referenceImages (style/asset references, up to 3 images)
-	// TODO: support lastFrame (first+last frame interpolation, Veo 3.1)
+	Prompt          string              `json:"prompt"`
+	Image           *VeoImageInput      `json:"image,omitempty"`
+	LastFrame       *VeoImageInput      `json:"lastFrame,omitempty"`
+	ReferenceImages []VeoReferenceImage `json:"referenceImages,omitempty"`
+}
+
+type VeoReferenceImage struct {
+	Image         *VeoImageInput `json:"image"`
+	ReferenceType string         `json:"referenceType"`
 }
 
 // VeoParameters represents the parameters block for Veo predictLongRunning.
@@ -51,18 +56,21 @@ type operationResponse struct {
 	Name     string `json:"name"`
 	Done     bool   `json:"done"`
 	Response struct {
-		Type                  string           `json:"@type"`
-		RaiMediaFilteredCount int              `json:"raiMediaFilteredCount"`
-		Videos                []operationVideo `json:"videos"`
-		BytesBase64Encoded    string           `json:"bytesBase64Encoded"`
-		Encoding              string           `json:"encoding"`
-		Video                 string           `json:"video"`
-		GenerateVideoResponse struct {
+		Type                    string           `json:"@type"`
+		RaiMediaFilteredCount   int              `json:"raiMediaFilteredCount"`
+		RaiMediaFilteredReasons []string         `json:"raiMediaFilteredReasons"`
+		Videos                  []operationVideo `json:"videos"`
+		BytesBase64Encoded      string           `json:"bytesBase64Encoded"`
+		Encoding                string           `json:"encoding"`
+		Video                   string           `json:"video"`
+		GenerateVideoResponse   struct {
 			GeneratedVideos []struct {
 				Video struct {
 					URI string `json:"uri"`
 				} `json:"video"`
 			} `json:"generatedVideos"`
+			RaiMediaFilteredCount   int      `json:"raiMediaFilteredCount"`
+			RaiMediaFilteredReasons []string `json:"raiMediaFilteredReasons"`
 		} `json:"generateVideoResponse"`
 	} `json:"response"`
 	Error struct {

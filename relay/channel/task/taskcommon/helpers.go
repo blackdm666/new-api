@@ -3,6 +3,7 @@ package taskcommon
 import (
 	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -35,6 +36,47 @@ func DefaultString(val, fallback string) string {
 		return fallback
 	}
 	return val
+}
+
+// ResolvedModelName returns the model name that an adaptor must use for
+// upstream capability checks and request construction. Task relays resolve
+// channel model mappings globally before adaptor validation, so a populated
+// UpstreamModelName always takes precedence over the public request model.
+func ResolvedModelName(info *relaycommon.RelayInfo, requestModel string) string {
+	if info != nil && info.ChannelMeta != nil {
+		if modelName := strings.TrimSpace(info.UpstreamModelName); modelName != "" {
+			return modelName
+		}
+	}
+	return strings.TrimSpace(requestModel)
+}
+
+// ModelConfigCandidates returns model names in sales-profile order. Adaptors
+// with public model variants (for example a fixed 1080p SKU) can preserve the
+// public profile when it is known, while arbitrary aliases fall back to the
+// globally resolved upstream model.
+func ModelConfigCandidates(info *relaycommon.RelayInfo, requestModel string) []string {
+	candidates := make([]string, 0, 3)
+	seen := make(map[string]struct{}, 3)
+	add := func(modelName string) {
+		modelName = strings.TrimSpace(modelName)
+		if modelName == "" {
+			return
+		}
+		if _, exists := seen[modelName]; exists {
+			return
+		}
+		seen[modelName] = struct{}{}
+		candidates = append(candidates, modelName)
+	}
+	if info != nil {
+		add(info.OriginModelName)
+	}
+	add(requestModel)
+	if info != nil && info.ChannelMeta != nil {
+		add(info.UpstreamModelName)
+	}
+	return candidates
 }
 
 // DefaultInt returns val if non-zero, otherwise fallback.

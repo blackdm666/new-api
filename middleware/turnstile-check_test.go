@@ -31,6 +31,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func withTurnstileConfig(t *testing.T, config common.TurnstileConfig) {
+	t.Helper()
+	previous := common.CurrentTurnstileConfig()
+	common.TurnstileCheckEnabled = config.Enabled
+	common.TurnstileProvider = config.Provider
+	common.TurnstileSiteKey = config.SiteKey
+	common.TurnstileSecretKey = config.SecretKey
+	common.TurnstileWidgetScriptURL = config.WidgetScriptURL
+	common.TurnstileWidgetEndpoint = config.WidgetEndpoint
+	common.TurnstileVerifyURL = config.VerifyURL
+	common.TurnstileAction = config.Action
+	t.Cleanup(func() {
+		common.TurnstileCheckEnabled = previous.Enabled
+		common.TurnstileProvider = previous.Provider
+		common.TurnstileSiteKey = previous.SiteKey
+		common.TurnstileSecretKey = previous.SecretKey
+		common.TurnstileWidgetScriptURL = previous.WidgetScriptURL
+		common.TurnstileWidgetEndpoint = previous.WidgetEndpoint
+		common.TurnstileVerifyURL = previous.VerifyURL
+		common.TurnstileAction = previous.Action
+	})
+}
+
 func TestOAuthStateTurnstileCheckAllowsBindAndRestoresBody(t *testing.T) {
 	oldEnabled := common.TurnstileCheckEnabled
 	common.TurnstileCheckEnabled = true
@@ -78,26 +101,28 @@ func TestOAuthStateTurnstileCheckRejectsLoginWithoutToken(t *testing.T) {
 
 func TestTurnstileVerifyURL(t *testing.T) {
 	t.Run("uses the self-hosted compatible endpoint", func(t *testing.T) {
-		t.Setenv("TURNSTILE_VERIFY_URL", " https://verify.88api.ai/turnstile/v0/siteverify ")
-		assert.Equal(t, "https://verify.88api.ai/turnstile/v0/siteverify", turnstileVerifyURL())
+		withTurnstileConfig(t, common.TurnstileConfig{
+			Enabled: true, Provider: common.TurnstileProviderCustom,
+			SecretKey: "secret", WidgetScriptURL: "https://captcha.example/widget.js",
+			WidgetEndpoint: "https://captcha.example", VerifyURL: "https://captcha.example/siteverify",
+		})
+		verifyURL, err := turnstileVerifyURL(common.CurrentTurnstileConfig())
+		require.NoError(t, err)
+		assert.Equal(t, "https://captcha.example/siteverify", verifyURL)
 	})
 
-	t.Run("falls back to Cloudflare when unset", func(t *testing.T) {
-		t.Setenv("TURNSTILE_VERIFY_URL", "")
-		assert.Equal(t, defaultTurnstileVerifyURL, turnstileVerifyURL())
+	t.Run("uses Cloudflare for the Cloudflare provider", func(t *testing.T) {
+		withTurnstileConfig(t, common.TurnstileConfig{
+			Enabled: true, Provider: common.TurnstileProviderCloudflare,
+			SiteKey: "site", SecretKey: "secret",
+		})
+		verifyURL, err := turnstileVerifyURL(common.CurrentTurnstileConfig())
+		require.NoError(t, err)
+		assert.Equal(t, defaultTurnstileVerifyURL, verifyURL)
 	})
 }
 
 func TestTurnstileCheckFromBodyVerifiesTokenAndRestoresBody(t *testing.T) {
-	oldEnabled := common.TurnstileCheckEnabled
-	oldSecret := common.TurnstileSecretKey
-	common.TurnstileCheckEnabled = true
-	common.TurnstileSecretKey = "test-secret"
-	t.Cleanup(func() {
-		common.TurnstileCheckEnabled = oldEnabled
-		common.TurnstileSecretKey = oldSecret
-	})
-
 	var verifiedToken string
 	verifyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
@@ -105,7 +130,11 @@ func TestTurnstileCheckFromBodyVerifiesTokenAndRestoresBody(t *testing.T) {
 		_, _ = io.WriteString(w, `{"success":true}`)
 	}))
 	t.Cleanup(verifyServer.Close)
-	t.Setenv("TURNSTILE_VERIFY_URL", verifyServer.URL)
+	withTurnstileConfig(t, common.TurnstileConfig{
+		Enabled: true, Provider: common.TurnstileProviderCustom,
+		SecretKey: "test-secret", WidgetScriptURL: "https://captcha.example/widget.js",
+		WidgetEndpoint: "https://captcha.example", VerifyURL: verifyServer.URL,
+	})
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

@@ -51,7 +51,6 @@ import {
 } from '@/features/auth/lib/storage'
 import { runTurnstileProtectedAuthAttempt } from '@/features/auth/lib/turnstile-auth-attempt'
 import { useStatus } from '@/hooks/use-status'
-import { isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
@@ -72,13 +71,13 @@ export function SignUpForm({
   const { status } = useStatus()
   const {
     isTurnstileEnabled,
-    turnstileSiteKey,
+    turnstileConfig,
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
     isStatusReady,
   } = useTurnstile()
-  const { redirectToLogin, handleLoginSuccess } = useAuthRedirect()
+  const { redirectToLogin, handleLoginResult } = useAuthRedirect()
   const {
     isSending: isSendingCode,
     secondsLeft,
@@ -236,10 +235,11 @@ export function SignUpForm({
     setIsWeChatSubmitting(true)
     try {
       const res = await wechatLoginByCode(wechatCode, turnstilePayload)
-      if (res?.success && isAuthBundle(res.data)) {
-        await handleLoginSuccess(res.data)
-        toast.success(t('Signed in via WeChat'))
+      if (res?.success) {
         handleWeChatDialogChange(false)
+        if (await handleLoginResult(res.data)) {
+          toast.success(t('Signed in via WeChat'))
+        }
       } else {
         if (getServerErrorMessageKey(res)) return
         toast.error(res?.message || t('Login failed'))
@@ -293,7 +293,7 @@ export function SignUpForm({
               <FormLabel>{t('Password')}</FormLabel>
               <FormControl>
                 <PasswordInput
-                  placeholder={t('Enter password (8-20 characters)')}
+                  placeholder={t('Enter password (8–128 characters)')}
                   {...field}
                 />
               </FormControl>
@@ -373,7 +373,7 @@ export function SignUpForm({
           <div className='mt-2'>
             <Turnstile
               key={turnstileWidgetKey}
-              siteKey={turnstileSiteKey}
+              {...turnstileConfig}
               onVerify={setTurnstileToken}
               onExpire={clearTurnstileToken}
             />

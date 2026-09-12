@@ -39,6 +39,44 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export interface PasskeyDomainChange {
+  rp_id: string
+  legacy_rp_ids: string
+  origins: string
+  previous_rp_id: string
+  effective_rp_id: string
+  removed_rp_ids: string[]
+  affected_credentials: number
+  unknown_credentials: number
+  confirmation_required: boolean
+  removal_confirmation: string
+}
+
+export interface UpdatePasskeyDomainsRequest {
+  rp_id: string
+  legacy_rp_ids: string
+  origins: string
+  preview: boolean
+  removal_confirmation?: string
+}
+
+export interface UpdatePasskeyDomainsResponse extends UpdateOptionResponse {
+  code?: string
+  data: PasskeyDomainChange
+}
+
+export type BotProtectionSettingsPayload = {
+  enabled: boolean
+  provider: 'cloudflare' | 'custom'
+  site_key: string
+  secret_key: string
+  widget_script_url: string
+  widget_endpoint: string
+  verify_url: string
+  action: string
+  clear_secret: boolean
+}
+
 export type SMTPTestResponse = {
   success: boolean
   message: string
@@ -47,6 +85,59 @@ export type SMTPTestResponse = {
     profile: 'security' | 'notification' | 'marketing'
     channel: 'security' | 'primary' | 'marketing' | 'backup'
   }
+}
+
+export type MarketingEmailSenderAccount = {
+  id: number
+  name: string
+  profile: 'marketing'
+  provider: 'aliyun_eventbridge'
+  server: string
+  port: number
+  account: string
+  from: string
+  ssl_enabled: boolean
+  starttls_enabled: boolean
+  insecure_skip_verify: boolean
+  force_auth_login: boolean
+  weight: number
+  rate_limit_per_minute: number
+  enabled: boolean
+  tested_time: number
+  receipt_verified_time: number
+  disabled_until: number
+  health_status: 'pending' | 'healthy' | 'degraded' | 'disabled'
+  consecutive_failures: number
+  last_success_time: number
+  last_failure_time: number
+  last_error: string
+  credential_configured: boolean
+}
+
+export type MarketingEmailSenderAccountInput = {
+  name: string
+  provider: 'aliyun_eventbridge'
+  server: string
+  port: number
+  account: string
+  from: string
+  token: string
+  ssl_enabled: boolean
+  starttls_enabled: boolean
+  insecure_skip_verify: boolean
+  force_auth_login: boolean
+  weight: number
+  rate_limit_per_minute: number
+}
+
+export type EmailReceiptEndpoint = {
+  provider: 'aliyun_eventbridge'
+  enabled: boolean
+  token_configured: boolean
+  callback_url: string
+  last_event_time: number
+  last_verified_time: number
+  last_error: string
 }
 
 export type InvoiceSettingsPayload = {
@@ -165,6 +256,7 @@ export type SiteSettings = {
   About: string
   HomePageContent: string
   ServerAddress: string
+  TaskPublicAddress: string
   'legal.user_agreement': string
   'legal.privacy_policy': string
   HeaderNavModules: string
@@ -195,6 +287,8 @@ export type AuthSettings = {
   'oidc.token_endpoint': string
   'oidc.user_info_endpoint': string
   TelegramOAuthEnabled: boolean
+  'telegram.client_id': string
+  'telegram.client_secret': string
   TelegramBotToken: string
   TelegramBotName: string
   LinuxDOOAuthEnabled: boolean
@@ -206,11 +300,18 @@ export type AuthSettings = {
   WeChatServerToken: string
   WeChatAccountQRCodeImageURL: string
   TurnstileCheckEnabled: boolean
+  TurnstileProvider: 'cloudflare' | 'custom'
   TurnstileSiteKey: string
   TurnstileSecretKey: string
+  TurnstileSecretKeyConfigured: boolean
+  TurnstileWidgetScriptURL: string
+  TurnstileWidgetEndpoint: string
+  TurnstileVerifyURL: string
+  TurnstileAction: string
   'passkey.enabled': boolean
   'passkey.rp_display_name': string
   'passkey.rp_id': string
+  'passkey.legacy_rp_ids': string
   'passkey.origins': string
   'passkey.allow_insecure_origin': boolean
   'passkey.user_verification': 'required' | 'preferred' | 'discouraged'
@@ -268,6 +369,7 @@ export type ModelSettings = {
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
+  'billing_setting.plugin_billing_expr': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
@@ -335,6 +437,7 @@ export type BillingSettings = {
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
+  'billing_setting.plugin_billing_expr': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
@@ -550,6 +653,12 @@ export type DifferencesMap = Record<
   Partial<Record<RatioType, RatioDifference>>
 >
 
+export type PricingSyncValues = Partial<Record<RatioType, number | string>>
+export type PricingSyncModels = Record<
+  string,
+  { current: PricingSyncValues; upstreams: Record<string, PricingSyncValues> }
+>
+
 export type UpstreamChannelsResponse = {
   success: boolean
   message: string
@@ -579,6 +688,7 @@ export type UpstreamRatiosResponse = {
   message: string
   data: {
     differences: DifferencesMap
+    prices: PricingSyncModels
     test_results: TestResult[]
   }
 }

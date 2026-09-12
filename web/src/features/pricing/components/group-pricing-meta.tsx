@@ -16,7 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useTranslation } from 'react-i18next'
+
 import { cn } from '@/lib/utils'
+
+import { formatGroupPricingRatio } from '../lib/group-ratio-label'
 
 type GroupPricingMetaProps = {
   group: string
@@ -40,7 +44,9 @@ function getVisibleGroupDescription(
 }
 
 export function GroupPricingMeta(props: GroupPricingMetaProps) {
+  const { i18n } = useTranslation()
   const description = getVisibleGroupDescription(props.group, props.description)
+  const language = i18n.resolvedLanguage || i18n.language
 
   return (
     <span
@@ -58,7 +64,7 @@ export function GroupPricingMeta(props: GroupPricingMetaProps) {
         </span>
       )}
       <span className='rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1 font-mono text-xs leading-none font-extrabold tracking-tight text-emerald-700 tabular-nums shadow-sm dark:border-emerald-400/35 dark:bg-emerald-400/10 dark:text-emerald-300'>
-        {props.ratio}x
+        {formatGroupPricingRatio(props.ratio, language)}
       </span>
     </span>
   )

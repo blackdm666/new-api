@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,48 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func newCanceledRelayTestContext(t *testing.T, path string) *gin.Context {
+	t.Helper()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	reqCtx, cancel := context.WithCancel(req.Context())
+	cancel()
+	c.Request = req.WithContext(reqCtx)
+	return c
+}
+
+func TestShouldRetryStopsWhenClientRequestDone(t *testing.T) {
+	originalRanges := operation_setting.AutomaticRetryStatusCodeRanges
+	t.Cleanup(func() {
+		operation_setting.AutomaticRetryStatusCodeRanges = originalRanges
+	})
+	require.NoError(t, operation_setting.AutomaticRetryStatusCodesFromString("500"))
+
+	apiErr := types.NewErrorWithStatusCode(
+		fmt.Errorf("upstream error"),
+		types.ErrorCodeBadResponse,
+		http.StatusInternalServerError,
+	)
+	active, _ := gin.CreateTestContext(httptest.NewRecorder())
+	active.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	require.True(t, shouldRetry(active, apiErr, 1))
+	require.False(t, shouldRetry(newCanceledRelayTestContext(t, "/v1/chat/completions"), apiErr, 1))
+}
+
+func TestShouldRetryTaskRelayStopsWhenClientRequestDone(t *testing.T) {
+	originalRanges := operation_setting.AutomaticRetryStatusCodeRanges
+	t.Cleanup(func() {
+		operation_setting.AutomaticRetryStatusCodeRanges = originalRanges
+	})
+	require.NoError(t, operation_setting.AutomaticRetryStatusCodesFromString("500"))
+
+	taskErr := &taskdto.TaskError{StatusCode: http.StatusInternalServerError}
+	active, _ := gin.CreateTestContext(httptest.NewRecorder())
+	active.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	require.True(t, shouldRetryTaskRelay(active, 74, taskErr, 1))
+	require.False(t, shouldRetryTaskRelay(newCanceledRelayTestContext(t, "/v1/videos"), 74, taskErr, 1))
+}
 
 func TestShouldRetryTaskRelayDoesNotReplaceLocalBillingError(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

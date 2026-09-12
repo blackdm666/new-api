@@ -74,7 +74,28 @@ func TestValidateMultipartDirectNormalizesImageField(t *testing.T) {
 	storedReq, err := GetTaskRequest(context)
 	require.NoError(t, err)
 	require.Equal(t, []string{"https://example.com/first.png"}, storedReq.Images)
-	require.Equal(t, constant.TaskActionGenerate, info.Action)
+	require.Equal(t, constant.TaskActionImageToVideo, info.Action)
+}
+
+func TestValidateMultipartDirectUsesResolvedSoraModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := strings.NewReader(`{"model":"sora-sales-alias","prompt":"animate","size":"1024x1024","seconds":"4"}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/videos", body)
+	request.Header.Set("Content-Type", "application/json")
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = request
+	info := &RelayInfo{
+		TaskRelayInfo: &TaskRelayInfo{},
+		ChannelMeta: &ChannelMeta{
+			UpstreamModelName: "sora-2",
+			IsModelMapped:     true,
+		},
+	}
+
+	taskErr := ValidateMultipartDirect(context, info)
+
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "invalid_size", taskErr.Code)
 }
 
 func TestValidateBasicTaskRequestStoresCallbackURL(t *testing.T) {
@@ -86,7 +107,7 @@ func TestValidateBasicTaskRequestStoresCallbackURL(t *testing.T) {
 	context.Request = request
 	info := &RelayInfo{TaskRelayInfo: &TaskRelayInfo{}}
 
-	taskErr := ValidateBasicTaskRequest(context, info, constant.TaskActionTextGenerate)
+	taskErr := ValidateBasicTaskRequest(context, info, constant.TaskActionTextToVideo)
 
 	require.Nil(t, taskErr)
 	assert.Equal(t, "https://example.com/video-callback", info.CallbackURL)
@@ -104,12 +125,36 @@ func TestValidateBasicTaskRequestStoresReferenceVideo(t *testing.T) {
 	context.Request = request
 	info := &RelayInfo{TaskRelayInfo: &TaskRelayInfo{}}
 
-	taskErr := ValidateBasicTaskRequest(context, info, constant.TaskActionTextGenerate)
+	taskErr := ValidateBasicTaskRequest(context, info, constant.TaskActionTextToVideo)
 
 	require.Nil(t, taskErr)
 	storedReq, err := GetTaskRequest(context)
 	require.NoError(t, err)
 	assert.Equal(t, "data:video/mp4;base64,AAAA", storedReq.Video)
+}
+
+func TestValidateTaskRequestAllowMediaPreservesXinMengOptionalFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := strings.NewReader(`{"model":"wan3.0-video-720p","media":[{"type":"reference_image","url":"https://example.com/ref.png"}],"negative_prompt":"blur","seed":42,"generate_audio":true,"camera_control":{"pan":2}}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/videos", body)
+	request.Header.Set("Content-Type", "application/json")
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = request
+	info := &RelayInfo{TaskRelayInfo: &TaskRelayInfo{}}
+
+	taskErr := ValidateTaskRequestAllowMedia(context, info, constant.TaskActionReferenceToVideo)
+
+	require.Nil(t, taskErr)
+	storedReq, err := GetTaskRequest(context)
+	require.NoError(t, err)
+	require.Len(t, storedReq.Media, 1)
+	assert.Equal(t, "reference_image", storedReq.Media[0]["type"])
+	assert.Equal(t, "blur", storedReq.NegativePrompt)
+	require.NotNil(t, storedReq.Seed)
+	assert.Equal(t, 42, *storedReq.Seed)
+	require.NotNil(t, storedReq.GenerateAudio)
+	assert.True(t, *storedReq.GenerateAudio)
+	assert.EqualValues(t, 2, storedReq.CameraControl["pan"])
 }
 
 // TestTaskDurationBounds guards the billing invariant that user-supplied
@@ -165,7 +210,7 @@ func TestTaskDurationBounds(t *testing.T) {
 		})
 		t.Run(tt.name+" (basic task request)", func(t *testing.T) {
 			context, info := newContext(t, tt.body)
-			taskErr := ValidateBasicTaskRequest(context, info, constant.TaskActionGenerate)
+			taskErr := ValidateBasicTaskRequest(context, info, constant.TaskActionImageToVideo)
 			if tt.wantErr {
 				require.NotNil(t, taskErr)
 				require.Equal(t, "invalid_seconds", taskErr.Code)

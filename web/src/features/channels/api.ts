@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { getGroups as getUserGroups } from '@/features/users/api'
 import { api, type ApiRequestConfig } from '@/lib/api'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import type {
   AddChannelRequest,
@@ -49,6 +50,27 @@ const channelActionConfig = (
   skipBusinessError: true,
   skipErrorHandler: true,
 })
+
+export type TaskPluginOption = {
+  sortPriority?: number
+  website?: string
+  key: string
+  name: string
+  description?: Record<string, string> | null
+  icon?: string
+  hasIcon?: boolean
+  baseUrl?: string
+  models: string[]
+  channelTypes?: number[] | null
+}
+
+export async function getTaskPluginOptions(): Promise<TaskPluginOption[]> {
+  const response = await api.get<{
+    success: boolean
+    data: TaskPluginOption[]
+  }>('/api/task_plugin_options')
+  return requireServerSuccess(response.data).data
+}
 
 export type CodexUsageResponse = {
   success: boolean
@@ -113,6 +135,16 @@ export async function getChannel(id: number): Promise<GetChannelResponse> {
 export async function getChannelOps(): Promise<ChannelOpsResponse> {
   const res = await api.get('/api/channel/ops', channelActionConfig())
   return res.data
+}
+
+export async function getChannelDefaultBaseURLs(): Promise<
+  Partial<Record<number, string>>
+> {
+  const response = await api.get<{
+    success: boolean
+    data: Partial<Record<number, string>>
+  }>('/api/channel/default_base_urls')
+  return requireServerSuccess(response.data).data
 }
 
 /**
@@ -319,13 +351,15 @@ export async function deleteDisabledChannels(): Promise<{
  */
 export async function getChannelKey(
   id: number,
-  proofToken?: string
+  proofToken: string,
+  signal?: AbortSignal
 ): Promise<{ success: boolean; message?: string; data?: { key: string } }> {
   const res = await api.post(
     `/api/channel/${id}/key`,
     undefined,
     channelActionConfig({
-      headers: proofToken ? { 'X-Security-Proof': proofToken } : undefined,
+      headers: { 'X-Security-Proof': proofToken },
+      signal,
     })
   )
   return res.data
@@ -334,7 +368,11 @@ export async function getChannelKey(
 /**
  * Get the complete balance-query account token as the root administrator.
  */
-export async function getChannelBalanceQueryToken(id: number): Promise<{
+export async function getChannelBalanceQueryToken(
+  id: number,
+  proofToken: string,
+  signal?: AbortSignal
+): Promise<{
   success: boolean
   message?: string
   data?: { token: string }
@@ -342,7 +380,7 @@ export async function getChannelBalanceQueryToken(id: number): Promise<{
   const res = await api.post(
     `/api/channel/${id}/balance_query/token`,
     undefined,
-    channelActionConfig()
+    channelActionConfig({ headers: { 'X-Security-Proof': proofToken }, signal })
   )
   return res.data
 }

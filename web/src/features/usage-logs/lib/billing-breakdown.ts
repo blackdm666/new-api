@@ -28,8 +28,12 @@ import {
   formatRatioCompact,
   getEffectiveGroupRatioInfo,
 } from './billing-display'
+import {
+  isLegacyTaskFixedBilling,
+  isPerCallBilling,
+  isPerSecondBilling,
+} from './billing-unit'
 import { getTieredBillingSummary, hasAnyCacheTokens } from './format'
-import { isPerCallBilling } from './utils'
 
 export interface BillingBreakdownRow {
   label: string
@@ -70,7 +74,18 @@ export function buildBillingBreakdownRows(
   isAdmin: boolean,
   t: TFunction
 ): BillingBreakdownRow[] {
-  const isPerCall = isPerCallBilling(other.model_price)
+  const isPerSecond = isPerSecondBilling(other.billing_unit)
+  const isTask = other.is_task === true
+  const isPerCall = isPerCallBilling(
+    other.model_price,
+    other.billing_unit,
+    isTask
+  )
+  const isLegacyTaskFixed = isLegacyTaskFixedBilling(
+    other.model_price,
+    other.billing_unit,
+    isTask
+  )
   const isClaude = other.claude === true
   const isTieredExpr = other.billing_mode === 'tiered_expr'
   const tieredSummary = getTieredBillingSummary(other)
@@ -117,6 +132,22 @@ export function buildBillingBreakdownRows(
         value: t('No matching results'),
       })
     }
+  } else if (isPerSecond) {
+    rows.push({ label: t('Billing Mode'), value: t('Per-second') })
+    pushPriceExplanation()
+    if (other.model_price != null) {
+      rows.push({
+        label: t('Model Price'),
+        value: `${fmtPrice(actualPrice(other.model_price))}/${t('second')}`,
+      })
+    }
+    const duration = other.task_ratios?.seconds ?? other.task_ratios?.duration
+    if (duration != null) {
+      rows.push({
+        label: t('Duration'),
+        value: `${duration}s`,
+      })
+    }
   } else if (isPerCall) {
     rows.push({ label: t('Billing Mode'), value: t('Per-call') })
     pushPriceExplanation()
@@ -125,6 +156,17 @@ export function buildBillingBreakdownRows(
         label: t('Model Price'),
         value: fmtPrice(actualPrice(other.model_price)),
       })
+    }
+  } else if (isLegacyTaskFixed) {
+    rows.push({ label: t('Billing Mode'), value: t('Dynamic Pricing') })
+    pushPriceExplanation()
+    rows.push({
+      label: t('Model Price'),
+      value: fmtPrice(actualPrice(other.model_price ?? 0)),
+    })
+    const duration = other.task_ratios?.seconds ?? other.task_ratios?.duration
+    if (duration != null) {
+      rows.push({ label: t('Duration'), value: `${duration}s` })
     }
   } else {
     rows.push({ label: t('Billing Mode'), value: t('Per-token') })

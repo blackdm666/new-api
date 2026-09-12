@@ -25,12 +25,14 @@ type EmailDeliveryQueryOptions struct {
 }
 
 const (
-	EmailDeliveryStatusQueued    = "queued"
-	EmailDeliveryStatusSending   = "sending"
-	EmailDeliveryStatusRetrying  = "retrying"
-	EmailDeliveryStatusDelivered = "delivered"
-	EmailDeliveryStatusFailed    = "failed"
-	EmailDeliveryStatusExpired   = "expired"
+	EmailDeliveryStatusQueued            = "queued"
+	EmailDeliveryStatusSending           = "sending"
+	EmailDeliveryStatusRetrying          = "retrying"
+	EmailDeliveryStatusAwaitingReceipt   = "awaiting_receipt"
+	EmailDeliveryStatusAcceptedUntracked = "accepted_untracked"
+	EmailDeliveryStatusDelivered         = "delivered"
+	EmailDeliveryStatusFailed            = "failed"
+	EmailDeliveryStatusExpired           = "expired"
 
 	EmailPriorityMarketing = 10
 	EmailPriorityBusiness  = 100
@@ -49,11 +51,19 @@ type EmailDeliveryListItem struct {
 	Recipient         string `json:"recipient"`
 	Priority          int    `json:"priority"`
 	Status            string `json:"status" gorm:"-"`
+	State             string `json:"state"`
+	SenderAccountId   int    `json:"sender_account_id"`
+	SenderAccountName string `json:"sender_account_name" gorm:"-"`
+	CurrentAttemptId  int    `json:"current_attempt_id"`
 	Attempts          int    `json:"attempts"`
 	LastError         string `json:"last_error"`
+	FailureType       string `json:"failure_type"`
 	NextAttemptTime   int64  `json:"next_attempt_time"`
 	LockedUntil       int64  `json:"locked_until"`
 	ExpiresTime       int64  `json:"expires_time"`
+	AcceptedTime      int64  `json:"accepted_time"`
+	FinalizedTime     int64  `json:"finalized_time"`
+	ReceiptDeadline   int64  `json:"receipt_deadline"`
 	DeliveredTime     int64  `json:"delivered_time"`
 	DeadLetterTime    int64  `json:"dead_letter_time"`
 	ExpiredTime       int64  `json:"expired_time"`
@@ -65,6 +75,9 @@ type EmailDeliveryStats struct {
 	Queued                  int64   `json:"queued"`
 	Sending                 int64   `json:"sending"`
 	Retrying                int64   `json:"retrying"`
+	AwaitingReceipt         int64   `json:"awaiting_receipt"`
+	AcceptedUntracked24h    int64   `json:"accepted_untracked_24h"`
+	FinalDelivered24h       int64   `json:"final_delivered_24h"`
 	Failed                  int64   `json:"failed"`
 	Delivered24h            int64   `json:"delivered_24h"`
 	Failed24h               int64   `json:"failed_24h"`
@@ -93,12 +106,19 @@ type EmailDelivery struct {
 	Subject            string `json:"subject" gorm:"type:varchar(512);not null"`
 	Body               string `json:"body" gorm:"type:text;not null"`
 	Priority           int    `json:"priority" gorm:"not null;default:100;index"`
+	State              string `json:"state" gorm:"type:varchar(32);not null;default:'queued';index"`
+	SenderAccountId    int    `json:"sender_account_id" gorm:"index"`
+	CurrentAttemptId   int    `json:"current_attempt_id" gorm:"index"`
 	MarketingQuotaTime int64  `json:"-" gorm:"bigint;not null;default:0;index"`
 	Attempts           int    `json:"attempts" gorm:"not null;default:0"`
 	LastError          string `json:"last_error" gorm:"type:text"`
+	FailureType        string `json:"failure_type" gorm:"type:varchar(64);not null;default:'';index"`
 	NextAttemptTime    int64  `json:"next_attempt_time" gorm:"bigint;not null;index"`
 	LockedUntil        int64  `json:"locked_until" gorm:"bigint;not null;default:0;index"`
 	ExpiresTime        int64  `json:"expires_time" gorm:"bigint;not null;default:0;index"`
+	AcceptedTime       int64  `json:"accepted_time" gorm:"bigint;not null;default:0;index"`
+	FinalizedTime      int64  `json:"finalized_time" gorm:"bigint;not null;default:0;index"`
+	ReceiptDeadline    int64  `json:"receipt_deadline" gorm:"bigint;not null;default:0;index"`
 	DeliveredTime      int64  `json:"delivered_time" gorm:"bigint;not null;default:0;index"`
 	DeadLetterTime     int64  `json:"dead_letter_time" gorm:"bigint;not null;default:0;index"`
 	ExpiredTime        int64  `json:"expired_time" gorm:"bigint;not null;default:0;index"`
@@ -147,6 +167,7 @@ func enqueueEmailDelivery(tx *gorm.DB, delivery *EmailDelivery) (*EmailDelivery,
 	delivery.CreatedTime = now
 	delivery.UpdatedTime = now
 	delivery.NextAttemptTime = now
+	delivery.State = EmailDeliveryStatusQueued
 	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(delivery)
 	if result.Error != nil {
 		return nil, false, result.Error
@@ -196,15 +217,15 @@ func ListDueEmailDeliveries(limit int, now int64) ([]*EmailDelivery, error) {
 		limit = 100
 	}
 	rows := []*EmailDelivery{}
-	err := DB.Where("delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0 AND next_attempt_time <= ? AND locked_until <= ? AND (expires_time = 0 OR expires_time > ?)", now, now, now).
+	err := DB.Where("state IN ? AND delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0 AND next_attempt_time <= ? AND locked_until <= ? AND (expires_time = 0 OR expires_time > ?)", []string{EmailDeliveryStatusQueued, EmailDeliveryStatusRetrying, EmailDeliveryStatusSending}, now, now, now).
 		Order("priority DESC, id ASC").Limit(limit).Find(&rows).Error
 	return rows, err
 }
 
 func ClaimEmailDelivery(id int, now int64, lockedUntil int64) (bool, error) {
 	result := DB.Model(&EmailDelivery{}).
-		Where("id = ? AND delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0 AND next_attempt_time <= ? AND locked_until <= ? AND (expires_time = 0 OR expires_time > ?)", id, now, now, now).
-		Updates(map[string]any{"locked_until": lockedUntil, "updated_time": now})
+		Where("id = ? AND state IN ? AND delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0 AND next_attempt_time <= ? AND locked_until <= ? AND (expires_time = 0 OR expires_time > ?)", id, []string{EmailDeliveryStatusQueued, EmailDeliveryStatusRetrying, EmailDeliveryStatusSending}, now, now, now).
+		Updates(map[string]any{"state": EmailDeliveryStatusSending, "locked_until": lockedUntil, "updated_time": now})
 	return result.RowsAffected == 1, result.Error
 }
 
@@ -304,6 +325,9 @@ func CompleteEmailDelivery(id int, smtpMetadata ...string) error {
 			"last_error":        "",
 			"locked_until":      int64(0),
 			"next_attempt_time": now,
+			"state":             EmailDeliveryStatusAcceptedUntracked,
+			"accepted_time":     now,
+			"finalized_time":    now,
 			"delivered_time":    now,
 			"smtp_profile":      strings.TrimSpace(smtpProfile),
 			"smtp_channel":      strings.TrimSpace(smtpChannel),
@@ -349,6 +373,9 @@ func RecordEmailDeliveryFailure(id int, message string, nextAttemptTime int64) e
 		if delivery.Attempts+1 >= setting.GetEmailDeliveryRules().EmailMaxAttempts {
 			updates["dead_letter_time"] = common.GetTimestamp()
 			updates["next_attempt_time"] = int64(0)
+			updates["state"] = EmailDeliveryStatusFailed
+		} else {
+			updates["state"] = EmailDeliveryStatusRetrying
 		}
 		return tx.Model(delivery).Updates(updates).Error
 	})
@@ -361,10 +388,41 @@ func ExpireEmailDeliveries(now int64) error {
 			"subject":      "",
 			"body":         "",
 			"last_error":   "expired before delivery",
+			"state":        EmailDeliveryStatusExpired,
 			"locked_until": int64(0),
 			"expired_time": now,
 			"updated_time": now,
 		}).Error
+}
+
+func ExpireAwaitingEmailReceipts(now int64) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		due := tx.Model(&EmailDelivery{}).Select("id").
+			Where("state = ? AND receipt_deadline > 0 AND receipt_deadline <= ?", EmailDeliveryStatusAwaitingReceipt, now)
+		attempts := tx.Model(&EmailDelivery{}).Select("current_attempt_id").
+			Where("state = ? AND receipt_deadline > 0 AND receipt_deadline <= ?", EmailDeliveryStatusAwaitingReceipt, now)
+		if err := tx.Model(&EmailDeliveryAttempt{}).Where("id IN (?) AND finalized_time = 0", attempts).
+			Updates(map[string]any{
+				"status": EmailAttemptStatusFailed, "failure_type": "receipt_timeout",
+				"error_message": "EventBridge receipt timeout", "finalized_time": now, "updated_time": now,
+			}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&MarketingRecipient{}).Where("email_delivery_id IN (?)", due).
+			Updates(map[string]any{
+				"status": MarketingRecipientStatusFailed, "last_error": "EventBridge receipt timeout", "updated_time": now,
+			}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&EmailDelivery{}).
+			Where("state = ? AND receipt_deadline > 0 AND receipt_deadline <= ?", EmailDeliveryStatusAwaitingReceipt, now).
+			Updates(map[string]any{
+				"state": EmailDeliveryStatusFailed, "subject": "", "body": "",
+				"last_error": "EventBridge receipt timeout", "failure_type": "receipt_timeout",
+				"dead_letter_time": now, "finalized_time": now,
+				"receipt_deadline": int64(0), "updated_time": now,
+			}).Error
+	})
 }
 
 func ExpireEmailDelivery(id int, reason string) error {
@@ -385,6 +443,7 @@ func ExpireEmailDelivery(id int, reason string) error {
 			"subject":           "",
 			"body":              "",
 			"last_error":        reason,
+			"state":             EmailDeliveryStatusExpired,
 			"locked_until":      int64(0),
 			"next_attempt_time": int64(0),
 			"dead_letter_time":  int64(0),
@@ -407,6 +466,7 @@ func RetryEmailDelivery(id int) error {
 		Updates(map[string]any{
 			"attempts":          0,
 			"last_error":        "",
+			"state":             EmailDeliveryStatusQueued,
 			"next_attempt_time": now,
 			"locked_until":      int64(0),
 			"dead_letter_time":  int64(0),
@@ -427,6 +487,7 @@ func RetryFailedEmailDelivery(id int) error {
 		Updates(map[string]any{
 			"attempts":          0,
 			"last_error":        "",
+			"state":             EmailDeliveryStatusQueued,
 			"next_attempt_time": now,
 			"locked_until":      int64(0),
 			"dead_letter_time":  int64(0),
@@ -448,6 +509,7 @@ func DeferEmailDelivery(id int, nextAttemptTime int64) error {
 	return DB.Model(&EmailDelivery{}).
 		Where("id = ? AND delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0", id).
 		Updates(map[string]any{
+			"state":             EmailDeliveryStatusQueued,
 			"next_attempt_time": nextAttemptTime,
 			"locked_until":      int64(0),
 			"updated_time":      common.GetTimestamp(),
@@ -473,13 +535,15 @@ func ListEmailDeliveries(options EmailDeliveryQueryOptions, pageInfo *common.Pag
 	now := common.GetTimestamp()
 	switch strings.TrimSpace(options.Status) {
 	case EmailDeliveryStatusQueued:
-		query = query.Where("delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0 AND attempts = 0 AND locked_until <= ?", now)
+		query = query.Where("state = ? AND locked_until <= ?", EmailDeliveryStatusQueued, now)
 	case EmailDeliveryStatusSending:
-		query = query.Where("delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0 AND locked_until > ?", now)
+		query = query.Where("state = ? AND locked_until > ?", EmailDeliveryStatusSending, now)
 	case EmailDeliveryStatusRetrying:
-		query = query.Where("delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0 AND attempts > 0 AND locked_until <= ?", now)
+		query = query.Where("state = ? AND locked_until <= ?", EmailDeliveryStatusRetrying, now)
+	case EmailDeliveryStatusAwaitingReceipt, EmailDeliveryStatusAcceptedUntracked:
+		query = query.Where("state = ?", strings.TrimSpace(options.Status))
 	case EmailDeliveryStatusDelivered:
-		query = query.Where("delivered_time > 0")
+		query = query.Where("state = ? OR (state = '' AND delivered_time > 0)", EmailDeliveryStatusDelivered)
 	case EmailDeliveryStatusFailed:
 		query = query.Where("delivered_time = 0 AND dead_letter_time > 0")
 	case EmailDeliveryStatusExpired:
@@ -506,13 +570,46 @@ func ListEmailDeliveries(options EmailDeliveryQueryOptions, pageInfo *common.Pag
 		return nil, 0, err
 	}
 	rows := []*EmailDeliveryListItem{}
-	if err := query.Select("id, category, smtp_profile, smtp_channel, message_id, related_id, user_id, invoice_delivery_id, recipient, priority, attempts, last_error, next_attempt_time, locked_until, expires_time, delivered_time, dead_letter_time, expired_time, created_time, updated_time").Order("id DESC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&rows).Error; err != nil {
+	if err := query.Select("id, category, smtp_profile, smtp_channel, message_id, related_id, user_id, invoice_delivery_id, recipient, priority, state, sender_account_id, current_attempt_id, attempts, last_error, failure_type, next_attempt_time, locked_until, expires_time, accepted_time, finalized_time, receipt_deadline, delivered_time, dead_letter_time, expired_time, created_time, updated_time").Order("id DESC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	for _, row := range rows {
 		row.Status = emailDeliveryStatus(row, now)
 	}
+	if err := decorateEmailDeliverySenderNames(rows); err != nil {
+		return nil, 0, err
+	}
 	return rows, total, nil
+}
+
+func decorateEmailDeliverySenderNames(rows []*EmailDeliveryListItem) error {
+	ids := make([]int, 0, len(rows))
+	seen := map[int]struct{}{}
+	for _, row := range rows {
+		if row.SenderAccountId <= 0 {
+			continue
+		}
+		if _, exists := seen[row.SenderAccountId]; exists {
+			continue
+		}
+		seen[row.SenderAccountId] = struct{}{}
+		ids = append(ids, row.SenderAccountId)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	accounts := []EmailSenderAccount{}
+	if err := DB.Select("id", "name").Where("id IN ?", ids).Find(&accounts).Error; err != nil {
+		return err
+	}
+	names := make(map[int]string, len(accounts))
+	for _, account := range accounts {
+		names[account.Id] = account.Name
+	}
+	for _, row := range rows {
+		row.SenderAccountName = names[row.SenderAccountId]
+	}
+	return nil
 }
 
 func RetryEmailDeliveries(ids []int) (int64, error) {
@@ -525,6 +622,7 @@ func RetryEmailDeliveries(ids []int) (int64, error) {
 		Updates(map[string]any{
 			"attempts":          0,
 			"last_error":        "",
+			"state":             EmailDeliveryStatusQueued,
 			"next_attempt_time": now,
 			"locked_until":      int64(0),
 			"dead_letter_time":  int64(0),
@@ -544,9 +642,12 @@ func GetEmailDeliveryStats(now int64, dayStart int64) (EmailDeliveryStats, error
 		where       string
 		args        []any
 	}{
-		{&stats.Queued, "delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0 AND attempts = 0 AND locked_until <= ?", []any{now}},
-		{&stats.Sending, "delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0 AND locked_until > ?", []any{now}},
-		{&stats.Retrying, "delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0 AND attempts > 0 AND locked_until <= ?", []any{now}},
+		{&stats.Queued, "state = ? AND locked_until <= ?", []any{EmailDeliveryStatusQueued, now}},
+		{&stats.Sending, "state = ? AND locked_until > ?", []any{EmailDeliveryStatusSending, now}},
+		{&stats.Retrying, "state = ? AND locked_until <= ?", []any{EmailDeliveryStatusRetrying, now}},
+		{&stats.AwaitingReceipt, "state = ?", []any{EmailDeliveryStatusAwaitingReceipt}},
+		{&stats.AcceptedUntracked24h, "state = ? AND accepted_time >= ?", []any{EmailDeliveryStatusAcceptedUntracked, now - 86400}},
+		{&stats.FinalDelivered24h, "state = ? AND finalized_time >= ?", []any{EmailDeliveryStatusDelivered, now - 86400}},
 		{&stats.Failed, "delivered_time = 0 AND dead_letter_time > 0", nil},
 		{&stats.Delivered24h, "delivered_time >= ?", []any{now - 86400}},
 		{&stats.Failed24h, "dead_letter_time >= ?", []any{now - 86400}},
@@ -589,11 +690,39 @@ func CleanupEmailDeliveries(deliveredBefore int64, terminalBefore int64, limit i
 	if err != nil || len(ids) == 0 {
 		return 0, err
 	}
-	result := DB.Where("id IN ?", ids).Delete(&EmailDelivery{})
-	return result.RowsAffected, result.Error
+	deleted := int64(0)
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("delivery_id IN ?", ids).Delete(&EmailDeliveryAttempt{}).Error; err != nil {
+			return err
+		}
+		result := tx.Where("id IN ?", ids).Delete(&EmailDelivery{})
+		deleted = result.RowsAffected
+		return result.Error
+	})
+	return deleted, err
+}
+
+func CleanupEmailDeliveryMetadata(before int64) error {
+	if before <= 0 {
+		return gorm.ErrInvalidData
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("received_time < ?", before).Delete(&EmailReceiptEvent{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("created_time < ? AND (delivery_id = 0 OR NOT EXISTS (?))", before,
+			tx.Model(&EmailDelivery{}).Select("1").Where("email_deliveries.id = email_delivery_attempts.delivery_id"),
+		).Delete(&EmailDeliveryAttempt{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("updated_time < ?", before).Delete(&EmailDeliveryThrottle{}).Error
+	})
 }
 
 func emailDeliveryStatus(row *EmailDeliveryListItem, now int64) string {
+	if row.State == EmailDeliveryStatusAwaitingReceipt || row.State == EmailDeliveryStatusAcceptedUntracked || row.State == EmailDeliveryStatusDelivered || row.State == EmailDeliveryStatusFailed || row.State == EmailDeliveryStatusExpired {
+		return row.State
+	}
 	if row.DeliveredTime > 0 {
 		return EmailDeliveryStatusDelivered
 	}
@@ -610,6 +739,31 @@ func emailDeliveryStatus(row *EmailDeliveryListItem, now int64) string {
 		return EmailDeliveryStatusRetrying
 	}
 	return EmailDeliveryStatusQueued
+}
+
+func backfillEmailDeliveryStates() error {
+	if err := DB.Model(&EmailDelivery{}).
+		Where("delivered_time > 0 AND accepted_time = 0").
+		Updates(map[string]any{
+			"state":          EmailDeliveryStatusAcceptedUntracked,
+			"accepted_time":  gorm.Expr("delivered_time"),
+			"finalized_time": gorm.Expr("delivered_time"),
+		}).Error; err != nil {
+		return err
+	}
+	if err := DB.Model(&EmailDelivery{}).
+		Where("expired_time > 0 AND state <> ?", EmailDeliveryStatusExpired).
+		Update("state", EmailDeliveryStatusExpired).Error; err != nil {
+		return err
+	}
+	if err := DB.Model(&EmailDelivery{}).
+		Where("dead_letter_time > 0 AND expired_time = 0 AND state <> ?", EmailDeliveryStatusFailed).
+		Update("state", EmailDeliveryStatusFailed).Error; err != nil {
+		return err
+	}
+	return DB.Model(&EmailDelivery{}).
+		Where("delivered_time = 0 AND dead_letter_time = 0 AND expired_time = 0 AND attempts > 0 AND state = ?", EmailDeliveryStatusQueued).
+		Update("state", EmailDeliveryStatusRetrying).Error
 }
 
 func maskEmailAddress(address string) string {

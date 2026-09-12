@@ -221,6 +221,22 @@ func TestInvoiceRequestDeductsConfiguredTaxFeeAtomically(t *testing.T) {
 	assert.Equal(t, quotaBefore-request.TaxFeeQuota, stored.Quota)
 }
 
+func TestCalculateInvoiceTaxFeeSupportsWalletQuotaAboveInt32(t *testing.T) {
+	originalQuotaPerUnit := common.QuotaPerUnit
+	originalExchangeRate := operation_setting.USDExchangeRate
+	common.QuotaPerUnit = 500_000
+	operation_setting.USDExchangeRate = 1
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+		operation_setting.USDExchangeRate = originalExchangeRate
+	})
+
+	feeCents, feeQuota, err := CalculateInvoiceTaxFee(20_000_000, 300)
+	require.NoError(t, err)
+	assert.Equal(t, int64(600_000), feeCents)
+	assert.Equal(t, 3_000_000_000, feeQuota)
+}
+
 func TestInvoiceRequestRejectsInsufficientTaxFeeBalanceWithoutCreatingRequest(t *testing.T) {
 	truncateTables(t)
 	originalQuotaPerUnit := common.QuotaPerUnit

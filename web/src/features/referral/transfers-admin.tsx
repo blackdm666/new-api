@@ -162,6 +162,7 @@ export function AffiliateTransferTable(props: {
                     <AdminUserIdentity
                       id={item.user_id}
                       username={item.username}
+                      remark={item.remark}
                     />
                   </TableCell>
                   <TableCell className='text-right font-semibold tabular-nums'>

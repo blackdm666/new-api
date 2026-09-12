@@ -52,11 +52,14 @@ import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_auth
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
 import { Route as AuthenticatedReferralIndexRouteImport } from './routes/_authenticated/referral/index'
+import { Route as AuthenticatedSecurityIndexRouteImport } from './routes/_authenticated/security/index'
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
 import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_authenticated/system-settings/index'
+import { Route as AuthenticatedTaskPluginsIndexRouteImport } from './routes/_authenticated/task-plugins/index'
 import { Route as AuthenticatedUsageLogsIndexRouteImport } from './routes/_authenticated/usage-logs/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
+import { Route as AuthenticatedUsageLogsAuditRouteImport } from './routes/_authenticated/usage-logs/audit'
 import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authenticated/users/index'
 import { Route as AuthenticatedWalletIndexRouteImport } from './routes/_authenticated/wallet/index'
 import { Route as PricingModelIdIndexRouteImport } from './routes/pricing/$modelId/index'
@@ -304,6 +307,12 @@ const AuthenticatedReferralIndexRoute =
     path: '/referral/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedSecurityIndexRoute =
+  AuthenticatedSecurityIndexRouteImport.update({
+    id: '/security/',
+    path: '/security/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSubscriptionsIndexRoute =
   AuthenticatedSubscriptionsIndexRouteImport.update({
     id: '/subscriptions/',
@@ -322,6 +331,12 @@ const AuthenticatedSystemSettingsIndexRoute =
     path: '/',
     getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
   } as any)
+const AuthenticatedTaskPluginsIndexRoute =
+  AuthenticatedTaskPluginsIndexRouteImport.update({
+    id: '/task-plugins/',
+    path: '/task-plugins/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedUsageLogsIndexRoute =
   AuthenticatedUsageLogsIndexRouteImport.update({
     id: '/usage-logs/',
@@ -332,6 +347,12 @@ const AuthenticatedUsageLogsSectionRoute =
   AuthenticatedUsageLogsSectionRouteImport.update({
     id: '/usage-logs/$section',
     path: '/usage-logs/$section',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedUsageLogsAuditRoute =
+  AuthenticatedUsageLogsAuditRouteImport.update({
+    id: '/usage-logs/audit',
+    path: '/usage-logs/audit',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedUsersIndexRoute = AuthenticatedUsersIndexRouteImport.update({
@@ -466,6 +487,7 @@ export interface FileRoutesByFullPath {
   '/invoices/$id': typeof AuthenticatedInvoicesIdRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/admin-affiliates/': typeof AuthenticatedAdminAffiliatesIndexRoute
   '/admin-invoices/': typeof AuthenticatedAdminInvoicesIndexRoute
   '/admin-marketing/': typeof AuthenticatedAdminMarketingIndexRoute
@@ -478,9 +500,11 @@ export interface FileRoutesByFullPath {
   '/profile/': typeof AuthenticatedProfileIndexRoute
   '/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/referral/': typeof AuthenticatedReferralIndexRoute
+  '/security/': typeof AuthenticatedSecurityIndexRoute
   '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
+  '/task-plugins/': typeof AuthenticatedTaskPluginsIndexRoute
   '/usage-logs/': typeof AuthenticatedUsageLogsIndexRoute
   '/users/': typeof AuthenticatedUsersIndexRoute
   '/wallet/': typeof AuthenticatedWalletIndexRoute
@@ -530,6 +554,7 @@ export interface FileRoutesByTo {
   '/invoices/$id': typeof AuthenticatedInvoicesIdRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/admin-affiliates': typeof AuthenticatedAdminAffiliatesIndexRoute
   '/admin-invoices': typeof AuthenticatedAdminInvoicesIndexRoute
   '/admin-marketing': typeof AuthenticatedAdminMarketingIndexRoute
@@ -542,9 +567,11 @@ export interface FileRoutesByTo {
   '/profile': typeof AuthenticatedProfileIndexRoute
   '/redemption-codes': typeof AuthenticatedRedemptionCodesIndexRoute
   '/referral': typeof AuthenticatedReferralIndexRoute
+  '/security': typeof AuthenticatedSecurityIndexRoute
   '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings': typeof AuthenticatedSystemSettingsIndexRoute
+  '/task-plugins': typeof AuthenticatedTaskPluginsIndexRoute
   '/usage-logs': typeof AuthenticatedUsageLogsIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
   '/wallet': typeof AuthenticatedWalletIndexRoute
@@ -598,6 +625,7 @@ export interface FileRoutesById {
   '/_authenticated/invoices/$id': typeof AuthenticatedInvoicesIdRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/_authenticated/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/_authenticated/admin-affiliates/': typeof AuthenticatedAdminAffiliatesIndexRoute
   '/_authenticated/admin-invoices/': typeof AuthenticatedAdminInvoicesIndexRoute
   '/_authenticated/admin-marketing/': typeof AuthenticatedAdminMarketingIndexRoute
@@ -610,9 +638,11 @@ export interface FileRoutesById {
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
   '/_authenticated/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/_authenticated/referral/': typeof AuthenticatedReferralIndexRoute
+  '/_authenticated/security/': typeof AuthenticatedSecurityIndexRoute
   '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/_authenticated/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
+  '/_authenticated/task-plugins/': typeof AuthenticatedTaskPluginsIndexRoute
   '/_authenticated/usage-logs/': typeof AuthenticatedUsageLogsIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
   '/_authenticated/wallet/': typeof AuthenticatedWalletIndexRoute
@@ -665,6 +695,7 @@ export interface FileRouteTypes {
     | '/invoices/$id'
     | '/models/$section'
     | '/usage-logs/$section'
+    | '/usage-logs/audit'
     | '/admin-affiliates/'
     | '/admin-invoices/'
     | '/admin-marketing/'
@@ -677,9 +708,11 @@ export interface FileRouteTypes {
     | '/profile/'
     | '/redemption-codes/'
     | '/referral/'
+    | '/security/'
     | '/subscriptions/'
     | '/system-info/'
     | '/system-settings/'
+    | '/task-plugins/'
     | '/usage-logs/'
     | '/users/'
     | '/wallet/'
@@ -729,6 +762,7 @@ export interface FileRouteTypes {
     | '/invoices/$id'
     | '/models/$section'
     | '/usage-logs/$section'
+    | '/usage-logs/audit'
     | '/admin-affiliates'
     | '/admin-invoices'
     | '/admin-marketing'
@@ -741,9 +775,11 @@ export interface FileRouteTypes {
     | '/profile'
     | '/redemption-codes'
     | '/referral'
+    | '/security'
     | '/subscriptions'
     | '/system-info'
     | '/system-settings'
+    | '/task-plugins'
     | '/usage-logs'
     | '/users'
     | '/wallet'
@@ -796,6 +832,7 @@ export interface FileRouteTypes {
     | '/_authenticated/invoices/$id'
     | '/_authenticated/models/$section'
     | '/_authenticated/usage-logs/$section'
+    | '/_authenticated/usage-logs/audit'
     | '/_authenticated/admin-affiliates/'
     | '/_authenticated/admin-invoices/'
     | '/_authenticated/admin-marketing/'
@@ -808,9 +845,11 @@ export interface FileRouteTypes {
     | '/_authenticated/profile/'
     | '/_authenticated/redemption-codes/'
     | '/_authenticated/referral/'
+    | '/_authenticated/security/'
     | '/_authenticated/subscriptions/'
     | '/_authenticated/system-info/'
     | '/_authenticated/system-settings/'
+    | '/_authenticated/task-plugins/'
     | '/_authenticated/usage-logs/'
     | '/_authenticated/users/'
     | '/_authenticated/wallet/'
@@ -1153,6 +1192,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedReferralIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/security/': {
+      id: '/_authenticated/security/'
+      path: '/security'
+      fullPath: '/security/'
+      preLoaderRoute: typeof AuthenticatedSecurityIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/subscriptions/': {
       id: '/_authenticated/subscriptions/'
       path: '/subscriptions'
@@ -1174,6 +1220,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSystemSettingsIndexRouteImport
       parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
     }
+    '/_authenticated/task-plugins/': {
+      id: '/_authenticated/task-plugins/'
+      path: '/task-plugins'
+      fullPath: '/task-plugins/'
+      preLoaderRoute: typeof AuthenticatedTaskPluginsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/usage-logs/': {
       id: '/_authenticated/usage-logs/'
       path: '/usage-logs'
@@ -1186,6 +1239,13 @@ declare module '@tanstack/react-router' {
       path: '/usage-logs/$section'
       fullPath: '/usage-logs/$section'
       preLoaderRoute: typeof AuthenticatedUsageLogsSectionRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/usage-logs/audit': {
+      id: '/_authenticated/usage-logs/audit'
+      path: '/usage-logs/audit'
+      fullPath: '/usage-logs/audit'
+      preLoaderRoute: typeof AuthenticatedUsageLogsAuditRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/users/': {
@@ -1403,6 +1463,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedInvoicesIdRoute: typeof AuthenticatedInvoicesIdRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
+  AuthenticatedUsageLogsAuditRoute: typeof AuthenticatedUsageLogsAuditRoute
   AuthenticatedAdminAffiliatesIndexRoute: typeof AuthenticatedAdminAffiliatesIndexRoute
   AuthenticatedAdminInvoicesIndexRoute: typeof AuthenticatedAdminInvoicesIndexRoute
   AuthenticatedAdminMarketingIndexRoute: typeof AuthenticatedAdminMarketingIndexRoute
@@ -1415,8 +1476,10 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
   AuthenticatedRedemptionCodesIndexRoute: typeof AuthenticatedRedemptionCodesIndexRoute
   AuthenticatedReferralIndexRoute: typeof AuthenticatedReferralIndexRoute
+  AuthenticatedSecurityIndexRoute: typeof AuthenticatedSecurityIndexRoute
   AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
+  AuthenticatedTaskPluginsIndexRoute: typeof AuthenticatedTaskPluginsIndexRoute
   AuthenticatedUsageLogsIndexRoute: typeof AuthenticatedUsageLogsIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
   AuthenticatedWalletIndexRoute: typeof AuthenticatedWalletIndexRoute
@@ -1433,6 +1496,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedInvoicesIdRoute: AuthenticatedInvoicesIdRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
+  AuthenticatedUsageLogsAuditRoute: AuthenticatedUsageLogsAuditRoute,
   AuthenticatedAdminAffiliatesIndexRoute:
     AuthenticatedAdminAffiliatesIndexRoute,
   AuthenticatedAdminInvoicesIndexRoute: AuthenticatedAdminInvoicesIndexRoute,
@@ -1447,8 +1511,10 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedRedemptionCodesIndexRoute:
     AuthenticatedRedemptionCodesIndexRoute,
   AuthenticatedReferralIndexRoute: AuthenticatedReferralIndexRoute,
+  AuthenticatedSecurityIndexRoute: AuthenticatedSecurityIndexRoute,
   AuthenticatedSubscriptionsIndexRoute: AuthenticatedSubscriptionsIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,
+  AuthenticatedTaskPluginsIndexRoute: AuthenticatedTaskPluginsIndexRoute,
   AuthenticatedUsageLogsIndexRoute: AuthenticatedUsageLogsIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,
   AuthenticatedWalletIndexRoute: AuthenticatedWalletIndexRoute,

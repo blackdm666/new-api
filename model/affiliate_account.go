@@ -26,7 +26,7 @@ func affiliateCentsToQuota(cents int64) (int, error) {
 	if cents <= 0 || common.QuotaPerUnit <= 0 {
 		return 0, nil
 	}
-	return common.QuotaFromDecimalStrict(
+	return common.WalletQuotaFromDecimalStrict(
 		decimal.NewFromInt(cents).
 			Div(decimal.NewFromInt(100)).
 			Mul(decimal.NewFromFloat(common.QuotaPerUnit)),

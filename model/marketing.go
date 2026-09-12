@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 
@@ -23,6 +24,7 @@ const (
 	MarketingCampaignStatusPaused    = "paused"
 	MarketingCampaignStatusCompleted = "completed"
 	MarketingCampaignStatusCancelled = "cancelled"
+	MarketingCampaignStatusArchived  = "archived"
 
 	MarketingRecipientStatusPending       = "pending"
 	MarketingRecipientStatusQueued        = "queued"
@@ -69,14 +71,14 @@ type MarketingLocalizedContent struct {
 }
 
 type MarketingAutomationTriggerConfig struct {
-	MatchDays             int `json:"match_days,omitempty"`
-	RegistrationWaitHours int `json:"registration_wait_hours,omitempty"`
-	ActiveWithinDays      int `json:"active_within_days,omitempty"`
-	MinRequestCount       int `json:"min_request_count,omitempty"`
-	MinTopUpCount         int `json:"min_topup_count,omitempty"`
-	MaxSendsPerUser       int `json:"max_sends_per_user,omitempty"`
-	RepeatIntervalDays    int `json:"repeat_interval_days,omitempty"`
-	ExpiryHours           int `json:"expiry_hours,omitempty"`
+	MatchDays             int     `json:"match_days,omitempty"`
+	RegistrationWaitHours float64 `json:"registration_wait_hours,omitempty"`
+	ActiveWithinDays      int     `json:"active_within_days,omitempty"`
+	MinRequestCount       int     `json:"min_request_count,omitempty"`
+	MinTopUpCount         int     `json:"min_topup_count,omitempty"`
+	MaxSendsPerUser       int     `json:"max_sends_per_user,omitempty"`
+	RepeatIntervalDays    int     `json:"repeat_interval_days,omitempty"`
+	ExpiryHours           int     `json:"expiry_hours,omitempty"`
 }
 
 type MarketingAudienceRule struct {
@@ -314,7 +316,7 @@ func NormalizeMarketingAutomationTriggerConfig(scene string, raw string) (string
 	}
 	switch scene {
 	case MarketingSceneRegistration:
-		if config.RegistrationWaitHours < 1 || config.RegistrationWaitHours > 8760 || config.MaxSendsPerUser < 1 || config.MaxSendsPerUser > 10 || config.RepeatIntervalDays < 1 || config.RepeatIntervalDays > 3650 {
+		if config.RegistrationWaitHours < 0.5 || config.RegistrationWaitHours > 8760 || math.Mod(config.RegistrationWaitHours*2, 1) != 0 || config.MaxSendsPerUser < 1 || config.MaxSendsPerUser > 10 || config.RepeatIntervalDays < 1 || config.RepeatIntervalDays > 3650 {
 			return "", MarketingAutomationTriggerConfig{}, ErrMarketingInvalid
 		}
 		config.MatchDays = 0
@@ -555,10 +557,11 @@ func GetMarketingCampaign(id int) (*MarketingCampaign, error) {
 func ListMarketingCampaigns(pageInfo *common.PageInfo) ([]*MarketingCampaign, int64, error) {
 	rows := []*MarketingCampaign{}
 	var total int64
-	if err := DB.Model(&MarketingCampaign{}).Count(&total).Error; err != nil {
+	query := DB.Model(&MarketingCampaign{}).Where("status <> ?", MarketingCampaignStatusArchived)
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if err := DB.Order("id DESC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&rows).Error; err != nil {
+	if err := query.Order("id DESC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	for _, row := range rows {
@@ -570,6 +573,19 @@ func ListMarketingCampaigns(pageInfo *common.PageInfo) ([]*MarketingCampaign, in
 		_ = DB.Model(&MarketingEvent{}).Where("campaign_id = ? AND event_type = ?", row.Id, MarketingEventConversion).Select("COALESCE(SUM(amount_cents), 0)").Scan(&row.ConvertedCents).Error
 	}
 	return rows, total, nil
+}
+
+func ArchiveMarketingCampaign(id int) error {
+	result := DB.Model(&MarketingCampaign{}).
+		Where("id = ? AND status IN ?", id, []string{MarketingCampaignStatusCompleted, MarketingCampaignStatusCancelled}).
+		Updates(map[string]any{"status": MarketingCampaignStatusArchived, "updated_time": common.GetTimestamp()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrMarketingInvalid
+	}
+	return nil
 }
 
 func SetMarketingCampaignStatus(id int, from []string, status string, reason string) error {
@@ -853,6 +869,15 @@ func DeleteMarketingSuppression(id int) error {
 	return DB.Delete(&MarketingSuppression{}, id).Error
 }
 
+func DeleteMarketingSuppressionByEmailAndReasons(email string, reasons []string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" || len(reasons) == 0 {
+		return ErrMarketingInvalid
+	}
+	return DB.Where("email_hash = ? AND reason IN ?", hashMarketingValue(email), reasons).
+		Delete(&MarketingSuppression{}).Error
+}
+
 func ListMarketingSuppressions(pageInfo *common.PageInfo) ([]*MarketingSuppression, int64, error) {
 	rows := []*MarketingSuppression{}
 	var total int64
@@ -1095,7 +1120,7 @@ func AttributeMarketingConversion(topUp *TopUp) error {
 
 func GetMarketingOverview() (MarketingOverview, error) {
 	result := MarketingOverview{}
-	if err := DB.Model(&MarketingCampaign{}).Count(&result.Campaigns).Error; err != nil {
+	if err := DB.Model(&MarketingCampaign{}).Where("status <> ?", MarketingCampaignStatusArchived).Count(&result.Campaigns).Error; err != nil {
 		return result, err
 	}
 	counts := []struct {

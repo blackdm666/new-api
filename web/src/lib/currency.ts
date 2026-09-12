@@ -130,6 +130,12 @@ type DisplayMeta =
       quotaPerUnit: number
     }
 
+export interface BillingCurrencyConversion {
+  symbol: string
+  label: string
+  exchangeRate: number
+}
+
 const DEFAULT_FORMAT_OPTIONS: ResolvedCurrencyFormatOptions = {
   digitsLarge: 2,
   digitsSmall: 4,
@@ -226,6 +232,51 @@ function getBillingDisplayMeta(config: CurrencyConfig): DisplayMeta {
     }
   }
   return meta
+}
+
+/**
+ * Resolve the real-currency unit used by billing and model-pricing editors.
+ * Token-only quota display intentionally falls back to USD because ModelPrice
+ * and ratio-derived prices are monetary values, not quota-token amounts.
+ */
+export function resolveBillingCurrencyConversion(
+  config: CurrencyConfig
+): BillingCurrencyConversion {
+  const meta = getBillingDisplayMeta({
+    ...DEFAULT_CURRENCY_CONFIG,
+    ...config,
+  })
+  if (meta.kind === 'custom') {
+    const symbol =
+      meta.symbol.trim() || DEFAULT_CURRENCY_CONFIG.customCurrencySymbol
+    return {
+      symbol,
+      label: symbol,
+      exchangeRate: meta.exchangeRate > 0 ? meta.exchangeRate : 1,
+    }
+  }
+  if (meta.kind === 'currency') {
+    return {
+      symbol: meta.symbol,
+      label: meta.currencyCode,
+      exchangeRate: meta.exchangeRate > 0 ? meta.exchangeRate : 1,
+    }
+  }
+  return { symbol: '$', label: 'USD', exchangeRate: 1 }
+}
+
+export function convertUSDToBillingCurrency(
+  amountUSD: number,
+  conversion: BillingCurrencyConversion
+): number {
+  return amountUSD * conversion.exchangeRate
+}
+
+export function convertBillingCurrencyToUSD(
+  amount: number,
+  conversion: BillingCurrencyConversion
+): number {
+  return amount / conversion.exchangeRate
 }
 
 function mergeOptions(

@@ -57,11 +57,21 @@ func GetEmailDeliveryStats(c *gin.Context) {
 	primarySMTPConfigured := strings.TrimSpace(common.SMTPServer) != "" && (strings.TrimSpace(common.SMTPFrom) != "" || strings.TrimSpace(common.SMTPAccount) != "")
 	backupSMTPConfigured := common.SMTPBackupEnabled && strings.TrimSpace(common.SMTPBackupServer) != "" && (strings.TrimSpace(common.SMTPBackupFrom) != "" || strings.TrimSpace(common.SMTPBackupAccount) != "")
 	securitySMTPConfigured := common.SMTPSecurityEnabled && strings.TrimSpace(common.SMTPSecurityServer) != "" && (strings.TrimSpace(common.SMTPSecurityFrom) != "" || strings.TrimSpace(common.SMTPSecurityAccount) != "")
-	marketingSMTPConfigured := common.SMTPMarketingEnabled && strings.TrimSpace(common.SMTPMarketingServer) != "" && (strings.TrimSpace(common.SMTPMarketingFrom) != "" || strings.TrimSpace(common.SMTPMarketingAccount) != "")
+	marketingAccounts, err := model.ListUsableMarketingEmailSenderAccounts(now.Unix())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	receiptEndpoint, err := model.GetEmailReceiptEndpoint()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	marketingSMTPConfigured := len(marketingAccounts) > 0 && receiptEndpoint.Enabled && receiptEndpoint.TokenConfigured && receiptEndpoint.LastVerifiedTime > 0
 	common.ApiSuccess(c, gin.H{
 		"queue":                     stats,
 		"categories":                categories,
-		"smtp_configured":           primarySMTPConfigured || backupSMTPConfigured,
+		"smtp_configured":           primarySMTPConfigured || backupSMTPConfigured || securitySMTPConfigured || marketingSMTPConfigured,
 		"smtp_primary_configured":   primarySMTPConfigured,
 		"smtp_backup_configured":    backupSMTPConfigured,
 		"smtp_security_configured":  securitySMTPConfigured,

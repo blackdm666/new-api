@@ -101,7 +101,7 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	}
 	creditedMoney := GetChargedAmount(float64(req.Amount), *user)
 	creditedQuotaDecimal := decimal.NewFromFloat(creditedMoney).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
-	creditedQuota, quotaErr := common.QuotaFromDecimalStrict(creditedQuotaDecimal)
+	creditedQuota, quotaErr := common.WalletQuotaFromDecimalStrict(creditedQuotaDecimal)
 	if quotaErr != nil || creditedQuota <= 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "无效的充值额度"})
 		return

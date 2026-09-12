@@ -50,7 +50,6 @@ import { runTurnstileProtectedAuthAttempt } from '@/features/auth/lib/turnstile-
 import { beginPasskeyLogin, finishPasskeyLogin } from '@/features/auth/passkey'
 import type { AuthFormProps } from '@/features/auth/types'
 import { useStatus } from '@/hooks/use-status'
-import { isAuthBundle } from '@/lib/api'
 import {
   buildAssertionResult,
   prepareCredentialRequestOptions,
@@ -58,7 +57,6 @@ import {
 } from '@/lib/passkey'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
-import { useAuthStore } from '@/stores/auth-store'
 
 export function UserAuthForm({
   className,
@@ -85,18 +83,19 @@ export function UserAuthForm({
     (status?.password_login_enabled ??
       status?.data?.password_login_enabled ??
       true) !== false
+  const passwordLoginEncryptionEnabled =
+    (status?.password_login_encryption_enabled ??
+      status?.data?.password_login_encryption_enabled ??
+      false) === true
   const {
     isTurnstileEnabled,
-    turnstileSiteKey,
+    turnstileConfig,
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
     isStatusReady,
   } = useTurnstile()
-  const { handleLoginSuccess, redirectTo2FA } = useAuthRedirect()
-  const setPending2FAFlowToken = useAuthStore(
-    (state) => state.auth.setPending2FAFlowToken
-  )
+  const { handleLoginResult } = useAuthRedirect()
 
   const hasUserAgreement = Boolean(status?.user_agreement_enabled)
   const hasPrivacyPolicy = Boolean(status?.privacy_policy_enabled)
@@ -183,24 +182,14 @@ export function UserAuthForm({
             username: data.username,
             password: data.password,
             turnstile: submittedTurnstileToken,
+            passwordEncryptionEnabled: passwordLoginEncryptionEnabled,
           })
 
           if (!res.success) return false
-
-          if (res.data && 'require_2fa' in res.data && res.data.require_2fa) {
-            if (!res.data.flow_token) {
-              throw new Error(t('Login flow expired. Please sign in again.'))
-            }
-            setPending2FAFlowToken(res.data.flow_token)
-            redirectTo2FA()
-            return true
+          form.setValue('password', '')
+          if (await handleLoginResult(res.data, redirectTo)) {
+            toast.success(t('Welcome back!'))
           }
-
-          if (!isAuthBundle(res.data)) {
-            throw new Error(t('Login failed'))
-          }
-          await handleLoginSuccess(res.data, redirectTo)
-          toast.success(t('Welcome back!'))
           return true
         },
         isTurnstileEnabled ? resetTurnstile : undefined
@@ -240,10 +229,11 @@ export function UserAuthForm({
     setIsWeChatSubmitting(true)
     try {
       const res = await wechatLoginByCode(wechatCode, turnstilePayload)
-      if (res?.success && isAuthBundle(res.data)) {
-        await handleLoginSuccess(res.data, redirectTo)
-        toast.success(t('Signed in via WeChat'))
+      if (res?.success) {
         handleWeChatDialogChange(false)
+        if (await handleLoginResult(res.data, redirectTo)) {
+          toast.success(t('Signed in via WeChat'))
+        }
       } else {
         if (getServerErrorMessageKey(res)) return
         toast.error(res?.message || loginFailedMessage)
@@ -276,15 +266,8 @@ export function UserAuthForm({
     setIsPasskeyLoading(true)
     try {
       const begin = await beginPasskeyLogin()
-      if (!begin.success) {
-        if (getServerErrorMessageKey(begin)) return
-        throw new Error(begin.message || t('Failed to start Passkey login'))
-      }
-
-      const publicKey = prepareCredentialRequestOptions(
-        begin.data?.options ?? begin.data
-      )
-      const flowToken = begin.data?.flow_token
+      const publicKey = prepareCredentialRequestOptions(begin.options ?? begin)
+      const flowToken = begin.flow_token
       if (!flowToken) {
         throw new Error(t('Login flow expired. Please sign in again.'))
       }
@@ -309,12 +292,9 @@ export function UserAuthForm({
         throw new Error(finish.message || t('Failed to complete Passkey login'))
       }
 
-      if (!isAuthBundle(finish.data)) {
-        throw new Error(t('Missing user data from Passkey login response'))
+      if (await handleLoginResult(finish.data, redirectTo)) {
+        toast.success(t('Signed in with Passkey'))
       }
-
-      await handleLoginSuccess(finish.data, redirectTo)
-      toast.success(t('Signed in with Passkey'))
     } catch (error: unknown) {
       if (getServerErrorMessageKey(error)) return
       if (error instanceof DOMException && error.name === 'NotAllowedError') {
@@ -431,7 +411,7 @@ export function UserAuthForm({
           <div className='mt-2'>
             <Turnstile
               key={turnstileWidgetKey}
-              siteKey={turnstileSiteKey}
+              {...turnstileConfig}
               onVerify={setTurnstileToken}
               onExpire={clearTurnstileToken}
             />

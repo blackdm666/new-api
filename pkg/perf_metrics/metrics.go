@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
@@ -26,6 +27,9 @@ func Init() {
 
 func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64) {
 	if info == nil {
+		return
+	}
+	if relayTargetsOnlyAsyncVideo(info) {
 		return
 	}
 	now := time.Now()
@@ -54,6 +58,81 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 	})
 }
 
+// RecordTaskTerminalSample records one terminal sample for an asynchronous
+// video task. The caller must invoke it only after winning the terminal status
+// transition, so overlapping pollers cannot count the same task twice.
+func RecordTaskTerminalSample(task *model.Task) {
+	sample, ok := taskTerminalSample(task, time.Now().Unix())
+	if !ok {
+		return
+	}
+	Record(sample)
+}
+
+func taskTerminalSample(task *model.Task, now int64) (Sample, bool) {
+	if task == nil || task.Platform == constant.TaskPlatformSuno || task.Platform == constant.TaskPlatformMidjourney {
+		return Sample{}, false
+	}
+	if task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure {
+		return Sample{}, false
+	}
+
+	modelName := task.Properties.OriginModelName
+	if modelName == "" && task.PrivateData.BillingContext != nil {
+		modelName = task.PrivateData.BillingContext.OriginModelName
+	}
+	if modelName == "" {
+		modelName = task.Properties.UpstreamModelName
+	}
+	if modelName == "" {
+		return Sample{}, false
+	}
+
+	startedAt := task.SubmitTime
+	if startedAt <= 0 {
+		startedAt = task.CreatedAt
+	}
+	finishedAt := task.FinishTime
+	if finishedAt <= 0 {
+		finishedAt = now
+	}
+	latencyMs := int64(0)
+	if startedAt > 0 && finishedAt > startedAt {
+		latencyMs = (finishedAt - startedAt) * 1000
+	}
+
+	return Sample{
+		Model:        modelName,
+		Group:        task.Group,
+		LatencyMs:    latencyMs,
+		Success:      task.Status == model.TaskStatusSuccess,
+		GenerationMs: latencyMs,
+	}, true
+}
+
+func relayTargetsOnlyAsyncVideo(info *relaycommon.RelayInfo) bool {
+	endpoints := model.GetModelSupportEndpointTypes(info.OriginModelName)
+	if len(endpoints) == 0 && info.ChannelMeta != nil {
+		endpoints = common.GetEndpointTypesByChannelType(info.ChannelMeta.ChannelType, info.OriginModelName)
+	}
+	return supportsOnlyAsyncVideo(endpoints)
+}
+
+func supportsOnlyAsyncVideo(endpoints []constant.EndpointType) bool {
+	if len(endpoints) == 0 {
+		return false
+	}
+	hasVideo := false
+	for _, endpoint := range endpoints {
+		if endpoint == constant.EndpointTypeOpenAIVideo {
+			hasVideo = true
+			continue
+		}
+		return false
+	}
+	return hasVideo
+}
+
 func Record(sample Sample) {
 	setting := perf_metrics_setting.GetSetting()
 	if !setting.Enabled || sample.Model == "" {
@@ -77,6 +156,14 @@ func Record(sample Sample) {
 }
 
 func Query(params QueryParams) (QueryResult, error) {
+	if !perf_metrics_setting.GetSetting().Enabled {
+		return QueryResult{
+			Enabled:      false,
+			ModelName:    params.Model,
+			SeriesSchema: seriesSchema,
+			Groups:       make([]GroupResult, 0),
+		}, nil
+	}
 	if params.Hours <= 0 {
 		params.Hours = 24
 	}
@@ -123,6 +210,9 @@ func Query(params QueryParams) (QueryResult, error) {
 }
 
 func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
+	if !perf_metrics_setting.GetSetting().Enabled {
+		return SummaryAllResult{Enabled: false, Models: make([]ModelSummary, 0)}, nil
+	}
 	if hours <= 0 {
 		hours = 24
 	}
@@ -183,19 +273,19 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 			avgTps = float64(total.outputTokens) / (float64(total.generationMs) / 1000.0)
 		}
 		models = append(models, ModelSummary{
-			ModelName:          name,
-			AvgLatencyMs:       avgLatency,
-			SuccessRate:        math.Round(successRate*100) / 100,
-			AvgTps:             math.Round(avgTps*100) / 100,
-			RecentSuccessRates: recentSuccessRates(modelBuckets[name], 3),
-			RequestCount:       total.requestCount,
+			ModelName:           name,
+			AvgLatencyMs:        avgLatency,
+			SuccessRate:         math.Round(successRate*100) / 100,
+			AvgTps:              math.Round(avgTps*100) / 100,
+			RecentSuccessSeries: recentSuccessSeries(modelBuckets[name]),
+			RequestCount:        total.requestCount,
 		})
 	}
 	sort.Slice(models, func(i, j int) bool {
 		return models[i].RequestCount > models[j].RequestCount
 	})
 
-	return SummaryAllResult{Models: models}, nil
+	return SummaryAllResult{Enabled: true, Models: models}, nil
 }
 
 func mergeModelTotals(totals map[string]counters, modelName string, value counters) {
@@ -231,25 +321,39 @@ func mergeModelBucket(modelBuckets map[string]map[int64]counters, modelName stri
 	modelBuckets[modelName][bucketTs] = current
 }
 
-func recentSuccessRates(buckets map[int64]counters, limit int) []float64 {
-	if len(buckets) == 0 || limit <= 0 {
+func recentSuccessSeries(buckets map[int64]counters) []SuccessRatePoint {
+	if len(buckets) == 0 {
 		return nil
 	}
-	timestamps := make([]int64, 0, len(buckets))
-	for ts := range buckets {
-		timestamps = append(timestamps, ts)
+	hourly := map[int64]counters{}
+	for ts, value := range buckets {
+		hourTs := ts - ts%3600
+		merged := hourly[hourTs]
+		merged.requestCount += value.requestCount
+		merged.successCount += value.successCount
+		hourly[hourTs] = merged
+	}
+	timestamps := make([]int64, 0, len(hourly))
+	for hourTs, value := range hourly {
+		if value.requestCount == 0 {
+			continue
+		}
+		timestamps = append(timestamps, hourTs)
+	}
+	if len(timestamps) == 0 {
+		return nil
 	}
 	sort.Slice(timestamps, func(i, j int) bool {
 		return timestamps[i] < timestamps[j]
 	})
-	if len(timestamps) > limit {
-		timestamps = timestamps[len(timestamps)-limit:]
+	points := make([]SuccessRatePoint, 0, len(timestamps))
+	for _, hourTs := range timestamps {
+		points = append(points, SuccessRatePoint{
+			Ts:          hourTs,
+			SuccessRate: math.Round(successRate(hourly[hourTs])*100) / 100,
+		})
 	}
-	rates := make([]float64, 0, len(timestamps))
-	for _, ts := range timestamps {
-		rates = append(rates, math.Round(successRate(buckets[ts])*100)/100)
-	}
-	return rates
+	return points
 }
 
 func allowedGroupSet(groups []string) map[string]struct{} {
@@ -340,6 +444,7 @@ func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResu
 	}
 
 	return QueryResult{
+		Enabled:      true,
 		ModelName:    modelName,
 		SeriesSchema: seriesSchema,
 		Groups:       results,
