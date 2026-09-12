@@ -18,9 +18,32 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import * as z from 'zod'
 
+import {
+  formatPricingAmount,
+  USD_PRICING_CURRENCY,
+  type PricingCurrency,
+} from '@/features/model-pricing/currency'
+import type {
+  CacheWriteMode,
+  LegacyBillingDetails,
+} from '@/features/model-pricing/pricing'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
+import { formatBillingCondition } from '@/features/pricing/lib/billing-expression/condition-display'
 
 import { formatPricingNumber } from './pricing-format'
+
+export const numericDraftRegex = /^(\d+(\.\d*)?|\.\d*)?([eE][+-]?\d*)?$/
+const completePricingNumberRegex = /^(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
+const zeroPricingNumberRegex = /^(0+(\.0*)?|\.0+)([eE][+-]?\d+)?$/
+
+export function isCompletePricingNumber(value: unknown): boolean {
+  if (typeof value !== 'string' && typeof value !== 'number') return false
+  const text = String(value)
+  if (!completePricingNumberRegex.test(text)) return false
+  const numeric = Number(text)
+  if (!Number.isFinite(numeric) || numeric < 0) return false
+  return numeric !== 0 || zeroPricingNumberRegex.test(text)
+}
 
 const optionalPricingNumber = (t: (key: string) => string) =>
   z
@@ -66,6 +89,7 @@ export type LaneKey =
   | 'audioOutput'
 
 export type ModelRatioData = {
+  pluginBillingExpr?: Record<string, string>
   name: string
   price?: string
   ratio?: string
@@ -81,23 +105,11 @@ export type ModelRatioData = {
 }
 
 export type PreviewRow = {
+  unit?: 'image' | 'none'
   key: string
   label: string
   value: string
   multiline?: boolean
-}
-
-export const numericDraftRegex = /^(\d+(\.\d*)?|\.\d*)?([eE][+-]?\d*)?$/
-const completePricingNumberRegex = /^(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
-const zeroPricingNumberRegex = /^(0+(\.0*)?|\.0+)([eE][+-]?\d+)?$/
-
-export function isCompletePricingNumber(value: unknown): boolean {
-  if (typeof value !== 'string' && typeof value !== 'number') return false
-  const text = String(value)
-  if (!completePricingNumberRegex.test(text)) return false
-  const numeric = Number(text)
-  if (!Number.isFinite(numeric) || numeric < 0) return false
-  return numeric !== 0 || zeroPricingNumberRegex.test(text)
 }
 
 export const EMPTY_LANE_PRICES: Record<LaneKey, string> = {
@@ -183,10 +195,10 @@ export function toNumberOrNull(value: unknown): number | null {
   return Number.isFinite(num) ? num : null
 }
 
-function ratioToBasePrice(ratio: unknown, exchangeRate = 1): string {
+function ratioToBasePrice(ratio: unknown): string {
   const num = toNumberOrNull(ratio)
   if (num === null) return ''
-  return formatPricingNumber(num * 2 * exchangeRate)
+  return formatPricingNumber(num * 2)
 }
 
 function deriveLanePrice(
@@ -200,10 +212,7 @@ function deriveLanePrice(
   return formatPricingNumber(ratioNumber * denominatorNumber)
 }
 
-export function createInitialLaneState(
-  data?: ModelRatioData | null,
-  exchangeRate = 1
-) {
+export function createInitialLaneState(data?: ModelRatioData | null) {
   if (!data) {
     return {
       promptPrice: '',
@@ -212,7 +221,7 @@ export function createInitialLaneState(
     }
   }
 
-  const promptPrice = ratioToBasePrice(data.ratio, exchangeRate)
+  const promptPrice = ratioToBasePrice(data.ratio)
   const audioInputPrice = deriveLanePrice(data.audioRatio, promptPrice)
   const prices: Record<LaneKey, string> = {
     completion: deriveLanePrice(data.completionRatio, promptPrice),
@@ -246,7 +255,9 @@ export function buildPreviewRows(
   lanePrices: Record<LaneKey, string>,
   laneEnabled: Record<LaneKey, boolean>,
   t: (key: string) => string,
-  currencySymbol = '$'
+  currency: PricingCurrency = USD_PRICING_CURRENCY,
+  cacheWriteMode?: CacheWriteMode,
+  billingDetails?: LegacyBillingDetails
 ): PreviewRow[] {
   if (mode === 'tiered_expr') {
     const effectiveExpr = combineBillingExpr(billingExpr, requestRuleExpr)
@@ -254,40 +265,76 @@ export function buildPreviewRows(
       { key: 'mode', label: t('Pricing'), value: t('Expression') },
       {
         key: 'expr',
-        label: t('Expression'),
+        label: `${t('Expression')} (USD)`,
         value: effectiveExpr || t('Empty'),
         multiline: true,
       },
     ]
   }
 
-  if (mode === 'per-request' || mode === 'per-second') {
+  if (mode === 'per-second') {
     return [
-      {
-        key: 'mode',
-        label: 'BillingMode',
-        value: mode === 'per-second' ? 'per_second' : 'per_request',
-      },
+      { key: 'mode', label: 'BillingMode', value: 'per_second' },
       {
         key: 'price',
         label: t('Fixed price'),
-        value: values.price ? `${currencySymbol}${values.price}` : t('Empty'),
+        value: values.price
+          ? formatPricingAmount(values.price, currency)
+          : t('Empty'),
       },
     ]
   }
 
-  return [
+  if (mode === 'per-request') {
+    return [
+      {
+        key: 'price',
+        label: billingDetails?.image_count
+          ? t('Price per image')
+          : t('Fixed price'),
+        ...(billingDetails?.image_count ? { unit: 'image' as const } : {}),
+        value: values.price
+          ? formatPricingAmount(values.price, currency)
+          : t('Empty'),
+      },
+      ...pricingAdjustmentRows(billingDetails, t),
+    ]
+  }
+
+  let audioInputValue =
+    laneEnabled.audioInput && lanePrices.audioInput
+      ? formatPricingAmount(lanePrices.audioInput, currency)
+      : t('Empty')
+  let audioOutputValue =
+    laneEnabled.audioOutput && lanePrices.audioOutput
+      ? formatPricingAmount(lanePrices.audioOutput, currency)
+      : t('Empty')
+  if (billingDetails?.audio_input_price !== undefined) {
+    audioInputValue = formatPricingAmount(
+      billingDetails.audio_input_price,
+      currency
+    )
+  }
+  if (billingDetails?.audio_output_price !== undefined) {
+    audioOutputValue = formatPricingAmount(
+      billingDetails.audio_output_price,
+      currency
+    )
+  }
+  const rows: PreviewRow[] = [
     {
       key: 'inputPrice',
       label: t('Input price'),
-      value: promptPrice ? `${currencySymbol}${promptPrice}` : t('Empty'),
+      value: promptPrice
+        ? formatPricingAmount(promptPrice, currency)
+        : t('Empty'),
     },
     {
       key: 'completion',
       label: t('Completion price'),
       value:
         laneEnabled.completion && lanePrices.completion
-          ? `${currencySymbol}${lanePrices.completion}`
+          ? formatPricingAmount(lanePrices.completion, currency)
           : t('Empty'),
     },
     {
@@ -295,15 +342,18 @@ export function buildPreviewRows(
       label: t('Cache read price'),
       value:
         laneEnabled.cache && lanePrices.cache
-          ? `${currencySymbol}${lanePrices.cache}`
+          ? formatPricingAmount(lanePrices.cache, currency)
           : t('Empty'),
     },
     {
       key: 'createCache',
-      label: t('Cache write price'),
+      label:
+        cacheWriteMode === 'claude_ttl'
+          ? t('Cache Creation (5m)')
+          : t('Cache write price'),
       value:
         laneEnabled.createCache && lanePrices.createCache
-          ? `${currencySymbol}${lanePrices.createCache}`
+          ? formatPricingAmount(lanePrices.createCache, currency)
           : t('Empty'),
     },
     {
@@ -311,24 +361,78 @@ export function buildPreviewRows(
       label: t('Image input price'),
       value:
         laneEnabled.image && lanePrices.image
-          ? `${currencySymbol}${lanePrices.image}`
+          ? formatPricingAmount(lanePrices.image, currency)
           : t('Empty'),
     },
     {
       key: 'audio',
       label: t('Audio input price'),
-      value:
-        laneEnabled.audioInput && lanePrices.audioInput
-          ? `${currencySymbol}${lanePrices.audioInput}`
-          : t('Empty'),
+      value: audioInputValue,
     },
     {
       key: 'audioCompletion',
       label: t('Audio output price'),
-      value:
-        laneEnabled.audioOutput && lanePrices.audioOutput
-          ? `${currencySymbol}${lanePrices.audioOutput}`
-          : t('Empty'),
+      value: audioOutputValue,
     },
   ]
+  if (
+    cacheWriteMode === 'claude_ttl' &&
+    laneEnabled.createCache &&
+    lanePrices.createCache
+  ) {
+    rows.splice(4, 0, {
+      key: 'createCache1h',
+      label: t('Cache create (1h) price'),
+      value: formatPricingAmount(
+        Number(lanePrices.createCache) * (6 / 3.75),
+        currency
+      ),
+    })
+  }
+  const showCacheWrite = cacheWriteMode
+    ? cacheWriteMode !== 'none'
+    : hasValue(values.createCacheRatio)
+  const imageRatio = toNumberOrNull(values.imageRatio) ?? 1
+  const cacheRatio = toNumberOrNull(values.cacheRatio) ?? 1
+  return [
+    ...rows.filter(
+      (row) =>
+        (row.key !== 'image' || imageRatio !== 1) &&
+        (row.key !== 'cache' || cacheRatio !== 1) &&
+        (row.key !== 'createCache' || showCacheWrite)
+    ),
+    ...pricingAdjustmentRows(billingDetails, t),
+  ]
+}
+
+export function pricingAdjustmentRows(
+  details: LegacyBillingDetails | undefined,
+  t: (key: string) => string
+): PreviewRow[] {
+  const rows: PreviewRow[] = []
+  if (details?.audio_text_branches) {
+    rows.push({
+      key: 'audioTextBranches',
+      label: t('Pricing'),
+      value: t('Audio and text-only requests keep their respective pricing.'),
+      unit: 'none',
+    })
+  }
+  if (details?.image_count) {
+    rows.push({
+      key: 'imageCount',
+      label: t('Image count'),
+      value: t('Reserve requested images; settle returned images.'),
+      unit: 'none',
+    })
+  }
+  for (const [index, rule] of (details?.request_rules ?? []).entries()) {
+    rows.push({
+      key: `adjustment-${index}`,
+      label: formatBillingCondition(rule.condition, t) || rule.condition,
+      value: `× ${rule.multiplier}`,
+      unit: 'none',
+    })
+  }
+  return rows
 }

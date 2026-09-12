@@ -134,9 +134,7 @@ test('commission review shows both administrator remarks without changing review
   const { client } = await openTab('Commission review')
   expect(await screen.findByText('Remark: promoter review note')).toBeVisible()
   expect(screen.getByText('Remark: buyer review note')).toBeVisible()
-  expect(
-    screen.getByRole('button', { name: 'Approve' })
-  ).toBeEnabled()
+  expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled()
   client.clear()
 })
 

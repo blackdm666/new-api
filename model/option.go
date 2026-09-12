@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"strconv"
 	"strings"
@@ -289,22 +290,27 @@ func InitOptionMap() {
 
 	// 自动添加所有注册的模型配置
 	modelConfigs := config.GlobalConfig.ExportAllConfigs()
-	for k, v := range modelConfigs {
-		common.OptionMap[k] = v
-	}
+	maps.Copy(common.OptionMap, modelConfigs)
 
 	common.OptionMapRWMutex.Unlock()
 	loadOptionsFromDatabase()
 }
 
 func loadOptionsFromDatabase() {
+	passkeyOptionMutex.Lock()
+	defer passkeyOptionMutex.Unlock()
 	options, _ := AllOption()
 	loadedKeys := make(map[string]struct{}, len(options))
 	turnstileValues := make(map[string]string)
+	passkeyOptions := make(map[string]string)
 	for _, option := range options {
 		loadedKeys[option.Key] = struct{}{}
 		if isTurnstileOptionKey(option.Key) {
 			turnstileValues[option.Key] = option.Value
+			continue
+		}
+		if IsPasskeyDomainOption(option.Key) {
+			passkeyOptions[option.Key] = option.Value
 			continue
 		}
 		err := updateOptionMap(option.Key, option.Value)
@@ -319,6 +325,7 @@ func loadOptionsFromDatabase() {
 			common.SysLog("failed to persist legacy Turnstile configuration: " + err.Error())
 		}
 	}
+	applyPasskeyDomainOptions(passkeyOptions)
 }
 
 func applyLegacyTurnstileCompatibility(loadedKeys map[string]struct{}) map[string]string {
@@ -603,6 +610,10 @@ func UpdateOption(key string, value string) error {
 	if err := validateOptionValue(key, value); err != nil {
 		return err
 	}
+	if IsPasskeyDomainOption(key) {
+		_, err := UpdatePasskeyDomainOptions(map[string]string{key: value}, false, "")
+		return err
+	}
 	if IsModelPricingOption(key) {
 		return UpdateModelPricingOptions(map[string]string{key: value})
 	}
@@ -649,6 +660,12 @@ func UpdateOptionsBulk(values map[string]string) error {
 		defer turnstileOptionUpdateMutex.Unlock()
 	}
 	values = withSMTPBackupDeactivated(values)
+	for key := range values {
+		if IsPasskeyDomainOption(key) {
+			_, err := UpdatePasskeyDomainOptions(values, false, "")
+			return err
+		}
+	}
 	for key, value := range values {
 		if err := validateOptionValue(key, value); err != nil {
 			return err

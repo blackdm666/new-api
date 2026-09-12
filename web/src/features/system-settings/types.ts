@@ -39,6 +39,32 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export interface PasskeyDomainChange {
+  rp_id: string
+  legacy_rp_ids: string
+  origins: string
+  previous_rp_id: string
+  effective_rp_id: string
+  removed_rp_ids: string[]
+  affected_credentials: number
+  unknown_credentials: number
+  confirmation_required: boolean
+  removal_confirmation: string
+}
+
+export interface UpdatePasskeyDomainsRequest {
+  rp_id: string
+  legacy_rp_ids: string
+  origins: string
+  preview: boolean
+  removal_confirmation?: string
+}
+
+export interface UpdatePasskeyDomainsResponse extends UpdateOptionResponse {
+  code?: string
+  data: PasskeyDomainChange
+}
+
 export type BotProtectionSettingsPayload = {
   enabled: boolean
   provider: 'cloudflare' | 'custom'
@@ -285,6 +311,7 @@ export type AuthSettings = {
   'passkey.enabled': boolean
   'passkey.rp_display_name': string
   'passkey.rp_id': string
+  'passkey.legacy_rp_ids': string
   'passkey.origins': string
   'passkey.allow_insecure_origin': boolean
   'passkey.user_verification': 'required' | 'preferred' | 'discouraged'
@@ -342,6 +369,7 @@ export type ModelSettings = {
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
+  'billing_setting.plugin_billing_expr': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
@@ -409,6 +437,7 @@ export type BillingSettings = {
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
+  'billing_setting.plugin_billing_expr': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string

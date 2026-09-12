@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -80,7 +81,7 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		} else if originTask.Properties.UpstreamModelName != "" {
 			info.OriginModelName = originTask.Properties.UpstreamModelName
 		} else {
-			var taskData map[string]interface{}
+			var taskData map[string]any
 			_ = common.Unmarshal(originTask.Data, &taskData)
 			if m, ok := taskData["model"].(string); ok && m != "" {
 				info.OriginModelName = m
@@ -123,7 +124,7 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 			}
 		} else {
 			// 旧的 remix 逻辑：直接从 task data 解析 seconds 和 size（如果存在）
-			var taskData map[string]interface{}
+			var taskData map[string]any
 			_ = common.Unmarshal(originTask.Data, &taskData)
 			secondsStr, _ := taskData["seconds"].(string)
 			seconds, _ := strconv.Atoi(secondsStr)
@@ -266,24 +267,28 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 	var priceData types.PriceData
 	var err error
-	useTiered := billing_setting.GetBillingMode(modelName) == billing_setting.BillingModeTieredExpr
-	var exprStr string
-	var exists bool
-	if useTiered {
-		exprStr, exists = billing_setting.GetBillingExpr(modelName)
-	} else if info.IsModelMapped {
-		if billing_setting.GetBillingMode(info.UpstreamModelName) == billing_setting.BillingModeTieredExpr {
-			if tailExpr, tailOK := billing_setting.GetBillingExpr(info.UpstreamModelName); tailOK && strings.TrimSpace(tailExpr) != "" {
-				exprStr = tailExpr
-				exists = true
-				useTiered = true
-			}
-		}
+	pluginKey := c.GetString("task_plugin_key")
+	pinnedValue, _ := c.Get(jsplugin.ContextKeyPinnedPlugin)
+	pinnedPlugin, _ := pinnedValue.(jsplugin.PinnedPlugin)
+	if pinnedPlugin.Plugin != nil {
+		pluginKey = pinnedPlugin.Plugin.Meta.Key
 	}
+	exprStr, exists := billing_setting.ResolveTaskBillingExpr(pluginKey, modelName, info.UpstreamModelName)
+	useTiered := exists || billing_setting.GetBillingMode(modelName) == billing_setting.BillingModeTieredExpr
 	if useTiered {
 		provider, supported := adaptor.(channel.TaskUsageFactsProvider)
+		if billingexpr.UsesFixedPricing(exprStr) {
+			return nil, service.TaskErrorWrapper(fmt.Errorf("fixed pricing is not supported for task usage expressions"), "model_price_error", http.StatusBadRequest)
+		}
 		if !exists || !supported {
 			return nil, service.TaskErrorWrapper(fmt.Errorf("task model %s has no usage expression or meter", modelName), "model_price_error", http.StatusBadRequest)
+		}
+		sharedModel := pinnedPlugin.Generation.SharedModel(modelName) || pinnedPlugin.Generation.SharedModel(info.UpstreamModelName)
+		if sharedModel && pinnedPlugin.Plugin != nil {
+			schema, _ := pinnedPlugin.Plugin.Meta.UsageForModel(info.UpstreamModelName)
+			if !billing_setting.TaskExprCompatible(exprStr, schema) {
+				return nil, service.TaskErrorWrapper(fmt.Errorf("task model %s pricing is not configured for plugin %s", modelName, pluginKey), "model_price_error", http.StatusBadRequest)
+			}
 		}
 		var facts map[string]any
 		if validatedProvider, ok := adaptor.(channel.TaskValidatedUsageFactsProvider); ok {
@@ -389,13 +394,29 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	if info.TieredBillingSnapshot == nil && !billing_setting.IsTaskPerRequestBilling(modelName) {
 		if adjustedRatios := adaptor.AdjustBillingOnSubmit(info, parsed.TaskData); len(adjustedRatios) > 0 {
 			if adjustedQuota, ok := recalcQuotaFromRatios(info, adjustedRatios); ok {
-				// 基于调整后的 ratios 重新计算 quota
 				finalQuota = adjustedQuota
 				info.PriceData.ReplaceOtherRatios(adjustedRatios)
 				info.PriceData.Quota = finalQuota
 			}
 		}
 	}
+	if parsed.Immediate != nil && parsed.Immediate.Status == model.TaskStatusFailure {
+		finalQuota = 0
+	} else if snap := info.TieredBillingSnapshot; snap != nil {
+		if parsed.Immediate != nil && parsed.Immediate.Status == model.TaskStatusSuccess && len(parsed.Immediate.UsageFacts) > 0 {
+			settlement, facts, err := service.EvaluateTaskCompletionUsage(snap, parsed.Immediate.UsageFacts)
+			if err != nil {
+				logger.LogWarn(c, fmt.Sprintf("task immediate usage settlement failed; retaining reserved quota: %v", err))
+			} else {
+				finalQuota = settlement.ActualQuotaAfterGroup
+				snap.UsageFacts = facts
+				snap.EstimatedTier = settlement.MatchedTier
+				noteTaskQuotaClamp(info, settlement.Clamp)
+			}
+		}
+	}
+
+	info.PriceData.Quota = finalQuota
 
 	return &TaskSubmitResult{
 		UpstreamTaskID: parsed.UpstreamTaskID,

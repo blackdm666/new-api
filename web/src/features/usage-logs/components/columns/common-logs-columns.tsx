@@ -35,29 +35,39 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
+import {
+  normalizeTierLabel,
+  parseTaskTiersFromExpr,
+} from '@/features/pricing/lib/billing-expr'
+import {
+  formatTaskUsageUnitPrice,
+  getTaskUsagePriceUnitLabelKey,
+} from '@/features/pricing/lib/dynamic-price'
+import { pluginUsageSchema } from '@/features/pricing/lib/plugin-pricing'
+import { taskUsageUnitLabel } from '@/features/pricing/lib/task-price-display'
+import type { BillingUsageSchema } from '@/features/pricing/types'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
-import { formatTimestampToDate } from '@/lib/format'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
+import { formatLogQuota, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
 import {
-  formatRatioCompact,
-  getEffectiveGroupRatioInfo,
-} from '../../lib/billing-display'
-import {
   formatModelName,
+  decodeBillingExprB64,
+  getTieredBillingSummary,
+  hasAnyCacheTokens,
   parseLogOther,
+  isViolationFeeLog,
   renderAuditContent,
 } from '../../lib/format'
-import {
-  buildTypeDetailSegments,
-  type DetailSegment,
-} from '../../lib/log-detail-segments'
 import {
   isDisplayableLogType,
   isTimingLogType,
   getLogTypeConfig,
+  isPerCallBilling,
 } from '../../lib/utils'
 import type { LogOtherData } from '../../types'
 import { DetailsDialog } from '../dialogs/details-dialog'
@@ -66,19 +76,46 @@ import { ModelBadge } from '../model-badge'
 import { TimingMetricsCell, StreamTpsCell } from '../timing-metrics-cell'
 import { useUsageLogsContext } from '../usage-logs-provider'
 
+interface DetailSegment {
+  text: string
+  muted?: boolean
+  danger?: boolean
+}
+
+function formatRatioCompact(ratio: number | undefined): string {
+  if (ratio == null || !Number.isFinite(ratio)) return '-'
+  return ratio % 1 === 0
+    ? String(ratio)
+    : ratio.toFixed(4).replace(/\.?0+$/, '')
+}
+
 function getGroupRatio(other: LogOtherData | null): number | null {
-  const info = getEffectiveGroupRatioInfo(other)
-  if (!info || (!info.isUserSpecific && info.ratio === 1)) return null
-  return info.ratio
+  const userGroupRatio = other?.user_group_ratio
+  if (
+    userGroupRatio != null &&
+    userGroupRatio !== -1 &&
+    Number.isFinite(userGroupRatio)
+  ) {
+    return userGroupRatio
+  }
+
+  const groupRatio = other?.group_ratio
+  if (groupRatio != null && groupRatio !== 1 && Number.isFinite(groupRatio)) {
+    return groupRatio
+  }
+
+  return null
 }
 
 function buildDetailSegments(
   log: UsageLog,
   other: LogOtherData | null,
   t: (key: string, opts?: Record<string, unknown>) => string,
-  isAdmin: boolean
+  isAdmin: boolean,
+  language: string,
+  usageSchema?: BillingUsageSchema
 ): DetailSegment[] {
-  const segments = buildTypeDetailSegments(log, other, t)
+  const segments = buildTypeDetailSegments(log, other, t, language, usageSchema)
   const adminSegments: DetailSegment[] = []
   // Quota saturation is a rare, admin-only anomaly marker; surface it first
   // and in danger styling so it stands out on the related billing log. The
@@ -87,19 +124,222 @@ function buildDetailSegments(
   if (isAdmin && other?.admin_info?.quota_saturation) {
     adminSegments.push({ text: t('Quota clamped'), danger: true })
   }
-  const plugin = isAdmin ? other?.admin_info?.task_plugin : undefined
-  if (plugin) {
-    const version = plugin.version ? ` @ ${plugin.version}` : ''
-    adminSegments.push({
-      text: `${t('Plugin')}: ${plugin.name || plugin.key}${version}`,
+  return [...adminSegments, ...segments]
+}
+
+function buildTypeDetailSegments(
+  log: UsageLog,
+  other: LogOtherData | null,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  language: string,
+  usageSchema?: BillingUsageSchema
+): DetailSegment[] {
+  // Top-up, audit, and login logs can carry a localized operation descriptor.
+  if (log.type === 1 || log.type === 3 || log.type === 7) {
+    const text = renderAuditContent(other, t)
+    return text ? [{ text }] : []
+  }
+
+  if (log.type === 6) {
+    return [{ text: t('Async task refund') }]
+  }
+
+  if (log.type !== 2) return []
+
+  const isViolation = isViolationFeeLog(other)
+  if (isViolation) {
+    const segments: DetailSegment[] = []
+    segments.push({ text: t('Violation Fee'), danger: true })
+    if (other?.violation_fee_code) {
+      segments.push({
+        text: other.violation_fee_code,
+        muted: true,
+      })
+    }
+    segments.push({
+      text: `${t('Fee')}: ${formatLogQuota(other?.fee_quota ?? log.quota)}`,
+      muted: true,
+    })
+    return segments
+  }
+
+  if (!other) return []
+
+  const segments: DetailSegment[] = []
+
+  const priceOpts = { digitsLarge: 4, digitsSmall: 6, abbreviate: false }
+  const formatPrice = (price: number) =>
+    `${formatBillingCurrencyFromUSD(price, priceOpts)}/M`
+  const formatPriceCompact = (price: number) =>
+    formatBillingCurrencyFromUSD(price, priceOpts)
+  const formatPriceList = (prices: string[], showUnit: boolean) => {
+    const text = prices.join(' / ')
+    return showUnit ? `${text}/M` : text
+  }
+  const isTieredExpr = other.billing_mode === 'tiered_expr'
+  const tieredSummary = getTieredBillingSummary(other)
+  if (isTieredExpr && other.is_task) {
+    const tiers = parseTaskTiersFromExpr(
+      decodeBillingExprB64(other.expr_b64),
+      usageSchema,
+      true
+    )
+    const tier = tiers.find(
+      (entry) =>
+        Boolean(other.matched_tier) &&
+        normalizeTierLabel(entry.label) ===
+          normalizeTierLabel(other.matched_tier)
+    )
+    if (tier) {
+      const prices = Object.entries(tier.unitPrices).map(([field, price]) => {
+        const definition = usageSchema?.[field]
+        const unitKey = getTaskUsagePriceUnitLabelKey(definition?.unit)
+        const unitLabel = taskUsageUnitLabel(definition, language, t(unitKey))
+        return `${field} ${formatTaskUsageUnitPrice(price, { tokenUnit: 'M' })}/${unitLabel}`
+      })
+      if (tier.constant > 0) {
+        prices.push(
+          `${t('Additional charge')} ${formatTaskUsageUnitPrice(tier.constant, { tokenUnit: 'M' })}/${t('request')}`
+        )
+      }
+      segments.push({
+        text: `${tier.label || t('Default')} · ${prices.join(' · ')}`,
+      })
+    } else {
+      segments.push({
+        text: `${t('Dynamic Pricing')} · ${t('No matching results')}`,
+        muted: true,
+      })
+    }
+  } else if (isTieredExpr) {
+    if (tieredSummary) {
+      const baseEntries = tieredSummary.priceEntries
+        .filter((entry) => ['inputPrice', 'outputPrice'].includes(entry.field))
+        .map((entry) => formatPriceCompact(entry.price))
+      if (baseEntries.length > 0) {
+        const tierLabel = tieredSummary.tier.label || t('Default')
+        segments.push({
+          text: `${tierLabel} · ${formatPriceList(baseEntries, true)}`,
+        })
+      }
+
+      const cacheEntries = tieredSummary.priceEntries
+        .filter((entry) =>
+          ['cacheReadPrice', 'cacheCreatePrice', 'cacheCreate1hPrice'].includes(
+            entry.field
+          )
+        )
+        .map((entry) => {
+          return formatPriceCompact(entry.price)
+        })
+      if (cacheEntries.length > 0) {
+        segments.push({
+          text: `${t('Cache')} ${formatPriceList(cacheEntries, false)}`,
+          muted: true,
+        })
+      }
+
+      const otherEntries = tieredSummary.priceEntries
+        .filter(
+          (entry) =>
+            ![
+              'inputPrice',
+              'outputPrice',
+              'cacheReadPrice',
+              'cacheCreatePrice',
+              'cacheCreate1hPrice',
+            ].includes(entry.field)
+        )
+        .map((entry) =>
+          entry.unit
+            ? `${tieredSummary.tier.label || t('Default')} · ${t(entry.shortLabel)} ${formatPriceCompact(entry.price)}/${t(entry.unit)}`
+            : `${t(entry.shortLabel)} ${formatPrice(entry.price)}`
+        )
+      if (otherEntries.length > 0) {
+        segments.push({
+          text: otherEntries.join(' · '),
+          muted: true,
+        })
+      }
+    } else {
+      segments.push({
+        text: `${t('Dynamic Pricing')} · ${t('No matching results')}`,
+        muted: true,
+      })
+    }
+  } else {
+    const modelPrice = other.model_price
+    const isPerCall = isPerCallBilling(modelPrice)
+    if (isPerCall && modelPrice != null) {
+      segments.push({
+        text: `${t('Per-call')} · ${formatBillingCurrencyFromUSD(modelPrice, priceOpts)}`,
+      })
+    } else if (other.model_ratio != null) {
+      const inputPriceUSD = other.model_ratio * 2.0
+      const baseEntries = [formatPriceCompact(inputPriceUSD)]
+      if (other.completion_ratio != null) {
+        baseEntries.push(
+          formatPriceCompact(inputPriceUSD * other.completion_ratio)
+        )
+      }
+      segments.push({
+        text: `${t('Standard')} · ${formatPriceList(baseEntries, true)}`,
+      })
+
+      if (hasAnyCacheTokens(other)) {
+        const cacheEntries = [
+          other.cache_ratio != null && other.cache_ratio !== 1
+            ? formatPriceCompact(inputPriceUSD * other.cache_ratio)
+            : null,
+          other.cache_creation_ratio != null && other.cache_creation_ratio !== 1
+            ? formatPriceCompact(inputPriceUSD * other.cache_creation_ratio)
+            : null,
+          other.cache_creation_ratio_1h != null &&
+          other.cache_creation_ratio_1h !== 0
+            ? formatPriceCompact(inputPriceUSD * other.cache_creation_ratio_1h)
+            : null,
+        ].filter(Boolean) as string[]
+
+        if (cacheEntries.length > 0) {
+          segments.push({
+            text: `${t('Cache')} ${formatPriceList(cacheEntries, false)}`,
+            muted: true,
+          })
+        }
+      }
+    } else {
+      const userGroupRatio = other.user_group_ratio
+      const groupRatio = other.group_ratio
+      const isUserGroup =
+        userGroupRatio != null &&
+        Number.isFinite(userGroupRatio) &&
+        userGroupRatio !== -1
+      const effectiveRatio = isUserGroup ? userGroupRatio : groupRatio
+      const ratioLabel = isUserGroup
+        ? t('User Exclusive Ratio')
+        : t('Group Ratio')
+
+      if (effectiveRatio != null && Number.isFinite(effectiveRatio)) {
+        segments.push({
+          text: `${ratioLabel} ${formatRatioCompact(effectiveRatio)}x`,
+        })
+      }
+    }
+  }
+
+  if (other.is_system_prompt_overwritten) {
+    segments.push({
+      text: t('System Prompt Override'),
+      danger: true,
     })
   }
-  return [...adminSegments, ...segments]
+
+  return segments
 }
 
 export function useCommonLogsColumns(
   isAdmin: boolean,
-  isRoot = false
+  isRoot: boolean
 ): ColumnDef<UsageLog>[] {
   const { t } = useTranslation()
   const columns: ColumnDef<UsageLog>[] = [
@@ -545,14 +785,30 @@ export function useCommonLogsColumns(
       accessorKey: 'content',
       header: t('Details'),
       cell: function DetailsCell({ row }) {
-        const { t } = useTranslation()
+        const { t, i18n } = useTranslation()
         const [dialogOpen, setDialogOpen] = useState(false)
         const log = row.original
         const other = parseLogOther(log.other)
 
-        const segments = buildDetailSegments(log, other, t, isAdmin)
-        const localizedContent =
-          (log.type === 1 ? renderAuditContent(other, t) : null) ?? log.content
+        const pricingData = usePricingData(
+          log.type === 2 &&
+            other?.is_task === true &&
+            other.billing_mode === 'tiered_expr'
+        )
+        const usageSchema = pluginUsageSchema(
+          pricingData.models.find(
+            (model) => model.model_name === log.model_name
+          ),
+          other?.admin_info?.task_plugin?.key
+        )
+        const segments = buildDetailSegments(
+          log,
+          other,
+          t,
+          isAdmin,
+          i18n.language,
+          usageSchema
+        )
         const primary = segments[0]
         const hasMore = segments.length > 1
         let primaryTextClass = 'text-foreground'
@@ -578,10 +834,10 @@ export function useCommonLogsColumns(
               )}
             </span>
           )
-        } else if (localizedContent) {
+        } else if (log.content) {
           detailPreview = (
             <span className='text-muted-foreground truncate group-hover:underline'>
-              {localizedContent}
+              {log.content}
             </span>
           )
         }

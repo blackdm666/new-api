@@ -28,7 +28,7 @@ import type { PricingModel } from '../types'
  */
 export function getAvailableGroups(
   model: PricingModel,
-  usableGroup: Record<string, string>
+  usableGroup: Record<string, unknown>
 ): string[] {
   const modelEnableGroups = Array.isArray(model.enable_groups)
     ? model.enable_groups

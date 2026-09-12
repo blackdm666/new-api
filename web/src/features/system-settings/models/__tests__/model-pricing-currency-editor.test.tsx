@@ -16,7 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
 import { createRef } from 'react'
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest'
@@ -64,16 +66,23 @@ describe('model pricing editor currency', () => {
     const ref = createRef<ModelPricingEditorPanelHandle>()
 
     render(
-      <ModelPricingEditorPanel
-        ref={ref}
-        editData={{
-          name: 'video-model',
-          price: '0.2',
-          billingMode: 'per-second',
-        }}
-      />
+      <QueryClientProvider client={new QueryClient()}>
+        <ModelPricingEditorPanel
+          ref={ref}
+          editData={{
+            name: 'video-model',
+            price: '0.2',
+            billingMode: 'per-second',
+          }}
+        />
+      </QueryClientProvider>
     )
 
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('combobox', { name: 'Pricing currency' }))
+    await user.click(
+      await screen.findByRole('option', { name: 'Site currency (CNY)' })
+    )
     const input = screen.getByDisplayValue('1.4')
     expect(screen.getAllByText('¥').length).toBeGreaterThan(0)
     expect(

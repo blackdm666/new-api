@@ -1,20 +1,3 @@
-import { zodResolver } from '@hookform/resolvers/zod'
-import { useQuery } from '@tanstack/react-query'
-import { Pencil } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
-
-import {
-  SideDrawerSection,
-  sideDrawerContentClassName,
-  sideDrawerFooterClassName,
-  sideDrawerFormClassName,
-  sideDrawerHeaderClassName,
-} from '@/components/drawer-layout'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -33,6 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useQuery } from '@tanstack/react-query'
+import { Pencil } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+
+import {
+  SideDrawerSection,
+  sideDrawerContentClassName,
+  sideDrawerFooterClassName,
+  sideDrawerFormClassName,
+  sideDrawerHeaderClassName,
+} from '@/components/drawer-layout'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Combobox } from '@/components/ui/combobox'
 import {
   Form,
@@ -72,8 +72,10 @@ import {
 } from '@/lib/admin-permissions'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
+import { handleServerError } from '@/lib/handle-server-error'
 import { accountPasswordSchema } from '@/lib/password-policy'
 import { ROLE } from '@/lib/roles'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
@@ -123,7 +125,7 @@ export function UsersMutateDrawer({
   // Fetch groups
   const { data: groupsData } = useQuery({
     queryKey: ['groups'],
-    queryFn: getGroups,
+    queryFn: async () => requireServerSuccess(await getGroups()),
     staleTime: 5 * 60 * 1000,
   })
 
@@ -132,7 +134,7 @@ export function UsersMutateDrawer({
   // Permission catalog is owned by the backend; fetched once and reused.
   const { data: permissionCatalog = EMPTY_PERMISSION_CATALOG } = useQuery({
     queryKey: ['admin-permission-catalog'],
-    queryFn: getPermissionCatalog,
+    queryFn: async () => requireServerSuccess(await getPermissionCatalog()),
     staleTime: 5 * 60 * 1000,
   })
 
@@ -158,8 +160,6 @@ export function UsersMutateDrawer({
       return
     }
 
-    // Keep the selected row visible while the authoritative details load, but
-    // do not allow edits or saves until that matching response arrives.
     form.reset(transformUserToFormDefaults(currentRow))
     setUserLoadState('loading')
     setLoadedUserId(null)
@@ -167,22 +167,19 @@ export function UsersMutateDrawer({
     void getUser(userId)
       .then((result) => {
         if (userDetailRequestRef.current !== requestId) return
-
         if (!result.success || !result.data || result.data.id !== userId) {
           setUserLoadState('error')
-          toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+          handleServerError(result, t('Failed to load'))
           return
         }
-
         form.reset(transformUserToFormDefaults(result.data))
         setLoadedUserId(userId)
         setUserLoadState('ready')
       })
-      .catch(() => {
+      .catch((error) => {
         if (userDetailRequestRef.current !== requestId) return
-
         setUserLoadState('error')
-        toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+        handleServerError(error, t('Failed to load'))
       })
 
     return () => {
@@ -194,11 +191,8 @@ export function UsersMutateDrawer({
     !isUpdate || (userLoadState === 'ready' && loadedUserId === currentRow?.id)
   const isLoadingUser = userLoadState === 'loading'
   let submitButtonLabel = t('Save changes')
-  if (isLoadingUser) {
-    submitButtonLabel = t('Loading...')
-  } else if (isSubmitting) {
-    submitButtonLabel = t('Saving...')
-  }
+  if (isLoadingUser) submitButtonLabel = t('Loading...')
+  else if (isSubmitting) submitButtonLabel = t('Saving...')
 
   const { meta: currencyMeta } = getCurrencyDisplay()
   const currencyLabel = getCurrencyLabel()
@@ -210,10 +204,7 @@ export function UsersMutateDrawer({
   const targetIsAdmin = (selectedRole ?? currentRow?.role ?? 0) >= ROLE.ADMIN
 
   const onSubmit = async (data: UserFormValues) => {
-    if (isUpdate && (!currentRow || !isUpdateReady)) {
-      return
-    }
-
+    if (isUpdate && (!currentRow || !isUpdateReady)) return
     if (!isUpdate || data.password) {
       if (!accountPasswordSchema.safeParse(data.password ?? '').success) {
         form.setError('password', {
@@ -244,15 +235,10 @@ export function UsersMutateDrawer({
         onOpenChange(false)
         triggerRefresh()
       } else {
-        toast.error(
-          result.message ||
-            (isUpdate
-              ? t(ERROR_MESSAGES.UPDATE_FAILED)
-              : t(ERROR_MESSAGES.CREATE_FAILED))
-        )
+        handleServerError(result, t(ERROR_MESSAGES.CREATE_FAILED))
       }
-    } catch {
-      toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+    } catch (error) {
+      handleServerError(error, t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setIsSubmitting(false)
     }
@@ -260,35 +246,14 @@ export function UsersMutateDrawer({
 
   const refreshUserData = async () => {
     if (!currentRow) return
-    const requestedUserId = currentRow.id
-    const requestId = ++userDetailRequestRef.current
-
-    setUserLoadState('loading')
-    setLoadedUserId(null)
-    triggerRefresh()
-
     try {
-      const result = await getUser(requestedUserId)
-      if (userDetailRequestRef.current !== requestId) return
-
-      if (
-        !result.success ||
-        !result.data ||
-        result.data.id !== requestedUserId
-      ) {
-        setUserLoadState('error')
-        toast.error(t(ERROR_MESSAGES.UNEXPECTED))
-        return
+      const result = requireServerSuccess(await getUser(currentRow.id))
+      if (result.success && result.data) {
+        form.reset(transformUserToFormDefaults(result.data))
       }
-
-      form.reset(transformUserToFormDefaults(result.data))
-      setLoadedUserId(requestedUserId)
-      setUserLoadState('ready')
-    } catch {
-      if (userDetailRequestRef.current !== requestId) return
-
-      setUserLoadState('error')
-      toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+      triggerRefresh()
+    } catch (error) {
+      handleServerError(error, t('Failed to load'))
     }
   }
 

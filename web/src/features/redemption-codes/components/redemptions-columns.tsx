@@ -133,7 +133,7 @@ export function useRedemptionsColumns(
     {
       id: 'code',
       accessorKey: 'key',
-      header: t('Code'),
+      header: t('Redemption Code'),
       cell: function CodeCell({ row }) {
         const redemption = row.original
         const key = redemption.key

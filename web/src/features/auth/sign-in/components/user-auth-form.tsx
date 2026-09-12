@@ -266,15 +266,8 @@ export function UserAuthForm({
     setIsPasskeyLoading(true)
     try {
       const begin = await beginPasskeyLogin()
-      if (!begin.success) {
-        if (getServerErrorMessageKey(begin)) return
-        throw new Error(begin.message || t('Failed to start Passkey login'))
-      }
-
-      const publicKey = prepareCredentialRequestOptions(
-        begin.data?.options ?? begin.data
-      )
-      const flowToken = begin.data?.flow_token
+      const publicKey = prepareCredentialRequestOptions(begin.options ?? begin)
+      const flowToken = begin.flow_token
       if (!flowToken) {
         throw new Error(t('Login flow expired. Please sign in again.'))
       }
