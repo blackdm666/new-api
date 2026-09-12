@@ -87,6 +87,8 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		if err := omnitask.ValidateRequest(c, info); err != nil {
 			return service.TaskErrorWrapperLocal(err, "invalid_omni_request", http.StatusBadRequest)
 		}
+	} else if _, err := geminitask.BuildVeoInstance(c, info); err != nil {
+		return service.TaskErrorWrapperLocal(err, "invalid_veo_request", http.StatusBadRequest)
 	}
 	return nil
 }
@@ -173,14 +175,9 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	}
 	req := v.(relaycommon.TaskSubmitReq)
 
-	instance := geminitask.VeoInstance{Prompt: req.Prompt}
-	if img := geminitask.ExtractMultipartImage(c, info); img != nil {
-		instance.Image = img
-	} else if len(req.Images) > 0 {
-		if parsed := geminitask.ParseImageInput(req.Images[0]); parsed != nil {
-			instance.Image = parsed
-			info.Action = constant.TaskActionImageToVideo
-		}
+	instance, err := geminitask.BuildVeoInstance(c, info)
+	if err != nil {
+		return nil, err
 	}
 
 	params := &geminitask.VeoParameters{}
