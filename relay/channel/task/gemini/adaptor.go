@@ -50,6 +50,8 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		if err := omnitask.ValidateRequest(c, info); err != nil {
 			return service.TaskErrorWrapperLocal(err, "invalid_omni_request", http.StatusBadRequest)
 		}
+	} else if _, err := BuildVeoInstance(c, info); err != nil {
+		return service.TaskErrorWrapperLocal(err, "invalid_veo_request", http.StatusBadRequest)
 	}
 	return nil
 }
@@ -95,14 +97,9 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		return nil, fmt.Errorf("unexpected task_request type")
 	}
 
-	instance := VeoInstance{Prompt: req.Prompt}
-	if img := ExtractMultipartImage(c, info); img != nil {
-		instance.Image = img
-	} else if len(req.Images) > 0 {
-		if parsed := ParseImageInput(req.Images[0]); parsed != nil {
-			instance.Image = parsed
-			info.Action = constant.TaskActionImageToVideo
-		}
+	instance, err := BuildVeoInstance(c, info)
+	if err != nil {
+		return nil, err
 	}
 
 	params := &VeoParameters{}
