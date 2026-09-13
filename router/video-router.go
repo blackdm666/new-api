@@ -8,6 +8,9 @@ import (
 )
 
 func SetVideoRouter(router *gin.Engine) {
+	// Only the small upload authorization JSON enters the gateway; media bytes
+	// are sent directly to the configured storage Worker using a scoped ticket.
+	router.POST("/v1/media/uploads", middleware.RouteTag("relay"), middleware.TokenAuth(), controller.CreateMediaUpload)
 	videoSharedRouter := router.Group("/v1")
 	videoSharedRouter.Use(middleware.RouteTag("relay"))
 	videoSharedRouter.Use(middleware.TokenAuth())

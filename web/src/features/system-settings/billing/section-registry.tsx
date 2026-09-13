@@ -110,6 +110,7 @@ const BILLING_SECTIONS = [
           defaultValues={{
             enabled: settings.AffiliateCommissionEnabled,
             autoApprove: settings.AffiliateCommissionAutoApprove,
+            topUpLimit: settings.AffiliateCommissionInviteeTopUpLimit ?? 0,
             juniorRate:
               (groupRates.default ??
                 groupRates['初级推广'] ??

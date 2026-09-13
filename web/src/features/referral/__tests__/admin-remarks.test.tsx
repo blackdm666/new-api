@@ -134,6 +134,12 @@ test('commission review shows both administrator remarks without changing review
   const { client } = await openTab('Commission review')
   expect(await screen.findByText('Remark: promoter review note')).toBeVisible()
   expect(screen.getByText('Remark: buyer review note')).toBeVisible()
+  expect(
+    screen.getByRole('button', { name: 'User Information: promoter' })
+  ).toBeEnabled()
+  expect(
+    screen.getByRole('button', { name: 'User Information: buyer' })
+  ).toBeEnabled()
   expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled()
   client.clear()
 })
@@ -142,6 +148,9 @@ test('upgrade review and notification failures show promoter remarks', async () 
   const { client } = await openTab('Upgrade review')
   expect(await screen.findByText('Remark: upgrade review note')).toBeVisible()
   expect(await screen.findByText('Remark: notice review note')).toBeVisible()
+  expect(
+    screen.getAllByRole('button', { name: 'User Information: promoter' })
+  ).toHaveLength(2)
   client.clear()
 })
 
@@ -151,5 +160,8 @@ test('settlement balance transfers also show the user remark', async () => {
     screen.getByRole('tab', { name: 'Balance transfer records' })
   )
   expect(await screen.findByText('Remark: transfer review note')).toBeVisible()
+  expect(
+    screen.getByRole('button', { name: 'User Information: promoter' })
+  ).toBeEnabled()
   client.clear()
 })

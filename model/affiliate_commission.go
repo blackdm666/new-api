@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	AffiliateCommissionStatusPending  = 1
-	AffiliateCommissionStatusApproved = 2
-	AffiliateCommissionStatusRejected = 3
+	AffiliateCommissionStatusPending      = 1
+	AffiliateCommissionStatusApproved     = 2
+	AffiliateCommissionStatusRejected     = 3
+	AffiliateCommissionStatusLimitReached = 4
 
 	AffiliateCommissionEnabledOptionKey               = "AffiliateCommissionEnabled"
 	AffiliateCommissionAutoApproveOptionKey           = "AffiliateCommissionAutoApprove"
@@ -28,12 +29,14 @@ const (
 	AffiliateUpgradeTopUpAmountThresholdOptionKey     = "AffiliateUpgradeEffectiveTopUpAmountCents"
 	AffiliateGoldUpgradeTopUpAmountThresholdOptionKey = "AffiliateGoldUpgradeEffectiveTopUpAmountCents"
 	AffiliateCommissionActivatedAtOptionKey           = "AffiliateCommissionActivatedAt"
+	AffiliateCommissionInviteeTopUpLimitOptionKey     = "AffiliateCommissionInviteeTopUpLimit"
 	AffiliateUpgradeEffectiveInviteesThreshold        = 50
 	AffiliateGoldUpgradeEffectiveInviteesThreshold    = 500
 	AffiliateUpgradeEffectiveTopUpAmountCents         = int64(200000)
 	AffiliateGoldUpgradeEffectiveTopUpAmountCents     = int64(2000000)
 	AffiliateCommissionMaxRateBasisPoints             = 10000
 	AffiliateCommissionMaxUpgradeInviteeThreshold     = 1000000
+	AffiliateCommissionMaxInviteeTopUpLimit           = 1000000
 	AffiliateCommissionMaxUpgradeTopUpAmountCents     = int64(100000000000000)
 	AffiliatePromoterGroupDefault                     = "default"
 	AffiliatePromoterGroupLegacyJunior                = "初级推广"
@@ -186,6 +189,7 @@ type AffiliateUpgradeMetrics struct {
 type affiliatePolicy struct {
 	Enabled                              bool
 	AutoApprove                          bool
+	InviteeTopUpLimit                    int
 	DefaultRateBasisPoints               int
 	GroupRates                           map[string]int
 	UpgradeInviteesThreshold             int
@@ -223,6 +227,7 @@ func getAffiliatePolicy() affiliatePolicy {
 	policy := affiliatePolicy{
 		Enabled:                              false,
 		AutoApprove:                          false,
+		InviteeTopUpLimit:                    0,
 		DefaultRateBasisPoints:               affiliateCommissionDefaultRateBasisPoints,
 		GroupRates:                           defaultAffiliateGroupRates(),
 		UpgradeInviteesThreshold:             AffiliateUpgradeEffectiveInviteesThreshold,
@@ -241,6 +246,7 @@ func getAffiliatePolicy() affiliatePolicy {
 	amountThresholdRaw := common.OptionMap[AffiliateUpgradeTopUpAmountThresholdOptionKey]
 	goldAmountThresholdRaw := common.OptionMap[AffiliateGoldUpgradeTopUpAmountThresholdOptionKey]
 	activatedAtRaw := common.OptionMap[AffiliateCommissionActivatedAtOptionKey]
+	inviteeTopUpLimitRaw := common.OptionMap[AffiliateCommissionInviteeTopUpLimitOptionKey]
 	common.OptionMapRWMutex.RUnlock()
 
 	if enabledRaw != "" {
@@ -248,6 +254,9 @@ func getAffiliatePolicy() affiliatePolicy {
 	}
 	if autoApproveRaw != "" {
 		policy.AutoApprove = autoApproveRaw == "true"
+	}
+	if value, err := strconv.Atoi(inviteeTopUpLimitRaw); err == nil && value >= 0 && value <= AffiliateCommissionMaxInviteeTopUpLimit {
+		policy.InviteeTopUpLimit = value
 	}
 	if value, err := strconv.Atoi(defaultRateRaw); err == nil && value >= 0 && value <= AffiliateCommissionMaxRateBasisPoints {
 		policy.DefaultRateBasisPoints = value
@@ -395,6 +404,11 @@ func ValidateAffiliateOptionValue(key string, value string) error {
 		if err != nil || activatedAt < 0 {
 			return errors.New("affiliate commission activation time must be a non-negative unix timestamp")
 		}
+	case AffiliateCommissionInviteeTopUpLimitOptionKey:
+		limit, err := strconv.Atoi(value)
+		if err != nil || limit < 0 || limit > AffiliateCommissionMaxInviteeTopUpLimit {
+			return fmt.Errorf("affiliate commission invitee top-up limit must be between 0 and %d", AffiliateCommissionMaxInviteeTopUpLimit)
+		}
 	}
 	return nil
 }
@@ -461,7 +475,7 @@ func createAffiliateCommissionForTopUpTx(tx *gorm.DB, topUp *TopUp) (bool, int, 
 	}
 
 	invitee := &User{}
-	if err := tx.Select("id", "username", "display_name", "inviter_id").Where("id = ?", topUp.UserId).First(invitee).Error; err != nil {
+	if err := lockForUpdate(tx).Select("id", "username", "display_name", "inviter_id").Where("id = ?", topUp.UserId).First(invitee).Error; err != nil {
 		return false, 0, err
 	}
 	if invitee.InviterId <= 0 || invitee.InviterId == invitee.Id {
@@ -492,14 +506,35 @@ func createAffiliateCommissionForTopUpTx(tx *gorm.DB, topUp *TopUp) (bool, int, 
 		Div(decimal.NewFromInt(10000)).
 		Round(0).
 		IntPart()
-	commissionQuota, err := affiliateCentsToQuota(commissionCents)
-	if err != nil || commissionQuota <= 0 {
-		return false, inviter.Id, nil
+	limitReached := false
+	if policy.InviteeTopUpLimit > 0 {
+		limitMarker := &AffiliateCommission{}
+		if err := lockForUpdate(tx).
+			Select("id").
+			Where("invitee_id = ?", invitee.Id).
+			Order("id ASC").
+			Offset(policy.InviteeTopUpLimit - 1).
+			Limit(1).
+			Find(limitMarker).Error; err != nil {
+			return false, inviter.Id, err
+		}
+		limitReached = limitMarker.Id > 0
 	}
 
 	status := AffiliateCommissionStatusPending
 	approvedTime := int64(0)
-	if policy.AutoApprove {
+	commissionQuota := 0
+	if limitReached {
+		status = AffiliateCommissionStatusLimitReached
+		commissionCents = 0
+	} else {
+		convertedQuota, err := affiliateCentsToQuota(commissionCents)
+		if err != nil || convertedQuota <= 0 {
+			return false, inviter.Id, nil
+		}
+		commissionQuota = convertedQuota
+	}
+	if !limitReached && policy.AutoApprove {
 		status = AffiliateCommissionStatusApproved
 		approvedTime = common.GetTimestamp()
 	}
@@ -523,7 +558,7 @@ func createAffiliateCommissionForTopUpTx(tx *gorm.DB, topUp *TopUp) (bool, int, 
 	if record.Id <= 0 {
 		return false, inviter.Id, nil
 	}
-	if policy.AutoApprove {
+	if status == AffiliateCommissionStatusApproved {
 		if err := creditAffiliateAccountTx(tx, inviter.Id, commissionCents); err != nil {
 			return false, inviter.Id, err
 		}
@@ -790,11 +825,12 @@ func GetAffiliateSummary(userId int) (*AffiliateSummary, error) {
 	row := sums{}
 	err = DB.Model(&AffiliateCommission{}).
 		Select(
-			"COALESCE(SUM(CASE WHEN status = ? THEN commission_cents ELSE 0 END), 0) AS pending_cents, COALESCE(SUM(CASE WHEN status = ? THEN commission_cents ELSE 0 END), 0) AS approved_cents, COALESCE(SUM(CASE WHEN status IN (?, ?) THEN top_up_amount_cents ELSE 0 END), 0) AS top_up_cents, COUNT(*) AS record_count",
+			"COALESCE(SUM(CASE WHEN status = ? THEN commission_cents ELSE 0 END), 0) AS pending_cents, COALESCE(SUM(CASE WHEN status = ? THEN commission_cents ELSE 0 END), 0) AS approved_cents, COALESCE(SUM(CASE WHEN status IN (?, ?, ?) THEN top_up_amount_cents ELSE 0 END), 0) AS top_up_cents, COUNT(*) AS record_count",
 			AffiliateCommissionStatusPending,
 			AffiliateCommissionStatusApproved,
 			AffiliateCommissionStatusPending,
 			AffiliateCommissionStatusApproved,
+			AffiliateCommissionStatusLimitReached,
 		).
 		Where("inviter_id = ?", userId).
 		Scan(&row).Error
@@ -807,7 +843,7 @@ func GetAffiliateSummary(userId int) (*AffiliateSummary, error) {
 	summary.CommissionRecordCount = row.RecordCount
 
 	if err := DB.Model(&AffiliateCommission{}).
-		Where("inviter_id = ? AND status IN (?, ?)", userId, AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved).
+		Where("inviter_id = ? AND status IN (?, ?, ?)", userId, AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached).
 		Distinct("invitee_id").
 		Count(&summary.EffectiveInviteeCount).Error; err != nil {
 		return nil, err
@@ -867,11 +903,11 @@ func ListAffiliateInviteeStats(inviterId int, pageInfo *common.PageInfo) ([]*Aff
 	}
 	rows := []*AffiliateInviteeStats{}
 	err := DB.Unscoped().Table("users").
-		Select("users.id, users.username, users.display_name, users.created_at, COALESCE(SUM(CASE WHEN affiliate_commissions.status IN (?, ?) THEN 1 ELSE 0 END), 0) AS top_up_count, COALESCE(SUM(CASE WHEN affiliate_commissions.status IN (?, ?) THEN affiliate_commissions.top_up_amount_cents ELSE 0 END), 0) AS top_up_amount_cents, COALESCE(SUM(CASE WHEN affiliate_commissions.status IN (?, ?) THEN affiliate_commissions.commission_cents ELSE 0 END), 0) AS commission_cents, COALESCE(MAX(CASE WHEN affiliate_commissions.status IN (?, ?) THEN affiliate_commissions.created_time ELSE 0 END), 0) AS last_top_up_time",
-			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved,
-			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved,
-			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved,
-			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved,
+		Select("users.id, users.username, users.display_name, users.created_at, COALESCE(SUM(CASE WHEN affiliate_commissions.status IN (?, ?, ?) THEN 1 ELSE 0 END), 0) AS top_up_count, COALESCE(SUM(CASE WHEN affiliate_commissions.status IN (?, ?, ?) THEN affiliate_commissions.top_up_amount_cents ELSE 0 END), 0) AS top_up_amount_cents, COALESCE(SUM(CASE WHEN affiliate_commissions.status IN (?, ?, ?) THEN affiliate_commissions.commission_cents ELSE 0 END), 0) AS commission_cents, COALESCE(MAX(CASE WHEN affiliate_commissions.status IN (?, ?, ?) THEN affiliate_commissions.created_time ELSE 0 END), 0) AS last_top_up_time",
+			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached,
+			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached,
+			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached,
+			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached,
 		).
 		Joins("LEFT JOIN affiliate_commissions ON affiliate_commissions.invitee_id = users.id AND affiliate_commissions.inviter_id = ?", inviterId).
 		Where("users.inviter_id = ?", inviterId).
@@ -908,7 +944,7 @@ func GetAffiliateAdminSummary() (*AffiliateAdminSummary, error) {
 	}
 	row := sums{}
 	if err := DB.Model(&AffiliateCommission{}).
-		Select("COALESCE(SUM(CASE WHEN status = ? THEN commission_cents ELSE 0 END), 0) AS pending_cents, COALESCE(SUM(CASE WHEN status = ? THEN commission_cents ELSE 0 END), 0) AS approved_cents, COALESCE(SUM(CASE WHEN status IN (?, ?) THEN top_up_amount_cents ELSE 0 END), 0) AS top_up_cents, COUNT(*) AS record_count", AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved).
+		Select("COALESCE(SUM(CASE WHEN status = ? THEN commission_cents ELSE 0 END), 0) AS pending_cents, COALESCE(SUM(CASE WHEN status = ? THEN commission_cents ELSE 0 END), 0) AS approved_cents, COALESCE(SUM(CASE WHEN status IN (?, ?, ?) THEN top_up_amount_cents ELSE 0 END), 0) AS top_up_cents, COUNT(*) AS record_count", AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached).
 		Scan(&row).Error; err != nil {
 		return nil, err
 	}
@@ -916,7 +952,7 @@ func GetAffiliateAdminSummary() (*AffiliateAdminSummary, error) {
 	summary.ApprovedCents = row.ApprovedCents
 	summary.TopUpCents = row.TopUpCents
 	summary.CommissionRecordCount = row.RecordCount
-	if err := DB.Model(&AffiliateCommission{}).Where("status IN (?, ?)", AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved).Distinct("invitee_id").Count(&summary.EffectiveInviteeCount).Error; err != nil {
+	if err := DB.Model(&AffiliateCommission{}).Where("status IN (?, ?, ?)", AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached).Distinct("invitee_id").Count(&summary.EffectiveInviteeCount).Error; err != nil {
 		return nil, err
 	}
 	return summary, nil
@@ -935,7 +971,7 @@ func getAffiliateUpgradeMetrics(db *gorm.DB, inviterId int) (AffiliateUpgradeMet
 	metrics := AffiliateUpgradeMetrics{}
 	err := db.Model(&AffiliateCommission{}).
 		Select("COUNT(DISTINCT invitee_id) AS effective_invitee_count, COALESCE(SUM(top_up_amount_cents), 0) AS effective_top_up_amount_cents").
-		Where("inviter_id = ? AND status IN (?, ?)", inviterId, AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved).
+		Where("inviter_id = ? AND status IN (?, ?, ?)", inviterId, AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached).
 		Scan(&metrics).Error
 	return metrics, err
 }
@@ -957,7 +993,7 @@ func EnsureAffiliateUpgradeNoticesForEligibleInviters() error {
 	rows := []eligibleRow{}
 	if err := DB.Model(&AffiliateCommission{}).
 		Select("inviter_id, COUNT(DISTINCT invitee_id) AS effective_invitee_count, COALESCE(SUM(top_up_amount_cents), 0) AS effective_top_up_amount_cents").
-		Where("status IN (?, ?)", AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved).
+		Where("status IN (?, ?, ?)", AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached).
 		Group("inviter_id").
 		Having("COUNT(DISTINCT invitee_id) >= ? OR COALESCE(SUM(top_up_amount_cents), 0) >= ?", policy.UpgradeInviteesThreshold, policy.UpgradeTopUpAmountThresholdCents).
 		Scan(&rows).Error; err != nil {
@@ -996,12 +1032,12 @@ func ListAffiliateUpgradeCandidates(pageInfo *common.PageInfo) ([]*AffiliateUpgr
 	}
 	advancedEligible := DB.Model(&AffiliateCommission{}).
 		Select("inviter_id").
-		Where("status IN (?, ?)", AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved).
+		Where("status IN (?, ?, ?)", AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached).
 		Group("inviter_id").
 		Having("COUNT(DISTINCT invitee_id) >= ? OR COALESCE(SUM(top_up_amount_cents), 0) >= ?", policy.UpgradeInviteesThreshold, policy.UpgradeTopUpAmountThresholdCents)
 	goldEligible := DB.Model(&AffiliateCommission{}).
 		Select("inviter_id").
-		Where("status IN (?, ?)", AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved).
+		Where("status IN (?, ?, ?)", AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached).
 		Group("inviter_id").
 		Having("COUNT(DISTINCT invitee_id) >= ? OR COALESCE(SUM(top_up_amount_cents), 0) >= ?", policy.GoldUpgradeInviteesThreshold, policy.GoldUpgradeTopUpAmountThresholdCents)
 	query := DB.Model(&User{}).

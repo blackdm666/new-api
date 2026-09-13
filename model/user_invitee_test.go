@@ -94,6 +94,18 @@ func TestListAdminAffiliateInviteRecordsIncludesUsersWithoutCommission(t *testin
 		Status:           AffiliateCommissionStatusPending,
 		CreatedTime:      1_786_700_500,
 	}).Error)
+	require.NoError(t, DB.Create(&AffiliateCommission{
+		InviterId:        inviter.Id,
+		InviteeId:        withCommission.Id,
+		TopUpId:          103,
+		TradeNo:          "GLOBAL-INVITE-PAID-3",
+		TopUpAmountCents: 10_000,
+		RateBasisPoints:  500,
+		CommissionCents:  0,
+		CommissionQuota:  0,
+		Status:           AffiliateCommissionStatusLimitReached,
+		CreatedTime:      1_786_700_600,
+	}).Error)
 
 	allRows, total, err := ListAdminAffiliateInviteRecords("", &common.PageInfo{Page: 1, PageSize: 10})
 	require.NoError(t, err)
@@ -112,10 +124,10 @@ func TestListAdminAffiliateInviteRecordsIncludesUsersWithoutCommission(t *testin
 	assert.Zero(t, filteredRows[0].TopUpCount)
 	assert.Zero(t, filteredRows[0].TopUpAmountCents)
 	assert.Equal(t, withCommission.Id, filteredRows[1].InviteeId)
-	assert.Equal(t, int64(2), filteredRows[1].TopUpCount)
-	assert.Equal(t, int64(30_000), filteredRows[1].TopUpAmountCents)
+	assert.Equal(t, int64(3), filteredRows[1].TopUpCount)
+	assert.Equal(t, int64(40_000), filteredRows[1].TopUpAmountCents)
 	assert.Equal(t, int64(1_500), filteredRows[1].CommissionCents)
-	assert.Equal(t, int64(1_786_700_500), filteredRows[1].LastTopUpTime)
+	assert.Equal(t, int64(1_786_700_600), filteredRows[1].LastTopUpTime)
 
 	byUid, total, err := ListAdminAffiliateInviteRecords(strconv.Itoa(withoutCommission.Id), &common.PageInfo{Page: 1, PageSize: 10})
 	require.NoError(t, err)

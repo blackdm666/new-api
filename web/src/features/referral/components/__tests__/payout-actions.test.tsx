@@ -105,7 +105,12 @@ describe('administrator payout actions', () => {
       )
     })
 
-    assert.equal(container.querySelectorAll('button').length, 1)
+    assert.equal(container.querySelectorAll('button').length, 2)
+    assert.ok(
+      container.querySelector(
+        'button[aria-label="User Information: recipient-user"]'
+      )
+    )
     assert.match(
       container.textContent ?? '',
       /recipient-userRemark: Admin payout remarkUID 3/

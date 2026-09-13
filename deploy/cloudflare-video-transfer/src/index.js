@@ -1,3 +1,5 @@
+import { handleMediaRequest } from "./media.js";
+
 const MAX_JOB_BODY_BYTES = 32 * 1024;
 const MAX_CLOCK_SKEW_SECONDS = 5 * 60;
 const MAX_REDIRECTS = 3;
@@ -229,6 +231,9 @@ function resolveVideoType(response, finalURL) {
 }
 
 export async function handleRequest(request, env, dependencies = {}) {
+  if (new URL(request.url).pathname.startsWith("/media/")) {
+    return handleMediaRequest(request, env, dependencies);
+  }
   if (
     request.method !== "POST" ||
     new URL(request.url).pathname !== "/transfer"

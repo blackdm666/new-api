@@ -124,6 +124,7 @@ func InitOptionMap() {
 	common.OptionMap[AffiliateUpgradeTopUpAmountThresholdOptionKey] = strconv.FormatInt(AffiliateUpgradeEffectiveTopUpAmountCents, 10)
 	common.OptionMap[AffiliateGoldUpgradeTopUpAmountThresholdOptionKey] = strconv.FormatInt(AffiliateGoldUpgradeEffectiveTopUpAmountCents, 10)
 	common.OptionMap[AffiliateCommissionActivatedAtOptionKey] = "0"
+	common.OptionMap[AffiliateCommissionInviteeTopUpLimitOptionKey] = "0"
 	common.OptionMap[AffiliateAlipayPayoutEnabledOptionKey] = "false"
 	common.OptionMap[AffiliateAlipayAppIdOptionKey] = ""
 	common.OptionMap[AffiliateAlipayPrivateKeyOptionKey] = ""

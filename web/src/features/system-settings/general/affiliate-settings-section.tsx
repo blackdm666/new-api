@@ -57,6 +57,7 @@ import {
 const schema = z.object({
   enabled: z.boolean(),
   autoApprove: z.boolean(),
+  topUpLimit: z.coerce.number().int().min(0).max(1000000),
   juniorRate: z.coerce.number().min(0).max(100),
   advancedRate: z.coerce.number().min(0).max(100),
   goldRate: z.coerce.number().min(0).max(100),
@@ -110,6 +111,7 @@ export function AffiliateSettingsSection(props: {
     await updateMutation.mutateAsync({
       enabled: values.enabled,
       auto_approve: values.autoApprove,
+      commission_top_up_limit: values.topUpLimit,
       default_rate_basis_points: Math.round(values.juniorRate * 100),
       group_rates: {
         default: Math.round(values.juniorRate * 100),
@@ -229,6 +231,31 @@ export function AffiliateSettingsSection(props: {
                     />
                   </FormControl>
                 </SettingsSwitchItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='topUpLimit'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Rebate limit')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={0}
+                      max={1000000}
+                      disabled={!enabled || updateMutation.isPending}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Maximum number of rewarded top-ups per invited user. 0 means unlimited. Top-ups beyond the limit remain in the commission ledger with zero commission.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
               )}
             />
 

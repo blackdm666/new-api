@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -558,6 +559,16 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 
 	// OpenAI Video API 格式: 走各 adaptor 的 ConvertToOpenAIVideo
 	if isOpenAIVideoAPI {
+		// Repair an existing, not-yet-archived result only on an authenticated
+		// retrieval. Never clear its storage key or re-upload a deleted object.
+		if service.TaskMediaPublicEnabled() && originTask.Status == model.TaskStatusSuccess && originTask.PrivateData.ResultStorageKey == "" {
+			if originTask.FinishTime > 0 && time.Now().Unix()-originTask.FinishTime >= 30*24*60*60 {
+				return nil, service.TaskErrorWrapperLocal(errors.New("media retention period has ended"), "media_expired", http.StatusGone)
+			}
+			if _, _, err := service.PrepareTaskVideoPreviewURL(c.Request.Context(), originTask); err != nil {
+				return nil, service.TaskErrorWrapperLocal(errors.New("video media is temporarily unavailable"), "media_unavailable", http.StatusServiceUnavailable)
+			}
+		}
 		adaptor := GetTaskAdaptor(originTask.Platform)
 		if adaptor == nil {
 			taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("invalid channel id: %d", originTask.ChannelId), "invalid_channel_id", http.StatusBadRequest)
@@ -565,6 +576,9 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		}
 		if converter, ok := adaptor.(channel.OpenAIVideoConverter); ok {
 			openAIVideoData, err := converter.ConvertToOpenAIVideo(originTask)
+			if err == nil {
+				openAIVideoData, err = service.PresentPublicTaskVideo(openAIVideoData, originTask)
+			}
 			if err != nil {
 				taskResp = service.TaskErrorWrapper(err, "convert_to_openai_video_failed", http.StatusInternalServerError)
 				return

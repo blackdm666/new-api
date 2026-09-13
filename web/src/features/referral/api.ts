@@ -181,6 +181,7 @@ export async function rejectAffiliateCommission(
 export type AffiliateSettingsPayload = {
   enabled: boolean
   auto_approve: boolean
+  commission_top_up_limit: number
   default_rate_basis_points: number
   group_rates: Record<string, number>
   upgrade_invitees_threshold: number

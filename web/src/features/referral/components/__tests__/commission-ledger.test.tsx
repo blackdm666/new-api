@@ -18,7 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 
-import { describe, test } from 'vitest'
+import { describe, test, vi } from 'vitest'
+
+import { api } from '@/lib/api'
 
 import {
   AFFILIATE_COMMISSION_STATUS,
@@ -77,6 +79,15 @@ describe('affiliate commission ledger', () => {
       commissionFixture(1, '初级推广', AFFILIATE_COMMISSION_STATUS.PENDING),
       commissionFixture(2, '高级推广', AFFILIATE_COMMISSION_STATUS.APPROVED),
       commissionFixture(3, '金牌推广', AFFILIATE_COMMISSION_STATUS.REJECTED),
+      {
+        ...commissionFixture(
+          4,
+          '初级推广',
+          AFFILIATE_COMMISSION_STATUS.LIMIT_REACHED
+        ),
+        commission_cents: 0,
+        commission_quota: 0,
+      },
     ]
     const container = document.createElement('div')
     document.body.append(container)
@@ -99,11 +110,42 @@ describe('affiliate commission ledger', () => {
     assert.match(text, /Pending review/)
     assert.match(text, /Approved/)
     assert.match(text, /Rejected/)
+    assert.match(text, /Rebate limit reached/)
     assert.match(text, /promoter_1Remark: Admin promoter remark 1UID 1/)
     assert.match(text, /invitee_1Remark: Admin invitee remark 1UID 101/)
     assert.doesNotMatch(text, /Promoter note/)
     assert.doesNotMatch(text, /Invitee note/)
-    assert.equal(container.querySelectorAll('button').length, 0)
+    const userButtons = container.querySelectorAll<HTMLButtonElement>(
+      'button[aria-label^="User Information:"]'
+    )
+    assert.equal(userButtons.length, 8)
+
+    const userInfoRequest = vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          id: 1,
+          username: 'promoter_1',
+          display_name: '',
+          created_at: 1_786_700_800,
+          last_login_at: 0,
+          quota: 0,
+          used_quota: 0,
+          request_count: 0,
+          group: 'default',
+          inviter_id: 0,
+          aff_count: 0,
+        },
+      },
+    })
+    await act(async () => {
+      userButtons[0]?.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    assert.equal(userInfoRequest.mock.calls[0]?.[0], '/api/user/1')
+    assert.match(document.body.textContent ?? '', /User Information/)
+    userInfoRequest.mockRestore()
 
     const badges = [...container.querySelectorAll('[data-slot="badge"]')]
     assert.ok(badges.some((badge) => badge.className.includes('sky-500')))

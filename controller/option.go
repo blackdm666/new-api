@@ -53,7 +53,8 @@ func isAffiliateCommissionOptionKey(key string) bool {
 		model.AffiliateGoldUpgradeInviteesThresholdOptionKey,
 		model.AffiliateUpgradeTopUpAmountThresholdOptionKey,
 		model.AffiliateGoldUpgradeTopUpAmountThresholdOptionKey,
-		model.AffiliateCommissionActivatedAtOptionKey:
+		model.AffiliateCommissionActivatedAtOptionKey,
+		model.AffiliateCommissionInviteeTopUpLimitOptionKey:
 		return true
 	default:
 		return false

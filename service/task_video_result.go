@@ -49,6 +49,9 @@ func PrepareTaskVideoResult(ctx context.Context, task *model.Task, reportedURL s
 	}
 
 	resultURL := ResolveTaskVideoResultURL(task, reportedURL)
+	if TaskMediaPublicEnabled() && !TaskVideoCacheEnabled() {
+		return TaskVideoPreparation{}, errors.New("public video delivery requires object storage")
+	}
 	if strings.HasPrefix(resultURL, "data:") {
 		if !TaskVideoCacheEnabled() {
 			return TaskVideoPreparation{}, nil
@@ -57,6 +60,10 @@ func PrepareTaskVideoResult(ctx context.Context, task *model.Task, reportedURL s
 		return TaskVideoPreparation{Cached: cached}, err
 	}
 
+	if TaskMediaPublicEnabled() {
+		cached, err := cacheTaskVideoRemoteSource(ctx, task, resultURL)
+		return TaskVideoPreparation{Cached: cached}, err
+	}
 	direct, err := taskVideoURLCanOpenDirectly(ctx, task, resultURL)
 	if err != nil {
 		return TaskVideoPreparation{}, err

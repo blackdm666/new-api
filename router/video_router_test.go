@@ -3,6 +3,7 @@ package router
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -148,4 +149,58 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("public media is separate from authenticated task operations", func(t *testing.T) {
+		t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "true")
+		t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "https://media.example/media")
+		t.Setenv("TASK_VIDEO_WORKER_SECRET", strings.Repeat("s", 32))
+		task.PrivateData.ResultStorageKind = "s3"
+		task.PrivateData.ResultStorageKey = "task-videos/2026/09/" + strings.Repeat("a", 64) + ".mp4"
+		task.PrivateData.ResultMimeType = "video/mp4"
+		require.NoError(t, database.Save(task).Error)
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			r := httptest.NewRecorder()
+			engine.ServeHTTP(r, httptest.NewRequest(method, "/v1/videos/"+task.TaskID+"/content", nil))
+			assert.Equal(t, http.StatusTemporaryRedirect, r.Code)
+			assert.Equal(t, "https://media.example/media/"+task.PrivateData.ResultStorageKey, r.Header().Get("Location"))
+			assert.Equal(t, "no-store", r.Header().Get("Cache-Control"))
+			assert.NotContains(t, r.Body.String(), "jimeng-private")
+		}
+		query := httptest.NewRequest(http.MethodGet, "/v1/videos/"+task.TaskID, nil)
+		query.Header.Set("Authorization", "Bearer sk-jimengfetch")
+		queryResult := httptest.NewRecorder()
+		engine.ServeHTTP(queryResult, query)
+		require.Equal(t, http.StatusOK, queryResult.Code, queryResult.Body.String())
+		var publicResult map[string]any
+		require.NoError(t, common.Unmarshal(queryResult.Body.Bytes(), &publicResult))
+		assert.Equal(t, "completed", publicResult["status"])
+		assert.Equal(t, "https://media.example/media/"+task.PrivateData.ResultStorageKey, publicResult["video_url"])
+		assert.NotContains(t, queryResult.Body.String(), "cdn.example")
+		for _, path := range []string{"/v1/videos/" + task.TaskID, "/v1/media/uploads"} {
+			method := http.MethodGet
+			if path == "/v1/media/uploads" {
+				method = http.MethodPost
+			}
+			r := httptest.NewRecorder()
+			engine.ServeHTTP(r, httptest.NewRequest(method, path, nil))
+			assert.Equal(t, http.StatusUnauthorized, r.Code)
+		}
+		for _, status := range []model.TaskStatus{model.TaskStatusInProgress, model.TaskStatusFailure} {
+			task.Status = status
+			require.NoError(t, database.Save(task).Error)
+			r := httptest.NewRecorder()
+			engine.ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/v1/videos/"+task.TaskID+"/content", nil))
+			assert.Equal(t, http.StatusNotFound, r.Code)
+			assert.NotContains(t, r.Body.String(), status)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/v1/media/uploads", strings.NewReader(`{"mime_type":"video/mp4","size":24,"sha256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`))
+		request.Header.Set("Authorization", "Bearer sk-jimengfetch")
+		r := httptest.NewRecorder()
+		engine.ServeHTTP(r, request)
+		require.Equal(t, http.StatusOK, r.Code, r.Body.String())
+		assert.Contains(t, r.Body.String(), "https://media.example/media/reference-media/")
+		assert.Contains(t, r.Body.String(), "X-Media-Upload-Token")
+		assert.NotContains(t, r.Body.String(), "sk-jimengfetch")
+		assert.NotContains(t, r.Body.String(), strings.Repeat("s", 32))
+	})
 }

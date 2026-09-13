@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +14,103 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+func TestAffiliateCommissionTopUpLimitDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector
+			kind := common.DatabaseTypeSQLite
+			switch dialect {
+			case "sqlite":
+				driver = sqlite.Open(filepath.Join(t.TempDir(), "commission-limit.db"))
+			case "mysql":
+				dsn := os.Getenv("TEST_MYSQL_DSN")
+				if dsn == "" {
+					t.Skip("TEST_MYSQL_DSN not configured")
+				}
+				driver = mysql.Open(dsn)
+				kind = common.DatabaseTypeMySQL
+			case "postgres":
+				dsn := os.Getenv("TEST_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("TEST_POSTGRES_DSN not configured")
+				}
+				driver = postgres.Open(dsn)
+				kind = common.DatabaseTypePostgreSQL
+			}
+			db, err := gorm.Open(driver, &gorm.Config{})
+			require.NoError(t, err)
+			oldDB, oldLog := DB, LOG_DB
+			oldMain, oldLogType := common.MainDatabaseType(), common.LogDatabaseType()
+			DB, LOG_DB = db, db
+			common.SetDatabaseTypes(kind, kind)
+			initCol()
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+			t.Cleanup(func() {
+				DB, LOG_DB = oldDB, oldLog
+				common.SetDatabaseTypes(oldMain, oldLogType)
+				initCol()
+				_ = sqlDB.Close()
+			})
+			for range 2 {
+				require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &AffiliateCommission{}, &AffiliateAccount{}, &AffiliateUpgradeNotice{}))
+			}
+			enableAffiliateForTest(t)
+			setAffiliateOptionForTest(t, AffiliateCommissionAutoApproveOptionKey, "true")
+			setAffiliateOptionForTest(t, AffiliateCommissionInviteeTopUpLimitOptionKey, "2")
+
+			inviter := &User{
+				Username: fmt.Sprintf("matrix-limit-owner-%s", dialect),
+				Email:    fmt.Sprintf("matrix-limit-owner-%s@example.com", dialect),
+				Group:    AffiliatePromoterGroupDefault,
+				AffCode:  fmt.Sprintf("matrix-limit-owner-code-%s", dialect),
+				Status:   common.UserStatusEnabled,
+			}
+			require.NoError(t, db.Create(inviter).Error)
+			invitee := &User{
+				Username:  fmt.Sprintf("matrix-limit-buyer-%s", dialect),
+				Email:     fmt.Sprintf("matrix-limit-buyer-%s@example.com", dialect),
+				AffCode:   fmt.Sprintf("matrix-limit-buyer-code-%s", dialect),
+				InviterId: inviter.Id,
+				Status:    common.UserStatusEnabled,
+			}
+			require.NoError(t, db.Create(invitee).Error)
+			t.Cleanup(func() {
+				_ = db.Where("inviter_id = ?", inviter.Id).Delete(&AffiliateUpgradeNotice{}).Error
+				_ = db.Where("user_id = ?", inviter.Id).Delete(&AffiliateAccount{}).Error
+				_ = db.Where("invitee_id = ?", invitee.Id).Delete(&AffiliateCommission{}).Error
+				_ = db.Where("user_id = ?", invitee.Id).Delete(&TopUp{}).Error
+				_ = db.Unscoped().Where("id IN ?", []int{inviter.Id, invitee.Id}).Delete(&User{}).Error
+			})
+			for index := range 3 {
+				topUp := &TopUp{
+					UserId:          invitee.Id,
+					Money:           100,
+					TradeNo:         fmt.Sprintf("MATRIX-LIMIT-%s-%d", dialect, index+1),
+					PaymentProvider: PaymentProviderEpay,
+					CompleteTime:    common.GetTimestamp(),
+					Status:          common.TopUpStatusSuccess,
+				}
+				require.NoError(t, db.Create(topUp).Error)
+				require.NoError(t, CreateAffiliateCommissionForTopUp(topUp))
+			}
+
+			records := []*AffiliateCommission{}
+			require.NoError(t, db.Where("invitee_id = ?", invitee.Id).Order("id ASC").Find(&records).Error)
+			require.Len(t, records, 3)
+			assert.Equal(t, AffiliateCommissionStatusApproved, records[0].Status)
+			assert.Equal(t, AffiliateCommissionStatusApproved, records[1].Status)
+			assert.Equal(t, AffiliateCommissionStatusLimitReached, records[2].Status)
+			assert.Zero(t, records[2].CommissionCents)
+			assert.Zero(t, records[2].CommissionQuota)
+			account, err := GetAffiliateAccount(inviter.Id)
+			require.NoError(t, err)
+			assert.Equal(t, records[0].CommissionCents+records[1].CommissionCents, account.AvailableCents)
+		})
+	}
+}
 
 func TestAffiliateAdminRemarksDatabaseMatrix(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {

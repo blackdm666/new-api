@@ -413,6 +413,7 @@ export type BillingSettings = {
   'quota_setting.enable_free_model_pre_consume': boolean
   AffiliateCommissionEnabled: boolean
   AffiliateCommissionAutoApprove: boolean
+  AffiliateCommissionInviteeTopUpLimit: number
   AffiliateCommissionDefaultRateBasisPoints: number
   AffiliateCommissionGroupRates: string
   AffiliateUpgradeEffectiveInviteesThreshold: number

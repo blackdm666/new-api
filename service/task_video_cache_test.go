@@ -82,6 +82,63 @@ func TestPrepareTaskVideoResultPersistsAndReopensDataURL(t *testing.T) {
 	assert.Equal(t, "video/mp4", mimeType)
 }
 
+func TestPublicVideoDeliveryArchivesOnceAndDoesNotReviveDeletedMedia(t *testing.T) {
+	t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "true")
+	t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "https://media.example/media")
+	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "true")
+	t.Setenv("TASK_VIDEO_DIRECT_HOSTS", "official.example")
+	storage := useLocalTaskVideoCache(t)
+	useStaticTaskVideoSource(t, "public-video")
+	task := &model.Task{TaskID: "task_public_once", Status: model.TaskStatusSuccess}
+	prepared, err := PrepareTaskVideoResult(context.Background(), task, "https://official.example/result.mp4")
+	require.NoError(t, err)
+	require.True(t, prepared.Cached)
+	key := task.PrivateData.ResultStorageKey
+	require.NoError(t, storage.Delete(context.Background(), key))
+	prepared, err = PrepareTaskVideoResult(context.Background(), task, "https://official.example/result.mp4")
+	require.NoError(t, err)
+	require.True(t, prepared.Cached)
+	exists, err := storage.Exists(context.Background(), key)
+	require.NoError(t, err)
+	assert.False(t, exists, "references must not re-upload a deleted/expired result")
+	task.PrivateData.ResultStorageKind = "s3"
+	publicURL, cached, err := GetTaskVideoPreviewURL(context.Background(), task)
+	require.NoError(t, err)
+	assert.True(t, cached)
+	assert.Equal(t, "https://media.example/media/"+key, publicURL)
+	assert.NotContains(t, publicURL, "?")
+}
+
+func TestMediaUploadGrantValidation(t *testing.T) {
+	t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "true")
+	t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "https://media.example/media")
+	t.Setenv("TASK_VIDEO_WORKER_SECRET", strings.Repeat("s", 32))
+	valid := MediaUploadRequest{Size: 12, MimeType: "video/mp4", SHA256: strings.Repeat("A", 43)}
+	receipt, err := IssueMediaUpload(valid)
+	require.NoError(t, err)
+	assert.Equal(t, receipt.URL, receipt.UploadURL)
+	assert.Equal(t, "PUT", receipt.Method)
+	assert.Contains(t, receipt.URL, "/reference-media/")
+	assert.NotContains(t, receipt.URL, "?")
+	assert.InDelta(t, time.Now().Add(10*time.Minute).Unix(), receipt.ExpiresAt, 2)
+	for _, bad := range []MediaUploadRequest{
+		{Size: 0, MimeType: valid.MimeType, SHA256: valid.SHA256},
+		{Size: TaskMediaMaxUploadBytes + 1, MimeType: valid.MimeType, SHA256: valid.SHA256},
+		{Size: 12, MimeType: "image/svg+xml", SHA256: valid.SHA256},
+		{Size: 12, MimeType: valid.MimeType, SHA256: "bad"},
+	} {
+		_, err := IssueMediaUpload(bad)
+		assert.Error(t, err)
+	}
+	for _, key := range []string{"invoice/private.pdf", "reference-media/../../secret.mp4", "task-videos/2026/09/not-a-key.mp4"} {
+		_, err := TaskMediaPublicURL(key)
+		assert.Error(t, err)
+	}
+	t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "http://media.example/media")
+	_, err = IssueMediaUpload(valid)
+	assert.Error(t, err)
+}
+
 func TestPrepareTaskVideoResultKeepsUpstreamR2URLDirect(t *testing.T) {
 	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "true")
 	task := &model.Task{

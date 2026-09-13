@@ -271,6 +271,10 @@ func GetTaskVideoPreviewURL(ctx context.Context, task *model.Task) (previewURL s
 	if task == nil || task.PrivateData.ResultStorageKey == "" {
 		return "", false, nil
 	}
+	if TaskMediaPublicEnabled() {
+		previewURL, err = PublicTaskVideoURL(task)
+		return previewURL, true, err
+	}
 	storage, err := taskVideoCacheStorageFactory()
 	if err != nil {
 		return "", true, err
