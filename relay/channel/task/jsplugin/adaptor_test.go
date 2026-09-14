@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"os"
 	"strings"
 	"testing"
 
@@ -1840,4 +1841,71 @@ func TestAlibabaSubmitDeltaDoesNotMutateControlState(t *testing.T) {
 	encoded, err = common.Marshal(result["state"])
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"choices":[{"count":2,"lastText":false,"finishReason":"stop"}],"hasUsage":true}`, string(encoded))
+}
+
+func TestXinMengPluginHostSubmitQueryAndUsage(t *testing.T) {
+	source, err := os.ReadFile("../../../../plugins/tasks/xinmeng-wan3/plugin.js")
+	require.NoError(t, err)
+	plugin, err := pluginruntime.NewRegistry().Register(string(source), pluginruntime.Options{})
+	require.NoError(t, err)
+	for _, tc := range []struct{ model, upstream, resolution string }{
+		{"wan3.0-video-480p", "wan3.0-video-480p", "480p"},
+		{"SD2.0 1080P", "cvd-seedance-2.0", "1080p"},
+		{"kling-3.0-turbo-4k", "kling-3.0-turbo", "4k"},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			submits, queries := 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "Bearer fixture", r.Header.Get("Authorization"))
+				switch r.URL.Path {
+				case "/v1/videos/generations":
+					submits++
+					var body map[string]any
+					require.NoError(t, common.DecodeJson(r.Body, &body))
+					assert.Equal(t, tc.upstream, body["model"])
+					assert.Equal(t, tc.resolution, body["resolution"])
+					assert.EqualValues(t, 4, body["duration"])
+					assert.NotContains(t, body, "callback_url")
+					_, _ = w.Write([]byte(`{"task_id":"provider-job","status":"pending"}`))
+				case "/v1/tasks/provider-job":
+					queries++
+					_, _ = w.Write([]byte(`{"data":{"status":"completed","result":{"video_url":"https://example.com/result.mp4"}}}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			adaptor := New(plugin)
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: server.URL, ApiKey: "fixture", UpstreamModelName: tc.upstream}, OriginModelName: tc.model, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_public"}}
+			adaptor.Init(info)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+			c.Set(pluginruntime.ContextKeyPinnedEndpoint, pluginruntime.PinnedEndpoint{Plugin: plugin, Protocol: "openai_video", Model: tc.model})
+			c.Set(pluginruntime.ContextKeyProtocolRequest, pluginruntime.ProtocolRequestContext{Model: tc.model, Protocol: "openai_video", Operation: "create", RouteRequestContext: pluginruntime.RouteRequestContext{Body: map[string]any{"kind": "json", "value": map[string]any{"model": tc.model, "prompt": "A toy car", "duration": "4", "seconds": "15", "metadata": `{"resolution":"480p"}`}}}})
+			require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+			assert.Empty(t, info.CallbackURL)
+			facts, err := adaptor.ExtractUsageFactsValidated(c, info)
+			require.NoError(t, err)
+			assert.EqualValues(t, 4, facts["seconds"])
+			body, err := adaptor.BuildRequestBody(c, info)
+			require.NoError(t, err)
+			response, err := adaptor.DoRequest(c, info, body)
+			require.NoError(t, err)
+			parsed, taskErr := adaptor.ParseResponse(c, response, info)
+			require.Nil(t, taskErr)
+			assert.Equal(t, "provider-job", parsed.UpstreamTaskID)
+			task := &model.Task{TaskID: "task_public", Properties: model.Properties{OriginModelName: tc.model, UpstreamModelName: tc.upstream}, PrivateData: model.TaskPrivateData{UpstreamTaskID: parsed.UpstreamTaskID}}
+			query, err := adaptor.FetchTask(server.URL, "fixture", task, "")
+			require.NoError(t, err)
+			queryBody, err := io.ReadAll(query.Body)
+			require.NoError(t, err)
+			require.NoError(t, query.Body.Close())
+			result, err := adaptor.ParseTaskResult(task, query, queryBody)
+			require.NoError(t, err)
+			assert.Equal(t, model.TaskStatusSuccess, result.Status)
+			assert.Equal(t, "https://example.com/result.mp4", result.Url)
+			assert.Equal(t, 1, submits)
+			assert.Equal(t, 1, queries)
+		})
+	}
 }

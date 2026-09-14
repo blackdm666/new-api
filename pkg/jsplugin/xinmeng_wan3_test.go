@@ -115,10 +115,10 @@ func TestXinMengWan3TaskPlugin(t *testing.T) {
 			})
 		}
 	})
-	t.Run("legacy metadata and callback stay local", func(t *testing.T) {
-		decoded := call(t, "decodeRequest", map[string]any{"model": "wan3.0-video-720p", "body": map[string]any{"kind": "json", "value": map[string]any{"metadata": `{"first_image":["https://example.com/first.png"],"last_image":"https://example.com/last.png"}`, "callback_url": "https://example.com/callback", "duration": "4", "seconds": "30"}}})
+	t.Run("legacy metadata and official polling contract", func(t *testing.T) {
+		decoded := call(t, "decodeRequest", map[string]any{"model": "wan3.0-video-720p", "body": map[string]any{"kind": "json", "value": map[string]any{"metadata": `{"first_image":["https://example.com/first.png"],"last_image":"https://example.com/last.png"}`, "duration": "4", "seconds": "30"}}})
 		request := decoded["requestBody"].(map[string]any)
-		assert.Equal(t, "https://example.com/callback", request["callback_url"])
+		assert.NotContains(t, request, "callback_url")
 		assert.NotContains(t, request, "seconds")
 		body := call(t, "buildSubmitRequest", map[string]any{"model": "wan3.0-video-720p", "requestBody": request})["body"].(map[string]any)
 		assert.NotContains(t, body, "callback_url", "callback delivery belongs to the host")
@@ -136,6 +136,25 @@ func TestXinMengWan3TaskPlugin(t *testing.T) {
 		assert.NotContains(t, body, "referenceImages")
 	})
 	t.Run("model-specific validation", func(t *testing.T) {
+		for _, model := range []string{"SD2.5 480P", "SD2.5 720P", "SD2.5 1080P"} {
+			decoded := call(t, "decodeRequest", map[string]any{"model": model, "body": map[string]any{"kind": "json", "value": map[string]any{"prompt": "test", "metadata": map[string]any{"generate_audio": false}}}})
+			body := call(t, "buildSubmitRequest", map[string]any{"model": model, "requestBody": decoded["requestBody"]})["body"].(map[string]any)
+			assert.Equal(t, false, body["generateAudio"], model)
+		}
+		refs := func(n int) []string {
+			values := make([]string, n)
+			for i := range values {
+				values[i] = "https://example.com/reference"
+			}
+			return values
+		}
+		for _, model := range []string{"SD2.0 480P", "SD2.0 720P", "SD2.0 1080P"} {
+			input := map[string]any{"prompt": "test", "images": refs(9), "videos": refs(3)}
+			call(t, "decodeRequest", map[string]any{"model": model, "body": map[string]any{"kind": "json", "value": input}})
+			input["audios"] = refs(1)
+			_, err := plugin.Engine.Call(ctx, "decodeRequest", map[string]any{"model": model, "body": map[string]any{"kind": "json", "value": input}})
+			assert.ErrorContains(t, err, "too many media references in total")
+		}
 		for _, tc := range []struct {
 			model string
 			input map[string]any
@@ -146,6 +165,7 @@ func TestXinMengWan3TaskPlugin(t *testing.T) {
 			{"wan3.0-video-720p", map[string]any{"firstFrame": "https://example.com/a.png", "images": []string{"https://example.com/b.png"}}},
 			{"wan3.0-video-720p", map[string]any{"prompt": "test", "metadata": "[]"}},
 			{"__proto__", map[string]any{"prompt": "test"}},
+			{"wan3.0-video-720p", map[string]any{"prompt": "test", "callback_url": "https://example.com/callback"}},
 		} {
 			_, err := plugin.Engine.Call(ctx, "decodeRequest", map[string]any{"model": tc.model, "body": map[string]any{"kind": "json", "value": tc.input}})
 			assert.Error(t, err, "%s: %v", tc.model, tc.input)

@@ -19,12 +19,12 @@ for (const resolution of ["480p", "720p", "1080p"]) {
   addModel("SD2.5 " + resolution.toUpperCase(), dvc, resolution, {
     maxDuration: 30, defaultRatio: "auto", ratios: ["auto", "1:1", "21:9", "16:9", "9:16", "3:4", "4:3"],
     images: 30, videos: 10, audios: 10, framesExclusive: true,
-    generateAudio: resolution === "720p", promptless: resolution !== "720p" });
+    generateAudio: true });
   // The live cvd catalog has four qualities. A sales alias is mandatory so
   // the 480/720/1080 tiers cannot accidentally all generate the default 480p.
   addModel("SD2.0 " + resolution.toUpperCase(), "cvd-seedance-2.0", resolution, {
     defaultRatio: "1:1", framesExclusive: true, promptless: true,
-    images: 30, videos: 10, audios: 10 });
+    images: 9, videos: 3, audios: 3, totalMedia: 12 });
 }
 for (const resolution of ["480p", "720p"]) {
   const name = "seedance-2.0-mini-" + resolution;
@@ -48,7 +48,7 @@ export const meta = {
   apiVersion: 1,
   key: "xinmeng-wan3",
   name: "XinMeng Video",
-  version: "2.0.0",
+  version: "2.0.1",
   author: { name: "88API" },
   description: { en: "Video generation through XinMeng", zh: "通过 XinMeng 生成视频" },
   models: MODELS,
@@ -180,7 +180,8 @@ export function decodeRequest(ctx) {
     try { req.metadata = JSON.parse(req.metadata); } catch (_error) { throw new Error("metadata must be a JSON object or an encoded JSON object"); }
   }
   if (req.metadata !== undefined && req.metadata !== null && (typeof req.metadata !== "object" || Array.isArray(req.metadata))) throw new Error("metadata must be an object");
-  if (req.callback_url !== undefined && (typeof req.callback_url !== "string" || req.callback_url.length > 2048)) throw new Error("callback_url must be a string of at most 2048 characters");
+  if (req.callback_url !== undefined && req.callback_url !== null && req.callback_url !== "") throw new Error("callback_url is not supported for this model; poll GET /v1/videos/{id} for the result");
+  delete req.callback_url;
   req.model = ctx.model;
   const payload = payloadFor(req, ctx.model);
   req.duration = payload.duration;
@@ -246,7 +247,7 @@ export const protocols = {
     decodeRequest: decodeRequest,
     render: function (_ctx, task) {
       const statuses = { NOT_START: "queued", SUBMITTED: "queued", QUEUED: "queued", IN_PROGRESS: "in_progress", SUCCESS: "completed", FAILURE: "failed" };
-      const result = { id: task.task_id, task_id: task.task_id, object: "video", model: object(task.properties).origin_model_name || "", status: statuses[task.status] || "unknown", progress: Number(String(task.progress || "0").replace("%", "")), created_at: task.created_at };
+      const result = { id: task.task_id, object: "video", model: object(task.properties).origin_model_name || "", status: statuses[task.status] || "unknown", progress: Number(String(task.progress || "0").replace("%", "")), created_at: task.created_at };
       if (task.status === "SUCCESS" || task.status === "FAILURE") result.completed_at = task.updated_at;
       if (task.status === "FAILURE") result.error = { code: "video_generation_failed", message: task.fail_reason || "video generation failed" };
       return result;
