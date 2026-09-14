@@ -894,6 +894,41 @@ func TestVideoGenerationsIsNotClaimedByOpenAIVideoProtocol(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
 }
 
+func TestLegacyVideoRouteExplicitlyUsesCanonicalPluginProtocol(t *testing.T) {
+	const key = "legacy-video-bridge"
+	_, err := jsplugin.DefaultRegistry.Register(taskProtocolPluginSource(key, "1.0.0", `["legacy-video-model"]`, "/v1/videos", `return {kind:"submit", model:ctx.model, action:"generate", requestBody:ctx.body.value};`), jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister(key)) })
+	for _, tc := range []struct {
+		name    string
+		claimed bool
+	}{{"legacy-video-model", true}, {"ordinary-video-model", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+			reached := false
+			router.POST("/v1/video/generations", PinTaskPluginEndpoint("/v1/videos"), PrepareTaskPluginEndpoint(), func(c *gin.Context) {
+				reached = true
+				value, claimed := c.Get(jsplugin.ContextKeyPinnedEndpoint)
+				assert.Equal(t, tc.claimed, claimed)
+				if claimed {
+					pin := value.(jsplugin.PinnedEndpoint)
+					assert.Equal(t, "openai_video", pin.Protocol)
+					assert.Equal(t, "create", pin.Operation.Name)
+					assert.Equal(t, "/v1/videos", pin.Operation.Path)
+				}
+				assert.Equal(t, "/v1/video/generations", c.Request.URL.Path)
+				c.Status(http.StatusNoContent)
+			})
+			request := httptest.NewRequest(http.MethodPost, "/v1/video/generations", strings.NewReader(`{"model":"`+tc.name+`","prompt":"test"}`))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			assert.Equal(t, http.StatusNoContent, recorder.Code, recorder.Body.String())
+			assert.True(t, reached)
+		})
+	}
+}
+
 func TestPrepareTaskPluginRouteKeepsRawBinaryOpaque(t *testing.T) {
 	plugin := compileTaskRoutePlugin(t, `
 export const meta = {

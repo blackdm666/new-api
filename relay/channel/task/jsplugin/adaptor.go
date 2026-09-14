@@ -124,6 +124,17 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		}
 	}
 	request, hasRequest := c.Get("task_request")
+	if body, ok := request.(map[string]any); ok {
+		// Plugin decoders bypass storeTaskRequest. Carry the local callback into
+		// the same SSRF validation and durable delivery path as native adaptors.
+		if value, present := body["callback_url"]; present && value != nil {
+			callbackURL, valid := value.(string)
+			if !valid {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("callback_url must be a string"), "invalid_callback_url", http.StatusBadRequest)
+			}
+			info.CallbackURL = strings.TrimSpace(callbackURL)
+		}
+	}
 	hasUsageProfiles := len(a.plugin.Meta.UsageProfiles) > 0
 	if hasRequest && !hasUsageProfiles {
 		if err := a.validateResolvedUsageRequest(request, ""); err != nil {
@@ -878,7 +889,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	host := task.ToOpenAIVideo()
 	rendered["id"] = host.ID
 	rendered["object"] = host.Object
-	delete(rendered, "task_id")
+	rendered["task_id"] = host.ID
 	rendered["status"] = host.Status
 	rendered["progress"] = host.Progress
 	rendered["created_at"] = host.CreatedAt
