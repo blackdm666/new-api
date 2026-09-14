@@ -58,10 +58,14 @@ jobs:
         run: make test
 
   frontend:
-    name: Frontend typecheck and test
+    name: Frontend typecheck and test (${{ matrix.shard }}/4)
     if: github.event.action != 'closed' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     defaults:
       run:
         working-directory: web
@@ -85,4 +89,7 @@ jobs:
         run: bun run typecheck
 
       - name: Test
-        run: bun run test
+        # Keep test isolation, assertions and timeouts unchanged. Heavy jsdom
+        # suites compete with Vite for CPU on one runner; distribute all files
+        # across runners rather than making individual tests more permissive.
+        run: bun run test --shard=${{ matrix.shard }}/4 --maxWorkers=1
