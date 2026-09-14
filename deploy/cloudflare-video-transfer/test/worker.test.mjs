@@ -78,18 +78,63 @@ test("media upload is scoped, write-once and anonymous reads support HEAD/ranges
     const r = await handleRequest(new Request(fixture.url, { method, headers: range ? { Range: range } : {} }), fixture.env);
     assert.equal(r.status, status);
     assert.equal(r.headers.get("Access-Control-Allow-Origin"), "*");
-    assert.equal(r.headers.get("Cache-Control"), "no-store");
+    assert.equal(r.headers.get("Cache-Control"), "public, max-age=60, s-maxage=300, must-revalidate");
     assert.equal(r.headers.get("Content-Security-Policy"), "default-src 'none'; media-src 'self'; img-src 'self'; sandbox allow-same-origin");
     assert.equal((await r.arrayBuffer()).byteLength, expected);
   }
   const invalidRange = await handleRequest(new Request(fixture.url, { headers: { Range: "bytes=999999-" } }), fixture.env);
   assert.equal(invalidRange.status, 416);
+  assert.equal(invalidRange.headers.get("Cache-Control"), "no-store");
   const expired = await handleRequest(new Request(fixture.url), fixture.env, { nowMilliseconds: Date.now() + 31 * 86400000 });
   assert.equal(expired.status, 410);
+  assert.equal(expired.headers.get("Cache-Control"), "no-store");
   assert.equal(fixture.env.VIDEO_BUCKET.writes, 1);
   fixture.env.VIDEO_BUCKET.objects.clear();
   assert.equal((await handleRequest(new Request(fixture.url), fixture.env)).status, 404);
   assert.equal(fixture.env.VIDEO_BUCKET.writes, 1);
+});
+
+test("media cache lifetime never exceeds object expiry, including time spent reading R2", async () => {
+  const fixture = await mediaUploadFixture();
+  await handleRequest(fixture.request(), fixture.env, fixedLengthDependencies);
+  const object = fixture.env.VIDEO_BUCKET.objects.get(fixture.key);
+  const expiry = object.uploaded.getTime() + 30 * 86400000;
+  for (const [remaining, cache] of [[25_250, "public, max-age=25, s-maxage=25, must-revalidate"], [500, "no-store"], [0, "no-store"]]) {
+    const response = await handleRequest(new Request(fixture.url), fixture.env, { nowMilliseconds: expiry - remaining });
+    assert.equal(response.status, remaining ? 200 : 410);
+    assert.equal(response.headers.get("Cache-Control"), cache);
+    await response.arrayBuffer();
+  }
+  let now = expiry - 10_000;
+  const get = fixture.env.VIDEO_BUCKET.get.bind(fixture.env.VIDEO_BUCKET);
+  fixture.env.VIDEO_BUCKET.get = async (...args) => { const value = await get(...args); now = expiry; return value; };
+  const delayed = await handleRequest(new Request(fixture.url), fixture.env, { get nowMilliseconds() { return now; } });
+  assert.equal(delayed.status, 410);
+  assert.equal(delayed.headers.get("Cache-Control"), "no-store");
+  assert.equal(fixture.env.VIDEO_BUCKET.writes, 1);
+});
+
+test("upload, errors and non-media endpoints remain uncacheable", async () => {
+  const fixture = await mediaUploadFixture();
+  const uploaded = await handleRequest(fixture.request(), fixture.env, fixedLengthDependencies);
+  assert.equal(uploaded.status, 201);
+  assert.equal(uploaded.headers.get("Cache-Control"), "no-store");
+  for (const [url, init, status] of [
+    [fixture.url, { method: "PUT", body: fixture.bytes }, 401],
+    [fixture.url + "?anything=1", {}, 400],
+    [fixture.url, { method: "OPTIONS" }, 204],
+    [fixture.url, { method: "DELETE" }, 405],
+    ["https://worker.example/transfer", { method: "POST", body: "{}" }, 401],
+    ["https://worker.example/media/reference-media/ffffffff-bbbb-4ccc-8ddd-eeeeeeeeeeee.mp4", {}, 404],
+  ]) {
+    const response = await handleRequest(new Request(url, init), fixture.env);
+    assert.equal(response.status, status);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+  }
+  fixture.env.VIDEO_BUCKET.get = async () => { throw new Error("storage failed"); };
+  const failed = await handleRequest(new Request(fixture.url), fixture.env);
+  assert.equal(failed.status, 502);
+  assert.equal(failed.headers.get("Cache-Control"), "no-store");
 });
 
 test("media rejects unscoped credentials, expired grants, wrong type, oversize and unrelated objects", async () => {

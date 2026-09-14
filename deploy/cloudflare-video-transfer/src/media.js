@@ -172,9 +172,23 @@ export async function handleMediaRequest(request, env, dependencies = {}) {
       return failure(416, "Invalid byte range", headers);
     }
     headers.set("Content-Length", String(range?.length ?? metadata.size));
+    const object = request.method === "HEAD" ? null : await env.VIDEO_BUCKET.get(key, range ? { range } : undefined);
+    if (request.method !== "HEAD" && !object) return failure(404, "Media not found");
+    // Recheck after R2 I/O. A slow read must not start a fresh cache lifetime
+    // beyond the object's original expiry. Errors and uploads stay no-store.
+    const responseNow = dependencies.nowMilliseconds ?? Date.now();
+    if (responseNow >= expires) {
+      await object?.body.cancel();
+      return failure(410, "Media expired; upload a new asset explicitly");
+    }
+    const ttl = Math.min(300, Math.floor((expires - responseNow) / 1000));
+    if (ttl > 0) {
+      headers.set("Date", new Date(responseNow).toUTCString());
+      headers.set("Cache-Control", `public, max-age=${Math.min(60, ttl)}, s-maxage=${ttl}, must-revalidate`);
+    }
+    // Workers Cache requests a full body on a cold Range and slices the cached
+    // response itself. Preserve our Range handling when that cache is disabled.
     if (request.method === "HEAD") return new Response(null, { headers });
-    const object = await env.VIDEO_BUCKET.get(key, range ? { range } : undefined);
-    if (!object) return failure(404, "Media not found");
     if (range) headers.set("Content-Range", `bytes ${range.offset}-${range.offset + range.length - 1}/${metadata.size}`);
     return new Response(object.body, { status: range ? 206 : 200, headers });
   } catch {
