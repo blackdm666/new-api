@@ -30,7 +30,11 @@ import {
   getDynamicPricingSummary,
   isUnconfiguredTaskUsageModel,
 } from '../lib/dynamic-price'
-import { isTokenBasedModel } from '../lib/model-helpers'
+import {
+  getFixedPriceUnitLabel,
+  isPerSecondModel,
+  isTokenBasedModel,
+} from '../lib/model-helpers'
 import { formatPrice, formatRequestPrice } from '../lib/price'
 import { taskUsageUnitLabel } from '../lib/task-price-display'
 import type { PricingModel, TokenUnit } from '../types'
@@ -219,7 +223,9 @@ export function ModelPriceCell(props: {
     } else {
       metrics = [
         {
-          label: t('Per-request'),
+          label: isPerSecondModel(props.model)
+            ? t('Per-second')
+            : t('Per-request'),
           value: formatRequestPrice(
             props.model,
             options.showRechargePrice,
@@ -230,7 +236,7 @@ export function ModelPriceCell(props: {
           ),
         },
       ]
-      caption = `${currencyLabel} / ${t('request')}`
+      caption = `${currencyLabel} / ${t(getFixedPriceUnitLabel(props.model))}`
     }
   }
   return (

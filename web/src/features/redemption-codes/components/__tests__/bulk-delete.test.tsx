@@ -116,6 +116,16 @@ afterEach(() => {
   clients.length = 0
 })
 
+test('copies only selected raw keys with one key per line', async () => {
+  const { user, remove } = await setup()
+  const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+  await user.click(screen.getByRole('checkbox', { name: 'code-11' }))
+  await user.click(screen.getByRole('checkbox', { name: 'code-33' }))
+  await user.click(screen.getByRole('button', { name: 'Copy selected codes' }))
+  await waitFor(() => expect(write).toHaveBeenCalledWith('key-11\nkey-33'))
+  expect(remove).not.toHaveBeenCalled()
+})
+
 test('shows deletion only for selected codes and cancellation sends no requests', async () => {
   const { user, remove } = await setup()
   expect(

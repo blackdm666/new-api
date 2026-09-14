@@ -272,6 +272,29 @@ test.each([
   }
 )
 
+test('task plugin unit and request prices apply the exclusive group rate exactly once', () => {
+  client.setQueryData(['pricing'], {
+    data: [
+      {
+        model_name: 'wan2.5-i2v-preview',
+        billing_usage_schema: { seconds: { type: 'number', unit: 'second' } },
+      },
+    ],
+    vendors: [],
+  })
+  const preview = renderPreview({
+    is_task: true,
+    billing_mode: 'tiered_expr',
+    expr_b64: btoa('tier("base", 0.1 + u("seconds") * 0.4)'),
+    matched_tier: 'base',
+    group_ratio: 0.5,
+    user_group_ratio: 0.2,
+  })
+  expect(preview).toHaveTextContent(
+    'base · seconds $0.08/second · Additional charge $0.02/request'
+  )
+})
+
 test('task log prices use localized unit labels from pricing metadata', async () => {
   client.setQueryData(['pricing'], {
     data: [

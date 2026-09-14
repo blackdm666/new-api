@@ -16,22 +16,29 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import {
+  normalizeTierLabel,
+  parseTaskTiersFromExpr,
+} from '@/features/pricing/lib/billing-expr'
+import {
+  formatTaskUsageUnitPrice,
+  getTaskUsagePriceUnitLabelKey,
+} from '@/features/pricing/lib/dynamic-price'
+import { taskUsageUnitLabel } from '@/features/pricing/lib/task-price-display'
+import type { BillingUsageSchema } from '@/features/pricing/types'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota } from '@/lib/format'
 
 import type { UsageLog } from '../data/schema'
 import type { LogOtherData } from '../types'
-import {
-  applyLoggedGroupRatio,
-  formatRatioCompact,
-  getEffectiveGroupRatioInfo,
-} from './billing-display'
+import { applyLoggedGroupRatio, formatRatioCompact } from './billing-display'
 import {
   isLegacyTaskFixedBilling,
   isPerCallBilling,
   isPerSecondBilling,
 } from './billing-unit'
 import {
+  decodeBillingExprB64,
   getTieredBillingSummary,
   hasAnyCacheTokens,
   isViolationFeeLog,
@@ -47,11 +54,12 @@ export interface DetailSegment {
 export function buildTypeDetailSegments(
   log: UsageLog,
   other: LogOtherData | null,
-  t: (key: string, opts?: Record<string, unknown>) => string
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  language = 'en',
+  usageSchema?: BillingUsageSchema
 ): DetailSegment[] {
-  // Audit (type=3) and login (type=7) logs: render localized content from the
-  // structured op descriptor instead of the raw (English-fallback) content.
-  if (log.type === 3 || log.type === 7) {
+  // Top-up, audit, and login logs can carry a localized operation descriptor.
+  if (log.type === 1 || log.type === 3 || log.type === 7) {
     const text = renderAuditContent(other, t)
     return text ? [{ text }] : []
   }
@@ -82,24 +90,56 @@ export function buildTypeDetailSegments(
   if (!other) return []
 
   const segments: DetailSegment[] = []
+
   const priceOpts = { digitsLarge: 4, digitsSmall: 6, abbreviate: false }
-  const actualPrice = (basePrice: number) =>
-    applyLoggedGroupRatio(basePrice, other)
   const formatPrice = (price: number) =>
-    `${formatBillingCurrencyFromUSD(price, priceOpts)}/M`
+    `${formatBillingCurrencyFromUSD(applyLoggedGroupRatio(price, other), priceOpts)}/M`
   const formatPriceCompact = (price: number) =>
-    formatBillingCurrencyFromUSD(price, priceOpts)
+    formatBillingCurrencyFromUSD(applyLoggedGroupRatio(price, other), priceOpts)
   const formatPriceList = (prices: string[], showUnit: boolean) => {
     const text = prices.join(' / ')
     return showUnit ? `${text}/M` : text
   }
   const isTieredExpr = other.billing_mode === 'tiered_expr'
   const tieredSummary = getTieredBillingSummary(other)
-  if (isTieredExpr) {
+  if (isTieredExpr && other.is_task) {
+    const tiers = parseTaskTiersFromExpr(
+      decodeBillingExprB64(other.expr_b64),
+      usageSchema,
+      true
+    )
+    const tier = tiers.find(
+      (entry) =>
+        Boolean(other.matched_tier) &&
+        normalizeTierLabel(entry.label) ===
+          normalizeTierLabel(other.matched_tier)
+    )
+    if (tier) {
+      const prices = Object.entries(tier.unitPrices).map(([field, price]) => {
+        const definition = usageSchema?.[field]
+        const unitKey = getTaskUsagePriceUnitLabelKey(definition?.unit)
+        const unitLabel = taskUsageUnitLabel(definition, language, t(unitKey))
+        return `${field} ${formatTaskUsageUnitPrice(applyLoggedGroupRatio(price, other), { tokenUnit: 'M' })}/${unitLabel}`
+      })
+      if (tier.constant > 0) {
+        prices.push(
+          `${t('Additional charge')} ${formatTaskUsageUnitPrice(applyLoggedGroupRatio(tier.constant, other), { tokenUnit: 'M' })}/${t('request')}`
+        )
+      }
+      segments.push({
+        text: `${tier.label || t('Default')} · ${prices.join(' · ')}`,
+      })
+    } else {
+      segments.push({
+        text: `${t('Dynamic Pricing')} · ${t('No matching results')}`,
+        muted: true,
+      })
+    }
+  } else if (isTieredExpr) {
     if (tieredSummary) {
       const baseEntries = tieredSummary.priceEntries
         .filter((entry) => ['inputPrice', 'outputPrice'].includes(entry.field))
-        .map((entry) => formatPriceCompact(actualPrice(entry.price)))
+        .map((entry) => formatPriceCompact(entry.price))
       if (baseEntries.length > 0) {
         const tierLabel = tieredSummary.tier.label || t('Default')
         segments.push({
@@ -113,7 +153,9 @@ export function buildTypeDetailSegments(
             entry.field
           )
         )
-        .map((entry) => formatPriceCompact(actualPrice(entry.price)))
+        .map((entry) => {
+          return formatPriceCompact(entry.price)
+        })
       if (cacheEntries.length > 0) {
         segments.push({
           text: `${t('Cache')} ${formatPriceList(cacheEntries, false)}`,
@@ -132,9 +174,10 @@ export function buildTypeDetailSegments(
               'cacheCreate1hPrice',
             ].includes(entry.field)
         )
-        .map(
-          (entry) =>
-            `${t(entry.shortLabel)} ${formatPrice(actualPrice(entry.price))}`
+        .map((entry) =>
+          entry.unit
+            ? `${tieredSummary.tier.label || t('Default')} · ${t(entry.shortLabel)} ${formatPriceCompact(entry.price)}/${t(entry.unit)}`
+            : `${t(entry.shortLabel)} ${formatPrice(entry.price)}`
         )
       if (otherEntries.length > 0) {
         segments.push({
@@ -160,24 +203,22 @@ export function buildTypeDetailSegments(
     )
     if (isPerSecond && modelPrice != null) {
       segments.push({
-        text: `${t('Per-second')} · ${formatBillingCurrencyFromUSD(actualPrice(modelPrice), priceOpts)}/${t('second')}`,
-      })
-    } else if (isPerCall && modelPrice != null) {
-      segments.push({
-        text: `${t('Per-call')} · ${formatBillingCurrencyFromUSD(actualPrice(modelPrice), priceOpts)}`,
+        text: `${t('Per-second')} · ${formatPriceCompact(modelPrice)}/${t('second')}`,
       })
     } else if (isLegacyTaskFixed && modelPrice != null) {
       segments.push({
-        text: `${t('Dynamic Pricing')} · ${formatBillingCurrencyFromUSD(actualPrice(modelPrice), priceOpts)}`,
+        text: `${t('Dynamic Pricing')} · ${formatPriceCompact(modelPrice)}`,
+      })
+    } else if (isPerCall && modelPrice != null) {
+      segments.push({
+        text: `${t('Per-call')} · ${formatPriceCompact(modelPrice)}`,
       })
     } else if (other.model_ratio != null) {
       const inputPriceUSD = other.model_ratio * 2.0
-      const baseEntries = [formatPriceCompact(actualPrice(inputPriceUSD))]
+      const baseEntries = [formatPriceCompact(inputPriceUSD)]
       if (other.completion_ratio != null) {
         baseEntries.push(
-          formatPriceCompact(
-            actualPrice(inputPriceUSD * other.completion_ratio)
-          )
+          formatPriceCompact(inputPriceUSD * other.completion_ratio)
         )
       }
       segments.push({
@@ -187,18 +228,14 @@ export function buildTypeDetailSegments(
       if (hasAnyCacheTokens(other)) {
         const cacheEntries = [
           other.cache_ratio != null && other.cache_ratio !== 1
-            ? formatPriceCompact(actualPrice(inputPriceUSD * other.cache_ratio))
+            ? formatPriceCompact(inputPriceUSD * other.cache_ratio)
             : null,
           other.cache_creation_ratio != null && other.cache_creation_ratio !== 1
-            ? formatPriceCompact(
-                actualPrice(inputPriceUSD * other.cache_creation_ratio)
-              )
+            ? formatPriceCompact(inputPriceUSD * other.cache_creation_ratio)
             : null,
           other.cache_creation_ratio_1h != null &&
           other.cache_creation_ratio_1h !== 0
-            ? formatPriceCompact(
-                actualPrice(inputPriceUSD * other.cache_creation_ratio_1h)
-              )
+            ? formatPriceCompact(inputPriceUSD * other.cache_creation_ratio_1h)
             : null,
         ].filter(Boolean) as string[]
 
@@ -210,13 +247,20 @@ export function buildTypeDetailSegments(
         }
       }
     } else {
-      const ratioInfo = getEffectiveGroupRatioInfo(other)
-      if (ratioInfo) {
-        const ratioLabel = ratioInfo.isUserSpecific
-          ? t('User Exclusive Ratio')
-          : t('Group Ratio')
+      const userGroupRatio = other.user_group_ratio
+      const groupRatio = other.group_ratio
+      const isUserGroup =
+        userGroupRatio != null &&
+        Number.isFinite(userGroupRatio) &&
+        userGroupRatio !== -1
+      const effectiveRatio = isUserGroup ? userGroupRatio : groupRatio
+      const ratioLabel = isUserGroup
+        ? t('User Exclusive Ratio')
+        : t('Group Ratio')
+
+      if (effectiveRatio != null && Number.isFinite(effectiveRatio)) {
         segments.push({
-          text: `${ratioLabel} ${formatRatioCompact(ratioInfo.ratio)}x`,
+          text: `${ratioLabel} ${formatRatioCompact(effectiveRatio)}x`,
         })
       }
     }

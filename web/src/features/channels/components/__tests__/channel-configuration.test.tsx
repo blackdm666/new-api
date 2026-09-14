@@ -174,6 +174,93 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+test('opens the upstream balance editor from channel settings and saves its draft without changing other settings', async () => {
+  editingChannel.setting = JSON.stringify({
+    proxy: 'http://proxy.example',
+  })
+  editingChannel.settings = JSON.stringify({
+    balance_query: { mode: 'disabled' },
+  })
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  await user.click(screen.getByRole('tab', { name: /Other Settings/ }))
+  await user.click(
+    screen.getByRole('button', { name: 'Configure balance query' })
+  )
+  const dialog = await screen.findByRole('dialog', {
+    name: 'Upstream Balance Query',
+  })
+  expect(
+    within(dialog).getByRole('combobox', { name: 'Query mode' })
+  ).toHaveTextContent('Disabled')
+  await user.click(within(dialog).getByRole('combobox', { name: 'Query mode' }))
+  await user.click(screen.getByRole('option', { name: 'Follow channel type' }))
+  await user.click(
+    within(dialog).getByRole('button', { name: 'Save balance query' })
+  )
+  expect(put).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+  await waitFor(() => expect(put).toHaveBeenCalledTimes(1))
+  const payload = put.mock.calls[0]?.[1] as {
+    setting: string
+    settings: string
+  }
+  const setting = JSON.parse(payload.setting)
+  expect(setting.proxy).toBe('http://proxy.example')
+  expect(JSON.parse(payload.settings).balance_query.mode).toBe('auto')
+})
+
+test('canceling a balance-query edit preserves the saved token and existing configuration', async () => {
+  const savedQuery = {
+    mode: 'new_api',
+    auth_configured: true,
+    auth_masked: '********last',
+    account_user_id: '7',
+  }
+  editingChannel.settings = JSON.stringify({ balance_query: savedQuery })
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  await user.click(screen.getByRole('tab', { name: /Other Settings/ }))
+  await user.click(
+    screen.getByRole('button', { name: 'Configure balance query' })
+  )
+  const dialog = await screen.findByRole('dialog', {
+    name: 'Upstream Balance Query',
+  })
+  expect(
+    within(dialog).getByRole('combobox', { name: 'Query mode' })
+  ).toHaveTextContent('NewAPI compatible')
+  await user.click(within(dialog).getByRole('combobox', { name: 'Query mode' }))
+  await user.click(screen.getByRole('option', { name: 'Disabled' }))
+  await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  await waitFor(() => expect(dialog).not.toBeInTheDocument())
+  await user.click(
+    screen.getByRole('button', { name: 'Configure balance query' })
+  )
+  const reopened = await screen.findByRole('dialog', {
+    name: 'Upstream Balance Query',
+  })
+  expect(
+    within(reopened).getByRole('combobox', { name: 'Query mode' })
+  ).toHaveTextContent('NewAPI compatible')
+  await user.click(
+    within(reopened).getByRole('button', { name: 'Save balance query' })
+  )
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+  await waitFor(() => expect(put).toHaveBeenCalledTimes(1))
+  const payload = put.mock.calls[0]?.[1] as { settings: string }
+  expect(JSON.parse(payload.settings).balance_query).toMatchObject(savedQuery)
+  expect(JSON.parse(payload.settings).balance_query.auth.value).toBe('')
+})
+
 test('changing built-in providers updates server-provided URL placeholders without replacing the draft address', async () => {
   const user = userEvent.setup()
   render(<ConfigurationHarness />)
@@ -1711,6 +1798,9 @@ describe('an operator without sensitive write permission', () => {
     await screen.findByDisplayValue('Existing channel')
     await user.click(screen.getByRole('tab', { name: /Other Settings/ }))
     expect(screen.getByLabelText('Proxy Address')).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: 'Configure balance query' })
+    ).toBeDisabled()
   })
 
   test('can save routing without replacing credentials or sensitive settings', async () => {

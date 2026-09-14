@@ -78,7 +78,14 @@ import {
   type DynamicPriceEntry,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
-import { getAvailableGroups, isTokenBasedModel } from '../lib/model-helpers'
+import { getGroupPricingRatioHeader } from '../lib/group-ratio-label'
+import {
+  getAvailableGroups,
+  getConfiguredGroupRatio,
+  isPerSecondModel,
+  isTokenBasedModel,
+} from '../lib/model-helpers'
+import { resolvePricingModelIcon } from '../lib/model-icon'
 import { withPluginPricing } from '../lib/plugin-pricing'
 import { formatFixedPrice, formatGroupPrice } from '../lib/price'
 import {
@@ -100,6 +107,7 @@ import type {
   TokenUnit,
 } from '../types'
 import { DynamicPricingBreakdown } from './dynamic-pricing-breakdown'
+import { GroupPricingMeta } from './group-pricing-meta'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelDetailsApi } from './model-details-api'
 import { ModelDetailsPerformance } from './model-details-performance'
@@ -617,7 +625,7 @@ function ModelBackendDetailsSection(props: { model: PricingModel }) {
 function ModelHeader(props: { model: PricingModel }) {
   const { t } = useTranslation()
   const model = props.model
-  const modelIconKey = model.icon || model.vendor_icon
+  const modelIconKey = resolvePricingModelIcon(model)
   const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 20) : null
   const description = model.description || model.vendor_description || null
 
@@ -860,7 +868,7 @@ function PriceSection(props: {
         <SectionTitle>{t('Base Price')}</SectionTitle>
         <div className='flex items-baseline justify-between'>
           <span className='text-muted-foreground text-sm'>
-            {t('Per request')}
+            {isPerSecondModel(props.model) ? t('Per-second') : t('Per request')}
           </span>
           <span className='text-foreground font-mono text-sm font-semibold tabular-nums'>
             {formatFixedPrice(
@@ -1179,7 +1187,7 @@ function ProviderGroupPricingSection(
     })
     const formattedPricesByGroup = new Map(
       availableGroups.map((group) => {
-        const ratio = props.groupRatio[group] || 1
+        const ratio = getConfiguredGroupRatio(props.groupRatio, group)
         return [
           group,
           getDynamicFormattedPricesByTier(dynamicTiers, {
@@ -1202,7 +1210,7 @@ function ProviderGroupPricingSection(
         <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
         <div className='space-y-3'>
           {availableGroups.map((group) => {
-            const ratio = props.groupRatio[group] || 1
+            const ratio = getConfiguredGroupRatio(props.groupRatio, group)
             const formattedPricesByTier =
               formattedPricesByGroup.get(group) ??
               new Map<DynamicPricingTier, Map<string, string>>()
@@ -1211,9 +1219,11 @@ function ProviderGroupPricingSection(
               <div key={group} className='overflow-hidden rounded-lg border'>
                 <div className='bg-muted/20 flex items-center justify-between gap-3 border-b px-3 py-2'>
                   <GroupBadge group={group} size='sm' />
-                  <span className='text-muted-foreground font-mono text-xs'>
-                    {ratio}x
-                  </span>
+                  <GroupPricingMeta
+                    group={group}
+                    ratio={ratio}
+                    description={props.usableGroup[group]}
+                  />
                 </div>
                 <StaticDataTable
                   className='rounded-none border-0'
@@ -1405,10 +1415,22 @@ function ProviderGroupPricingSection(
           },
           {
             id: 'ratio',
-            header: t('Ratio'),
+            header: getGroupPricingRatioHeader(
+              availableGroups.map((group) =>
+                getConfiguredGroupRatio(props.groupRatio, group)
+              ),
+              i18n.resolvedLanguage || i18n.language,
+              t('Ratio')
+            ),
             className: thClass,
             cellClassName: 'text-muted-foreground py-2.5 font-mono',
-            cell: (group) => `${props.groupRatio[group] || 1}x`,
+            cell: (group) => (
+              <GroupPricingMeta
+                group={group}
+                ratio={getConfiguredGroupRatio(props.groupRatio, group)}
+                description={props.usableGroup[group]}
+              />
+            ),
           },
           ...(isTokenBased
             ? [

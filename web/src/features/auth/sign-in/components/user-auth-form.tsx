@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Link } from '@tanstack/react-router'
-import axios from 'axios'
 import { Loader2, LogIn, KeyRound } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
@@ -50,12 +49,14 @@ import { runTurnstileProtectedAuthAttempt } from '@/features/auth/lib/turnstile-
 import { beginPasskeyLogin, finishPasskeyLogin } from '@/features/auth/passkey'
 import type { AuthFormProps } from '@/features/auth/types'
 import { useStatus } from '@/hooks/use-status'
+import { handleServerError } from '@/lib/handle-server-error'
 import {
   buildAssertionResult,
   prepareCredentialRequestOptions,
   isPasskeySupported as detectPasskeySupport,
 } from '@/lib/passkey'
-import { getServerErrorMessageKey } from '@/lib/server-error-message'
+import { AuthOperationError } from '@/lib/secure-verification'
+import { createServerError } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 export function UserAuthForm({
@@ -185,7 +186,9 @@ export function UserAuthForm({
             passwordEncryptionEnabled: passwordLoginEncryptionEnabled,
           })
 
-          if (!res.success) return false
+          if (!res.success) {
+            throw createServerError(res, loginFailedMessage)
+          }
           form.setValue('password', '')
           if (await handleLoginResult(res.data, redirectTo)) {
             toast.success(t('Welcome back!'))
@@ -195,8 +198,7 @@ export function UserAuthForm({
         isTurnstileEnabled ? resetTurnstile : undefined
       )
     } catch (error: unknown) {
-      if (axios.isAxiosError(error)) return
-      toast.error(error instanceof Error ? error.message : loginFailedMessage)
+      handleServerError(AuthOperationError.from(error, loginFailedMessage))
     } finally {
       setIsLoading(false)
     }
@@ -235,12 +237,10 @@ export function UserAuthForm({
           toast.success(t('Signed in via WeChat'))
         }
       } else {
-        if (getServerErrorMessageKey(res)) return
-        toast.error(res?.message || loginFailedMessage)
+        throw createServerError(res, loginFailedMessage)
       }
     } catch (error: unknown) {
-      if (getServerErrorMessageKey(error)) return
-      toast.error(loginFailedMessage)
+      handleServerError(AuthOperationError.from(error, loginFailedMessage))
     } finally {
       setIsWeChatSubmitting(false)
       resetTurnstile()
@@ -288,21 +288,19 @@ export function UserAuthForm({
 
       const finish = await finishPasskeyLogin(flowToken, assertion)
       if (!finish.success) {
-        if (getServerErrorMessageKey(finish)) return
-        throw new Error(finish.message || t('Failed to complete Passkey login'))
+        throw createServerError(finish, t('Failed to complete Passkey login'))
       }
 
       if (await handleLoginResult(finish.data, redirectTo)) {
         toast.success(t('Signed in with Passkey'))
       }
     } catch (error: unknown) {
-      if (getServerErrorMessageKey(error)) return
       if (error instanceof DOMException && error.name === 'NotAllowedError') {
         toast.info(t('Passkey login was cancelled or timed out'))
-      } else if (error instanceof Error) {
-        toast.error(error.message)
       } else {
-        toast.error(t('Passkey login failed'))
+        handleServerError(
+          AuthOperationError.from(error, t('Passkey login failed'))
+        )
       }
     } finally {
       setIsPasskeyLoading(false)

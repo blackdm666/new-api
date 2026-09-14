@@ -172,6 +172,11 @@ import {
   validateModelMappingJson,
 } from '../../lib'
 import {
+  BALANCE_QUERY_MODE_OPTIONS,
+  parseBalanceQueryConfig,
+  stringifyBalanceQueryConfig,
+} from '../../lib/balance-query'
+import {
   getChannelConfigurationSection,
   getChannelConfigurationState,
   type ChannelConfigurationStatus,
@@ -195,6 +200,7 @@ import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelTypeLogo } from '../channel-type-badge'
 import { useChannels } from '../channels-provider'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
+import { BalanceQueryEditorDialog } from '../dialogs/balance-query-editor-dialog'
 import { ConfigureModelsDialog } from '../dialogs/configure-models-dialog'
 import {
   MissingModelsConfirmationDialog,
@@ -425,6 +431,15 @@ export function ChannelMutateDrawer({
     setDrawerSide(requestedSide)
   }
   const channelId = currentRow?.id ?? null
+  const [balanceQueryEditorOpen, setBalanceQueryEditorOpen] = useState(false)
+  useEffect(() => {
+    setBalanceQueryEditorOpen(false)
+  }, [open, channelId])
+  const balanceTokenDisclosure = useChannelKeyDisclosure(
+    open && balanceQueryEditorOpen,
+    channelId,
+    'balance-query-token'
+  )
   const sensitiveLocked = isEditing && !canEditSensitive
   const [providerTarget, setProviderTarget] =
     useState<ChannelProviderTarget | null>(null)
@@ -4173,6 +4188,48 @@ export function ChannelMutateDrawer({
                 {httpShardsFields}
               </fieldset>
             </div>
+            <div
+              role='group'
+              aria-label={t('Upstream Balance Query')}
+              className={channelConfigurationBlockClassName(
+                configuration.blocks.balanceQuery,
+                'space-y-4'
+              )}
+            >
+              <CardHeading
+                status={configuration.blocks.balanceQuery}
+                title={t('Upstream Balance Query')}
+                icon={<Settings className='size-4' />}
+              />
+              <FormField
+                control={form.control}
+                name='balance_query'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormDescription>
+                      {t(
+                        BALANCE_QUERY_MODE_OPTIONS.find(
+                          (option) =>
+                            option.value ===
+                            parseBalanceQueryConfig(field.value).mode
+                        )?.label || 'Follow channel type'
+                      )}
+                    </FormDescription>
+                    <FormControl>
+                      <Button
+                        type='button'
+                        variant='outline'
+                        disabled={sensitiveLocked}
+                        onClick={() => setBalanceQueryEditorOpen(true)}
+                      >
+                        {t('Configure balance query')}
+                      </Button>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
             {upstreamModelDetectionFields}
             {notesFields}
           </>
@@ -4452,6 +4509,38 @@ export function ChannelMutateDrawer({
         />
       )}
 
+      {open && balanceQueryEditorOpen && !sensitiveLocked && (
+        <BalanceQueryEditorDialog
+          open
+          onOpenChange={setBalanceQueryEditorOpen}
+          value={parseBalanceQueryConfig(formValues.balance_query)}
+          channelType={formValues.type}
+          baseURL={formValues.base_url || ''}
+          channelId={channelId ?? undefined}
+          savedToken={balanceTokenDisclosure.channelKey}
+          canRevealSavedToken={canRevealChannelKey && Boolean(channelId)}
+          savedTokenLoading={balanceTokenDisclosure.isChannelKeyLoading}
+          onRevealSavedToken={async () => {
+            await balanceTokenDisclosure.handleRevealKey()
+          }}
+          onCopySavedToken={async () => {
+            const token =
+              balanceTokenDisclosure.channelKey ??
+              (await balanceTokenDisclosure.handleRevealKey())
+            if (token) await copyToClipboard(token)
+          }}
+          onSave={(config) =>
+            form.setValue(
+              'balance_query',
+              stringifyBalanceQueryConfig(config),
+              { shouldDirty: true, shouldValidate: true }
+            )
+          }
+        />
+      )}
+      <SecureVerificationDialog
+        {...balanceTokenDisclosure.verification.dialogProps}
+      />
       <SecureVerificationDialog {...verification.dialogProps} />
 
       {/* Missing Models Confirmation Dialog */}

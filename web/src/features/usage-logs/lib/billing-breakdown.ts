@@ -123,13 +123,13 @@ export function buildBillingBreakdownRows(
       for (const entry of tieredSummary.priceEntries) {
         rows.push({
           label: t(entry.shortLabel),
-          value: `${fmtPrice(actualPrice(entry.price))}/M`,
+          value: `${fmtPrice(actualPrice(entry.price))}/${entry.unit ? t(entry.unit) : 'M'}`,
         })
       }
     } else {
       rows.push({
         label: t('Matched Tier'),
-        value: t('No matching results'),
+        value: other.matched_tier || t('No matching results'),
       })
     }
   } else if (isPerSecond) {

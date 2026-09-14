@@ -25,15 +25,19 @@ import { formatGroupPricingRatio } from '../lib/group-ratio-label'
 type GroupPricingMetaProps = {
   group: string
   ratio: number
-  description?: string
+  description?: string | { desc: string; ratio: number }
   className?: string
 }
 
 function getVisibleGroupDescription(
   group: string,
-  description?: string
+  description?: GroupPricingMetaProps['description']
 ): string {
-  const value = description?.trim() ?? ''
+  const value =
+    (typeof description === 'string'
+      ? description
+      : description?.desc
+    )?.trim() ?? ''
   if (
     !value ||
     value.toLocaleLowerCase() === group.trim().toLocaleLowerCase()
