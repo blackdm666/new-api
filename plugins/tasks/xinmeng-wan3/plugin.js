@@ -5,7 +5,7 @@ export const meta = {
   apiVersion: 1,
   key: "xinmeng-wan3",
   name: "XinMeng Wan3",
-  version: "1.0.0",
+  version: "1.0.1",
   author: { name: "88API" },
   description: { en: "Wan3 video generation through XinMeng", zh: "通过 XinMeng 生成 Wan3 视频" },
   models: MODELS,
@@ -14,7 +14,6 @@ export const meta = {
   usageSchema: {
     seconds: { type: "number", unit: "second", description: { en: "Video generation unit price", zh: "视频生成单价" } },
   },
-  usageExamples: [4, 5, 10, 30].map(function (seconds) { return { label: seconds + "s", facts: { seconds: seconds } }; }),
 };
 
 function object(value) { return value && typeof value === "object" && !Array.isArray(value) ? value : {}; }
