@@ -18,11 +18,19 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
 import { createRef } from 'react'
-import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest'
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest'
 
+import { usePricingPreferencesStore } from '@/stores/pricing-preferences-store'
 import {
   DEFAULT_CURRENCY_CONFIG,
   useSystemConfigStore,
@@ -38,6 +46,13 @@ vi.mock('@/features/pricing/hooks/use-pricing-data', () => ({
 }))
 
 describe('model pricing editor currency', () => {
+  beforeEach(() => {
+    usePricingPreferencesStore.setState(
+      usePricingPreferencesStore.getInitialState()
+    )
+    localStorage.clear()
+  })
+
   beforeAll(() => {
     i18next.addResourceBundle('en', 'translation', {
       'Per-second': 'Per-second',
@@ -50,12 +65,16 @@ describe('model pricing editor currency', () => {
   })
 
   afterEach(() => {
+    usePricingPreferencesStore.setState(
+      usePricingPreferencesStore.getInitialState()
+    )
+    localStorage.clear()
     useSystemConfigStore.getState().setConfig({
       currency: { ...DEFAULT_CURRENCY_CONFIG },
     })
   })
 
-  test('edits in CNY and commits the internal USD ModelPrice', async () => {
+  test('defaults to site CNY without a saved preference and commits the internal USD ModelPrice', async () => {
     useSystemConfigStore.getState().setConfig({
       currency: {
         ...DEFAULT_CURRENCY_CONFIG,
@@ -78,11 +97,9 @@ describe('model pricing editor currency', () => {
       </QueryClientProvider>
     )
 
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('combobox', { name: 'Pricing currency' }))
-    await user.click(
-      await screen.findByRole('option', { name: 'Site currency (CNY)' })
-    )
+    expect(
+      screen.getByRole('combobox', { name: 'Pricing currency' })
+    ).toHaveTextContent('Site currency (CNY)')
     const input = screen.getByDisplayValue('1.4')
     expect(screen.getAllByText('¥').length).toBeGreaterThan(0)
     expect(
