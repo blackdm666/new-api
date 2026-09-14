@@ -47,6 +47,35 @@ func TestRechargeAntomCreditsQuotaExactlyOnce(t *testing.T) {
 	assert.Equal(t, 5_000_000, getUserQuotaForPaymentGuardTest(t, user.Id))
 }
 
+func TestRechargeAntomLegacyOrderSupportsWalletQuotaAboveInt32(t *testing.T) {
+	truncateTables(t)
+	originalQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+
+	user := insertUserForPaymentGuardTest(t, 902, 0)
+	order := &TopUp{
+		UserId:          user.Id,
+		Amount:          5000,
+		Money:           5000,
+		MoneyMinor:      500000,
+		CreditedQuota:   0,
+		Currency:        "USD",
+		TradeNo:         "ANTOM-LEGACY-WIDE-WALLET",
+		PaymentMethod:   PaymentMethodAntom,
+		PaymentProvider: PaymentProviderAntom,
+		CreateTime:      common.GetTimestamp(),
+		Status:          common.TopUpStatusPending,
+	}
+	require.NoError(t, order.Insert())
+
+	alreadyDone, err := RechargeAntom(order.TradeNo, "ALIPAY_HK", 500000, "USD", "127.0.0.1")
+	require.NoError(t, err)
+	assert.False(t, alreadyDone)
+	assert.Equal(t, 2_500_000_000, getUserQuotaForPaymentGuardTest(t, user.Id))
+	assert.Equal(t, 2_500_000_000, GetTopUpByTradeNo(order.TradeNo).CreditedQuota)
+}
+
 func TestRechargeAntomRejectsAmountCurrencyAndProviderMismatch(t *testing.T) {
 	testCases := []struct {
 		name          string

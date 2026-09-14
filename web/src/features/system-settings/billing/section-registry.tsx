@@ -39,6 +39,7 @@ const getModelDefaults = (settings: BillingSettings) => ({
   ExposeRatioEnabled: settings.ExposeRatioEnabled,
   BillingMode: settings['billing_setting.billing_mode'],
   BillingExpr: settings['billing_setting.billing_expr'],
+  PluginBillingExpr: settings['billing_setting.plugin_billing_expr'],
 })
 
 const getGroupDefaults = (settings: BillingSettings) => ({
@@ -109,6 +110,7 @@ const BILLING_SECTIONS = [
           defaultValues={{
             enabled: settings.AffiliateCommissionEnabled,
             autoApprove: settings.AffiliateCommissionAutoApprove,
+            topUpLimit: settings.AffiliateCommissionInviteeTopUpLimit ?? 0,
             juniorRate:
               (groupRates.default ??
                 groupRates['初级推广'] ??

@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 )
 
 func TestDeliverTaskCallbackSignsAndCompletesDelivery(t *testing.T) {
+	t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "true")
+	t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "https://assets.88api.ai/media")
 	truncate(t)
 	const userID = 81
 	const tokenID = 82
@@ -51,8 +54,11 @@ func TestDeliverTaskCallbackSignsAndCompletesDelivery(t *testing.T) {
 		FinishTime: time.Now().Unix(),
 		Properties: model.Properties{OriginModelName: "gemini-omni-flash-preview"},
 		PrivateData: model.TaskPrivateData{
-			TokenId:   tokenID,
-			ResultURL: "https://api.example.com/v1/videos/task_callback_success/content",
+			TokenId:           tokenID,
+			ResultURL:         "https://api.example.com/v1/videos/task_callback_success/content",
+			ResultStorageKind: "s3",
+			ResultStorageKey:  "task-videos/2026/09/" + strings.Repeat("a", 64) + ".mp4",
+			ResultMimeType:    "video/mp4",
 		},
 	}
 	require.NoError(t, task.InsertWithCallback(server.URL))
@@ -67,5 +73,5 @@ func TestDeliverTaskCallbackSignsAndCompletesDelivery(t *testing.T) {
 	assert.Equal(t, "evt_task_callback_success_completed", received.ID)
 	assert.Equal(t, task.TaskID, received.Data.TaskID)
 	assert.Equal(t, "completed", received.Data.Status)
-	assert.Equal(t, task.GetResultURL(), received.Data.OutputURL)
+	assert.Equal(t, "https://assets.88api.ai/media/"+task.PrivateData.ResultStorageKey, received.Data.OutputURL)
 }

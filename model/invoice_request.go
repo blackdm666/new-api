@@ -171,7 +171,7 @@ func CalculateInvoiceTaxFee(totalCents int64, rateBasisPoints int) (int64, int, 
 		return 0, 0, errors.New("invoice tax fee quota conversion is not configured")
 	}
 	feeCNY := decimal.NewFromInt(feeCents).Div(decimal.NewFromInt(100))
-	feeQuota, err := common.QuotaFromDecimalStrict(
+	feeQuota, err := common.WalletQuotaFromDecimalStrict(
 		feeCNY.
 			Div(decimal.NewFromFloat(operation_setting.USDExchangeRate)).
 			Mul(decimal.NewFromFloat(common.QuotaPerUnit)),

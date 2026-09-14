@@ -62,6 +62,30 @@ func TestValidateVideo15AllowsTextToVideo(t *testing.T) {
 	}
 }
 
+func TestArbitraryMappedAliasUsesResolvedModelConfig(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"model":"grok-sales-alias","prompt":"test","duration":5}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	defer common.CleanupBodyStorage(c)
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "grok-sales-alias",
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: ModelGrokImagineVideo,
+			IsModelMapped:     true,
+		},
+	}
+	adaptor := &TaskAdaptor{}
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	assert.Equal(t, map[string]float64{"seconds": 5}, adaptor.EstimateBilling(c, info))
+	body, err := adaptor.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	payload, err := io.ReadAll(body)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"grok-imagine-video","prompt":"test","duration":5,"aspect_ratio":"16:9","resolution":"720p"}`, string(payload))
+}
+
 func TestValidateGrokVideoDefaultsAndLimits(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"model":"grok-imagine-video","prompt":"test","size":"3:2","metadata":{"resolution":"480p"}}`))
@@ -113,12 +137,12 @@ func TestEstimateBillingUsesGrokVideoDuration(t *testing.T) {
 
 func TestParseTaskResultHandlesSub2APIStatesAndRelativeContentURL(t *testing.T) {
 	adaptor := &TaskAdaptor{baseURL: "https://api.apikey.fun"}
-	pending, err := adaptor.ParseTaskResult([]byte(`{"request_id":"upstream-1","status":"pending","progress":75}`))
+	pending, err := adaptor.ParseTaskResult(nil, nil, []byte(`{"request_id":"upstream-1","status":"pending","progress":75}`))
 	require.NoError(t, err)
 	assert.Equal(t, model.TaskStatusInProgress, pending.Status)
 	assert.Equal(t, "75%", pending.Progress)
 
-	done, err := adaptor.ParseTaskResult([]byte(`{"request_id":"upstream-1","status":"done","progress":100,"video":{"url":"/v1/videos/upstream-1/content","duration":5}}`))
+	done, err := adaptor.ParseTaskResult(nil, nil, []byte(`{"request_id":"upstream-1","status":"done","progress":100,"video":{"url":"/v1/videos/upstream-1/content","duration":5}}`))
 	require.NoError(t, err)
 	assert.Equal(t, model.TaskStatusSuccess, done.Status)
 	assert.Equal(t, "https://api.apikey.fun/v1/videos/upstream-1/content", done.Url)
@@ -130,10 +154,13 @@ func TestDoResponseReturnsPublicTaskID(t *testing.T) {
 	resp := &http.Response{Body: io.NopCloser(bytes.NewBufferString(`{"request_id":"private-upstream-id","status":"pending","progress":0}`))}
 	info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_public"}, OriginModelName: ModelGrokImagineVideo}
 
-	upstreamID, _, taskErr := (&TaskAdaptor{}).DoResponse(c, resp, info)
+	parsed, taskErr := (&TaskAdaptor{}).ParseResponse(c, resp, info)
 	require.Nil(t, taskErr)
-	assert.Equal(t, "private-upstream-id", upstreamID)
-	assert.JSONEq(t, `{"id":"task_public","object":"video","model":"grok-imagine-video","status":"queued"}`, recorder.Body.String())
+	require.NotNil(t, parsed)
+	assert.Equal(t, "private-upstream-id", parsed.UpstreamTaskID)
+	payload, err := common.Marshal(parsed.ClientResponse)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id":"task_public","object":"video","model":"grok-imagine-video","status":"queued"}`, string(payload))
 }
 
 func TestConvertToOpenAIVideoUsesPersistedTaskState(t *testing.T) {

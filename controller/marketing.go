@@ -22,6 +22,11 @@ type marketingSchedulePayload struct {
 	ScheduledTime int64 `json:"scheduled_time"`
 }
 
+type marketingRetryUntrackedPayload struct {
+	DeliveryIds []int  `json:"delivery_ids"`
+	Name        string `json:"name"`
+}
+
 type marketingTestPayload struct {
 	LocalizedContent map[string]model.MarketingLocalizedContent `json:"localized_content"`
 	Language         string                                     `json:"language"`
@@ -171,6 +176,18 @@ func CancelMarketingCampaign(c *gin.Context) {
 	marketingCampaignTransition(c, []string{model.MarketingCampaignStatusDraft, model.MarketingCampaignStatusScheduled, model.MarketingCampaignStatusRunning, model.MarketingCampaignStatusPaused}, model.MarketingCampaignStatusCancelled)
 }
 
+func ArchiveMarketingCampaign(c *gin.Context) {
+	id, ok := marketingID(c)
+	if !ok {
+		return
+	}
+	if err := model.ArchiveMarketingCampaign(id); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"archived": true})
+}
+
 func CloneMarketingCampaign(c *gin.Context) {
 	id, ok := marketingID(c)
 	if !ok {
@@ -182,6 +199,24 @@ func CloneMarketingCampaign(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, clone)
+}
+
+func RetryUntrackedMarketingCampaign(c *gin.Context) {
+	id, ok := marketingID(c)
+	if !ok {
+		return
+	}
+	payload := marketingRetryUntrackedPayload{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		common.ApiError(c, model.ErrMarketingInvalid)
+		return
+	}
+	result, err := service.CreateMarketingRetryCampaign(id, payload.DeliveryIds, payload.Name, c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
 }
 
 func TestMarketingEmail(c *gin.Context) {

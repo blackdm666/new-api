@@ -111,6 +111,24 @@ func TestWriteEmailMessageUsesConfiguredSystemNameAsSender(t *testing.T) {
 	require.NotContains(t, message.String(), "YMeng CC")
 }
 
+func TestWriteEmailMessageIncludesEventBridgeCorrelationHeader(t *testing.T) {
+	var message strings.Builder
+	err := writeEmailMessageData(
+		&message,
+		"<message@example.com>",
+		"=?UTF-8?B?VGVzdA==?=",
+		"receiver@example.com",
+		"<p>content</p>",
+		nil,
+		"New API",
+		"sender@example.com",
+		"newapi-email-correlation@example.com",
+	)
+	require.NoError(t, err)
+	assert.Contains(t, message.String(), "Message-ID: <message@example.com>\r\n")
+	assert.Contains(t, message.String(), "X-Notify-Message-ID: newapi-email-correlation@example.com\r\n")
+}
+
 func TestSecuritySMTPProfileUsesDedicatedSenderAndMultipartAlternative(t *testing.T) {
 	withSMTPSettings(t)
 	server := newFakeSMTPServer(t)

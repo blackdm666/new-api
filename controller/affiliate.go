@@ -48,6 +48,7 @@ func TransferAffiliateCommission(c *gin.Context) {
 type affiliateSettingsPayload struct {
 	Enabled                              bool           `json:"enabled"`
 	AutoApprove                          bool           `json:"auto_approve"`
+	CommissionTopUpLimit                 int            `json:"commission_top_up_limit"`
 	DefaultRateBasisPoints               int            `json:"default_rate_basis_points"`
 	GroupRates                           map[string]int `json:"group_rates"`
 	UpgradeInviteesThreshold             int            `json:"upgrade_invitees_threshold"`
@@ -96,8 +97,9 @@ func GetAffiliateCommissions(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	status, _ := strconv.Atoi(c.Query("status"))
 	records, total, err := model.ListAffiliateCommissions(model.AffiliateCommissionQueryOptions{
-		InviterId: c.GetInt("id"),
-		Status:    status,
+		ExcludeLimitReached: true,
+		InviterId:           c.GetInt("id"),
+		Status:              status,
 	}, pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
@@ -214,8 +216,9 @@ func GetAdminAffiliateCommissions(c *gin.Context) {
 	status, _ := strconv.Atoi(c.Query("status"))
 	keyword := strings.TrimSpace(c.Query("keyword"))
 	records, total, err := model.ListAffiliateCommissions(model.AffiliateCommissionQueryOptions{
-		Status:  status,
-		Keyword: keyword,
+		IncludeAdminRemarks: true,
+		Status:              status,
+		Keyword:             keyword,
 	}, pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
@@ -241,7 +244,8 @@ func GetAdminAffiliateInviteRecords(c *gin.Context) {
 func GetAdminAffiliateTransfers(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	rows, total, err := model.ListAffiliateTransfers(model.AffiliateTransferQueryOptions{
-		Keyword: strings.TrimSpace(c.Query("keyword")),
+		IncludeAdminRemarks: true,
+		Keyword:             strings.TrimSpace(c.Query("keyword")),
 	}, pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
@@ -265,8 +269,9 @@ func GetAdminAffiliatePayouts(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	status, _ := strconv.Atoi(c.Query("status"))
 	rows, total, err := model.ListAffiliatePayouts(model.AffiliatePayoutQueryOptions{
-		Status:  status,
-		Keyword: c.Query("keyword"),
+		IncludeAdminRemarks: true,
+		Status:              status,
+		Keyword:             c.Query("keyword"),
 	}, pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
@@ -530,6 +535,7 @@ func UpdateAffiliateSettings(c *gin.Context) {
 	values := map[string]string{
 		model.AffiliateCommissionEnabledOptionKey:               strconv.FormatBool(payload.Enabled),
 		model.AffiliateCommissionAutoApproveOptionKey:           strconv.FormatBool(payload.AutoApprove),
+		model.AffiliateCommissionInviteeTopUpLimitOptionKey:     strconv.Itoa(payload.CommissionTopUpLimit),
 		model.AffiliateCommissionDefaultRateOptionKey:           strconv.Itoa(payload.DefaultRateBasisPoints),
 		model.AffiliateCommissionGroupRatesOptionKey:            string(groupRates),
 		model.AffiliateUpgradeInviteesThresholdOptionKey:        strconv.Itoa(payload.UpgradeInviteesThreshold),
@@ -559,6 +565,7 @@ func UpdateAffiliateSettings(c *gin.Context) {
 	recordManageAudit(c, "affiliate.settings.update", map[string]interface{}{
 		"enabled":                                    payload.Enabled,
 		"auto_approve":                               payload.AutoApprove,
+		"commission_top_up_limit":                    payload.CommissionTopUpLimit,
 		"default_rate_basis_points":                  payload.DefaultRateBasisPoints,
 		"group_rates":                                payload.GroupRates,
 		"upgrade_invitees_threshold":                 payload.UpgradeInviteesThreshold,

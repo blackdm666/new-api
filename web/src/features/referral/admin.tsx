@@ -284,6 +284,7 @@ export function AdminAffiliatePage() {
                             <AdminUserIdentity
                               id={item.inviter_id}
                               username={item.username}
+                              remark={item.remark}
                             />
                           </TableCell>
                           <TableCell>
@@ -423,6 +424,7 @@ export function AdminAffiliatePage() {
                                 <AdminUserIdentity
                                   id={item.inviter_id}
                                   username={item.inviter_username}
+                                  remark={item.inviter_remark}
                                 />
                               </TableCell>
                               <TableCell>{item.attempt_count}</TableCell>
@@ -650,12 +652,14 @@ function AdminCommissionRow(props: {
         <AdminUserIdentity
           id={props.item.inviter_id}
           username={props.item.inviter_username}
+          remark={props.item.inviter_remark}
         />
       </TableCell>
       <TableCell>
         <AdminUserIdentity
           id={props.item.invitee_id}
           username={props.item.invitee_username}
+          remark={props.item.invitee_remark}
         />
       </TableCell>
       <TableCell className='font-mono text-xs'>{props.item.trade_no}</TableCell>

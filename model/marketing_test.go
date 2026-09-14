@@ -214,6 +214,26 @@ func TestCancellingMarketingCampaignExpiresQueuedPayload(t *testing.T) {
 	assert.Equal(t, MarketingRecipientStatusSkipped, recipient.Status)
 }
 
+func TestArchivingCompletedMarketingCampaignHidesItWithoutDeletingAuditRows(t *testing.T) {
+	truncateTables(t)
+	campaign := &MarketingCampaign{Name: "archive", Scene: MarketingSceneCustom, Status: MarketingCampaignStatusCompleted, AudienceRule: "{}", LocalizedContent: "{}", ActionPath: "/wallet"}
+	require.NoError(t, CreateMarketingCampaign(campaign))
+	recipient := &MarketingRecipient{CampaignId: campaign.Id, UserId: 1, DedupeKey: "archive-recipient", Language: "en", RecipientMasked: "a***@example.com", ClickTokenHash: "archive-click", Status: MarketingRecipientStatusDelivered}
+	require.NoError(t, DB.Create(recipient).Error)
+
+	require.NoError(t, ArchiveMarketingCampaign(campaign.Id))
+	stored, err := GetMarketingCampaign(campaign.Id)
+	require.NoError(t, err)
+	assert.Equal(t, MarketingCampaignStatusArchived, stored.Status)
+	rows, total, err := ListMarketingCampaigns(&common.PageInfo{Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	assert.Zero(t, total)
+	assert.Empty(t, rows)
+	var recipients int64
+	require.NoError(t, DB.Model(&MarketingRecipient{}).Where("campaign_id = ?", campaign.Id).Count(&recipients).Error)
+	assert.Equal(t, int64(1), recipients)
+}
+
 func TestDisablingAutomationPausesAndReenablingResumesQueuedCampaign(t *testing.T) {
 	truncateTables(t)
 	require.NoError(t, EnsureMarketingAutomations())
@@ -323,9 +343,23 @@ func TestOptimizedMarketingDefaultsCoverAllRecipientLanguages(t *testing.T) {
 func TestMarketingAutomationTriggerConfigUsesSafeDefaultsAndValidation(t *testing.T) {
 	_, registration, err := NormalizeMarketingAutomationTriggerConfig(MarketingSceneRegistration, "")
 	require.NoError(t, err)
-	assert.Equal(t, 24, registration.RegistrationWaitHours)
+	assert.InDelta(t, 24, registration.RegistrationWaitHours, 0)
 	assert.Equal(t, 1, registration.MaxSendsPerUser)
 	assert.Equal(t, 2, registration.RepeatIntervalDays)
+
+	encoded, registration, err := NormalizeMarketingAutomationTriggerConfig(
+		MarketingSceneRegistration,
+		`{"registration_wait_hours":0.5,"max_sends_per_user":1,"repeat_interval_days":2}`,
+	)
+	require.NoError(t, err)
+	assert.InDelta(t, 0.5, registration.RegistrationWaitHours, 0)
+	assert.JSONEq(t, `{"registration_wait_hours":0.5,"max_sends_per_user":1,"repeat_interval_days":2}`, encoded)
+
+	_, _, err = NormalizeMarketingAutomationTriggerConfig(
+		MarketingSceneRegistration,
+		`{"registration_wait_hours":0.25,"max_sends_per_user":1,"repeat_interval_days":2}`,
+	)
+	assert.ErrorIs(t, err, ErrMarketingInvalid)
 
 	encoded, config, err := NormalizeMarketingAutomationTriggerConfig(MarketingSceneInactive, "")
 	require.NoError(t, err)

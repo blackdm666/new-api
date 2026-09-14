@@ -112,6 +112,10 @@ export async function transitionMarketingCampaign(
   data(await api.post(`/api/marketing/campaigns/${id}/${action}`))
 }
 
+export async function archiveMarketingCampaign(id: number): Promise<void> {
+  data(await api.delete(`/api/marketing/campaigns/${id}`))
+}
+
 export async function sendMarketingTest(
   localizedContent: Record<string, MarketingLocalizedContent>,
   language: string

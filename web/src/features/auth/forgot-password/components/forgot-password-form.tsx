@@ -42,6 +42,9 @@ import {
 } from '@/features/auth/constants'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import { useCountdown } from '@/hooks/use-countdown'
+import { handleServerError } from '@/lib/handle-server-error'
+import { AuthOperationError } from '@/lib/secure-verification'
+import { createServerError } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 export function ForgotPasswordForm({
@@ -54,7 +57,7 @@ export function ForgotPasswordForm({
 
   const {
     isTurnstileEnabled,
-    turnstileSiteKey,
+    turnstileConfig,
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
@@ -91,10 +94,12 @@ export function ForgotPasswordForm({
         startCountdown()
         toast.success(t('Reset email sent, please check your inbox'))
       } else {
-        toast.error(res?.message || t('Failed to send reset email'))
+        throw createServerError(res, t('Failed to send reset email'))
       }
-    } catch {
-      // Errors are handled by global interceptor
+    } catch (error: unknown) {
+      handleServerError(
+        AuthOperationError.from(error, t('Failed to send reset email'))
+      )
     } finally {
       resetTurnstile()
       setIsLoading(false)
@@ -137,7 +142,7 @@ export function ForgotPasswordForm({
           <div className='mt-2'>
             <Turnstile
               key={turnstileWidgetKey}
-              siteKey={turnstileSiteKey}
+              {...turnstileConfig}
               onVerify={setTurnstileToken}
               onExpire={resetTurnstile}
             />

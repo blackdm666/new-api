@@ -18,6 +18,7 @@ type EmailDeliveryRules struct {
 	EmailMaxAttempts          int `json:"email_max_attempts"`
 	EmailRetryInitialSeconds  int `json:"email_retry_initial_seconds"`
 	EmailRetryMaxSeconds      int `json:"email_retry_max_seconds"`
+	ReceiptTimeoutHours       int `json:"receipt_timeout_hours"`
 	DeliveredRetentionDays    int `json:"delivered_retention_days"`
 	TerminalRetentionDays     int `json:"terminal_retention_days"`
 }
@@ -37,6 +38,7 @@ func DefaultEmailDeliveryRules() EmailDeliveryRules {
 		EmailMaxAttempts:          8,
 		EmailRetryInitialSeconds:  30,
 		EmailRetryMaxSeconds:      86400,
+		ReceiptTimeoutHours:       24,
 		DeliveredRetentionDays:    30,
 		TerminalRetentionDays:     90,
 	}
@@ -74,7 +76,7 @@ func UpdateEmailDeliveryRulesByJSONString(raw string) error {
 }
 
 func parseEmailDeliveryRules(raw string) (EmailDeliveryRules, error) {
-	rules := EmailDeliveryRules{}
+	rules := DefaultEmailDeliveryRules()
 	if err := common.UnmarshalJsonStr(raw, &rules); err != nil {
 		return rules, fmt.Errorf("invalid email delivery rules: %w", err)
 	}
@@ -98,6 +100,9 @@ func parseEmailDeliveryRules(raw string) (EmailDeliveryRules, error) {
 	}
 	if rules.EmailRetryMaxSeconds < rules.EmailRetryInitialSeconds || rules.EmailRetryMaxSeconds > 86400 {
 		return rules, fmt.Errorf("email retry maximum delay must be at least the initial delay and no more than 86400 seconds")
+	}
+	if rules.ReceiptTimeoutHours < 1 || rules.ReceiptTimeoutHours > 168 {
+		return rules, fmt.Errorf("receipt timeout must be between 1 and 168 hours")
 	}
 	if rules.DeliveredRetentionDays < 1 || rules.DeliveredRetentionDays > 3650 {
 		return rules, fmt.Errorf("delivered email retention must be between 1 and 3650 days")

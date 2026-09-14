@@ -40,9 +40,15 @@ func getScannerBufferSize() int {
 	return DefaultMaxScannerBufferSize
 }
 
-func NewStreamScanner(reader io.Reader) *bufio.Scanner {
+// NewStreamScanner shares relay scanner configuration. Callers buffering bounded
+// task state may additionally cap a line without increasing the configured limit.
+func NewStreamScanner(reader io.Reader, maxBytes ...int) *bufio.Scanner {
+	limit := getScannerBufferSize()
+	if len(maxBytes) > 0 && maxBytes[0] > 0 {
+		limit = min(limit, maxBytes[0])
+	}
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, InitialScannerBufferSize), getScannerBufferSize())
+	scanner.Buffer(make([]byte, min(InitialScannerBufferSize, limit)), limit)
 	return scanner
 }
 
@@ -280,13 +286,12 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			}
 		}
 
-		if err := scanner.Err(); err != nil {
-			if err != io.EOF {
-				logger.LogError(c, "scanner error: "+err.Error())
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
-			}
+		if err := scanner.Err(); err != nil && err != io.EOF {
+			logger.LogError(c, "scanner error: "+err.Error())
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
+		} else {
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
 		}
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
 	})
 
 	// 主循环等待完成或超时
@@ -298,7 +303,9 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	case <-c.Request.Context().Done():
 		// 客户端断开：立即 cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
 		// 避免为已放弃的请求继续消费上游 token。
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+		if !info.StreamStatus.IsNormalEnd() {
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+		}
 	}
 
 	cleanup()

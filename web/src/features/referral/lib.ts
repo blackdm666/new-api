@@ -41,6 +41,10 @@ export const AFFILIATE_STATUS_META: Record<
     labelKey: 'Rejected',
     className: 'border-destructive/40 bg-destructive/10 text-destructive',
   },
+  [AFFILIATE_COMMISSION_STATUS.LIMIT_REACHED]: {
+    labelKey: 'Rebate limit reached',
+    className: 'border-slate-500/40 bg-slate-500/10 text-slate-600',
+  },
 }
 
 export const AFFILIATE_PAYOUT_STATUS_META: Record<

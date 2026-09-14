@@ -78,6 +78,7 @@ type AffiliatePayout struct {
 	UpdatedTime            int64  `json:"updated_time" gorm:"bigint;autoUpdateTime"`
 	Username               string `json:"username" gorm:"->;-:migration"`
 	DisplayName            string `json:"display_name" gorm:"->;-:migration"`
+	Remark                 string `json:"remark,omitempty" gorm:"->;-:migration"`
 }
 
 func (payout *AffiliatePayout) AfterFind(_ *gorm.DB) error {
@@ -102,9 +103,10 @@ type CreateAffiliatePayoutParams struct {
 }
 
 type AffiliatePayoutQueryOptions struct {
-	UserId  int
-	Status  int
-	Keyword string
+	IncludeAdminRemarks bool
+	UserId              int
+	Status              int
+	Keyword             string
 }
 
 type AffiliatePayoutSummary struct {
@@ -428,6 +430,9 @@ func ListAffiliatePayouts(options AffiliatePayoutQueryOptions, pageInfo *common.
 	query := DB.Model(&AffiliatePayout{}).
 		Select("affiliate_payouts.*, users.username, users.display_name").
 		Joins("LEFT JOIN users ON users.id = affiliate_payouts.user_id")
+	if options.IncludeAdminRemarks {
+		query = query.Select("affiliate_payouts.*, users.username, users.display_name, users.remark")
+	}
 	if options.UserId > 0 {
 		query = query.Where("affiliate_payouts.user_id = ?", options.UserId)
 	}

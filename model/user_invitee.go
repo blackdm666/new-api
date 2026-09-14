@@ -112,7 +112,7 @@ func ListAdminAffiliateInviteRecords(keyword string, pageInfo *common.PageInfo) 
 	rows := []*AdminAffiliateInviteRecord{}
 	err := query.
 		Select("invitee.inviter_id, COALESCE(inviter.username, '') AS inviter_username, COALESCE(inviter.display_name, '') AS inviter_display_name, COALESCE(inviter.remark, '') AS inviter_remark, invitee.id AS invitee_id, invitee.username AS invitee_username, invitee.display_name AS invitee_display_name, invitee.created_at, COUNT(affiliate_commissions.id) AS top_up_count, COALESCE(SUM(affiliate_commissions.top_up_amount_cents), 0) AS top_up_amount_cents, COALESCE(SUM(affiliate_commissions.commission_cents), 0) AS commission_cents, COALESCE(MAX(affiliate_commissions.created_time), 0) AS last_top_up_time").
-		Joins("LEFT JOIN affiliate_commissions ON affiliate_commissions.invitee_id = invitee.id AND affiliate_commissions.inviter_id = invitee.inviter_id AND affiliate_commissions.status IN (?, ?)", AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved).
+		Joins("LEFT JOIN affiliate_commissions ON affiliate_commissions.invitee_id = invitee.id AND affiliate_commissions.inviter_id = invitee.inviter_id AND affiliate_commissions.status IN (?, ?, ?)", AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached).
 		Group("invitee.inviter_id, inviter.username, inviter.display_name, inviter.remark, invitee.id, invitee.username, invitee.display_name, invitee.created_at").
 		Order("invitee.created_at DESC, invitee.id DESC").
 		Limit(pageInfo.GetPageSize()).

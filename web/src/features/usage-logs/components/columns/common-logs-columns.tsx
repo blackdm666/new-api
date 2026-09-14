@@ -35,16 +35,15 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
+import { pluginUsageSchema } from '@/features/pricing/lib/plugin-pricing'
+import type { BillingUsageSchema } from '@/features/pricing/types'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
-import {
-  formatRatioCompact,
-  getEffectiveGroupRatioInfo,
-} from '../../lib/billing-display'
 import { formatModelName, parseLogOther } from '../../lib/format'
 import {
   buildTypeDetailSegments,
@@ -62,30 +61,55 @@ import { ModelBadge } from '../model-badge'
 import { TimingMetricsCell, StreamTpsCell } from '../timing-metrics-cell'
 import { useUsageLogsContext } from '../usage-logs-provider'
 
+function formatRatioCompact(ratio: number | undefined): string {
+  if (ratio == null || !Number.isFinite(ratio)) return '-'
+  return ratio % 1 === 0
+    ? String(ratio)
+    : ratio.toFixed(4).replace(/\.?0+$/, '')
+}
+
 function getGroupRatio(other: LogOtherData | null): number | null {
-  const info = getEffectiveGroupRatioInfo(other)
-  if (!info || (!info.isUserSpecific && info.ratio === 1)) return null
-  return info.ratio
+  const userGroupRatio = other?.user_group_ratio
+  if (
+    userGroupRatio != null &&
+    userGroupRatio !== -1 &&
+    Number.isFinite(userGroupRatio)
+  ) {
+    return userGroupRatio
+  }
+
+  const groupRatio = other?.group_ratio
+  if (groupRatio != null && groupRatio !== 1 && Number.isFinite(groupRatio)) {
+    return groupRatio
+  }
+
+  return null
 }
 
 function buildDetailSegments(
   log: UsageLog,
   other: LogOtherData | null,
   t: (key: string, opts?: Record<string, unknown>) => string,
-  isAdmin: boolean
+  isAdmin: boolean,
+  language: string,
+  usageSchema?: BillingUsageSchema
 ): DetailSegment[] {
-  const segments = buildTypeDetailSegments(log, other, t)
+  const segments = buildTypeDetailSegments(log, other, t, language, usageSchema)
+  const adminSegments: DetailSegment[] = []
   // Quota saturation is a rare, admin-only anomaly marker; surface it first
   // and in danger styling so it stands out on the related billing log. The
   // backend already strips admin_info for non-admins; gate on isAdmin too as
   // defense in depth so the marker never leaks if that changes.
   if (isAdmin && other?.admin_info?.quota_saturation) {
-    return [{ text: t('Quota clamped'), danger: true }, ...segments]
+    adminSegments.push({ text: t('Quota clamped'), danger: true })
   }
-  return segments
+  return [...adminSegments, ...segments]
 }
 
-export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
+export function useCommonLogsColumns(
+  isAdmin: boolean,
+  isRoot: boolean
+): ColumnDef<UsageLog>[] {
   const { t } = useTranslation()
   const columns: ColumnDef<UsageLog>[] = [
     {
@@ -437,6 +461,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         return (
           <StreamTpsCell
             isStream={log.is_stream}
+            isTask={other?.is_task === true}
             tokensPerSecond={tokensPerSecond}
             streamStatus={other?.stream_status}
           />
@@ -529,11 +554,30 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       accessorKey: 'content',
       header: t('Details'),
       cell: function DetailsCell({ row }) {
+        const { t, i18n } = useTranslation()
         const [dialogOpen, setDialogOpen] = useState(false)
         const log = row.original
         const other = parseLogOther(log.other)
 
-        const segments = buildDetailSegments(log, other, t, isAdmin)
+        const pricingData = usePricingData(
+          log.type === 2 &&
+            other?.is_task === true &&
+            other.billing_mode === 'tiered_expr'
+        )
+        const usageSchema = pluginUsageSchema(
+          pricingData.models.find(
+            (model) => model.model_name === log.model_name
+          ),
+          other?.admin_info?.task_plugin?.key
+        )
+        const segments = buildDetailSegments(
+          log,
+          other,
+          t,
+          isAdmin,
+          i18n.language,
+          usageSchema
+        )
         const primary = segments[0]
         const hasMore = segments.length > 1
         let primaryTextClass = 'text-foreground'
@@ -580,6 +624,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             <DetailsDialog
               log={log}
               isAdmin={isAdmin}
+              isRoot={isRoot}
               open={dialogOpen}
               onOpenChange={setDialogOpen}
             />

@@ -17,7 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { UserRoundSearch } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+
+import { UserInfoDialog } from '@/components/user-info-dialog'
 
 type AdminUserIdentityProps = {
   id: number
@@ -28,18 +31,18 @@ type AdminUserIdentityProps = {
 
 export function AdminUserIdentity(props: AdminUserIdentityProps) {
   const { t } = useTranslation()
+  const [userInfoOpen, setUserInfoOpen] = useState(false)
+  const openUserInfo = props.onClick ?? (() => setUserInfoOpen(true))
   const content = (
     <>
       <div className='flex items-center gap-1.5 font-medium'>
         <span className='break-all group-hover:underline'>
           {props.username || '-'}
         </span>
-        {props.onClick ? (
-          <UserRoundSearch
-            className='text-muted-foreground size-3.5 shrink-0'
-            aria-hidden='true'
-          />
-        ) : null}
+        <UserRoundSearch
+          className='text-muted-foreground size-3.5 shrink-0'
+          aria-hidden='true'
+        />
       </div>
       {props.remark?.trim() ? (
         <div
@@ -53,18 +56,23 @@ export function AdminUserIdentity(props: AdminUserIdentityProps) {
     </>
   )
 
-  if (props.onClick) {
-    return (
+  return (
+    <>
       <button
         type='button'
         className='group focus-visible:ring-ring min-w-36 rounded-md text-left focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none'
         aria-label={`${t('User Information')}: ${props.username || `UID ${props.id}`}`}
-        onClick={props.onClick}
+        onClick={openUserInfo}
       >
         {content}
       </button>
-    )
-  }
-
-  return <div className='min-w-36'>{content}</div>
+      {props.onClick ? null : (
+        <UserInfoDialog
+          userId={props.id}
+          open={userInfoOpen}
+          onOpenChange={setUserInfoOpen}
+        />
+      )}
+    </>
+  )
 }

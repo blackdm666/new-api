@@ -41,6 +41,16 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { MultiSelect } from '@/components/multi-select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -77,6 +87,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  EmailQueueOverviewStats,
   EmailQueueRulesSection,
   EmailQueueSection,
 } from '@/features/system-settings/integrations/email-queue-section'
@@ -86,6 +97,7 @@ import { formatTimestampToDate } from '@/lib/format'
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error'
 
 import {
+  archiveMarketingCampaign,
   createMarketingCampaign,
   createMarketingSuppression,
   deleteMarketingSuppression,
@@ -237,7 +249,11 @@ export function MarketingAdminPage() {
     queryFn: fetchMarketingAutomations,
   })
   const refresh = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['marketing'] })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['marketing'] }),
+      queryClient.invalidateQueries({ queryKey: ['email-queue'] }),
+      queryClient.invalidateQueries({ queryKey: ['marketing-email-accounts'] }),
+    ])
   }
   const isEmailOperationsTab =
     activeTab === 'email-queue' || activeTab === 'email-queue-rules'
@@ -256,31 +272,31 @@ export function MarketingAdminPage() {
               )}
             </p>
           </div>
-          {!isEmailOperationsTab ? (
-            <div className='flex gap-2'>
-              <Button
-                type='button'
-                variant='outline'
-                onClick={() => void refresh()}
-              >
-                <RefreshCw className='size-4' />
-                {t('Refresh')}
-              </Button>
-              <Button
-                type='button'
-                onClick={() => {
-                  setCampaignTarget(null)
-                  setCampaignOpen(true)
-                }}
-              >
-                <MailPlus className='size-4' />
-                {t('Create campaign')}
-              </Button>
-            </div>
-          ) : null}
+          <div className='flex gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={() => void refresh()}
+            >
+              <RefreshCw className='size-4' />
+              {t('Refresh')}
+            </Button>
+            <Button
+              type='button'
+              onClick={() => {
+                setCampaignTarget(null)
+                setCampaignOpen(true)
+              }}
+            >
+              <MailPlus className='size-4' />
+              {t('Create campaign')}
+            </Button>
+          </div>
         </header>
 
-        {!isEmailOperationsTab ? (
+        {isEmailOperationsTab ? (
+          <EmailQueueOverviewStats />
+        ) : (
           <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7'>
             <Stat
               label={t('Campaigns')}
@@ -311,7 +327,7 @@ export function MarketingAdminPage() {
               )}
             />
           </div>
-        ) : null}
+        )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className='gap-4'>
           <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
@@ -400,6 +416,9 @@ function CampaignTable(props: {
 }) {
   const { t } = useTranslation()
   const [workingId, setWorkingId] = useState(0)
+  const [archiveTarget, setArchiveTarget] = useState<MarketingCampaign | null>(
+    null
+  )
   const [renderedAt] = useState(() => Math.floor(Date.now() / 1000))
   const act = async (
     campaign: MarketingCampaign,
@@ -411,6 +430,20 @@ function CampaignTable(props: {
         await scheduleMarketingCampaign(campaign.id, campaign.scheduled_time)
       } else await transitionMarketingCampaign(campaign.id, action)
       toast.success(t('Campaign updated'))
+      await props.onChanged()
+    } catch (error) {
+      toast.error(getUserFacingErrorMessage(error))
+    } finally {
+      setWorkingId(0)
+    }
+  }
+  const archive = async () => {
+    if (!archiveTarget) return
+    setWorkingId(archiveTarget.id)
+    try {
+      await archiveMarketingCampaign(archiveTarget.id)
+      toast.success(t('Campaign deleted'))
+      setArchiveTarget(null)
       await props.onChanged()
     } catch (error) {
       toast.error(getUserFacingErrorMessage(error))
@@ -550,6 +583,17 @@ function CampaignTable(props: {
                         <Ban className='size-4' />
                       </Button>
                     ) : null}
+                    {['completed', 'cancelled'].includes(campaign.status) ? (
+                      <Button
+                        size='icon-sm'
+                        variant='outline'
+                        title={t('Delete')}
+                        disabled={workingId > 0}
+                        onClick={() => setArchiveTarget(campaign)}
+                      >
+                        <Trash2 className='text-destructive size-4' />
+                      </Button>
+                    ) : null}
                   </div>
                 </TableCell>
               </TableRow>
@@ -572,6 +616,35 @@ function CampaignTable(props: {
         total={props.total}
         onPageChange={props.onPageChange}
       />
+      <AlertDialog
+        open={archiveTarget !== null}
+        onOpenChange={(open) => !open && setArchiveTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('Delete this completed campaign?')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(
+                'The campaign will be hidden from the activity list. Sending records, clicks, and attributed top-ups will be retained for audit.'
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={workingId > 0}>
+              {t('Cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant='destructive'
+              disabled={workingId > 0}
+              onClick={() => void archive()}
+            >
+              {t('Confirm deletion')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -1169,8 +1242,9 @@ function AutomationDialog(props: {
             <Field label={t('Wait after registration (hours)')}>
               <Input
                 type='number'
-                min={1}
+                min={0.5}
                 max={8760}
+                step={0.5}
                 aria-label={t('Wait after registration (hours)')}
                 value={triggerConfig.registration_wait_hours ?? 24}
                 onChange={(event) =>
@@ -1882,9 +1956,11 @@ function validAutomationTriggerConfig(
   config: MarketingAutomationTriggerConfig
 ) {
   if (scene === 'registration_no_first_call') {
+    const registrationWaitHours = Number(config.registration_wait_hours)
     return (
-      Number(config.registration_wait_hours) >= 1 &&
-      Number(config.registration_wait_hours) <= 8760 &&
+      registrationWaitHours >= 0.5 &&
+      registrationWaitHours <= 8760 &&
+      Number.isInteger(registrationWaitHours * 2) &&
       Number(config.max_sends_per_user) >= 1 &&
       Number(config.max_sends_per_user) <= 10 &&
       Number(config.repeat_interval_days) >= 1 &&

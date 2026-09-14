@@ -81,12 +81,17 @@ func TestCompleteEmailDeliveryRetainsRecipientForRootMaintenance(t *testing.T) {
 
 	rows, total, err := ListEmailDeliveries(EmailDeliveryQueryOptions{
 		Keyword: "user@example.com",
-		Status:  EmailDeliveryStatusDelivered,
+		Status:  EmailDeliveryStatusAcceptedUntracked,
 	}, &common.PageInfo{Page: 1, PageSize: 10})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), total)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "user@example.com", rows[0].Recipient)
+	_, finalTotal, err := ListEmailDeliveries(EmailDeliveryQueryOptions{
+		Status: EmailDeliveryStatusDelivered,
+	}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Zero(t, finalTotal)
 }
 
 func TestExpiredEmailDeliveryRetainsRecipientForRootMaintenance(t *testing.T) {
@@ -147,9 +152,15 @@ func TestEmailDeliveryPriorityStatusBatchRetryAndCleanup(t *testing.T) {
 
 	require.NoError(t, DB.Model(marketing).Updates(map[string]any{"delivered_time": now - 31*86400, "created_time": now - 40*86400}).Error)
 	require.NoError(t, DB.Model(critical).Updates(map[string]any{"dead_letter_time": now - 91*86400, "updated_time": now - 91*86400}).Error)
+	account := newTestEmailSenderAccount(t, "cleanup-secret")
+	attempt, err := CreateEmailDeliveryAttempt(marketing.Id, account, EmailAttemptPurposeDelivery, marketing.Recipient, "<cleanup@example.com>", "notify-cleanup@example.com")
+	require.NoError(t, err)
 	removed, err := CleanupEmailDeliveries(now-30*86400, now-90*86400, 500)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), removed)
+	var attemptCount int64
+	require.NoError(t, DB.Model(&EmailDeliveryAttempt{}).Where("id = ?", attempt.Id).Count(&attemptCount).Error)
+	assert.Zero(t, attemptCount)
 }
 
 func TestMarketingQuotaReservationIncludesCrossDayBacklog(t *testing.T) {

@@ -31,12 +31,12 @@ import {
   Users,
   WalletCards,
 } from 'lucide-react'
-import { type MouseEvent, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { EmptyState } from '@/components/empty-state'
 import { SectionPageLayout } from '@/components/layout'
-import { Badge, badgeVariants } from '@/components/ui/badge'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -83,21 +83,6 @@ import type {
 } from './types'
 
 const PAGE_SIZE = 10
-
-function showUnavailableTierFeedback(event: MouseEvent<HTMLButtonElement>) {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-  event.currentTarget.animate(
-    [
-      { transform: 'translateX(0)' },
-      { transform: 'translateX(-3px)' },
-      { transform: 'translateX(3px)' },
-      { transform: 'translateX(-2px)' },
-      { transform: 'translateX(2px)' },
-      { transform: 'translateX(0)' },
-    ],
-    { duration: 240, easing: 'ease-out' }
-  )
-}
 
 export function ReferralProgram() {
   const { t } = useTranslation()
@@ -344,7 +329,7 @@ function UpgradeProgress({ summary }: { summary?: AffiliateSummary }) {
             </p>
           </div>
         </div>
-        <TierBadges summary={summary} />
+        <CurrentTierBadge summary={summary} />
       </div>
     )
   }
@@ -376,7 +361,7 @@ function UpgradeProgress({ summary }: { summary?: AffiliateSummary }) {
           </p>
         </div>
       </div>
-      <TierBadges summary={summary} />
+      <CurrentTierBadge summary={summary} />
       <div className='mt-3 space-y-3'>
         <UpgradeCriterion
           label={t('Effective top-up users')}
@@ -409,81 +394,25 @@ function UpgradeCriterion(props: {
   )
 }
 
-function TierBadges({ summary }: { summary?: AffiliateSummary }) {
+export function CurrentTierBadge({ summary }: { summary?: AffiliateSummary }) {
   const { t } = useTranslation()
-  const currentTier = summary?.tier_name?.trim()
-  const activeTier =
-    currentTier === '高级推广' || currentTier === '金牌推广'
-      ? currentTier
-      : '初级推广'
-  const tiers = [
-    {
-      key: '初级推广',
-      label: t('Junior promoter'),
-      configuredRate:
-        summary?.group_rates?.default ??
-        summary?.group_rates?.['初级推广'] ??
-        summary?.default_rate_basis_points ??
-        500,
-    },
-    {
-      key: '高级推广',
-      label: t('Advanced promoter'),
-      configuredRate: summary?.group_rates?.['高级推广'] ?? 1000,
-    },
-    {
-      key: '金牌推广',
-      label: t('Gold promoter'),
-      configuredRate: summary?.group_rates?.['金牌推广'] ?? 1500,
-    },
-  ]
+  if (!summary) return null
 
   return (
     <div className='mt-3 mb-3 flex flex-wrap items-center gap-2'>
       <span className='text-muted-foreground inline-flex h-6 items-center text-sm leading-none font-medium'>
         {t('Current tier')}:
       </span>
-      {tiers.map((tier) => {
-        const isActive = tier.key === activeTier
-        const rate = isActive
-          ? (summary?.rate_basis_points ?? tier.configuredRate)
-          : tier.configuredRate
-        const controlClassName = cn(
-          badgeVariants({ variant: 'outline' }),
-          promoterTierBadgeClassName(tier.key),
+      <Badge
+        variant='outline'
+        className={cn(
+          promoterTierBadgeClassName(summary.tier_name),
           'h-6 px-2.5 py-0 text-sm leading-none font-normal'
-        )
-        if (!isActive) {
-          return (
-            <button
-              key={tier.key}
-              type='button'
-              aria-disabled='true'
-              onClick={showUnavailableTierFeedback}
-              className={cn(
-                controlClassName,
-                'cursor-pointer opacity-65 transition-opacity hover:opacity-80 active:opacity-60'
-              )}
-            >
-              {tier.label} · {formatRate(rate)}
-            </button>
-          )
-        }
-        return (
-          <button
-            key={tier.key}
-            type='button'
-            aria-pressed='true'
-            aria-label={`${t('Current tier')}: ${tier.label}, ${t('Commission rate')}: ${formatRate(rate)}`}
-            className={cn(
-              controlClassName,
-              'cursor-pointer transition-[transform,filter,box-shadow] hover:brightness-110 active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-ring/50'
-            )}
-          >
-            {tier.label} · {formatRate(rate)}
-          </button>
-        )
-      })}
+        )}
+      >
+        {t(promoterTierLabelKey(summary.tier_name))} ·{' '}
+        {formatRate(summary.rate_basis_points)}
+      </Badge>
     </div>
   )
 }

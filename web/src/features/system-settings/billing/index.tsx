@@ -34,6 +34,7 @@ const defaultBillingSettings: BillingSettings = {
   'quota_setting.enable_free_model_pre_consume': true,
   AffiliateCommissionEnabled: true,
   AffiliateCommissionAutoApprove: false,
+  AffiliateCommissionInviteeTopUpLimit: 0,
   AffiliateCommissionDefaultRateBasisPoints: 500,
   AffiliateCommissionGroupRates:
     '{"default":500,"高级推广":1000,"金牌推广":1500}',
@@ -59,6 +60,7 @@ const defaultBillingSettings: BillingSettings = {
   ExposeRatioEnabled: false,
   'billing_setting.billing_mode': '{}',
   'billing_setting.billing_expr': '{}',
+  'billing_setting.plugin_billing_expr': '{}',
   'tool_price_setting.prices': '{}',
   TopupGroupRatio: '',
   GroupRatio: '',

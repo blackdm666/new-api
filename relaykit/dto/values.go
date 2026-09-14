@@ -5,40 +5,42 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+
+	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 )
 
 type StringValue string
 
 func (s *StringValue) UnmarshalJSON(data []byte) error {
 	var str string
-	if err := json.Unmarshal(data, &str); err == nil {
+	if err := kitutil.Unmarshal(data, &str); err == nil {
 		*s = StringValue(str)
 		return nil
 	}
 
 	var raw json.Number
-	if err := json.Unmarshal(data, &raw); err == nil {
+	if err := kitutil.Unmarshal(data, &raw); err == nil {
 		*s = StringValue(raw.String())
 		return nil
 	}
 
-	return json.Unmarshal(data, &str)
+	return kitutil.Unmarshal(data, &str)
 }
 
 func (s StringValue) MarshalJSON() ([]byte, error) {
-	return json.Marshal(string(s))
+	return kitutil.Marshal(string(s))
 }
 
 type IntValue int
 
 func (i *IntValue) UnmarshalJSON(b []byte) error {
 	var n int
-	if err := json.Unmarshal(b, &n); err == nil {
+	if err := kitutil.Unmarshal(b, &n); err == nil {
 		*i = IntValue(n)
 		return nil
 	}
 	var f float64
-	if err := json.Unmarshal(b, &f); err == nil {
+	if err := kitutil.Unmarshal(b, &f); err == nil {
 		// The upper bound must be < rather than <=: float64(math.MaxInt) rounds
 		// up to 2^63, which is just out of range.
 		if f >= math.MinInt && f < math.MaxInt {
@@ -48,7 +50,7 @@ func (i *IntValue) UnmarshalJSON(b []byte) error {
 		return fmt.Errorf("json: number %s overflows int", string(b))
 	}
 	var s string
-	if err := json.Unmarshal(b, &s); err != nil {
+	if err := kitutil.Unmarshal(b, &s); err != nil {
 		return err
 	}
 	v, err := strconv.Atoi(s)
@@ -60,19 +62,19 @@ func (i *IntValue) UnmarshalJSON(b []byte) error {
 }
 
 func (i IntValue) MarshalJSON() ([]byte, error) {
-	return json.Marshal(int(i))
+	return kitutil.Marshal(int(i))
 }
 
 type BoolValue bool
 
 func (b *BoolValue) UnmarshalJSON(data []byte) error {
 	var boolean bool
-	if err := json.Unmarshal(data, &boolean); err == nil {
+	if err := kitutil.Unmarshal(data, &boolean); err == nil {
 		*b = BoolValue(boolean)
 		return nil
 	}
 	var str string
-	if err := json.Unmarshal(data, &str); err != nil {
+	if err := kitutil.Unmarshal(data, &str); err != nil {
 		return err
 	}
 	if str == "true" {
@@ -80,10 +82,10 @@ func (b *BoolValue) UnmarshalJSON(data []byte) error {
 	} else if str == "false" {
 		*b = BoolValue(false)
 	} else {
-		return json.Unmarshal(data, &boolean)
+		return kitutil.Unmarshal(data, &boolean)
 	}
 	return nil
 }
 func (b BoolValue) MarshalJSON() ([]byte, error) {
-	return json.Marshal(bool(b))
+	return kitutil.Marshal(bool(b))
 }

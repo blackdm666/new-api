@@ -176,6 +176,123 @@ func TestAffiliateCommissionAutoApprovalCreditsExactlyOnce(t *testing.T) {
 	assert.Equal(t, record.CommissionCents, summary.ApprovedCommissionCents)
 }
 
+func TestAffiliateCommissionTopUpLimitKeepsAnUnrewardedLedgerEntry(t *testing.T) {
+	truncateTables(t)
+	enableAffiliateForTest(t)
+	setAffiliateOptionForTest(t, AffiliateCommissionAutoApproveOptionKey, "true")
+	setAffiliateOptionForTest(t, AffiliateCommissionInviteeTopUpLimitOptionKey, "2")
+
+	inviter := &User{
+		Username: "affiliate-limit-owner", Email: "affiliate-limit-owner@example.com",
+		Group: AffiliatePromoterGroupDefault, AffCode: "affiliate-limit-owner-code", Status: common.UserStatusEnabled,
+	}
+	require.NoError(t, DB.Create(inviter).Error)
+	invitee := &User{
+		Username: "affiliate-limit-buyer", Email: "affiliate-limit-buyer@example.com",
+		AffCode: "affiliate-limit-buyer-code", InviterId: inviter.Id, Status: common.UserStatusEnabled,
+	}
+	require.NoError(t, DB.Create(invitee).Error)
+
+	for index := 1; index <= 3; index++ {
+		topUp := &TopUp{
+			UserId: invitee.Id, Money: 100, TradeNo: fmt.Sprintf("AFF-LIMIT-%d", index),
+			PaymentProvider: PaymentProviderEpay, CompleteTime: common.GetTimestamp(), Status: common.TopUpStatusSuccess,
+		}
+		require.NoError(t, DB.Create(topUp).Error)
+		require.NoError(t, CreateAffiliateCommissionForTopUp(topUp))
+	}
+
+	records := []*AffiliateCommission{}
+	require.NoError(t, DB.Order("id ASC").Find(&records).Error)
+	require.Len(t, records, 3)
+	assert.Equal(t, AffiliateCommissionStatusApproved, records[0].Status)
+	assert.Equal(t, AffiliateCommissionStatusApproved, records[1].Status)
+	assert.Equal(t, AffiliateCommissionStatusLimitReached, records[2].Status)
+	assert.Positive(t, records[0].CommissionCents)
+	assert.Equal(t, records[0].CommissionCents, records[1].CommissionCents)
+	assert.Zero(t, records[2].CommissionCents)
+	assert.Zero(t, records[2].CommissionQuota)
+	assert.Positive(t, records[2].RateBasisPoints)
+	require.ErrorIs(t, CompleteAffiliateCommission(records[2].Id, 99, true, ""), ErrAffiliateCommissionStatusInvalid)
+
+	account, err := GetAffiliateAccount(inviter.Id)
+	require.NoError(t, err)
+	assert.Equal(t, records[0].CommissionCents+records[1].CommissionCents, account.AvailableCents)
+
+	listed, total, err := ListAffiliateCommissions(
+		AffiliateCommissionQueryOptions{Status: AffiliateCommissionStatusLimitReached},
+		&common.PageInfo{Page: 1, PageSize: 10},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, listed, 1)
+	assert.Equal(t, "AFF-LIMIT-3", listed[0].TradeNo)
+
+	inviterVisible, inviterVisibleTotal, err := ListAffiliateCommissions(
+		AffiliateCommissionQueryOptions{InviterId: inviter.Id, ExcludeLimitReached: true},
+		&common.PageInfo{Page: 1, PageSize: 10},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), inviterVisibleTotal)
+	require.Len(t, inviterVisible, 2)
+	for _, record := range inviterVisible {
+		assert.NotEqual(t, AffiliateCommissionStatusLimitReached, record.Status)
+	}
+
+	limitReachedBypass, limitReachedBypassTotal, err := ListAffiliateCommissions(
+		AffiliateCommissionQueryOptions{
+			InviterId:           inviter.Id,
+			Status:              AffiliateCommissionStatusLimitReached,
+			ExcludeLimitReached: true,
+		},
+		&common.PageInfo{Page: 1, PageSize: 10},
+	)
+	require.NoError(t, err)
+	assert.Zero(t, limitReachedBypassTotal)
+	assert.Empty(t, limitReachedBypass)
+
+	summary, err := GetAffiliateSummary(inviter.Id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), summary.CommissionRecordCount)
+	assert.Equal(t, int64(30_000), summary.TotalTopUpCents)
+
+	stats, total, err := ListAffiliateInviteeStats(inviter.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, stats, 1)
+	assert.Equal(t, int64(3), stats[0].TopUpCount)
+	assert.Equal(t, int64(30_000), stats[0].TopUpAmountCents)
+
+	metrics, err := GetAffiliateUpgradeMetrics(inviter.Id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), metrics.EffectiveInviteeCount)
+	assert.Equal(t, int64(30_000), metrics.EffectiveTopUpAmountCents)
+}
+
+func TestAffiliateCommissionZeroTopUpLimitRemainsUnlimited(t *testing.T) {
+	truncateTables(t)
+	enableAffiliateForTest(t)
+	setAffiliateOptionForTest(t, AffiliateCommissionAutoApproveOptionKey, "true")
+	setAffiliateOptionForTest(t, AffiliateCommissionInviteeTopUpLimitOptionKey, "0")
+
+	inviter, invitee, _, firstRecord := createAffiliateFixture(t, "unlimited", 100)
+	for index := 2; index <= 3; index++ {
+		topUp := &TopUp{
+			UserId: invitee.Id, Money: 100, TradeNo: fmt.Sprintf("AFF-UNLIMITED-%d", index),
+			PaymentProvider: PaymentProviderEpay, CompleteTime: common.GetTimestamp(), Status: common.TopUpStatusSuccess,
+		}
+		require.NoError(t, DB.Create(topUp).Error)
+		require.NoError(t, CreateAffiliateCommissionForTopUp(topUp))
+	}
+
+	var approvedCount int64
+	require.NoError(t, DB.Model(&AffiliateCommission{}).Where("status = ?", AffiliateCommissionStatusApproved).Count(&approvedCount).Error)
+	assert.Equal(t, int64(3), approvedCount)
+	account, err := GetAffiliateAccount(inviter.Id)
+	require.NoError(t, err)
+	assert.Equal(t, firstRecord.CommissionCents*3, account.AvailableCents)
+}
+
 func TestAffiliateCommissionAutoApprovalModeSwitchOnlyAffectsNewTopUps(t *testing.T) {
 	truncateTables(t)
 	enableAffiliateForTest(t)
@@ -639,6 +756,10 @@ func TestAffiliateUpgradeDoesNotReplaceUnrelatedUserGroups(t *testing.T) {
 func TestAffiliateSettingsRequireAllCoreGroupsAndRejectReason(t *testing.T) {
 	assert.NoError(t, ValidateAffiliateOptionValue(AffiliateCommissionAutoApproveOptionKey, "true"))
 	assert.Error(t, ValidateAffiliateOptionValue(AffiliateCommissionAutoApproveOptionKey, "automatic"))
+	assert.NoError(t, ValidateAffiliateOptionValue(AffiliateCommissionInviteeTopUpLimitOptionKey, "0"))
+	assert.NoError(t, ValidateAffiliateOptionValue(AffiliateCommissionInviteeTopUpLimitOptionKey, "1000000"))
+	assert.Error(t, ValidateAffiliateOptionValue(AffiliateCommissionInviteeTopUpLimitOptionKey, "-1"))
+	assert.Error(t, ValidateAffiliateOptionValue(AffiliateCommissionInviteeTopUpLimitOptionKey, "1000001"))
 	assert.Error(t, ValidateAffiliateOptionValue(AffiliateCommissionGroupRatesOptionKey, `{"default":500,"高级推广":1000}`))
 	assert.NoError(t, ValidateAffiliateOptionValue(AffiliateCommissionGroupRatesOptionKey, `{"default":550,"高级推广":1000,"金牌推广":1500}`))
 	assert.NoError(t, ValidateAffiliateUpgradeThresholds(50, 500, 200000, 2000000))

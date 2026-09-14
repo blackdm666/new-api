@@ -163,11 +163,11 @@ func applyClaudeThinkingConfig(request *dto.GeminiChatRequest, thinking *dto.Thi
 	switch thinking.Type {
 	case "enabled":
 		request.GenerationConfig.ThinkingConfig = &dto.GeminiThinkingConfig{
-			IncludeThoughts: true,
+			IncludeThoughts: kitutil.GetPointer(true),
 			ThinkingBudget:  thinking.BudgetTokens,
 		}
 	case "adaptive":
-		request.GenerationConfig.ThinkingConfig = &dto.GeminiThinkingConfig{IncludeThoughts: true}
+		request.GenerationConfig.ThinkingConfig = &dto.GeminiThinkingConfig{IncludeThoughts: kitutil.GetPointer(true)}
 	case "disabled":
 		request.GenerationConfig.ThinkingConfig = &dto.GeminiThinkingConfig{ThinkingBudget: kitutil.GetPointer(0)}
 	}
