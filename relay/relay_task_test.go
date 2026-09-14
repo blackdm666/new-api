@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,9 +17,60 @@ import (
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
+
+func TestRetiredNativeVideoTasksRemainReadable(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Task{}))
+	previousDB := model.DB
+	model.DB = db
+	t.Cleanup(func() { model.DB = previousDB })
+	t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "true")
+	t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "https://assets.88api.ai/media")
+	for _, tc := range []struct {
+		platform string
+		status   model.TaskStatus
+		owner    int
+		ok       bool
+	}{
+		{"61", model.TaskStatusSuccess, 7, true},
+		{"62", model.TaskStatusSuccess, 7, true},
+		{"62", model.TaskStatusFailure, 7, true},
+		{"62", model.TaskStatusInProgress, 7, false},
+		{"missing-plugin", model.TaskStatusSuccess, 7, false},
+		{"62", model.TaskStatusSuccess, 8, false},
+	} {
+		t.Run(fmt.Sprintf("%s-%s-owner%d", tc.platform, tc.status, tc.owner), func(t *testing.T) {
+			require.Nil(t, GetTaskAdaptor(constant.TaskPlatform(tc.platform)))
+			task := &model.Task{TaskID: "task_retired", UserId: 7, ChannelId: 99, Platform: constant.TaskPlatform(tc.platform), Status: tc.status, Action: constant.TaskActionTextToVideo, Progress: "100%", FinishTime: 20,
+				PrivateData: model.TaskPrivateData{Execution: &model.TaskExecutionSnapshot{}, ResultStorageKind: "s3", ResultStorageKey: "task-videos/2026/09/" + strings.Repeat("a", 64) + ".mp4", ResultMimeType: "video/mp4"}}
+			require.NoError(t, db.Create(task).Error)
+			t.Cleanup(func() { db.Delete(task) })
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Set("id", tc.owner)
+			c.Set("task_id", task.TaskID)
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/videos/"+task.TaskID, nil)
+			body, taskErr := videoFetchByIDRespBodyBuilder(c)
+			if !tc.ok {
+				require.NotNil(t, taskErr)
+				return
+			}
+			require.Nil(t, taskErr)
+			var result map[string]any
+			require.NoError(t, common.Unmarshal(body, &result))
+			assert.Equal(t, task.TaskID, result["id"])
+			if tc.status == model.TaskStatusSuccess {
+				assert.Equal(t, "https://assets.88api.ai/media/"+task.PrivateData.ResultStorageKey, result["url"])
+			}
+			assert.Equal(t, int64(20), task.FinishTime)
+		})
+	}
+}
 
 func TestTaskModel2DtoNormalizesLegacyAction(t *testing.T) {
 	task := &model.Task{Action: "firstTailGenerate"}

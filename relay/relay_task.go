@@ -21,6 +21,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
+	relaykitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -562,6 +563,25 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		// starts a new archive merely because a client polls an old task.
 		adaptor := GetTaskAdaptor(originTask.Platform)
 		if adaptor == nil {
+			// A retired native adaptor is unnecessary for presenting a terminal
+			// task already persisted locally. Plugin tasks still require their renderer.
+			_, nativeErr := strconv.Atoi(string(originTask.Platform))
+			terminal := originTask.Status == model.TaskStatusSuccess || originTask.Status == model.TaskStatusFailure
+			pluginTask := originTask.PrivateData.Execution != nil && originTask.PrivateData.Execution.TaskPlugin != nil
+			if nativeErr == nil && terminal && !pluginTask {
+				video := originTask.ToOpenAIVideo()
+				if originTask.Status == model.TaskStatusFailure {
+					video.Error = &relaykitdto.OpenAIVideoError{Code: "video_generation_failed", Message: originTask.FailReason}
+				}
+				respBody, err = common.Marshal(video)
+				if err == nil {
+					respBody, err = service.PresentPublicTaskVideo(respBody, originTask)
+				}
+				if err != nil {
+					taskResp = service.TaskErrorWrapper(err, "convert_to_openai_video_failed", http.StatusInternalServerError)
+				}
+				return
+			}
 			taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("invalid channel id: %d", originTask.ChannelId), "invalid_channel_id", http.StatusBadRequest)
 			return
 		}

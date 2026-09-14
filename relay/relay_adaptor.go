@@ -37,11 +37,9 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/sub2api"
 	"github.com/QuantumNous/new-api/relay/channel/submodel"
 	taskGemini "github.com/QuantumNous/new-api/relay/channel/task/gemini"
-	taskglobalaiopc "github.com/QuantumNous/new-api/relay/channel/task/globalaiopc"
 	jspluginadaptor "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
 	tasksub2api "github.com/QuantumNous/new-api/relay/channel/task/sub2api"
 	taskvertex "github.com/QuantumNous/new-api/relay/channel/task/vertex"
-	taskxinmeng "github.com/QuantumNous/new-api/relay/channel/task/xinmeng"
 	"github.com/QuantumNous/new-api/relay/channel/tencent"
 	"github.com/QuantumNous/new-api/relay/channel/vertex"
 	"github.com/QuantumNous/new-api/relay/channel/volcengine"
@@ -180,12 +178,8 @@ func getLegacyTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 		return &taskGemini.TaskAdaptor{}
 	case constant.ChannelTypeVertexAi:
 		return &taskvertex.TaskAdaptor{}
-	case constant.ChannelTypeGlobalAiOpc:
-		return &taskglobalaiopc.TaskAdaptor{}
 	case constant.ChannelTypeSub2API:
 		return &tasksub2api.TaskAdaptor{}
-	case constant.ChannelTypeXinMeng:
-		return &taskxinmeng.TaskAdaptor{}
 	default:
 		return nil
 	}

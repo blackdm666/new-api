@@ -60,10 +60,10 @@ const (
 	ChannelTypeNewAPI         = 60
 	// Keep the deployed custom channel ids stable. The upstream task-plugin
 	// channel was introduced after these ids were already in production.
-	ChannelTypeGlobalAiOpc = 61
-	ChannelTypeXinMeng     = 62
-	ChannelTypeTaskPlugin  = 63
-	ChannelTypeDummy       // this one is only for count, do not add any channel after this
+	_                     = 61 // retired custom channel; never reuse persisted type IDs
+	_                     = 62 // retired custom channel; never reuse persisted type IDs
+	ChannelTypeTaskPlugin = 63
+	ChannelTypeDummy      // this one is only for count, do not add any channel after this
 
 )
 
@@ -131,9 +131,9 @@ var ChannelBaseURLs = []string{
 	"",                                          //58
 	"",                                          //59
 	"",                                          //60
-	"https://zcbservice.aizfw.cn/kyyReactApiServer", //61
-	"https://www.jimengvip.online",                  //62
-	"",                                              //63
+	"",                                          //61 retired
+	"",                                          //62 retired
+	"",                                          //63
 }
 
 func GetChannelBaseURL(channelType int) string {
@@ -201,8 +201,6 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeAdvancedCustom: "Advanced Custom",
 	ChannelTypeSub2API:        "Sub2API",
 	ChannelTypeNewAPI:         "New API",
-	ChannelTypeGlobalAiOpc:    "GlobalAiOpc",
-	ChannelTypeXinMeng:        "XinMeng",
 	ChannelTypeTaskPlugin:     "Task Plugin",
 }
 

@@ -157,45 +157,6 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Models',
     },
   },
-  61: {
-    id: 61,
-    name: CHANNEL_TYPES[61],
-    icon: 'video',
-    defaultBaseUrl: 'https://zcbservice.aizfw.cn/kyyReactApiServer',
-    hints: {
-      baseUrl: 'Default: https://zcbservice.aizfw.cn/kyyReactApiServer',
-      key: 'Bearer API key from GlobalAiOpc',
-      models: 'seedance-2.5,minimax-h3',
-    },
-  },
-  62: {
-    id: 62,
-    name: CHANNEL_TYPES[62],
-    icon: 'video',
-    defaultBaseUrl: 'https://www.jimengvip.online',
-    supportedModels: [
-      'dvc-seedance-2.5',
-      'dvc-seedance-2.0',
-      'minimax-h3-768p',
-      'doubao-seedance-2-5-720p',
-      'doubao-seedance-2-0-720p',
-      'doubao-seedance-2-0-fast-720p',
-      'seedance-2.0-mini-480p',
-      'seedance-2.0-mini-720p',
-      'wan3.0-video-720p',
-      'wan3.0-video-1080p',
-      'kling-3.0-turbo-720p',
-      'kling-3.0-turbo-1080p',
-      'kling-3.0-turbo-2k',
-      'kling-3.0-turbo-4k',
-    ],
-    hints: {
-      baseUrl: 'Default: https://www.jimengvip.online (do not append /v1)',
-      key: 'Bearer API key from XinMeng',
-      models:
-        'dvc-seedance-2.5,dvc-seedance-2.0,minimax-h3-768p,doubao-seedance-2-5-720p,doubao-seedance-2-0-720p,doubao-seedance-2-0-fast-720p,seedance-2.0-mini-480p,seedance-2.0-mini-720p,wan3.0-video-720p,wan3.0-video-1080p,kling-3.0-turbo-720p,kling-3.0-turbo-1080p,kling-3.0-turbo-2k,kling-3.0-turbo-4k',
-    },
-  },
 }
 
 /**

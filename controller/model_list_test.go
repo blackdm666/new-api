@@ -234,15 +234,14 @@ func TestGetUserModelsReturnsPlaygroundModesWhenRequested(t *testing.T) {
 	}).Error)
 	require.NoError(t, db.Create(&[]model.Channel{
 		{Id: 31, Name: "chat-and-image", Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled},
-		{Id: 32, Name: "global-video", Type: constant.ChannelTypeGlobalAiOpc, Status: common.ChannelStatusEnabled},
+		{Id: 32, Name: "native-video", Type: constant.ChannelTypeSora, Status: common.ChannelStatusEnabled},
 		{Id: 33, Name: "gemini-chat-image", Type: constant.ChannelTypeGemini, Status: common.ChannelStatusEnabled},
 		{Id: 34, Name: "grok-image", Type: constant.ChannelTypeSub2API, Status: common.ChannelStatusEnabled},
 	}).Error)
 	require.NoError(t, db.Create(&[]model.Ability{
 		{Group: "default", Model: "gpt-4o", ChannelId: 31, Enabled: true},
 		{Group: "default", Model: "gpt-image-2", ChannelId: 31, Enabled: true},
-		{Group: "default", Model: "seedance-2.5", ChannelId: 32, Enabled: true},
-		{Group: "default", Model: "digitalHuman", ChannelId: 32, Enabled: true},
+		{Group: "default", Model: "sora-2", ChannelId: 32, Enabled: true},
 		{Group: "default", Model: "gemini-3.1-flash-image", ChannelId: 33, Enabled: true},
 		{Group: "default", Model: "grok-imagine-image-quality", ChannelId: 34, Enabled: true},
 	}).Error)
@@ -266,14 +265,13 @@ func TestGetUserModelsReturnsPlaygroundModesWhenRequested(t *testing.T) {
 	}
 	assert.Equal(t, "chat", modes["gpt-4o"])
 	assert.Equal(t, "image", modes["gpt-image-2"])
-	assert.Equal(t, "video", modes["seedance-2.5"])
-	assert.Equal(t, "unsupported", modes["digitalHuman"])
+	assert.Equal(t, "video", modes["sora-2"])
 	assert.Equal(t, "image", modes["gemini-3.1-flash-image"])
 	assert.Equal(t, "chat", transports["gemini-3.1-flash-image"])
 	assert.Equal(t, "image", modes["grok-imagine-image-quality"])
 	assert.Equal(t, "image", transports["grok-imagine-image-quality"])
 	assert.Equal(t, "image", transports["gpt-image-2"])
-	assert.Equal(t, "video", transports["seedance-2.5"])
+	assert.Equal(t, "video", transports["sora-2"])
 }
 
 func TestGetUserModelsExpandsAutoGroupsInConfiguredOrder(t *testing.T) {

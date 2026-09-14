@@ -25,6 +25,11 @@ import {
 } from '../../constants'
 
 describe('channel type options for task plugin bind', () => {
+  test('retired native video providers cannot be selected for new channels', () => {
+    expect(
+      CHANNEL_TYPE_OPTIONS.filter((option) => [61, 62].includes(option.value))
+    ).toEqual([])
+  })
   test('hides the task plugin type when the caller cannot bind', () => {
     const options = channelTypeOptionsForTaskPluginBind(false)
 
