@@ -77,7 +77,15 @@ func TestBuiltInTaskPluginResponsesAndUsageContracts(t *testing.T) {
 			actualKeys = append(actualKeys, entry.Name())
 		}
 	}
-	assert.Equal(t, expectedKeys, actualKeys)
+	assert.Equal(t, append(append([]string{}, expectedKeys...), "xinmeng-wan3"), actualKeys)
+	xinmeng, found := generation.Get("xinmeng-wan3")
+	require.True(t, found, "XinMeng must be included in the factory generation")
+	assert.Len(t, xinmeng.Meta.Models, 19)
+	for _, model := range xinmeng.Meta.Models {
+		binding, claimed := generation.LookupEndpoint("POST", "/v1/videos", model)
+		require.True(t, claimed, model)
+		assert.Same(t, xinmeng, binding.Plugin)
+	}
 
 	for _, key := range expectedKeys {
 		t.Run(key, func(t *testing.T) {
