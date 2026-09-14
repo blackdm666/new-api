@@ -17,7 +17,9 @@ function mediaHeaders() {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
-    "Content-Security-Policy": "default-src 'none'; sandbox",
+    // Standalone browser media documents must load their own URL. Preserve the
+    // origin for that request while keeping scripts and other resources blocked.
+    "Content-Security-Policy": "default-src 'none'; media-src 'self'; img-src 'self'; sandbox allow-same-origin",
   });
 }
 

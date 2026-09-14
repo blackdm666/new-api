@@ -143,6 +143,7 @@ type AffiliateInviteeStats struct {
 
 type AffiliateCommissionQueryOptions struct {
 	IncludeAdminRemarks bool
+	ExcludeLimitReached bool
 	InviterId           int
 	Status              int
 	Keyword             string
@@ -874,6 +875,9 @@ func ListAffiliateCommissions(options AffiliateCommissionQueryOptions, pageInfo 
 	}
 	if options.Status > 0 {
 		query = query.Where("affiliate_commissions.status = ?", options.Status)
+	}
+	if options.ExcludeLimitReached {
+		query = query.Where("affiliate_commissions.status <> ?", AffiliateCommissionStatusLimitReached)
 	}
 	if keyword := strings.TrimSpace(options.Keyword); keyword != "" {
 		pattern, err := sanitizeLikePattern(keyword)

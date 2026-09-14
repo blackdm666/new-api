@@ -79,6 +79,7 @@ test("media upload is scoped, write-once and anonymous reads support HEAD/ranges
     assert.equal(r.status, status);
     assert.equal(r.headers.get("Access-Control-Allow-Origin"), "*");
     assert.equal(r.headers.get("Cache-Control"), "no-store");
+    assert.equal(r.headers.get("Content-Security-Policy"), "default-src 'none'; media-src 'self'; img-src 'self'; sandbox allow-same-origin");
     assert.equal((await r.arrayBuffer()).byteLength, expected);
   }
   const invalidRange = await handleRequest(new Request(fixture.url, { headers: { Range: "bytes=999999-" } }), fixture.env);

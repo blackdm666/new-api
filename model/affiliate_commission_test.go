@@ -228,6 +228,29 @@ func TestAffiliateCommissionTopUpLimitKeepsAnUnrewardedLedgerEntry(t *testing.T)
 	require.Len(t, listed, 1)
 	assert.Equal(t, "AFF-LIMIT-3", listed[0].TradeNo)
 
+	inviterVisible, inviterVisibleTotal, err := ListAffiliateCommissions(
+		AffiliateCommissionQueryOptions{InviterId: inviter.Id, ExcludeLimitReached: true},
+		&common.PageInfo{Page: 1, PageSize: 10},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), inviterVisibleTotal)
+	require.Len(t, inviterVisible, 2)
+	for _, record := range inviterVisible {
+		assert.NotEqual(t, AffiliateCommissionStatusLimitReached, record.Status)
+	}
+
+	limitReachedBypass, limitReachedBypassTotal, err := ListAffiliateCommissions(
+		AffiliateCommissionQueryOptions{
+			InviterId:           inviter.Id,
+			Status:              AffiliateCommissionStatusLimitReached,
+			ExcludeLimitReached: true,
+		},
+		&common.PageInfo{Page: 1, PageSize: 10},
+	)
+	require.NoError(t, err)
+	assert.Zero(t, limitReachedBypassTotal)
+	assert.Empty(t, limitReachedBypass)
+
 	summary, err := GetAffiliateSummary(inviter.Id)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), summary.CommissionRecordCount)
