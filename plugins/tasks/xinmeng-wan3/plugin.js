@@ -1,13 +1,56 @@
-const MODELS = ["wan3.0-video-480p", "wan3.0-video-720p", "wan3.0-video-1080p"];
 const RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4"];
+// Sales identity owns resolution; channel model_mapping owns the upstream ID.
+// New models/capability changes belong here and can be uploaded without rebuilding
+// the gateway. Do not derive a paid resolution from user-supplied metadata.
+const MODEL_CONFIGS = {};
+function addModel(name, upstream, resolution, overrides) {
+  MODEL_CONFIGS[name] = Object.assign({ upstream: upstream, resolution: resolution,
+    defaultDuration: 5, minDuration: 4, maxDuration: 15, defaultRatio: "16:9",
+    ratios: RATIOS.concat(["21:9"]), maxPrompt: 5000, images: 9, videos: 3,
+    audios: 3, framesExclusive: false, promptless: false, nativeMedia: false,
+    generateAudio: false, visualWithAudio: false, totalMedia: 0 }, overrides);
+}
+for (const resolution of ["480p", "720p", "1080p"]) {
+  const wan = "wan3.0-video-" + resolution;
+  addModel(wan, wan, resolution, { maxDuration: 30, ratios: RATIOS, promptless: true,
+    images: resolution === "480p" ? 30 : 10, videos: resolution === "480p" ? 10 : 5,
+    audios: resolution === "480p" ? 10 : 5, framesExclusive: resolution !== "480p" });
+  const dvc = "dvc-seedance-2.5" + (resolution === "720p" ? "" : "-" + resolution);
+  addModel("SD2.5 " + resolution.toUpperCase(), dvc, resolution, {
+    maxDuration: 30, defaultRatio: "auto", ratios: ["auto", "1:1", "21:9", "16:9", "9:16", "3:4", "4:3"],
+    images: 30, videos: 10, audios: 10, framesExclusive: true,
+    generateAudio: resolution === "720p", promptless: resolution !== "720p" });
+  // The live cvd catalog has four qualities. A sales alias is mandatory so
+  // the 480/720/1080 tiers cannot accidentally all generate the default 480p.
+  addModel("SD2.0 " + resolution.toUpperCase(), "cvd-seedance-2.0", resolution, {
+    defaultRatio: "1:1", framesExclusive: true, promptless: true,
+    images: 30, videos: 10, audios: 10 });
+}
+for (const resolution of ["480p", "720p"]) {
+  const name = "seedance-2.0-mini-" + resolution;
+  addModel(name, name, resolution, {});
+}
+for (const resolution of ["720p", "1080p", "2k", "4k"]) {
+  addModel("kling-3.0-turbo-" + resolution, "kling-3.0-turbo", resolution, {
+    ratios: ["16:9", "9:16", "1:1"], maxPrompt: 2000, images: 30, videos: 10,
+    audios: 0, nativeMedia: true, generateAudio: true });
+}
+addModel("Seedance-2.5-720p官方版", "doubao-seedance-2-5-720p", "720p", {
+  defaultDuration: 4, maxDuration: 30, images: 30, videos: 10, audios: 10, framesExclusive: true });
+addModel("Seedance-2.0-720p官方版", "doubao-seedance-2-0-720p", "720p", { defaultDuration: 4, framesExclusive: true });
+addModel("Seedance-2.0-fast-720p官方版", "doubao-seedance-2-0-fast-720p", "720p", { defaultDuration: 4, framesExclusive: true });
+addModel("minimax-h3-768p", "minimax-h3-768p", "768p", { defaultDuration: 4,
+  ratios: ["1:1", "16:9", "9:16"], maxPrompt: 2500, images: 10, videos: 5,
+  audios: 5, visualWithAudio: true });
+const MODELS = Object.keys(MODEL_CONFIGS);
 
 export const meta = {
   apiVersion: 1,
   key: "xinmeng-wan3",
-  name: "XinMeng Wan3",
-  version: "1.0.1",
+  name: "XinMeng Video",
+  version: "2.0.0",
   author: { name: "88API" },
-  description: { en: "Wan3 video generation through XinMeng", zh: "通过 XinMeng 生成 Wan3 视频" },
+  description: { en: "Video generation through XinMeng", zh: "通过 XinMeng 生成视频" },
   models: MODELS,
   fetchMode: "per_task",
   protocols: ["openai_video"],
@@ -26,37 +69,45 @@ function firstArray() {
   }
   return [];
 }
-function secondsFor(req) {
+function secondsFor(req, cfg) {
   // The same validated value is sent upstream and supplied to both billing modes.
-  const value = req.duration !== undefined ? req.duration : req.seconds !== undefined ? req.seconds : 5;
-  if ((typeof value !== "number" && typeof value !== "string") || String(value).trim() === "") throw new Error("duration must be an integer between 4 and 30");
+  // Match the legacy positive-duration precedence when both aliases are present.
+  const duration = req.duration;
+  const hasDuration = duration !== undefined && duration !== null && duration !== 0 && duration !== "0" && duration !== "";
+  const hasSeconds = req.seconds !== undefined && req.seconds !== null && req.seconds !== "" && req.seconds !== 0 && req.seconds !== "0";
+  const value = hasDuration ? duration : hasSeconds ? req.seconds : cfg.defaultDuration;
+  if ((typeof value !== "number" && typeof value !== "string") || String(value).trim() === "") throw new Error("duration must be an integer");
   const seconds = Number(value);
-  if (!Number.isInteger(seconds) || seconds < 4 || seconds > 30) throw new Error("duration must be an integer between 4 and 30");
-  if (req.duration !== undefined && req.seconds !== undefined && Number(req.seconds) !== seconds) throw new Error("duration and seconds must agree");
+  if (!Number.isInteger(seconds) || seconds < cfg.minDuration || seconds > cfg.maxDuration) throw new Error("duration must be an integer between " + cfg.minDuration + " and " + cfg.maxDuration);
+  if (cfg.durations && !cfg.durations.includes(seconds)) throw new Error("unsupported duration");
   return seconds;
 }
-function payloadFor(req, model) {
-  if (!MODELS.includes(model)) throw new Error("unsupported Wan3 model");
-  const metadata = object(req.metadata);
+function modelConfig(model) {
+  if (!Object.prototype.hasOwnProperty.call(MODEL_CONFIGS, model)) throw new Error("unsupported XinMeng sales model: " + model);
+  return MODEL_CONFIGS[model];
+}
+function payloadFor(req, model, upstreamModel) {
+  const cfg = modelConfig(model);
+  const metadata = object(typeof req.metadata === "string" ? JSON.parse(req.metadata) : req.metadata);
   const all = Object.assign({}, metadata, req);
   const sizeRatios = { "1280x720": "16:9", "1920x1080": "16:9", "2560x1440": "16:9", "720x1280": "9:16", "1080x1920": "9:16", "1440x2560": "9:16", "1024x1024": "1:1", "1440x1440": "1:1", "1920x1440": "4:3", "1440x1920": "3:4" };
   const body = {
-    model: model,
-    ratio: first(all.ratio, all.aspect_ratio, RATIOS.includes(req.size) ? req.size : sizeRatios[req.size], "16:9"),
-    duration: secondsFor(req),
-    resolution: model.slice(model.lastIndexOf("-") + 1),
+    model: upstreamModel && upstreamModel !== model ? upstreamModel : cfg.upstream,
+    ratio: first(all.ratio, all.aspect_ratio, cfg.ratios.includes(req.size) ? req.size : req.size === "3360x1440" ? "21:9" : sizeRatios[req.size], cfg.defaultRatio),
+    duration: secondsFor(req, cfg),
+    resolution: cfg.resolution,
   };
   const prompt = text(req.prompt);
   if (prompt) body.prompt = prompt;
   const negative = first(req.negative_prompt, metadata.negative_prompt);
   if (negative) body.negative_prompt = negative;
   const images = firstArray(req.images, req.image, req.input_reference, all.referenceImages, all.reference_images, all.image_urls, metadata.images, metadata.image, all.file_paths);
-  const videos = firstArray(all.referenceVideos, all.reference_videos, all.video_urls, all.videos);
-  const audios = firstArray(all.referenceAudios, all.reference_audios, all.audio_urls, all.audios);
+  const videos = firstArray(all.referenceVideos, all.reference_videos, all.video_urls, all.videos, all.video);
+  const audios = firstArray(all.referenceAudios, all.reference_audios, all.audio_urls, all.audios, all.audio);
   for (const entry of [["referenceImages", images], ["referenceVideos", videos], ["referenceAudios", audios]]) {
     if (entry[1].length) {
       for (const value of entry[1]) {
-        if (!text(value) && !(entry[0] === "referenceImages" && object(value).__fileRef)) throw new Error(entry[0] + " must contain media references");
+        if (!text(value) && !(entry[0] === "referenceImages" && (object(value).__fileRef || cfg.nativeMedia && text(object(value).url)))) throw new Error(entry[0] + " must contain media references");
       }
       body[entry[0]] = entry[1];
     }
@@ -71,15 +122,32 @@ function payloadFor(req, model) {
     body.seed = all.seed;
   }
   if (Object.keys(object(all.camera_control)).length) body.camera_control = Object.assign({}, all.camera_control);
-  if (all.generateAudio !== undefined || all.generate_audio !== undefined) throw new Error("generateAudio is not supported by model " + model);
-  if (!prompt && !images.length && !videos.length && !audios.length && !firstFrame && !lastFrame && !body.media) throw new Error("prompt or reference media is required");
-  if (Array.from(prompt).length > 5000) throw new Error("prompt must contain at most 5000 characters");
-  if (!RATIOS.includes(body.ratio)) throw new Error("unsupported aspect ratio");
-  // Preserve the old static 720/1080 contract and the catalog-derived 480 contract.
-  const is480 = body.resolution === "480p";
-  if (images.length > (is480 ? 30 : 10) || videos.length > (is480 ? 10 : 5) || audios.length > (is480 ? 10 : 5)) throw new Error("too many media references");
-  if (!is480 && (firstFrame || lastFrame) && (images.length || videos.length || audios.length)) throw new Error("first/last frame mode cannot be mixed with reference media");
+  const generateAudio = all.generateAudio !== undefined && all.generateAudio !== null ? all.generateAudio : all.generate_audio;
+  if (generateAudio !== undefined && generateAudio !== null) {
+    if (!cfg.generateAudio) throw new Error("generateAudio is not supported by model " + model);
+    if (typeof generateAudio !== "boolean") throw new Error("generateAudio must be a boolean");
+    body[cfg.nativeMedia ? "generate_audio" : "generateAudio"] = generateAudio;
+  }
+  if (!prompt && (!cfg.promptless || !images.length && !videos.length && !audios.length && !firstFrame && !lastFrame && !body.media)) throw new Error("prompt or supported reference media is required");
+  if (Array.from(prompt).length > cfg.maxPrompt) throw new Error("prompt must contain at most " + cfg.maxPrompt + " characters");
+  if (!cfg.ratios.includes(body.ratio)) throw new Error("unsupported aspect ratio");
+  const imageCount = images.length + (cfg.nativeMedia ? Number(!!firstFrame) + Number(!!lastFrame) : 0);
+  if (imageCount > cfg.images || videos.length > cfg.videos || audios.length > cfg.audios) throw new Error("too many media references");
+  if (cfg.totalMedia && imageCount + videos.length + audios.length > cfg.totalMedia) throw new Error("too many media references in total");
+  if (cfg.visualWithAudio && audios.length && !images.length && !videos.length && !firstFrame && !lastFrame) throw new Error("reference audios require an image or video");
+  if (cfg.framesExclusive && (firstFrame || lastFrame) && (images.length || videos.length || audios.length)) throw new Error("first/last frame mode cannot be mixed with reference media");
   if (lastFrame && !firstFrame) throw new Error("lastFrame requires firstFrame");
+  if (cfg.nativeMedia) {
+    const nativeImages = images.slice();
+    if (firstFrame) nativeImages.push({ url: firstFrame, role: "first_frame" });
+    if (lastFrame) nativeImages.push({ url: lastFrame, role: "last_frame" });
+    if (nativeImages.length) body.images = nativeImages;
+    if (videos.length) body.videos = videos;
+    delete body.referenceImages;
+    delete body.referenceVideos;
+    delete body.firstFrame;
+    delete body.lastFrame;
+  }
   return body;
 }
 
@@ -96,7 +164,7 @@ export function decodeRequest(ctx) {
       if (values.length !== 1) throw new Error(key + " must be provided once");
       req[key] = values[0];
     }
-    for (const key of ["metadata", "images", "referenceImages", "reference_images", "referenceVideos", "reference_videos", "referenceAudios", "reference_audios", "media", "camera_control", "seed"]) {
+    for (const key of ["metadata", "images", "videos", "audios", "image_urls", "video_urls", "audio_urls", "file_paths", "referenceImages", "reference_images", "referenceVideos", "reference_videos", "referenceAudios", "reference_audios", "media", "camera_control", "seed", "generateAudio", "generate_audio"]) {
       if (req[key] !== undefined) {
         try { req[key] = JSON.parse(req[key]); } catch (_error) { throw new Error(key + " must be valid JSON"); }
       }
@@ -108,18 +176,23 @@ export function decodeRequest(ctx) {
       req.images = [{ __fileRef: files[0].ref, encoding: "dataUrl" }];
     }
   }
-  if (req.metadata !== undefined && (!req.metadata || typeof req.metadata !== "object" || Array.isArray(req.metadata))) throw new Error("metadata must be an object");
+  if (typeof req.metadata === "string") {
+    try { req.metadata = JSON.parse(req.metadata); } catch (_error) { throw new Error("metadata must be a JSON object or an encoded JSON object"); }
+  }
+  if (req.metadata !== undefined && req.metadata !== null && (typeof req.metadata !== "object" || Array.isArray(req.metadata))) throw new Error("metadata must be an object");
+  if (req.callback_url !== undefined && (typeof req.callback_url !== "string" || req.callback_url.length > 2048)) throw new Error("callback_url must be a string of at most 2048 characters");
   req.model = ctx.model;
   const payload = payloadFor(req, ctx.model);
   req.duration = payload.duration;
-  return { kind: "submit", model: ctx.model, action: payload.referenceImages || payload.referenceVideos || payload.referenceAudios || payload.firstFrame || payload.media ? "image_to_video" : "text_to_video", requestBody: req };
+  delete req.seconds;
+  return { kind: "submit", model: ctx.model, action: payload.referenceImages || payload.referenceVideos || payload.referenceAudios || payload.firstFrame || payload.media || payload.images || payload.videos ? "image_to_video" : "text_to_video", requestBody: req };
 }
 
 function base(ctx) { return String(ctx.baseUrl).replace(/\/+$/, "").replace(/\/v1$/, ""); }
 export function buildSubmitRequest(ctx) {
-  return { url: base(ctx) + "/v1/videos/generations", method: "POST", headers: { Authorization: "Bearer " + ctx.apiKey, "Content-Type": "application/json" }, body: payloadFor(object(ctx.requestBody), ctx.upstreamModel || ctx.model) };
+  return { url: base(ctx) + "/v1/videos/generations", method: "POST", headers: { Authorization: "Bearer " + ctx.apiKey, "Content-Type": "application/json" }, body: payloadFor(object(ctx.requestBody), ctx.model, ctx.upstreamModel) };
 }
-export function extractUsage(ctx) { return { seconds: secondsFor(object(ctx.requestBody)) }; }
+export function extractUsage(ctx) { return { seconds: secondsFor(object(ctx.requestBody), modelConfig(ctx.model)) }; }
 
 function taskBody(value) {
   const body = object(value);
@@ -152,7 +225,11 @@ export function parseTaskResult(_ctx, value) {
   const terminal = status === "SUCCESS" || status === "FAILURE";
   const progress = Number(String(body.progress || "0").replace(/%$/, ""));
   const result = { status: status, progress: terminal ? "100%" : (Number.isFinite(progress) ? Math.max(0, Math.min(99, Math.floor(progress))) : 0) + "%" };
-  if (status === "SUCCESS") { const url = resultURL(body); if (url) result.url = url; }
+  if (status === "SUCCESS") {
+    const url = resultURL(body);
+    if (!url) return { status: "FAILURE", progress: "100%", reason: "XinMeng completed the task without a video URL" };
+    result.url = url;
+  }
   if (status === "FAILURE") result.reason = errorMessage(body);
   return result;
 }
