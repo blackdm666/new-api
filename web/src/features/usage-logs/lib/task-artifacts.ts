@@ -82,9 +82,19 @@ function parseContentUrl(value: unknown): string {
       authority.includes('@') ||
       url.username ||
       url.password ||
-      url.hash ||
-      !taskArtifactContentPathPattern.test(url.pathname)
+      url.hash
     ) {
+      throw new TaskArtifactApiError('invalid_content_url')
+    }
+    // Public media URLs are selected by the authenticated host projection.
+    // Keep strict capability validation for all task/content routes.
+    if (
+      !url.pathname.includes('/v1/tasks/') &&
+      !url.pathname.includes('/v1/videos/')
+    ) {
+      return parseLegacyContentUrl(contentUrl)
+    }
+    if (!taskArtifactContentPathPattern.test(url.pathname)) {
       throw new TaskArtifactApiError('invalid_content_url')
     }
     const accessToken = url.searchParams.get('access')

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -60,10 +61,6 @@ func PrepareTaskVideoResult(ctx context.Context, task *model.Task, reportedURL s
 		return TaskVideoPreparation{Cached: cached}, err
 	}
 
-	if TaskMediaPublicEnabled() {
-		cached, err := cacheTaskVideoRemoteSource(ctx, task, resultURL)
-		return TaskVideoPreparation{Cached: cached}, err
-	}
 	direct, err := taskVideoURLCanOpenDirectly(ctx, task, resultURL)
 	if err != nil {
 		return TaskVideoPreparation{}, err
@@ -90,6 +87,11 @@ func PrepareTaskVideoPreviewURL(ctx context.Context, task *model.Task) (string, 
 			return "", 0, err
 		}
 		return previewURL, int64(TaskVideoPreviewURLTTL().Seconds()), nil
+	}
+	// References and alternate preview routes must not revive old, unarchived
+	// media. Existing objects above keep their original Worker-enforced expiry.
+	if task.Status == model.TaskStatusSuccess && task.FinishTime > 0 && time.Now().Unix()-task.FinishTime >= 30*24*60*60 {
+		return "", 0, errors.New("media retention period has ended")
 	}
 
 	previousURL := task.PrivateData.ResultURL
@@ -163,7 +165,7 @@ func extractTaskVideoResultURL(value any, depth int) string {
 		if video, ok := typed["video"].(string); ok && isTaskVideoURLCandidate(video) {
 			return strings.TrimSpace(video)
 		}
-		for _, key := range []string{"video", "videos", "result", "results", "output", "outputs", "data", "response"} {
+		for _, key := range []string{"video", "videos", "result", "results", "output", "outputs", "data", "response", "content", "task"} {
 			if candidate := extractTaskVideoResultURL(typed[key], depth+1); candidate != "" {
 				return candidate
 			}
@@ -193,19 +195,16 @@ func taskVideoURLCanOpenDirectly(ctx context.Context, task *model.Task, resultUR
 		return false, nil
 	}
 	parsed, err := url.Parse(resultURL)
-	if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+	if err != nil || parsed.Hostname() == "" || parsed.Scheme != "https" || parsed.User != nil || parsed.Fragment != "" || strings.ContainsAny(resultURL, "\r\n\\") {
 		return false, nil
 	}
 	if taskVideoURLContainsProviderCredential(parsed) {
 		return false, nil
 	}
-	if isCloudflareR2URL(parsed) {
-		return true, nil
-	}
 	if !isBrowserRoutableVideoHost(parsed.Hostname()) {
 		return false, nil
 	}
-	if !taskVideoDirectHostAllowed(parsed.Hostname()) {
+	if !isCloudflareR2URL(parsed) && !taskVideoDirectHostAllowed(parsed.Hostname()) {
 		return false, nil
 	}
 	return taskVideoDirectProbe(ctx, resultURL)

@@ -186,6 +186,40 @@ func TestDashboardTaskArtifactsReturnsLegacyCapabilityWithoutUpstreamURL(t *test
 	assert.NotContains(t, recorder.Body.String(), "signature=secret")
 }
 
+func TestDashboardTaskArtifactsReturnsArchivedPublicURLWithoutRenewal(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "true")
+	t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "https://assets.88api.ai/media")
+	task.Action = constant.TaskActionTextToVideo
+	task.PrivateData.ResultURL = "https://gateway.example/v1/videos/" + task.TaskID + "/content"
+	task.PrivateData.ResultStorageKind = "s3"
+	task.PrivateData.ResultStorageKey = "task-videos/2026/09/" + strings.Repeat("a", 64) + ".mp4"
+	task.PrivateData.ResultMimeType = "video/mp4"
+	require.NoError(t, model.DB.Save(task).Error)
+
+	for _, dashboard := range []bool{true, false} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Set("id", task.UserId)
+		c.Set("role", common.RoleCommonUser)
+		c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}, {Key: "key", Value: task.TaskID}}
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID+"/artifacts", nil)
+		if dashboard {
+			GetDashboardTaskArtifacts(c)
+		} else {
+			GetTaskArtifacts(c)
+		}
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "https://assets.88api.ai/media/"+task.PrivateData.ResultStorageKey)
+		assert.NotContains(t, recorder.Body.String(), "access=")
+	}
+	stored, exists, err := model.GetByTaskId(task.UserId, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.Equal(t, task.PrivateData, stored.PrivateData)
+	assert.Equal(t, int64(20), stored.FinishTime)
+}
+
 func TestDashboardTaskArtifactsReturnsTrustedDirectURL(t *testing.T) {
 	task := setupGenericTaskTest(t)
 	task.Action = constant.TaskActionTextToVideo

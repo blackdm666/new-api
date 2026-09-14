@@ -609,6 +609,46 @@ func TestServeTaskPluginProtocolStreamInjectsHostArtifactCapabilities(t *testing
 	assert.NotContains(t, recorder.Body.String(), "secret")
 }
 
+func TestPluginProtocolArchivedArtifactDeliveryInStreamAndFinal(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "true")
+	t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "https://assets.88api.ai/media")
+	previousMemoryCache := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCache })
+	pinned := compilePluginProtocolTestEndpoint(t, "public-artifacts", `
+		export function listArtifacts() { return [{key: "video", type: "video", mimeType: "video/mp4"}]; }
+		export function buildContentRequest() { return {url: "https://example.com/result.mp4", method: "GET", credentialless: true}; }
+		export const protocols = {openai_responses: {
+			renderEvents: function(ctx) { return {events: [{type: "output", data: ctx.artifacts.video.url}], done: true}; },
+			renderFinal: function(ctx) { return {output: [{type: "message", status: "completed", role: "assistant", content: [{type: "output_text", text: ctx.artifacts.video.url, annotations: [], logprobs: []}]}]}; }
+		}};
+	`)
+	task.UserId = 71
+	task.Platform = constant.TaskPlatform(pinned.Plugin.Meta.Key)
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{Key: pinned.Plugin.Meta.Key}}
+	task.PrivateData.ResultStorageKind = "s3"
+	task.PrivateData.ResultStorageKey = "task-videos/2026/09/" + strings.Repeat("a", 64) + ".mp4"
+	task.PrivateData.ResultMimeType = "video/mp4"
+	task.SetData(map[string]any{"content": map[string]any{"url": "https://example.com/result.mp4"}})
+	for _, stream := range []bool{true, false} {
+		c, recorder := newPluginProtocolTestContext(stream, stream)
+		deps := pluginProtocolTestDeps()
+		deps.submit = func(_ *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+			return pluginProtocolTestOutcome(info, pinned.Plugin.Meta.Key, task.TaskID, nil), nil
+		}
+		deps.loadTask = func(context.Context, int, constant.TaskPlatform, string) (*model.Task, bool, error) {
+			return task, true, nil
+		}
+		deps.artifactContentURL = func(string, string) (string, error) { return "https://gateway.example/fallback?access=capability", nil }
+		serveTaskPluginProtocol(c, pinned, deps)
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "https://assets.88api.ai/media/"+task.PrivateData.ResultStorageKey)
+		assert.NotContains(t, recorder.Body.String(), "access=")
+		assert.NotContains(t, recorder.Body.String(), "example.com/result.mp4")
+	}
+}
+
 func TestTaskPluginProtocolHeartbeatDoesNotDispatchEmptySDKEvent(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

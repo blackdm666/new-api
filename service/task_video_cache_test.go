@@ -86,7 +86,7 @@ func TestPublicVideoDeliveryArchivesOnceAndDoesNotReviveDeletedMedia(t *testing.
 	t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "true")
 	t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "https://media.example/media")
 	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "true")
-	t.Setenv("TASK_VIDEO_DIRECT_HOSTS", "official.example")
+	t.Setenv("TASK_VIDEO_DIRECT_HOSTS", "")
 	storage := useLocalTaskVideoCache(t)
 	useStaticTaskVideoSource(t, "public-video")
 	task := &model.Task{TaskID: "task_public_once", Status: model.TaskStatusSuccess}
@@ -140,6 +140,9 @@ func TestMediaUploadGrantValidation(t *testing.T) {
 }
 
 func TestPrepareTaskVideoResultKeepsUpstreamR2URLDirect(t *testing.T) {
+	previousProbe := taskVideoDirectProbe
+	taskVideoDirectProbe = func(context.Context, string) (bool, error) { return true, nil }
+	t.Cleanup(func() { taskVideoDirectProbe = previousProbe })
 	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "true")
 	task := &model.Task{
 		TaskID: "task_upstream_r2",
@@ -159,6 +162,7 @@ func TestPrepareTaskVideoResultKeepsUpstreamR2URLDirect(t *testing.T) {
 }
 
 func TestPrepareTaskVideoResultKeepsAnonymousOfficialURLDirect(t *testing.T) {
+	t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "true")
 	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "true")
 	t.Setenv("TASK_VIDEO_DIRECT_HOSTS", "official.example")
 	previousProbe := taskVideoDirectProbe

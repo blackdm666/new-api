@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -100,12 +102,21 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 		return
 	}
 	items := make([]taskArtifactResponse, 0, len(artifacts))
+	deliveryContext, cancelDelivery := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancelDelivery()
+	var deliveryProvider relaychannel.TaskContentRequestProvider
+	if service.TaskMediaPublicEnabled() && len(artifacts) > 0 {
+		if adaptor, initErr := initTaskArtifactAdaptor(task); initErr == nil {
+			deliveryProvider, _ = adaptor.(relaychannel.TaskContentRequestProvider)
+		}
+	}
 	for _, artifact := range artifacts {
 		contentURL, buildErr := service.BuildTaskArtifactContentURL(task.TaskID, artifact.Key)
 		if buildErr != nil {
 			writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact content URL")
 			return
 		}
+		contentURL = resolveTaskArtifactDelivery(deliveryContext, task, artifacts, artifact, deliveryProvider, contentURL)
 		items = append(items, taskArtifactResponse{
 			Key:        artifact.Key,
 			Type:       artifact.Type,
@@ -129,11 +140,12 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 	c.JSON(http.StatusOK, response)
 }
 
-// buildLegacyTaskContentURL preserves the pre-plugin delivery policy. Videos
-// already copied to private storage keep the same-origin capability route,
-// while allow-listed, anonymously readable official media URLs are returned
-// directly so their bytes do not transit the NewAPI server.
+// buildLegacyTaskContentURL shares public delivery with API/plugin outputs.
+// With public delivery disabled the original capability policy is preserved.
 func buildLegacyTaskContentURL(c *gin.Context, task *model.Task) (string, error) {
+	if service.TaskMediaPublicEnabled() {
+		return service.TaskVideoDeliveryURL(c.Request.Context(), task), nil
+	}
 	capabilityURL, err := service.BuildTaskArtifactContentURL(task.TaskID, "video")
 	if err != nil {
 		return "", err
@@ -211,6 +223,13 @@ func validateProjectedTaskArtifacts(artifacts []relaychannel.TaskArtifact) ([]re
 }
 
 func initTaskArtifactAdaptor(task *model.Task) (relaychannel.TaskAdaptor, error) {
+	if task == nil {
+		return nil, errTaskArtifactPluginUnavailable
+	}
+	return initTaskArtifactAdaptorInstance(task, relay.GetTaskAdaptor(task.Platform))
+}
+
+func initTaskArtifactAdaptorInstance(task *model.Task, adaptor relaychannel.TaskAdaptor) (relaychannel.TaskAdaptor, error) {
 	if task == nil || !taskHasPluginExecution(task) {
 		return nil, errTaskArtifactPluginUnavailable
 	}
@@ -218,7 +237,6 @@ func initTaskArtifactAdaptor(task *model.Task) (relaychannel.TaskAdaptor, error)
 	if err != nil {
 		return nil, fmt.Errorf("%w: channel unavailable", errTaskArtifactPluginUnavailable)
 	}
-	adaptor := relay.GetTaskAdaptor(task.Platform)
 	if adaptor == nil {
 		return nil, errTaskArtifactPluginUnavailable
 	}
@@ -239,6 +257,25 @@ func initTaskArtifactAdaptor(task *model.Task) (relaychannel.TaskAdaptor, error)
 		},
 	})
 	return adaptor, nil
+}
+
+func resolveTaskArtifactDelivery(ctx context.Context, task *model.Task, artifacts []relaychannel.TaskArtifact, artifact relaychannel.TaskArtifact, provider relaychannel.TaskContentRequestProvider, fallback string) string {
+	if !service.TaskMediaPublicEnabled() {
+		return fallback
+	}
+	videoCount := 0
+	for _, item := range artifacts {
+		if item.Type == "video" {
+			videoCount++
+		}
+	}
+	var source *service.TaskArtifactDeliverySource
+	if provider != nil {
+		if descriptor, err := provider.BuildContentRequest(task, artifact.Key, relaychannel.TaskArtifactClientRequest{Method: http.MethodGet}); err == nil && descriptor != nil {
+			source = &service.TaskArtifactDeliverySource{URL: descriptor.URL, Method: descriptor.Method, Anonymous: descriptor.Credentialless && len(descriptor.Headers) == 0 && len(descriptor.Body) == 0}
+		}
+	}
+	return service.TaskArtifactDeliveryURL(ctx, task, artifact, videoCount == 1, source, fallback)
 }
 
 func taskHasPluginExecution(task *model.Task) bool {
@@ -397,6 +434,26 @@ func TaskArtifactContent(c *gin.Context) {
 	descriptor, err := provider.BuildContentRequest(task, artifactKey, clientRequest)
 	if err != nil || descriptor == nil {
 		writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_plugin_error", "Artifact content plugin failed")
+		return
+	}
+	// Old capability links stay usable, but a positively mapped public artifact
+	// redirects to the same object without proxying or renewing it.
+	videoCount := 0
+	var requestedArtifact relaychannel.TaskArtifact
+	for _, artifact := range artifacts {
+		if artifact.Type == "video" {
+			videoCount++
+		}
+		if artifact.Key == artifactKey {
+			requestedArtifact = artifact
+		}
+	}
+	publicURL := service.TaskArtifactDeliveryURL(c.Request.Context(), task, requestedArtifact, videoCount == 1, &service.TaskArtifactDeliverySource{
+		URL: descriptor.URL, Method: descriptor.Method, Anonymous: descriptor.Credentialless && len(descriptor.Headers) == 0 && len(descriptor.Body) == 0,
+	}, "")
+	if publicURL != "" {
+		c.Header("Cache-Control", "private, no-store")
+		c.Redirect(http.StatusTemporaryRedirect, publicURL)
 		return
 	}
 	if err := proxyTaskMedia(c, task, descriptor); err != nil {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -50,10 +51,7 @@ func PresentPublicTaskVideo(payload []byte, task *model.Task) ([]byte, error) {
 	if !TaskMediaPublicEnabled() || task == nil || task.Status != model.TaskStatusSuccess {
 		return payload, nil
 	}
-	publicURL, err := PublicTaskVideoURL(task)
-	if err != nil {
-		return nil, err
-	}
+	publicURL := TaskVideoDeliveryURL(context.Background(), task)
 	var value map[string]any
 	if err := common.Unmarshal(payload, &value); err != nil || value == nil {
 		return nil, errors.New("invalid video result response")

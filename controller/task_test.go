@@ -2,19 +2,51 @@ package controller
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+type taskPreviewProbeTransport struct{ t *testing.T }
+
+func (transport taskPreviewProbeTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	assert.Equal(transport.t, "account.r2.cloudflarestorage.com", request.URL.Host)
+	assert.Empty(transport.t, request.Header.Get("Authorization"))
+	assert.Equal(transport.t, "bytes=0-0", request.Header.Get("Range"))
+	return &http.Response{StatusCode: http.StatusPartialContent, Header: http.Header{"Content-Type": {"video/mp4"}}, Body: io.NopCloser(strings.NewReader("v")), Request: request}, nil
+}
+
+func mockTaskPreviewAnonymousProbe(t *testing.T) {
+	t.Helper()
+	setting := system_setting.GetFetchSetting()
+	previousSetting := *setting
+	setting.EnableSSRFProtection = false
+	client := service.GetSSRFProtectedHTTPClient()
+	if client == nil {
+		service.InitHttpClient()
+		client = service.GetSSRFProtectedHTTPClient()
+	}
+	require.NotNil(t, client)
+	previousTransport := client.Transport
+	client.Transport = taskPreviewProbeTransport{t}
+	t.Cleanup(func() {
+		client.Transport = previousTransport
+		*setting = previousSetting
+	})
+}
 
 func setupTaskControllerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -55,6 +87,7 @@ func TestTasksToDtoAddsAdminChannelName(t *testing.T) {
 }
 
 func TestGetTaskPreviewURLAllowsAdminToOpenAnotherUsersDirectResult(t *testing.T) {
+	mockTaskPreviewAnonymousProbe(t)
 	gin.SetMode(gin.TestMode)
 	db := setupTaskControllerTestDB(t)
 	task := &model.Task{
@@ -105,6 +138,7 @@ func TestGetTaskPreviewURLAllowsAdminToOpenAnotherUsersDirectResult(t *testing.T
 }
 
 func TestGetTaskPreviewURLExtractsAndPersistsUpstreamR2Result(t *testing.T) {
+	mockTaskPreviewAnonymousProbe(t)
 	gin.SetMode(gin.TestMode)
 	db := setupTaskControllerTestDB(t)
 	const directURL = "https://account.r2.cloudflarestorage.com/cdn/video.mp4?X-Amz-Signature=signed"

@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	taskjsplugin "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -1178,11 +1179,20 @@ func taskPluginProtocolRendererContext(
 	}
 
 	rendererArtifacts := make(map[string]any, len(artifacts))
+	deliveryContext, cancelDelivery := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancelDelivery()
+	var deliveryProvider relaychannel.TaskContentRequestProvider
+	if service.TaskMediaPublicEnabled() && len(artifacts) > 0 {
+		if adaptor, initErr := initTaskArtifactAdaptorInstance(task, taskjsplugin.New(pinned.Plugin)); initErr == nil {
+			deliveryProvider, _ = adaptor.(relaychannel.TaskContentRequestProvider)
+		}
+	}
 	for _, artifact := range artifacts {
 		contentURL, buildErr := artifactContentURL(task.TaskID, artifact.Key)
 		if buildErr != nil {
 			return nil, fmt.Errorf("build task artifact content URL: %w", buildErr)
 		}
+		contentURL = resolveTaskArtifactDelivery(deliveryContext, task, artifacts, artifact, deliveryProvider, contentURL)
 		item := map[string]any{
 			"key":  artifact.Key,
 			"type": artifact.Type,

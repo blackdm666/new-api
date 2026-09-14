@@ -62,6 +62,20 @@ function taskFixture(overrides: Partial<TaskLog> = {}): TaskLog {
 }
 
 describe('task artifact projection', () => {
+  test('accepts host-approved public media while retaining upstream URLs verbatim', () => {
+    for (const url of [
+      'https://assets.88api.ai/media/task-videos/result.mp4',
+      'https://official.example/video.mp4?signature=original',
+    ]) {
+      const projection = parseTaskArtifactsResponse({
+        success: true,
+        data: {
+          artifacts: [{ key: 'video', type: 'video', content_url: url }],
+        },
+      })
+      assert.equal(projection.artifacts[0].content_url, url)
+    }
+  })
   test('enables projection only after a successful artifact viewer opens', () => {
     const successfulPluginTask = taskFixture()
 
@@ -237,7 +251,7 @@ describe('task artifact projection', () => {
       `${validContentUrl}#`,
       ` ${validContentUrl}`,
       `${validContentUrl}\n`,
-      'https://media.example.com/video.mp4',
+      'http://media.example.com/video.mp4',
       `https://media.example.com/v1/videos/task-public/content?access=${artifactAccessToken}`,
       `https://media.example.com/v1/tasks/task-public/artifacts/video-main/content?token=${artifactAccessToken}`,
       `https://media.example.com/v1/tasks/task-public/artifacts/video-main/content?access=${'A'.repeat(42)}`,

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -559,16 +558,8 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 
 	// OpenAI Video API 格式: 走各 adaptor 的 ConvertToOpenAIVideo
 	if isOpenAIVideoAPI {
-		// Repair an existing, not-yet-archived result only on an authenticated
-		// retrieval. Never clear its storage key or re-upload a deleted object.
-		if service.TaskMediaPublicEnabled() && originTask.Status == model.TaskStatusSuccess && originTask.PrivateData.ResultStorageKey == "" {
-			if originTask.FinishTime > 0 && time.Now().Unix()-originTask.FinishTime >= 30*24*60*60 {
-				return nil, service.TaskErrorWrapperLocal(errors.New("media retention period has ended"), "media_expired", http.StatusGone)
-			}
-			if _, _, err := service.PrepareTaskVideoPreviewURL(c.Request.Context(), originTask); err != nil {
-				return nil, service.TaskErrorWrapperLocal(errors.New("video media is temporarily unavailable"), "media_unavailable", http.StatusServiceUnavailable)
-			}
-		}
+		// Retrieval only presents existing results; it never renews media or
+		// starts a new archive merely because a client polls an old task.
 		adaptor := GetTaskAdaptor(originTask.Platform)
 		if adaptor == nil {
 			taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("invalid channel id: %d", originTask.ChannelId), "invalid_channel_id", http.StatusBadRequest)
@@ -591,9 +582,11 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	}
 
 	// 通用 TaskDto 格式
+	publicTask := TaskModel2Dto(originTask)
+	publicTask.ResultURL = service.TaskVideoDeliveryURL(c.Request.Context(), originTask)
 	respBody, err = common.Marshal(dto.TaskResponse[any]{
 		Code: "success",
-		Data: TaskModel2Dto(originTask),
+		Data: publicTask,
 	})
 	if err != nil {
 		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
@@ -663,7 +656,7 @@ func tryRealtimeFetch(ctx context.Context, task *model.Task, isOpenAIVideoAPI bo
 		"metadata": nil,
 		"status":   mapTaskStatusToSimple(task.Status),
 		"task_id":  task.TaskID,
-		"url":      task.GetResultURL(),
+		"url":      service.TaskVideoDeliveryURL(ctx, task),
 	}
 	respBody, _ := common.Marshal(dto.TaskResponse[any]{
 		Code: "success",

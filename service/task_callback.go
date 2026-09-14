@@ -124,7 +124,7 @@ func deliverTaskCallback(delivery *model.TaskCallbackDelivery) {
 			Model:       task.Properties.OriginModelName,
 			Status:      task.Status.ToVideoStatus(),
 			Progress:    task.Progress,
-			OutputURL:   task.GetResultURL(),
+			OutputURL:   TaskVideoDeliveryURL(context.Background(), task),
 			Error:       task.FailReason,
 			CreatedAt:   task.CreatedAt,
 			CompletedAt: task.FinishTime,
