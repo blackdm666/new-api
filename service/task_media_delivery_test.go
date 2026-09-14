@@ -48,6 +48,30 @@ func TestTaskArtifactDeliveryMapsOnlyExactSingleVideo(t *testing.T) {
 	}
 }
 
+func TestTaskArtifactDeliveryArchivedStringResults(t *testing.T) {
+	for _, data := range []string{
+		`{"id":"upstream","status":"completed","result":"https://untrusted.example/result.mp4"}`,
+		`{"data":{"result":"https://untrusted.example/result.mp4"}}`,
+		`{"results":["https://untrusted.example/result.mp4"]}`,
+	} {
+		t.Run(data, func(t *testing.T) {
+			task := deliveryTask(t)
+			task.Data = []byte(data)
+			before := task.PrivateData
+			source := &TaskArtifactDeliverySource{URL: "https://untrusted.example/result.mp4", Method: "GET", Anonymous: true}
+			want, err := PublicTaskVideoURL(task)
+			require.NoError(t, err)
+			require.Equal(t, want, TaskArtifactDeliveryURL(context.Background(), task, types.TaskArtifact{Key: "video", Type: "video"}, true, source, "capability"))
+			// Keep exact-source and single-video guards; never map another artifact.
+			require.Equal(t, "capability", TaskArtifactDeliveryURL(context.Background(), task, types.TaskArtifact{Key: "video", Type: "video"}, false, source, "capability"))
+			source.URL = "https://untrusted.example/other.mp4"
+			require.Equal(t, "capability", TaskArtifactDeliveryURL(context.Background(), task, types.TaskArtifact{Key: "video", Type: "video"}, true, source, "capability"))
+			require.Equal(t, data, string(task.Data))
+			require.Equal(t, before, task.PrivateData)
+		})
+	}
+}
+
 func TestTaskArtifactDeliveryKeepsAnonymousTrustedSourceOnly(t *testing.T) {
 	for _, tc := range []struct {
 		name, source, method     string
