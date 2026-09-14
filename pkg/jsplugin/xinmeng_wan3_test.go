@@ -45,15 +45,15 @@ func TestXinMengWan3TaskPlugin(t *testing.T) {
 		})
 	}
 	t.Run("invalid quantities fail before upstream or billing", func(t *testing.T) {
-		for _, bad := range []any{-1, 0, 3, 31, 4.5, "Infinity", "1e100", true, ""} {
+		for _, bad := range []any{-1, 3, 31, 4.5, "Infinity", "1e100", true} {
 			input := map[string]any{"prompt": "test", "duration": bad}
 			_, err := plugin.Engine.Call(ctx, "decodeRequest", map[string]any{"model": "wan3.0-video-720p", "body": map[string]any{"kind": "json", "value": input}})
 			assert.Error(t, err, "duration=%v", bad)
-			_, err = plugin.Engine.Call(ctx, "extractUsage", map[string]any{"requestBody": input})
+			_, err = plugin.Engine.Call(ctx, "extractUsage", map[string]any{"model": "wan3.0-video-720p", "requestBody": input})
 			assert.Error(t, err, "duration=%v", bad)
 		}
-		_, err := plugin.Engine.Call(ctx, "extractUsage", map[string]any{"requestBody": map[string]any{"duration": 4, "seconds": 30}})
-		assert.ErrorContains(t, err, "must agree")
+		facts := call(t, "extractUsage", map[string]any{"model": "wan3.0-video-720p", "requestBody": map[string]any{"duration": 4, "seconds": 30}})
+		assert.EqualValues(t, 4, facts["seconds"], "positive duration keeps legacy precedence")
 	})
 	t.Run("media aliases and fixed resolution", func(t *testing.T) {
 		result := call(t, "buildSubmitRequest", map[string]any{"model": "wan3.0-video-1080p", "baseUrl": "https://example.com", "requestBody": map[string]any{"duration": 5, "metadata": map[string]any{"resolution": "480p", "reference_images": []string{"https://example.com/a.png"}, "reference_videos": []string{"https://example.com/v.mp4"}, "reference_audios": []string{"https://example.com/a.mp3"}}}})
@@ -78,5 +78,79 @@ func TestXinMengWan3TaskPlugin(t *testing.T) {
 		assert.NotContains(t, content, "headers")
 	})
 	_, claimed := registry.Generation().GetByModel("doubao-seedance-2.5")
-	assert.False(t, claimed, "only the three Wan3 aliases may be claimed")
+	assert.False(t, claimed, "unrelated provider aliases must not be claimed")
+	assert.Len(t, plugin.Meta.Models, 19)
+	assert.Empty(t, plugin.Meta.UsageExamples, "do not restore the removed pricing examples")
+	t.Run("all sales models preserve billing identity and fixed quality", func(t *testing.T) {
+		for _, tc := range []struct {
+			model, upstream, quality string
+			seconds                  int
+		}{
+			{"SD2.0 480P", "cvd-seedance-2.0", "480p", 5},
+			{"SD2.0 720P", "cvd-seedance-2.0", "720p", 5},
+			{"SD2.0 1080P", "cvd-seedance-2.0", "1080p", 5},
+			{"SD2.5 480P", "dvc-seedance-2.5-480p", "480p", 5},
+			{"SD2.5 720P", "dvc-seedance-2.5", "720p", 5},
+			{"SD2.5 1080P", "dvc-seedance-2.5-1080p", "1080p", 5},
+			{"seedance-2.0-mini-480p", "seedance-2.0-mini-480p", "480p", 5},
+			{"seedance-2.0-mini-720p", "seedance-2.0-mini-720p", "720p", 5},
+			{"kling-3.0-turbo-720p", "kling-3.0-turbo", "720p", 5},
+			{"kling-3.0-turbo-1080p", "kling-3.0-turbo", "1080p", 5},
+			{"kling-3.0-turbo-2k", "kling-3.0-turbo", "2k", 5},
+			{"kling-3.0-turbo-4k", "kling-3.0-turbo", "4k", 5},
+			{"Seedance-2.5-720p官方版", "doubao-seedance-2-5-720p", "720p", 4},
+			{"Seedance-2.0-720p官方版", "doubao-seedance-2-0-720p", "720p", 4},
+			{"Seedance-2.0-fast-720p官方版", "doubao-seedance-2-0-fast-720p", "720p", 4},
+			{"minimax-h3-768p", "minimax-h3-768p", "768p", 4},
+		} {
+			t.Run(tc.model, func(t *testing.T) {
+				request := call(t, "decodeRequest", map[string]any{"model": tc.model, "body": map[string]any{"kind": "json", "value": map[string]any{"prompt": "A toy car", "metadata": `{"resolution":"4k"}`}}})
+				assert.Equal(t, tc.model, request["model"])
+				driver := map[string]any{"model": tc.model, "upstreamModel": tc.upstream, "requestBody": request["requestBody"], "baseUrl": "https://example.com"}
+				body := call(t, "buildSubmitRequest", driver)["body"].(map[string]any)
+				assert.Equal(t, tc.quality, body["resolution"])
+				assert.Equal(t, tc.upstream, body["model"])
+				assert.EqualValues(t, tc.seconds, body["duration"])
+				assert.EqualValues(t, tc.seconds, call(t, "extractUsage", driver)["seconds"])
+			})
+		}
+	})
+	t.Run("legacy metadata and callback stay local", func(t *testing.T) {
+		decoded := call(t, "decodeRequest", map[string]any{"model": "wan3.0-video-720p", "body": map[string]any{"kind": "json", "value": map[string]any{"metadata": `{"first_image":["https://example.com/first.png"],"last_image":"https://example.com/last.png"}`, "callback_url": "https://example.com/callback", "duration": "4", "seconds": "30"}}})
+		request := decoded["requestBody"].(map[string]any)
+		assert.Equal(t, "https://example.com/callback", request["callback_url"])
+		assert.NotContains(t, request, "seconds")
+		body := call(t, "buildSubmitRequest", map[string]any{"model": "wan3.0-video-720p", "requestBody": request})["body"].(map[string]any)
+		assert.NotContains(t, body, "callback_url", "callback delivery belongs to the host")
+		assert.Equal(t, "https://example.com/last.png", body["lastFrame"])
+		assert.EqualValues(t, 4, body["duration"])
+	})
+	t.Run("multipart aliases preserve zero false and native frame roles", func(t *testing.T) {
+		decoded := call(t, "decodeRequest", map[string]any{"model": "kling-3.0-turbo-4k", "body": map[string]any{"kind": "multipart", "fields": map[string]any{"prompt": []string{"Camera pan"}, "metadata": []string{`{"firstFrame":"https://example.com/first.png"}`}, "video_urls": []string{`["https://example.com/v.mp4"]`}, "generate_audio": []string{"false"}, "seed": []string{"0"}}}})
+		body := call(t, "buildSubmitRequest", map[string]any{"model": "kling-3.0-turbo-4k", "requestBody": decoded["requestBody"]})["body"].(map[string]any)
+		assert.Equal(t, false, body["generate_audio"])
+		assert.EqualValues(t, 0, body["seed"])
+		assert.Equal(t, "kling-3.0-turbo", body["model"])
+		assert.Len(t, body["videos"], 1)
+		assert.Equal(t, "first_frame", body["images"].([]any)[0].(map[string]any)["role"])
+		assert.NotContains(t, body, "referenceImages")
+	})
+	t.Run("model-specific validation", func(t *testing.T) {
+		for _, tc := range []struct {
+			model string
+			input map[string]any
+		}{
+			{"minimax-h3-768p", map[string]any{"prompt": "test", "referenceAudios": []string{"https://example.com/a.mp3"}}},
+			{"kling-3.0-turbo-720p", map[string]any{"prompt": "test", "duration": 30}},
+			{"seedance-2.0-mini-720p", map[string]any{"prompt": "test", "generate_audio": false}},
+			{"wan3.0-video-720p", map[string]any{"firstFrame": "https://example.com/a.png", "images": []string{"https://example.com/b.png"}}},
+			{"wan3.0-video-720p", map[string]any{"prompt": "test", "metadata": "[]"}},
+			{"__proto__", map[string]any{"prompt": "test"}},
+		} {
+			_, err := plugin.Engine.Call(ctx, "decodeRequest", map[string]any{"model": tc.model, "body": map[string]any{"kind": "json", "value": tc.input}})
+			assert.Error(t, err, "%s: %v", tc.model, tc.input)
+		}
+		missing := call(t, "parseTaskResult", map[string]any{}, map[string]any{"status": "completed"})
+		assert.Equal(t, "FAILURE", missing["status"], "completed without video must terminate instead of polling forever")
+	})
 }
