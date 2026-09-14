@@ -846,6 +846,9 @@ test('searching a known type number selects that type and an unknown positive nu
   await user.clear(search)
   await user.type(search, '61')
   expect(screen.queryByRole('option')).not.toBeInTheDocument()
+  await user.clear(search)
+  await user.type(search, '62')
+  expect(screen.queryByRole('option')).not.toBeInTheDocument()
 })
 
 test('an empty plugin filter reports that no plugins can be bound', async () => {

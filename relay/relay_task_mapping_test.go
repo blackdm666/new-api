@@ -37,16 +37,6 @@ func TestTaskModelMappingRunsBeforeAdaptorValidation(t *testing.T) {
 			wantMessage: "invalid base64 video data",
 		},
 		{
-			name:        "global ai opc",
-			channelType: constant.ChannelTypeGlobalAiOpc,
-			origin:      "global-sales-alias",
-			upstream:    "seedance-2.5",
-			mapping:     `{"global-sales-alias":"seedance-2.5"}`,
-			body:        `{"model":"global-sales-alias","prompt":"test","duration":31}`,
-			wantCode:    "invalid_request",
-			wantMessage: "duration must be between 4 and 30",
-		},
-		{
 			name:        "sub2api",
 			channelType: constant.ChannelTypeSub2API,
 			origin:      "grok-sales-alias",
@@ -55,16 +45,6 @@ func TestTaskModelMappingRunsBeforeAdaptorValidation(t *testing.T) {
 			body:        `{"model":"grok-sales-alias","prompt":"test","duration":16}`,
 			wantCode:    "invalid_request",
 			wantMessage: "duration must be between 1 and 15",
-		},
-		{
-			name:        "xinmeng chained mapping",
-			channelType: constant.ChannelTypeXinMeng,
-			origin:      "DC sales alias",
-			upstream:    "dvc-seedance-2.5",
-			mapping:     `{"DC sales alias":"DC internal alias","DC internal alias":"dvc-seedance-2.5"}`,
-			body:        `{"model":"DC sales alias","prompt":"test","duration":31}`,
-			wantCode:    "invalid_request",
-			wantMessage: "duration must be between 4 and 30",
 		},
 	}
 
@@ -100,7 +80,7 @@ func TestTaskModelMappingRejectsCycleBeforeAdaptorValidation(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = request
-	c.Set("channel_type", constant.ChannelTypeXinMeng)
+	c.Set("channel_type", constant.ChannelTypeSub2API)
 	c.Set("model_mapping", `{"sales-a":"sales-b","sales-b":"sales-a"}`)
 
 	info := &relaycommon.RelayInfo{OriginModelName: "sales-a", TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
