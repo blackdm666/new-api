@@ -127,7 +127,8 @@ func TestPresentTaskSubmissionUsesHostOpenAIVideoCreateReceipt(t *testing.T) {
 
 	presentTaskSubmission(c, outcome)
 
-	assert.JSONEq(t, `{"id":"task_public","task_id":"task_public","object":"video","model":"video-model","status":"queued","progress":0,"created_at":456}`, recorder.Body.String())
+	assert.JSONEq(t, `{"id":"task_public","object":"video","model":"video-model","status":"queued","progress":0,"created_at":456}`, recorder.Body.String())
+	assert.NotContains(t, recorder.Body.String(), "task_id")
 }
 
 func TestExecuteTaskSubmissionRefundsWhenInsertFails(t *testing.T) {

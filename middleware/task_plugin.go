@@ -315,14 +315,8 @@ func PrepareTaskPluginRoute() gin.HandlerFunc {
 // PinTaskPluginEndpoint decides shared-endpoint ownership without executing
 // plugin code. Invalid or unidentifiable ordinary requests deliberately fall
 // through so the existing endpoint remains responsible for its validation.
-func PinTaskPluginEndpoint(protocolPaths ...string) gin.HandlerFunc {
+func PinTaskPluginEndpoint() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// A host-owned legacy route may explicitly reuse a canonical protocol.
-		// Keep the original URL for logging and ordinary-channel fallback.
-		protocolPath := c.Request.URL.Path
-		if len(protocolPaths) > 0 && protocolPaths[0] != "" {
-			protocolPath = protocolPaths[0]
-		}
 		generation := pluginruntime.DefaultRegistry.Generation()
 		if generation == nil {
 			c.Next()
@@ -331,7 +325,7 @@ func PinTaskPluginEndpoint(protocolPaths ...string) gin.HandlerFunc {
 
 		modelRequest, err := getModelFromRequest(c)
 		if err != nil {
-			if _, _, knownProtocolPath := pluginruntime.LookupHostProtocolOperation(c.Request.Method, protocolPath); knownProtocolPath {
+			if _, _, protocolPath := pluginruntime.LookupHostProtocolOperation(c.Request.Method, c.Request.URL.Path); protocolPath {
 				abortWithOpenAiMessage(c, http.StatusBadRequest, "Invalid task protocol request")
 				return
 			}
@@ -367,7 +361,7 @@ func PinTaskPluginEndpoint(protocolPaths ...string) gin.HandlerFunc {
 				rewriteTo = target.Alias
 			}
 		}
-		binding, found := generation.LookupEndpoint(c.Request.Method, protocolPath, lookupModel)
+		binding, found := generation.LookupEndpoint(c.Request.Method, c.Request.URL.Path, lookupModel)
 		if !found || binding.Plugin == nil {
 			c.Set(contextKeyTaskPluginEndpointModel, *modelRequest)
 			c.Next()
@@ -381,7 +375,7 @@ func PinTaskPluginEndpoint(protocolPaths ...string) gin.HandlerFunc {
 		}
 		modelRequest.Model = pinModel
 		c.Set(contextKeyTaskPluginEndpointModel, *modelRequest)
-		candidates := generation.LookupEndpointCandidates(c.Request.Method, protocolPath, lookupModel)
+		candidates := generation.LookupEndpointCandidates(c.Request.Method, c.Request.URL.Path, lookupModel)
 		if len(candidates) == 0 {
 			candidates = []pluginruntime.ProtocolBinding{binding}
 		}
