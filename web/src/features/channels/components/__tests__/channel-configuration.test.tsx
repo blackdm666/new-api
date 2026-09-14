@@ -28,7 +28,7 @@ import {
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 import { createAppQueryClient } from '@/lib/query-client'
@@ -1659,50 +1659,77 @@ test('advanced custom edits preview draft connection settings with the saved key
   )
 })
 
-test('an operator without sensitive write permission can discover saved models and update routing', async () => {
-  useAuthStore.setState({
-    auth: {
-      ...originalAuth,
-      user: {
-        id: 10,
-        username: 'operator',
-        role: ROLE.ADMIN,
-        permissions: {
-          admin_permissions: {
-            channel: { read: true, write: true, operate: true },
+describe('an operator without sensitive write permission', () => {
+  beforeEach(() => {
+    useAuthStore.setState({
+      auth: {
+        ...originalAuth,
+        user: {
+          id: 10,
+          username: 'operator',
+          role: ROLE.ADMIN,
+          permissions: {
+            admin_permissions: {
+              channel: { read: true, write: true, operate: true },
+            },
           },
         },
       },
-    },
+    })
   })
-  const put = vi
-    .spyOn(api, 'put')
-    .mockResolvedValue({ data: { success: true } })
-  const user = userEvent.setup()
-  render(<ConfigurationHarness currentRow={editingChannel} />)
-  await screen.findByDisplayValue('Existing channel')
-  expect(screen.getByRole('button', { name: 'Change provider' })).toBeDisabled()
-  expect(screen.getByLabelText('API Key *')).toBeDisabled()
-  await user.click(screen.getByRole('button', { name: 'Fetch from Upstream' }))
-  expect(
-    await screen.findByRole('checkbox', { name: 'upstream-model' })
-  ).toBeVisible()
-  await user.click(screen.getByRole('tab', { name: /Request & Response/ }))
-  const thinking = screen.getByRole('switch', { name: 'Thinking to Content' })
-  expect(thinking).toHaveAttribute('aria-disabled', 'true')
-  await user.click(thinking)
-  expect(thinking).not.toBeChecked()
-  await user.click(screen.getByRole('tab', { name: /Other Settings/ }))
-  expect(screen.getByLabelText('Proxy Address')).toBeDisabled()
-  await user.click(screen.getByRole('tab', { name: /Routing & Mapping/ }))
-  fireEvent.change(screen.getByLabelText('Priority'), {
-    target: { value: '8' },
+
+  test('can discover saved models while provider and key remain locked', async () => {
+    const user = userEvent.setup()
+    render(<ConfigurationHarness currentRow={editingChannel} />)
+    await screen.findByDisplayValue('Existing channel')
+    expect(
+      screen.getByRole('button', { name: 'Change provider' })
+    ).toBeDisabled()
+    expect(screen.getByLabelText('API Key *')).toBeDisabled()
+    await user.click(
+      screen.getByRole('button', { name: 'Fetch from Upstream' })
+    )
+    expect(
+      await screen.findByRole('checkbox', { name: 'upstream-model' })
+    ).toBeVisible()
   })
-  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
-  await waitFor(() => expect(put).toHaveBeenCalled())
-  expect(put.mock.calls[0]?.[1]).toMatchObject({ id: 42, priority: 8 })
-  expect(put.mock.calls[0]?.[1]).not.toHaveProperty('setting')
-  expect(put.mock.calls[0]?.[1]).not.toHaveProperty('key')
+
+  test('cannot enable sensitive request processing', async () => {
+    const user = userEvent.setup()
+    render(<ConfigurationHarness currentRow={editingChannel} />)
+    await screen.findByDisplayValue('Existing channel')
+    await user.click(screen.getByRole('tab', { name: /Request & Response/ }))
+    const thinking = screen.getByRole('switch', { name: 'Thinking to Content' })
+    expect(thinking).toHaveAttribute('aria-disabled', 'true')
+    await user.click(thinking)
+    expect(thinking).not.toBeChecked()
+  })
+
+  test('cannot edit the proxy address', async () => {
+    const user = userEvent.setup()
+    render(<ConfigurationHarness currentRow={editingChannel} />)
+    await screen.findByDisplayValue('Existing channel')
+    await user.click(screen.getByRole('tab', { name: /Other Settings/ }))
+    expect(screen.getByLabelText('Proxy Address')).toBeDisabled()
+  })
+
+  test('can save routing without replacing credentials or sensitive settings', async () => {
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true } })
+    const user = userEvent.setup()
+    render(<ConfigurationHarness currentRow={editingChannel} />)
+    await screen.findByDisplayValue('Existing channel')
+    await user.click(screen.getByRole('tab', { name: /Routing & Mapping/ }))
+    fireEvent.change(screen.getByLabelText('Priority'), {
+      target: { value: '8' },
+    })
+    await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    expect(put.mock.calls[0]?.[1]).toMatchObject({ id: 42, priority: 8 })
+    expect(put.mock.calls[0]?.[1]).not.toHaveProperty('setting')
+    expect(put.mock.calls[0]?.[1]).not.toHaveProperty('key')
+  })
 })
 
 test.each([
