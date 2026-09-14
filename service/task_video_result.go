@@ -156,6 +156,10 @@ func extractTaskVideoResultURL(value any, depth int) string {
 		return ""
 	}
 	switch typed := value.(type) {
+	case string:
+		if isTaskVideoURLCandidate(typed) {
+			return strings.TrimSpace(typed)
+		}
 	case map[string]any:
 		for _, key := range []string{"video_url", "result_url", "output_url", "file_url", "url", "uri"} {
 			if candidate, ok := typed[key].(string); ok && isTaskVideoURLCandidate(candidate) {

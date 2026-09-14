@@ -630,22 +630,27 @@ func TestPluginProtocolArchivedArtifactDeliveryInStreamAndFinal(t *testing.T) {
 	task.PrivateData.ResultStorageKind = "s3"
 	task.PrivateData.ResultStorageKey = "task-videos/2026/09/" + strings.Repeat("a", 64) + ".mp4"
 	task.PrivateData.ResultMimeType = "video/mp4"
-	task.SetData(map[string]any{"content": map[string]any{"url": "https://example.com/result.mp4"}})
-	for _, stream := range []bool{true, false} {
-		c, recorder := newPluginProtocolTestContext(stream, stream)
-		deps := pluginProtocolTestDeps()
-		deps.submit = func(_ *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
-			return pluginProtocolTestOutcome(info, pinned.Plugin.Meta.Key, task.TaskID, nil), nil
+	for _, data := range []map[string]any{
+		{"content": map[string]any{"url": "https://example.com/result.mp4"}},
+		{"result": "https://example.com/result.mp4"},
+	} {
+		task.SetData(data)
+		for _, stream := range []bool{true, false} {
+			c, recorder := newPluginProtocolTestContext(stream, stream)
+			deps := pluginProtocolTestDeps()
+			deps.submit = func(_ *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+				return pluginProtocolTestOutcome(info, pinned.Plugin.Meta.Key, task.TaskID, nil), nil
+			}
+			deps.loadTask = func(context.Context, int, constant.TaskPlatform, string) (*model.Task, bool, error) {
+				return task, true, nil
+			}
+			deps.artifactContentURL = func(string, string) (string, error) { return "https://gateway.example/fallback?access=capability", nil }
+			serveTaskPluginProtocol(c, pinned, deps)
+			assert.Equal(t, http.StatusOK, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), "https://assets.88api.ai/media/"+task.PrivateData.ResultStorageKey)
+			assert.NotContains(t, recorder.Body.String(), "access=")
+			assert.NotContains(t, recorder.Body.String(), "example.com/result.mp4")
 		}
-		deps.loadTask = func(context.Context, int, constant.TaskPlatform, string) (*model.Task, bool, error) {
-			return task, true, nil
-		}
-		deps.artifactContentURL = func(string, string) (string, error) { return "https://gateway.example/fallback?access=capability", nil }
-		serveTaskPluginProtocol(c, pinned, deps)
-		assert.Equal(t, http.StatusOK, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), "https://assets.88api.ai/media/"+task.PrivateData.ResultStorageKey)
-		assert.NotContains(t, recorder.Body.String(), "access=")
-		assert.NotContains(t, recorder.Body.String(), "example.com/result.mp4")
 	}
 }
 
