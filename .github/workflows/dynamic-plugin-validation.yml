@@ -25,9 +25,9 @@ jobs:
         ports: ["5432:5432"]
         options: --health-cmd="pg_isready -U postgres" --health-interval=5s --health-timeout=5s --health-retries=30
     env:
-      GOWORK: off
+      GOWORK: 'off'
       TEST_MYSQL_DSN: root:fixture-only@tcp(127.0.0.1:3306)/plugin_test?charset=utf8mb4&parseTime=True&loc=Local
-      TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=fixture-only dbname=plugin_test sslmode=disable
+      TEST_POSTGRES_DSN: postgres://postgres:fixture-only@127.0.0.1:5432/plugin_test?sslmode=disable
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
@@ -35,7 +35,9 @@ jobs:
           go-version-file: go.mod
       - run: mkdir -p web/dist && touch web/dist/index.html
       - name: Backend regression
-        run: go test ./... -timeout 10m
+        run: env -u TEST_MYSQL_DSN -u TEST_POSTGRES_DSN go test ./... -timeout 10m
+      - name: Dynamic routing and pricing on MySQL and PostgreSQL
+        run: go test ./model -run TestDynamicPluginDatabaseMatrix -count=1 -v
       - name: Wallet settlement on MySQL and PostgreSQL
         run: |
           TEST_TASK_DB_DIALECT=mysql go test ./controller -run TestImmediateTaskSettlementDatabase -count=1 -v
