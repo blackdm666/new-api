@@ -342,13 +342,14 @@ func PinTaskPluginEndpoint() gin.HandlerFunc {
 		pinModel := claimedModel
 		mappedModel := ""
 		rewriteTo := ""
+		dynamicCandidates := model.DynamicTaskEndpointCandidates(generation, c.Request.Method, c.Request.URL.Path, claimedModel)
 		if declared, ok := generation.CanonicalModel(claimedModel); ok {
 			lookupModel = declared
 			pinModel = declared
 			if claimedModel != declared {
 				rewriteTo = declared
 			}
-		} else if target, ok := model.ResolveTaskModelAlias(generation, claimedModel); ok {
+		} else if target, ok := model.ResolveTaskModelAlias(generation, claimedModel); ok && len(dynamicCandidates) == 0 {
 			if target.Declared == "" {
 				c.Set(contextKeyTaskPluginEndpointModel, *modelRequest)
 				c.Next()
@@ -361,18 +362,12 @@ func PinTaskPluginEndpoint() gin.HandlerFunc {
 				rewriteTo = target.Alias
 			}
 		}
-	binding, found := generation.LookupEndpoint(c.Request.Method, c.Request.URL.Path, lookupModel)
-	if !found {
-		dynamic := generation.LookupDynamicEndpointCandidates(c.Request.Method, c.Request.URL.Path)
-		if len(dynamic) > 0 {
-			// Dynamic plugins defer model ownership to channel selection. The
-			// concrete model is kept in the request and candidates are filtered
-			// later by channel/plugin identity.
-			binding = dynamic[0]
+		binding, found := generation.LookupEndpoint(c.Request.Method, c.Request.URL.Path, lookupModel)
+		if !found && len(dynamicCandidates) > 0 {
+			binding = dynamicCandidates[0]
 			found = true
 		}
-	}
-	if !found || binding.Plugin == nil {
+		if !found || binding.Plugin == nil {
 			c.Set(contextKeyTaskPluginEndpointModel, *modelRequest)
 			c.Next()
 			return
@@ -386,8 +381,10 @@ func PinTaskPluginEndpoint() gin.HandlerFunc {
 		modelRequest.Model = pinModel
 		c.Set(contextKeyTaskPluginEndpointModel, *modelRequest)
 		candidates := generation.LookupEndpointCandidates(c.Request.Method, c.Request.URL.Path, lookupModel)
-		if len(candidates) == 0 {
-			candidates = generation.LookupDynamicEndpointCandidates(c.Request.Method, c.Request.URL.Path)
+		for _, dynamic := range dynamicCandidates {
+			if !slices.ContainsFunc(candidates, func(candidate pluginruntime.ProtocolBinding) bool { return candidate.Plugin == dynamic.Plugin }) {
+				candidates = append(candidates, dynamic)
+			}
 		}
 		if len(candidates) == 0 {
 			candidates = []pluginruntime.ProtocolBinding{binding}

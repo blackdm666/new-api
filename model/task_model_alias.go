@@ -2,11 +2,13 @@ package model
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 )
 
@@ -20,9 +22,32 @@ type TaskAliasTarget struct {
 }
 
 type taskAliasView struct {
-	generation uint64
-	expiresAt  time.Time
-	byFold     map[string]TaskAliasTarget
+	generation     uint64
+	expiresAt      time.Time
+	byFold         map[string]TaskAliasTarget
+	dynamicByModel map[string][]string
+}
+
+// DynamicTaskEndpointCandidates returns only plugins actually bound to enabled
+// task channels exposing the requested sales name. A protocol declaration alone
+// never makes a dynamic plugin an owner of unrelated models. Group permissions
+// and channel priority remain the distributor's responsibility.
+func DynamicTaskEndpointCandidates(g *jsplugin.RoutingGeneration, method, path, name string) []jsplugin.ProtocolBinding {
+	if g == nil || name == "" {
+		return nil
+	}
+	view := loadFreshTaskAliasView(g)
+	if view == nil || len(view.dynamicByModel[name]) == 0 {
+		return nil
+	}
+	var result []jsplugin.ProtocolBinding
+	for _, candidate := range g.LookupDynamicEndpointCandidates(method, path) {
+		if slices.Contains(view.dynamicByModel[name], candidate.Plugin.Meta.Key) {
+			candidate.Model = name
+			result = append(result, candidate)
+		}
+	}
+	return result
 }
 
 const taskAliasViewTTL = 60 * time.Second
@@ -84,16 +109,17 @@ func buildTaskAliasView(generation *jsplugin.RoutingGeneration) *taskAliasView {
 		genNum = generation.Number
 	}
 	view := &taskAliasView{
-		generation: genNum,
-		expiresAt:  time.Now().Add(taskAliasViewTTL),
-		byFold:     make(map[string]TaskAliasTarget),
+		generation:     genNum,
+		expiresAt:      time.Now().Add(taskAliasViewTTL),
+		byFold:         make(map[string]TaskAliasTarget),
+		dynamicByModel: make(map[string][]string),
 	}
-	if DB == nil {
+	if DB == nil || generation == nil {
 		return view
 	}
 
 	var channels []Channel
-	err := DB.Select("id", "type", "models", "model_mapping").
+	err := DB.Select("id", "type", "models", "model_mapping", "setting").
 		Where("status = ?", common.ChannelStatusEnabled).
 		Find(&channels).Error
 	if err != nil {
@@ -104,6 +130,16 @@ func buildTaskAliasView(generation *jsplugin.RoutingGeneration) *taskAliasView {
 	drafts := make(map[string]*taskAliasDraft)
 	for i := range channels {
 		channel := &channels[i]
+		if channel.Type == constant.ChannelTypeTaskPlugin {
+			key := channel.GetSetting().TaskPluginKey
+			if plugin, ok := generation.Get(key); ok && plugin.Meta.DynamicModels {
+				for _, name := range channel.GetModels() {
+					if name != "" && !slices.Contains(view.dynamicByModel[name], key) {
+						view.dynamicByModel[name] = append(view.dynamicByModel[name], key)
+					}
+				}
+			}
+		}
 		mappingJSON := channel.GetModelMapping()
 		if mappingJSON == "" || mappingJSON == "{}" {
 			continue

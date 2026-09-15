@@ -1458,6 +1458,7 @@ func equalStringPtr(a, b *string) bool {
 }
 
 type fetchModelsRequest struct {
+	TaskPluginKey  string  `json:"task_plugin_key"`
 	ChannelID      int     `json:"channel_id"`
 	BaseURL        *string `json:"base_url"`
 	Type           int     `json:"type"`
@@ -1574,6 +1575,11 @@ func FetchModels(c *gin.Context) {
 			Type:    req.Type,
 			Key:     key,
 			BaseURL: &baseURL,
+		}
+		if channel.Type == constant.ChannelTypeTaskPlugin {
+			setting := channel.GetSetting()
+			setting.TaskPluginKey = strings.TrimSpace(req.TaskPluginKey)
+			channel.SetSetting(setting)
 		}
 	}
 

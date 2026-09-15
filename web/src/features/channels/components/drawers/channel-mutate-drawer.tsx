@@ -1117,6 +1117,10 @@ export function ChannelMutateDrawer({
       data: {
         type: currentType,
         key: previewKey,
+        task_plugin_key:
+          currentType === CHANNEL_TYPE_TASK_PLUGIN
+            ? currentTaskPluginKey
+            : undefined,
         channel_id: isEditing ? channelId || undefined : undefined,
         base_url: currentBaseUrl || '',
         advanced_custom: currentAdvancedCustom,
@@ -1127,6 +1131,7 @@ export function ChannelMutateDrawer({
     [
       currentType,
       previewKey,
+      currentTaskPluginKey,
       isEditing,
       channelId,
       currentBaseUrl,

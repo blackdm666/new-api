@@ -367,7 +367,9 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		if !ok {
 			return nil, fmt.Errorf("task plugin %q is not registered", channel.GetSetting().TaskPluginKey)
 		}
-		return normalizeModelNames(plugin.Meta.Models), nil
+		if !plugin.Meta.DynamicModels {
+			return normalizeModelNames(plugin.Meta.Models), nil
+		}
 	}
 	baseURL := constant.GetChannelBaseURL(channel.Type)
 	if channel.GetBaseURL() != "" {
@@ -433,6 +435,13 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		}
 	default:
 		url = fmt.Sprintf("%s/v1/models", baseURL)
+	}
+	if channel.Type == constant.ChannelTypeTaskPlugin {
+		// A dynamic plugin discovers the provider catalog rather than returning
+		// its (intentionally empty) manifest model list. Accept either a root
+		// base URL or an existing /v1 API base, like the video adapters do.
+		base := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
+		url = base + "/v1/models"
 	}
 
 	key, _, apiErr := channel.GetNextEnabledKey()
