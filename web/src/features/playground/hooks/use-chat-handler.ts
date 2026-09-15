@@ -31,6 +31,7 @@ import {
   applyChatCompletionResponse,
   completeAssistantMessage,
   hasChatCompletionChoice,
+  getPlaygroundRequestErrorMessage,
   isAssistantMessageFinal,
   isAssistantMessagePending,
 } from '../lib'
@@ -224,7 +225,10 @@ export function useChatHandler({
       if (generation !== requestGenerationRef.current) return
       flushStreamUpdates(generation)
       setIsRequesting(false)
-      const displayError = getDisplayError(error)
+      const displayError = getPlaygroundRequestErrorMessage(
+        { errorCode, errorMessage: getDisplayError(error) },
+        t
+      )
       toast.error(displayError)
       const errorTitle = t(ERROR_MESSAGES.API_REQUEST_ERROR)
       onMessageUpdate((prev) => {

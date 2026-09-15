@@ -16,17 +16,29 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { t } from 'i18next'
+
 import { api } from '@/lib/api'
+import { UserFacingError } from '@/lib/user-facing-error'
 
 import type {
   ConfirmPaymentComplianceResponse,
+  BotProtectionSettingsPayload,
   FetchUpstreamRatiosRequest,
+  InvoiceSettingsPayload,
+  InvoiceSettingsResponse,
   LogCleanupTask,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
+  SMTPTestResponse,
+  MarketingEmailSenderAccount,
+  MarketingEmailSenderAccountInput,
+  EmailReceiptEndpoint,
   UpdateOptionRequest,
   UpdateOptionResponse,
+  UpdatePasskeyDomainsRequest,
+  UpdatePasskeyDomainsResponse,
   UpstreamChannelsResponse,
   UpstreamRatiosResponse,
 } from './types'
@@ -38,6 +50,170 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function updatePasskeyDomains(
+  request: UpdatePasskeyDomainsRequest
+) {
+  const res = await api.put<UpdatePasskeyDomainsResponse>(
+    '/api/option/passkey/domains',
+    request,
+    {
+      validateStatus: (status) =>
+        (status >= 200 && status < 300) || status === 409,
+    }
+  )
+  return res.data
+}
+
+export async function updateBotProtectionSettings(
+  request: BotProtectionSettingsPayload
+) {
+  const res = await api.put<UpdateOptionResponse>(
+    '/api/option/bot-protection',
+    request
+  )
+  return res.data
+}
+
+export async function testSMTPEmail(
+  email: string,
+  channel: 'security' | 'primary' | 'marketing' | 'backup'
+) {
+  const res = await api.post<SMTPTestResponse>(
+    '/api/option/smtp-test',
+    { email, channel },
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  if (!res.data.success) {
+    throw new UserFacingError(
+      res.data.message?.trim() || t('SMTP test email failed')
+    )
+  }
+  return res.data
+}
+
+export async function listMarketingEmailSenderAccounts() {
+  const res = await api.get<{
+    success: boolean
+    message: string
+    data: MarketingEmailSenderAccount[]
+  }>('/api/option/smtp/marketing-accounts')
+  return res.data
+}
+
+export async function createMarketingEmailSenderAccount(
+  request: MarketingEmailSenderAccountInput
+) {
+  const res = await api.post<{
+    success: boolean
+    message: string
+    data: MarketingEmailSenderAccount
+  }>('/api/option/smtp/marketing-accounts', request)
+  return res.data
+}
+
+export async function updateMarketingEmailSenderAccount(
+  id: number,
+  request: MarketingEmailSenderAccountInput
+) {
+  const res = await api.put<{
+    success: boolean
+    message: string
+    data: MarketingEmailSenderAccount
+  }>(`/api/option/smtp/marketing-accounts/${id}`, request)
+  return res.data
+}
+
+export async function deleteMarketingEmailSenderAccount(id: number) {
+  const res = await api.delete<{ success: boolean; message: string }>(
+    `/api/option/smtp/marketing-accounts/${id}`
+  )
+  return res.data
+}
+
+export async function setMarketingEmailSenderAccountEnabled(
+  id: number,
+  enabled: boolean
+) {
+  const res = await api.put<{
+    success: boolean
+    message: string
+    data: MarketingEmailSenderAccount
+  }>(`/api/option/smtp/marketing-accounts/${id}/enabled`, { enabled })
+  return res.data
+}
+
+export async function testMarketingEmailSenderAccount(
+  id: number,
+  email: string
+) {
+  const res = await api.post<{
+    success: boolean
+    message: string
+    data: {
+      recipient: string
+      attempt_id: number
+      status: string
+      message: string
+    }
+  }>(`/api/option/smtp/marketing-accounts/${id}/test`, { email })
+  return res.data
+}
+
+export async function getEmailReceiptEndpoint() {
+  const res = await api.get<{
+    success: boolean
+    message: string
+    data: EmailReceiptEndpoint
+  }>('/api/option/smtp/receipts')
+  return res.data
+}
+
+export async function updateEmailReceiptEndpoint(enabled: boolean) {
+  const res = await api.put<{
+    success: boolean
+    message: string
+    data: EmailReceiptEndpoint
+  }>('/api/option/smtp/receipts', { enabled })
+  return res.data
+}
+
+export async function rotateEmailReceiptEndpointToken() {
+  const res = await api.post<{
+    success: boolean
+    message: string
+    data: { token: string; callback_url: string }
+  }>('/api/option/smtp/receipts/token')
+  return res.data
+}
+
+export async function updateInvoiceSettings(request: InvoiceSettingsPayload) {
+  const res = await api.put<InvoiceSettingsResponse>(
+    '/api/option/invoice',
+    request,
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  if (!res.data.success) {
+    throw new UserFacingError(
+      res.data.message?.trim() || t('Failed to update invoice settings')
+    )
+  }
+  return res.data
+}
+
+export async function testInvoiceStorage() {
+  const res = await api.post<InvoiceSettingsResponse>(
+    '/api/option/invoice/storage-test',
+    undefined,
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  if (!res.data.success) {
+    throw new UserFacingError(
+      res.data.message?.trim() || t('Invoice storage connection failed')
+    )
+  }
   return res.data
 }
 

@@ -19,6 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 /**
  * Utility functions for redemption codes
  */
+import type { Redemption } from '../types'
+
+export function redemptionCodesToClipboard(redemptions: Redemption[]): string {
+  return redemptions.map((redemption) => redemption.key).join('\n')
+}
 
 /**
  * Check if a Unix timestamp (in seconds) is expired

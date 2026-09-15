@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { defineConfig, loadEnv } from '@rsbuild/core'
+import { defineConfig, loadEnv, type ProxyOptions } from '@rsbuild/core'
 import { pluginReact } from '@rsbuild/plugin-react'
 import { pluginTailwindcss } from '@rsbuild/plugin-tailwindcss'
 import { tanstackRouter } from '@tanstack/router-plugin/rspack'
@@ -14,15 +14,38 @@ export default defineConfig(({ envMode }) => {
     process.env.VITE_REACT_APP_SERVER_URL ||
     env.rawPublicVars.VITE_REACT_APP_SERVER_URL ||
     'http://localhost:3000'
+  const serverOrigin = new URL(serverUrl).origin
+  const captchaDevServerUrl =
+    process.env.VITE_CAPTCHA_DEV_SERVER_URL ||
+    env.rawPublicVars.VITE_CAPTCHA_DEV_SERVER_URL
+  const captchaDevOrigin =
+    process.env.VITE_CAPTCHA_DEV_ORIGIN ||
+    env.rawPublicVars.VITE_CAPTCHA_DEV_ORIGIN
 
   const isProd = envMode === 'production'
-  const devProxy = Object.fromEntries(
-    (['/api', '/mj', '/pg'] as const).map((key) => [
+  const captchaDevProxyEnabled =
+    !isProd &&
+    Boolean(captchaDevServerUrl) &&
+    (process.env.VITE_CAPTCHA_DEV_PROXY_ENABLED ||
+      env.rawPublicVars.VITE_CAPTCHA_DEV_PROXY_ENABLED) === 'true'
+  const devProxy: Record<string, ProxyOptions> = Object.fromEntries(
+    (['/api', '/v1', '/mj', '/pg'] as const).map((key) => [
       key,
-      { target: serverUrl, changeOrigin: true },
+      {
+        target: serverUrl,
+        changeOrigin: true,
+        headers: { origin: serverOrigin },
+      },
     ])
-  ) as Record<string, { target: string; changeOrigin: boolean }>
-
+  )
+  if (captchaDevServerUrl) {
+    devProxy['/__captcha'] = {
+      target: captchaDevServerUrl,
+      changeOrigin: true,
+      ...(captchaDevOrigin ? { headers: { origin: captchaDevOrigin } } : {}),
+      pathRewrite: { '^/__captcha': '' },
+    }
+  }
   return {
     plugins: [pluginReact(), pluginTailwindcss({ optimize: false })],
     // Rsbuild 2: replaces deprecated `performance.chunkSplit` (RSPack 2 aligned)
@@ -55,6 +78,11 @@ export default defineConfig(({ envMode }) => {
     source: {
       entry: {
         index: './src/main.tsx',
+      },
+      define: {
+        'import.meta.env.VITE_CAPTCHA_DEV_PROXY_ENABLED': JSON.stringify(
+          captchaDevProxyEnabled ? 'true' : 'false'
+        ),
       },
     },
     resolve: {

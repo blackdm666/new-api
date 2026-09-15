@@ -1,12 +1,19 @@
 package model
 
 import (
+	"fmt"
+	"maps"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
@@ -20,6 +27,8 @@ type Option struct {
 	Value string `json:"value"`
 }
 
+var turnstileOptionUpdateMutex sync.Mutex
+
 func AllOption() ([]*Option, error) {
 	var options []*Option
 	var err error
@@ -28,6 +37,7 @@ func AllOption() ([]*Option, error) {
 }
 
 func InitOptionMap() {
+	turnstileConfig := common.CurrentTurnstileConfig()
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap = make(map[string]string)
 
@@ -43,7 +53,7 @@ func InitOptionMap() {
 	common.OptionMap["LinuxDOOAuthEnabled"] = strconv.FormatBool(common.LinuxDOOAuthEnabled)
 	common.OptionMap["TelegramOAuthEnabled"] = strconv.FormatBool(common.TelegramOAuthEnabled)
 	common.OptionMap["WeChatAuthEnabled"] = strconv.FormatBool(common.WeChatAuthEnabled)
-	common.OptionMap["TurnstileCheckEnabled"] = strconv.FormatBool(common.TurnstileCheckEnabled)
+	common.OptionMap["TurnstileCheckEnabled"] = strconv.FormatBool(turnstileConfig.Enabled)
 	common.OptionMap["RegisterEnabled"] = strconv.FormatBool(common.RegisterEnabled)
 	common.OptionMap["AutomaticDisableChannelEnabled"] = strconv.FormatBool(common.AutomaticDisableChannelEnabled)
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
@@ -52,6 +62,11 @@ func InitOptionMap() {
 	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
 	common.OptionMap["DrawingEnabled"] = strconv.FormatBool(common.DrawingEnabled)
 	common.OptionMap["TaskEnabled"] = strconv.FormatBool(common.TaskEnabled)
+	common.OptionMap["TaskPluginEnabled"] = strconv.FormatBool(constant.TaskPluginEnabled)
+	jsplugin.DefaultRegistry.SetEnabled(constant.TaskPluginEnabled)
+	common.OptionMap[setting.TaskPluginMarketplaceSourcesKey] = setting.TaskPluginMarketplaceSources2JsonString()
+	common.OptionMap[setting.TaskPluginDisabledFactoryKeysKey] = "[]"
+	jsplugin.DefaultRegistry.SetDisabledFactoryKeys(nil)
 	common.OptionMap["DataExportEnabled"] = strconv.FormatBool(common.DataExportEnabled)
 	common.OptionMap["ChannelDisableThreshold"] = strconv.FormatFloat(common.ChannelDisableThreshold, 'f', -1, 64)
 	common.OptionMap["EmailDomainRestrictionEnabled"] = strconv.FormatBool(common.EmailDomainRestrictionEnabled)
@@ -66,6 +81,87 @@ func InitOptionMap() {
 	common.OptionMap["SMTPStartTLSEnabled"] = strconv.FormatBool(common.SMTPStartTLSEnabled)
 	common.OptionMap["SMTPInsecureSkipVerify"] = strconv.FormatBool(common.SMTPInsecureSkipVerify)
 	common.OptionMap["SMTPForceAuthLogin"] = strconv.FormatBool(common.SMTPForceAuthLogin)
+	common.OptionMap["SMTPBackupEnabled"] = strconv.FormatBool(common.SMTPBackupEnabled)
+	common.OptionMap["SMTPBackupServer"] = ""
+	common.OptionMap["SMTPBackupFrom"] = ""
+	common.OptionMap["SMTPBackupPort"] = strconv.Itoa(common.SMTPBackupPort)
+	common.OptionMap["SMTPBackupAccount"] = ""
+	common.OptionMap["SMTPBackupToken"] = ""
+	common.OptionMap["SMTPBackupSSLEnabled"] = strconv.FormatBool(common.SMTPBackupSSLEnabled)
+	common.OptionMap["SMTPBackupStartTLSEnabled"] = strconv.FormatBool(common.SMTPBackupStartTLSEnabled)
+	common.OptionMap["SMTPBackupInsecureSkipVerify"] = strconv.FormatBool(common.SMTPBackupInsecureSkipVerify)
+	common.OptionMap["SMTPBackupForceAuthLogin"] = strconv.FormatBool(common.SMTPBackupForceAuthLogin)
+	common.OptionMap["SMTPSecurityEnabled"] = strconv.FormatBool(common.SMTPSecurityEnabled)
+	common.OptionMap["SMTPSecurityServer"] = ""
+	common.OptionMap["SMTPSecurityFrom"] = ""
+	common.OptionMap["SMTPSecurityPort"] = strconv.Itoa(common.SMTPSecurityPort)
+	common.OptionMap["SMTPSecurityAccount"] = ""
+	common.OptionMap["SMTPSecurityToken"] = ""
+	common.OptionMap["SMTPSecuritySSLEnabled"] = strconv.FormatBool(common.SMTPSecuritySSLEnabled)
+	common.OptionMap["SMTPSecurityStartTLSEnabled"] = strconv.FormatBool(common.SMTPSecurityStartTLSEnabled)
+	common.OptionMap["SMTPSecurityInsecureSkipVerify"] = strconv.FormatBool(common.SMTPSecurityInsecureSkipVerify)
+	common.OptionMap["SMTPSecurityForceAuthLogin"] = strconv.FormatBool(common.SMTPSecurityForceAuthLogin)
+	common.OptionMap["SMTPMarketingEnabled"] = strconv.FormatBool(common.SMTPMarketingEnabled)
+	common.OptionMap["SMTPMarketingServer"] = ""
+	common.OptionMap["SMTPMarketingFrom"] = ""
+	common.OptionMap["SMTPMarketingPort"] = strconv.Itoa(common.SMTPMarketingPort)
+	common.OptionMap["SMTPMarketingAccount"] = ""
+	common.OptionMap["SMTPMarketingToken"] = ""
+	common.OptionMap["SMTPMarketingSSLEnabled"] = strconv.FormatBool(common.SMTPMarketingSSLEnabled)
+	common.OptionMap["SMTPMarketingStartTLSEnabled"] = strconv.FormatBool(common.SMTPMarketingStartTLSEnabled)
+	common.OptionMap["SMTPMarketingInsecureSkipVerify"] = strconv.FormatBool(common.SMTPMarketingInsecureSkipVerify)
+	common.OptionMap["SMTPMarketingForceAuthLogin"] = strconv.FormatBool(common.SMTPMarketingForceAuthLogin)
+	common.OptionMap[setting.EmailDeliveryRulesOptionKey] = setting.EmailDeliveryRules2JSONString()
+	common.OptionMap["InvoiceApplicationNotifyAdminEnabled"] = strconv.FormatBool(common.InvoiceApplicationNotifyAdminEnabled)
+	common.OptionMap["InvoiceIssuedNotifyUserEnabled"] = strconv.FormatBool(common.InvoiceIssuedNotifyUserEnabled)
+	common.OptionMap["InvoiceAdminEmail"] = common.InvoiceAdminEmail
+	common.OptionMap[AffiliateCommissionEnabledOptionKey] = "false"
+	common.OptionMap[AffiliateCommissionAutoApproveOptionKey] = "false"
+	common.OptionMap[AffiliateCommissionDefaultRateOptionKey] = strconv.Itoa(affiliateCommissionDefaultRateBasisPoints)
+	common.OptionMap[AffiliateCommissionGroupRatesOptionKey] = affiliateCommissionDefaultGroupRatesJSON
+	common.OptionMap[AffiliateUpgradeInviteesThresholdOptionKey] = strconv.Itoa(AffiliateUpgradeEffectiveInviteesThreshold)
+	common.OptionMap[AffiliateGoldUpgradeInviteesThresholdOptionKey] = strconv.Itoa(AffiliateGoldUpgradeEffectiveInviteesThreshold)
+	common.OptionMap[AffiliateUpgradeTopUpAmountThresholdOptionKey] = strconv.FormatInt(AffiliateUpgradeEffectiveTopUpAmountCents, 10)
+	common.OptionMap[AffiliateGoldUpgradeTopUpAmountThresholdOptionKey] = strconv.FormatInt(AffiliateGoldUpgradeEffectiveTopUpAmountCents, 10)
+	common.OptionMap[AffiliateCommissionActivatedAtOptionKey] = "0"
+	common.OptionMap[AffiliateCommissionInviteeTopUpLimitOptionKey] = "0"
+	common.OptionMap[AffiliateAlipayPayoutEnabledOptionKey] = "false"
+	common.OptionMap[AffiliateAlipayAppIdOptionKey] = ""
+	common.OptionMap[AffiliateAlipayPrivateKeyOptionKey] = ""
+	common.OptionMap[AffiliateAlipayAppCertificateOptionKey] = ""
+	common.OptionMap[AffiliateAlipayPublicCertificateOptionKey] = ""
+	common.OptionMap[AffiliateAlipayRootCertificateOptionKey] = ""
+	common.OptionMap[AffiliateAlipayTransferTitleOptionKey] = AffiliateAlipayDefaultTransferTitle
+	common.OptionMap["InvoiceFileEnabled"] = strconv.FormatBool(setting.InvoiceFileEnabled)
+	common.OptionMap["InvoiceFileMaxSize"] = strconv.FormatInt(setting.InvoiceFileMaxSize, 10)
+	common.OptionMap["InvoiceFileMaxCount"] = strconv.Itoa(setting.InvoiceFileMaxCount)
+	common.OptionMap["InvoiceMinimumAmountCents"] = strconv.FormatInt(setting.InvoiceMinimumAmountCents, 10)
+	common.OptionMap["InvoiceTaxRateBasisPoints"] = strconv.Itoa(setting.InvoiceTaxRateBasisPoints)
+	common.OptionMap["InvoiceDataRetentionDays"] = strconv.Itoa(setting.InvoiceDataRetentionDays)
+	common.OptionMap["InvoicePendingExpiryDays"] = strconv.Itoa(setting.InvoicePendingExpiryDays)
+	common.OptionMap["InvoiceFileAllowedExts"] = setting.InvoiceFileAllowedExts
+	common.OptionMap["InvoiceFileAllowedMimes"] = setting.InvoiceFileAllowedMimes
+	common.OptionMap["InvoiceFileStorage"] = setting.InvoiceFileStorage
+	common.OptionMap["InvoiceFileLocalPath"] = setting.InvoiceFileLocalPath
+	common.OptionMap["InvoiceFileSignedURLTTL"] = strconv.FormatInt(setting.InvoiceFileSignedURLTTL, 10)
+	common.OptionMap["InvoiceFileOSSEndpoint"] = setting.InvoiceFileOSSEndpoint
+	common.OptionMap["InvoiceFileOSSBucket"] = setting.InvoiceFileOSSBucket
+	common.OptionMap["InvoiceFileOSSRegion"] = setting.InvoiceFileOSSRegion
+	common.OptionMap["InvoiceFileOSSAccessKeyId"] = setting.InvoiceFileOSSAccessKeyId
+	common.OptionMap["InvoiceFileOSSAccessKeySecret"] = setting.InvoiceFileOSSAccessKeySecret
+	common.OptionMap["InvoiceFileOSSCustomDomain"] = setting.InvoiceFileOSSCustomDomain
+	common.OptionMap["InvoiceFileS3Endpoint"] = setting.InvoiceFileS3Endpoint
+	common.OptionMap["InvoiceFileS3Bucket"] = setting.InvoiceFileS3Bucket
+	common.OptionMap["InvoiceFileS3Region"] = setting.InvoiceFileS3Region
+	common.OptionMap["InvoiceFileS3AccessKeyId"] = setting.InvoiceFileS3AccessKeyId
+	common.OptionMap["InvoiceFileS3AccessKeySecret"] = setting.InvoiceFileS3AccessKeySecret
+	common.OptionMap["InvoiceFileS3CustomDomain"] = setting.InvoiceFileS3CustomDomain
+	common.OptionMap["InvoiceFileCOSEndpoint"] = setting.InvoiceFileCOSEndpoint
+	common.OptionMap["InvoiceFileCOSBucket"] = setting.InvoiceFileCOSBucket
+	common.OptionMap["InvoiceFileCOSRegion"] = setting.InvoiceFileCOSRegion
+	common.OptionMap["InvoiceFileCOSSecretId"] = setting.InvoiceFileCOSSecretId
+	common.OptionMap["InvoiceFileCOSSecretKey"] = setting.InvoiceFileCOSSecretKey
+	common.OptionMap["InvoiceFileCOSCustomDomain"] = setting.InvoiceFileCOSCustomDomain
 	common.OptionMap["Notice"] = ""
 	common.OptionMap["About"] = ""
 	common.OptionMap["HomePageContent"] = ""
@@ -73,6 +169,7 @@ func InitOptionMap() {
 	common.OptionMap["SystemName"] = common.SystemName
 	common.OptionMap["Logo"] = common.Logo
 	common.OptionMap["ServerAddress"] = ""
+	common.OptionMap["TaskPublicAddress"] = system_setting.TaskPublicAddress
 	common.OptionMap["WorkerUrl"] = system_setting.WorkerUrl
 	common.OptionMap["WorkerValidKey"] = system_setting.WorkerValidKey
 	common.OptionMap["WorkerAllowHttpImageRequestEnabled"] = strconv.FormatBool(system_setting.WorkerAllowHttpImageRequestEnabled)
@@ -80,6 +177,16 @@ func InitOptionMap() {
 	common.OptionMap["CustomCallbackAddress"] = ""
 	common.OptionMap["EpayId"] = ""
 	common.OptionMap["EpayKey"] = ""
+	common.OptionMap["AntomEnabled"] = strconv.FormatBool(setting.AntomEnabled)
+	common.OptionMap["AntomDisplayName"] = setting.AntomDisplayName
+	common.OptionMap["AntomGateway"] = setting.AntomGateway
+	common.OptionMap["AntomClientId"] = setting.AntomClientId
+	common.OptionMap["AntomMerchantPrivateKey"] = setting.AntomMerchantPrivateKey
+	common.OptionMap["AntomPublicKey"] = setting.AntomPublicKey
+	common.OptionMap["AntomMerchantPrivateKeyConfigured"] = strconv.FormatBool(strings.TrimSpace(setting.AntomMerchantPrivateKey) != "")
+	common.OptionMap["AntomPublicKeyConfigured"] = strconv.FormatBool(strings.TrimSpace(setting.AntomPublicKey) != "")
+	common.OptionMap["AntomNotifyURL"] = setting.AntomNotifyURL
+	common.OptionMap["AntomRedirectURL"] = setting.AntomRedirectURL
 	common.OptionMap["Price"] = strconv.FormatFloat(operation_setting.Price, 'f', -1, 64)
 	common.OptionMap["USDExchangeRate"] = strconv.FormatFloat(operation_setting.USDExchangeRate, 'f', -1, 64)
 	common.OptionMap["MinTopUp"] = strconv.Itoa(operation_setting.MinTopUp)
@@ -129,8 +236,13 @@ func InitOptionMap() {
 	common.OptionMap["WeChatServerAddress"] = ""
 	common.OptionMap["WeChatServerToken"] = ""
 	common.OptionMap["WeChatAccountQRCodeImageURL"] = ""
-	common.OptionMap["TurnstileSiteKey"] = ""
-	common.OptionMap["TurnstileSecretKey"] = ""
+	common.OptionMap["TurnstileSiteKey"] = turnstileConfig.SiteKey
+	common.OptionMap["TurnstileSecretKey"] = turnstileConfig.SecretKey
+	common.OptionMap["TurnstileProvider"] = turnstileConfig.Provider
+	common.OptionMap["TurnstileWidgetScriptURL"] = turnstileConfig.WidgetScriptURL
+	common.OptionMap["TurnstileWidgetEndpoint"] = turnstileConfig.WidgetEndpoint
+	common.OptionMap["TurnstileVerifyURL"] = turnstileConfig.VerifyURL
+	common.OptionMap["TurnstileAction"] = turnstileConfig.Action
 	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
 	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
@@ -179,21 +291,86 @@ func InitOptionMap() {
 
 	// 自动添加所有注册的模型配置
 	modelConfigs := config.GlobalConfig.ExportAllConfigs()
-	for k, v := range modelConfigs {
-		common.OptionMap[k] = v
-	}
+	maps.Copy(common.OptionMap, modelConfigs)
 
 	common.OptionMapRWMutex.Unlock()
 	loadOptionsFromDatabase()
 }
 
 func loadOptionsFromDatabase() {
+	passkeyOptionMutex.Lock()
+	defer passkeyOptionMutex.Unlock()
 	options, _ := AllOption()
+	loadedKeys := make(map[string]struct{}, len(options))
+	turnstileValues := make(map[string]string)
+	passkeyOptions := make(map[string]string)
 	for _, option := range options {
+		loadedKeys[option.Key] = struct{}{}
+		if isTurnstileOptionKey(option.Key) {
+			turnstileValues[option.Key] = option.Value
+			continue
+		}
+		if IsPasskeyDomainOption(option.Key) {
+			passkeyOptions[option.Key] = option.Value
+			continue
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
 		}
+	}
+	applyTurnstileOptionValues(turnstileValues)
+	legacyValues := applyLegacyTurnstileCompatibility(loadedKeys)
+	if len(legacyValues) > 0 {
+		if err := UpdateOptionsBulk(legacyValues); err != nil {
+			common.SysLog("failed to persist legacy Turnstile configuration: " + err.Error())
+		}
+	}
+	applyPasskeyDomainOptions(passkeyOptions)
+}
+
+func applyLegacyTurnstileCompatibility(loadedKeys map[string]struct{}) map[string]string {
+	if _, explicitlyConfigured := loadedKeys["TurnstileProvider"]; explicitlyConfigured {
+		return nil
+	}
+	config := common.CurrentTurnstileConfig()
+	legacyEndpoint := strings.TrimRight(strings.TrimSpace(config.SiteKey), "/")
+	if common.ValidateTurnstileHTTPURL("legacy Turnstile endpoint", legacyEndpoint, true) != nil {
+		return nil
+	}
+
+	config.Provider = common.TurnstileProviderCustom
+	// Keep the legacy endpoint in SiteKey so an image-only rollback can still
+	// render the self-hosted widget with the old URL-based integration.
+	config.SiteKey = legacyEndpoint
+	config.WidgetEndpoint = legacyEndpoint
+	config.WidgetScriptURL = legacyEndpoint + "/widget.js"
+	legacyVerifyURL := strings.TrimSpace(os.Getenv("TURNSTILE_VERIFY_URL"))
+	if common.ValidateTurnstileHTTPURL("legacy Turnstile verification URL", legacyVerifyURL, true) != nil {
+		legacyVerifyURL = legacyEndpoint + "/turnstile/v0/siteverify"
+	}
+	config.VerifyURL = legacyVerifyURL
+	if strings.TrimSpace(config.Action) == "" {
+		config.Action = "register"
+	}
+	common.ApplyTurnstileConfig(config)
+
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap["TurnstileProvider"] = config.Provider
+	common.OptionMap["TurnstileSiteKey"] = config.SiteKey
+	common.OptionMap["TurnstileWidgetEndpoint"] = config.WidgetEndpoint
+	common.OptionMap["TurnstileWidgetScriptURL"] = config.WidgetScriptURL
+	common.OptionMap["TurnstileVerifyURL"] = config.VerifyURL
+	common.OptionMap["TurnstileAction"] = config.Action
+	common.OptionMapRWMutex.Unlock()
+
+	return map[string]string{
+		"TurnstileProvider":        config.Provider,
+		"TurnstileSiteKey":         config.SiteKey,
+		"TurnstileWidgetEndpoint":  config.WidgetEndpoint,
+		"TurnstileWidgetScriptURL": config.WidgetScriptURL,
+		"TurnstileVerifyURL":       config.VerifyURL,
+		"TurnstileAction":          config.Action,
 	}
 }
 
@@ -206,17 +383,242 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if err := ValidateAffiliateOptionValue(key, value); err != nil {
+		return err
+	}
+	if key == "SMTPPort" || key == "SMTPBackupPort" || key == "SMTPSecurityPort" || key == "SMTPMarketingPort" {
+		port, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf("%s must be between 1 and 65535", key)
+		}
+	}
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
+	}
+	switch key {
+	case "ModelPrice", "ModelRatio", "CompletionRatio", "CacheRatio", "CreateCacheRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio":
+		return ratio_setting.ValidateNumericPricingMapJSONString(key, value)
+	case "GroupRatio":
+		return ratio_setting.ValidateNumericPricingMapJSONString(key, value)
+	case "GroupGroupRatio":
+		return ratio_setting.ValidateNestedNumericPricingMapJSONString(key, value)
+	}
+	if key == "billing_setting.billing_mode" {
+		return billing_setting.ValidateBillingModesJSON(value)
+	}
+	if key == operation_setting.ChannelTestConcurrencyOptionKey {
+		return operation_setting.ValidateChannelTestConcurrency(value)
 	}
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)
 	}
+	if key == setting.EmailDeliveryRulesOptionKey {
+		return setting.ValidateEmailDeliveryRulesJSONString(value)
+	}
+	switch key {
+	case "TurnstileCheckEnabled":
+		if value != "true" && value != "false" {
+			return fmt.Errorf("TurnstileCheckEnabled must be true or false")
+		}
+	case "TurnstileProvider":
+		provider := strings.ToLower(strings.TrimSpace(value))
+		if provider != common.TurnstileProviderCloudflare && provider != common.TurnstileProviderCustom {
+			return fmt.Errorf("unsupported human verification provider %q", value)
+		}
+	case "TurnstileWidgetScriptURL", "TurnstileWidgetEndpoint", "TurnstileVerifyURL":
+		return common.ValidateTurnstileHTTPURL(key, value, false)
+	case "TurnstileAction":
+		if len(strings.TrimSpace(value)) > 128 {
+			return fmt.Errorf("TurnstileAction must not exceed 128 characters")
+		}
+	}
 	return nil
 }
 
+func validateRelatedOptionValues(values map[string]string) error {
+	if err := validateTurnstileOptionValues(values); err != nil {
+		return err
+	}
+
+	_, advancedChanged := values[AffiliateUpgradeInviteesThresholdOptionKey]
+	_, goldChanged := values[AffiliateGoldUpgradeInviteesThresholdOptionKey]
+	_, advancedAmountChanged := values[AffiliateUpgradeTopUpAmountThresholdOptionKey]
+	_, goldAmountChanged := values[AffiliateGoldUpgradeTopUpAmountThresholdOptionKey]
+	if !advancedChanged && !goldChanged && !advancedAmountChanged && !goldAmountChanged {
+		return nil
+	}
+	policy := getAffiliatePolicy()
+	advancedThreshold := policy.UpgradeInviteesThreshold
+	goldThreshold := policy.GoldUpgradeInviteesThreshold
+	advancedAmountCents := policy.UpgradeTopUpAmountThresholdCents
+	goldAmountCents := policy.GoldUpgradeTopUpAmountThresholdCents
+	if raw, ok := values[AffiliateUpgradeInviteesThresholdOptionKey]; ok {
+		advancedThreshold, _ = strconv.Atoi(raw)
+	}
+	if raw, ok := values[AffiliateGoldUpgradeInviteesThresholdOptionKey]; ok {
+		goldThreshold, _ = strconv.Atoi(raw)
+	}
+	if raw, ok := values[AffiliateUpgradeTopUpAmountThresholdOptionKey]; ok {
+		advancedAmountCents, _ = strconv.ParseInt(raw, 10, 64)
+	}
+	if raw, ok := values[AffiliateGoldUpgradeTopUpAmountThresholdOptionKey]; ok {
+		goldAmountCents, _ = strconv.ParseInt(raw, 10, 64)
+	}
+	return ValidateAffiliateUpgradeThresholds(advancedThreshold, goldThreshold, advancedAmountCents, goldAmountCents)
+}
+
+func validateTurnstileOptionValues(values map[string]string) error {
+	config, changed := resolveTurnstileOptionValues(values)
+	if !changed {
+		return nil
+	}
+	return common.ValidateTurnstileConfig(config)
+}
+
+func resolveTurnstileOptionValues(values map[string]string) (common.TurnstileConfig, bool) {
+	config := common.CurrentTurnstileConfig()
+	changed := false
+	for key, value := range values {
+		switch key {
+		case "TurnstileCheckEnabled":
+			config.Enabled = value == "true"
+			changed = true
+		case "TurnstileProvider":
+			config.Provider = strings.ToLower(strings.TrimSpace(value))
+			changed = true
+		case "TurnstileSiteKey":
+			config.SiteKey = strings.TrimSpace(value)
+			changed = true
+		case "TurnstileSecretKey":
+			config.SecretKey = strings.TrimSpace(value)
+			changed = true
+		case "TurnstileWidgetScriptURL":
+			config.WidgetScriptURL = strings.TrimSpace(value)
+			changed = true
+		case "TurnstileWidgetEndpoint":
+			config.WidgetEndpoint = strings.TrimRight(strings.TrimSpace(value), "/")
+			changed = true
+		case "TurnstileVerifyURL":
+			config.VerifyURL = strings.TrimSpace(value)
+			changed = true
+		case "TurnstileAction":
+			config.Action = strings.TrimSpace(value)
+			changed = true
+		}
+	}
+	return config, changed
+}
+
+func isTurnstileOptionKey(key string) bool {
+	switch key {
+	case "TurnstileCheckEnabled",
+		"TurnstileProvider",
+		"TurnstileSiteKey",
+		"TurnstileSecretKey",
+		"TurnstileWidgetScriptURL",
+		"TurnstileWidgetEndpoint",
+		"TurnstileVerifyURL",
+		"TurnstileAction":
+		return true
+	default:
+		return false
+	}
+}
+
+func applyTurnstileOptionValues(values map[string]string) {
+	config, changed := resolveTurnstileOptionValues(values)
+	if !changed {
+		return
+	}
+	common.ApplyTurnstileConfig(config)
+	common.OptionMapRWMutex.Lock()
+	for key, value := range values {
+		if isTurnstileOptionKey(key) {
+			common.OptionMap[key] = value
+		}
+	}
+	common.OptionMapRWMutex.Unlock()
+}
+
+func isSMTPBackupConfigurationOption(key string) bool {
+	switch key {
+	case "SMTPBackupServer",
+		"SMTPBackupPort",
+		"SMTPBackupAccount",
+		"SMTPBackupFrom",
+		"SMTPBackupToken",
+		"SMTPBackupSSLEnabled",
+		"SMTPBackupStartTLSEnabled",
+		"SMTPBackupInsecureSkipVerify",
+		"SMTPBackupForceAuthLogin":
+		return true
+	default:
+		return false
+	}
+}
+
+func smtpProfileEnabledOption(key string) string {
+	for _, profile := range []string{"Security", "Marketing"} {
+		prefix := "SMTP" + profile
+		if !strings.HasPrefix(key, prefix) || key == prefix+"Enabled" {
+			continue
+		}
+		return prefix + "Enabled"
+	}
+	return ""
+}
+
+func withSMTPBackupDeactivated(values map[string]string) map[string]string {
+	result := values
+	copied := false
+	for key := range values {
+		enabledKey := smtpProfileEnabledOption(key)
+		if enabledKey != "" {
+			if !copied {
+				result = make(map[string]string, len(values)+3)
+				for optionKey, optionValue := range values {
+					result[optionKey] = optionValue
+				}
+				copied = true
+			}
+			result[enabledKey] = "false"
+		}
+		if !isSMTPBackupConfigurationOption(key) {
+			continue
+		}
+		if !copied {
+			result = make(map[string]string, len(values)+3)
+			for optionKey, optionValue := range values {
+				result[optionKey] = optionValue
+			}
+			copied = true
+		}
+		// A changed backup configuration must pass a fresh SMTP test before it
+		// is eligible for automatic failover again.
+		result["SMTPBackupEnabled"] = "false"
+	}
+	return result
+}
+
 func UpdateOption(key string, value string) error {
+	if isTurnstileOptionKey(key) {
+		turnstileOptionUpdateMutex.Lock()
+		defer turnstileOptionUpdateMutex.Unlock()
+	}
+	if isSMTPBackupConfigurationOption(key) || smtpProfileEnabledOption(key) != "" {
+		return UpdateOptionsBulk(map[string]string{key: value})
+	}
 	if err := validateOptionValue(key, value); err != nil {
+		return err
+	}
+	if IsPasskeyDomainOption(key) {
+		_, err := UpdatePasskeyDomainOptions(map[string]string{key: value}, false, "")
+		return err
+	}
+	if IsModelPricingOption(key) {
+		return UpdateModelPricingOptions(map[string]string{key: value})
+	}
+	if err := validateRelatedOptionValues(map[string]string{key: value}); err != nil {
 		return err
 	}
 	// Save to database first
@@ -224,12 +626,16 @@ func UpdateOption(key string, value string) error {
 		Key: key,
 	}
 	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
+	if err := DB.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+		return err
+	}
 	option.Value = value
 	// Save is a combination function.
 	// If save value does not contain primary key, it will execute Create,
 	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
+	if err := DB.Save(&option).Error; err != nil {
+		return err
+	}
 	// Update OptionMap
 	return updateOptionMap(key, value)
 }
@@ -243,10 +649,31 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
+	turnstileChanged := false
+	for key := range values {
+		if isTurnstileOptionKey(key) {
+			turnstileChanged = true
+			break
+		}
+	}
+	if turnstileChanged {
+		turnstileOptionUpdateMutex.Lock()
+		defer turnstileOptionUpdateMutex.Unlock()
+	}
+	values = withSMTPBackupDeactivated(values)
+	for key := range values {
+		if IsPasskeyDomainOption(key) {
+			_, err := UpdatePasskeyDomainOptions(values, false, "")
+			return err
+		}
+	}
 	for key, value := range values {
 		if err := validateOptionValue(key, value); err != nil {
 			return err
 		}
+	}
+	if err := validateRelatedOptionValues(values); err != nil {
+		return err
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		for k, v := range values {
@@ -264,7 +691,11 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if err != nil {
 		return err
 	}
+	applyTurnstileOptionValues(values)
 	for k, v := range values {
+		if isTurnstileOptionKey(k) {
+			continue
+		}
 		if err := updateOptionMap(k, v); err != nil {
 			return err
 		}
@@ -282,6 +713,9 @@ func updateOptionMap(key string, value string) (err error) {
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value
+	if common.UpdateTurnstileConfigValue(key, value) {
+		return nil
+	}
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
 	if handleConfigUpdate(key, value) {
@@ -302,7 +736,7 @@ func updateOptionMap(key string, value string) (err error) {
 			common.ImageDownloadPermission = intValue
 		}
 	}
-	if strings.HasSuffix(key, "Enabled") || key == "DefaultCollapseSidebar" || key == "DefaultUseAutoGroup" || key == "SMTPForceAuthLogin" || key == "SMTPInsecureSkipVerify" {
+	if strings.HasSuffix(key, "Enabled") || key == "DefaultCollapseSidebar" || key == "DefaultUseAutoGroup" || key == "SMTPForceAuthLogin" || key == "SMTPInsecureSkipVerify" || key == "SMTPBackupForceAuthLogin" || key == "SMTPBackupInsecureSkipVerify" || key == "SMTPSecurityForceAuthLogin" || key == "SMTPSecurityInsecureSkipVerify" || key == "SMTPMarketingForceAuthLogin" || key == "SMTPMarketingInsecureSkipVerify" {
 		boolValue := value == "true"
 		switch key {
 		case "PasswordRegisterEnabled":
@@ -319,8 +753,6 @@ func updateOptionMap(key string, value string) (err error) {
 			common.WeChatAuthEnabled = boolValue
 		case "TelegramOAuthEnabled":
 			common.TelegramOAuthEnabled = boolValue
-		case "TurnstileCheckEnabled":
-			common.TurnstileCheckEnabled = boolValue
 		case "RegisterEnabled":
 			common.RegisterEnabled = boolValue
 		case "EmailDomainRestrictionEnabled":
@@ -349,6 +781,9 @@ func updateOptionMap(key string, value string) (err error) {
 			common.DrawingEnabled = boolValue
 		case "TaskEnabled":
 			common.TaskEnabled = boolValue
+		case "TaskPluginEnabled":
+			constant.TaskPluginEnabled = boolValue
+			jsplugin.DefaultRegistry.SetEnabled(boolValue)
 		case "DataExportEnabled":
 			common.DataExportEnabled = boolValue
 		case "DefaultCollapseSidebar":
@@ -383,6 +818,42 @@ func updateOptionMap(key string, value string) (err error) {
 			common.SMTPInsecureSkipVerify = boolValue
 		case "SMTPForceAuthLogin":
 			common.SMTPForceAuthLogin = boolValue
+		case "SMTPBackupEnabled":
+			common.SMTPBackupEnabled = boolValue
+		case "SMTPBackupSSLEnabled":
+			common.SMTPBackupSSLEnabled = boolValue
+		case "SMTPBackupStartTLSEnabled":
+			common.SMTPBackupStartTLSEnabled = boolValue
+		case "SMTPBackupInsecureSkipVerify":
+			common.SMTPBackupInsecureSkipVerify = boolValue
+		case "SMTPBackupForceAuthLogin":
+			common.SMTPBackupForceAuthLogin = boolValue
+		case "SMTPSecurityEnabled":
+			common.SMTPSecurityEnabled = boolValue
+		case "SMTPSecuritySSLEnabled":
+			common.SMTPSecuritySSLEnabled = boolValue
+		case "SMTPSecurityStartTLSEnabled":
+			common.SMTPSecurityStartTLSEnabled = boolValue
+		case "SMTPSecurityInsecureSkipVerify":
+			common.SMTPSecurityInsecureSkipVerify = boolValue
+		case "SMTPSecurityForceAuthLogin":
+			common.SMTPSecurityForceAuthLogin = boolValue
+		case "SMTPMarketingEnabled":
+			common.SMTPMarketingEnabled = boolValue
+		case "SMTPMarketingSSLEnabled":
+			common.SMTPMarketingSSLEnabled = boolValue
+		case "SMTPMarketingStartTLSEnabled":
+			common.SMTPMarketingStartTLSEnabled = boolValue
+		case "SMTPMarketingInsecureSkipVerify":
+			common.SMTPMarketingInsecureSkipVerify = boolValue
+		case "SMTPMarketingForceAuthLogin":
+			common.SMTPMarketingForceAuthLogin = boolValue
+		case "InvoiceApplicationNotifyAdminEnabled":
+			common.InvoiceApplicationNotifyAdminEnabled = boolValue
+		case "InvoiceIssuedNotifyUserEnabled":
+			common.InvoiceIssuedNotifyUserEnabled = boolValue
+		case "InvoiceFileEnabled":
+			setting.InvoiceFileEnabled = boolValue
 		case "WorkerAllowHttpImageRequestEnabled":
 			system_setting.WorkerAllowHttpImageRequestEnabled = boolValue
 		case "DefaultUseAutoGroup":
@@ -390,6 +861,9 @@ func updateOptionMap(key string, value string) (err error) {
 		case "ExposeRatioEnabled":
 			ratio_setting.SetExposeRatioEnabled(boolValue)
 		}
+	}
+	if key == setting.TaskPluginDisabledFactoryKeysKey {
+		jsplugin.DefaultRegistry.SetDisabledFactoryKeys(setting.ParseTaskPluginDisabledFactoryKeys(value))
 	}
 	switch key {
 	case "EmailDomainWhitelist":
@@ -405,8 +879,117 @@ func updateOptionMap(key string, value string) (err error) {
 		common.SMTPFrom = value
 	case "SMTPToken":
 		common.SMTPToken = value
+	case "SMTPBackupServer":
+		common.SMTPBackupServer = value
+	case "SMTPBackupPort":
+		intValue, _ := strconv.Atoi(value)
+		common.SMTPBackupPort = intValue
+	case "SMTPBackupAccount":
+		common.SMTPBackupAccount = value
+	case "SMTPBackupFrom":
+		common.SMTPBackupFrom = value
+	case "SMTPBackupToken":
+		common.SMTPBackupToken = value
+	case "SMTPSecurityServer":
+		common.SMTPSecurityServer = value
+	case "SMTPSecurityPort":
+		common.SMTPSecurityPort, _ = strconv.Atoi(value)
+	case "SMTPSecurityAccount":
+		common.SMTPSecurityAccount = value
+	case "SMTPSecurityFrom":
+		common.SMTPSecurityFrom = value
+	case "SMTPSecurityToken":
+		common.SMTPSecurityToken = value
+	case "SMTPMarketingServer":
+		common.SMTPMarketingServer = value
+	case "SMTPMarketingPort":
+		common.SMTPMarketingPort, _ = strconv.Atoi(value)
+	case "SMTPMarketingAccount":
+		common.SMTPMarketingAccount = value
+	case "SMTPMarketingFrom":
+		common.SMTPMarketingFrom = value
+	case "SMTPMarketingToken":
+		common.SMTPMarketingToken = value
+	case setting.EmailDeliveryRulesOptionKey:
+		err = setting.UpdateEmailDeliveryRulesByJSONString(value)
+	case "InvoiceAdminEmail":
+		common.InvoiceAdminEmail = value
+	case "InvoiceFileMaxSize":
+		if v, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil && v > 0 {
+			setting.InvoiceFileMaxSize = v
+		}
+	case "InvoiceFileMaxCount":
+		if v, parseErr := strconv.Atoi(value); parseErr == nil && v > 0 {
+			setting.InvoiceFileMaxCount = v
+		}
+	case "InvoiceMinimumAmountCents":
+		if v, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil && v > 0 {
+			setting.InvoiceMinimumAmountCents = v
+		}
+	case "InvoiceTaxRateBasisPoints":
+		if v, parseErr := strconv.Atoi(value); parseErr == nil && v >= 0 && v <= 10000 {
+			setting.InvoiceTaxRateBasisPoints = v
+		}
+	case "InvoiceDataRetentionDays":
+		if v, parseErr := strconv.Atoi(value); parseErr == nil && v >= 0 {
+			setting.InvoiceDataRetentionDays = v
+		}
+	case "InvoicePendingExpiryDays":
+		if v, parseErr := strconv.Atoi(value); parseErr == nil && v >= 0 {
+			setting.InvoicePendingExpiryDays = v
+		}
+	case "InvoiceFileAllowedExts":
+		setting.InvoiceFileAllowedExts = value
+	case "InvoiceFileAllowedMimes":
+		setting.InvoiceFileAllowedMimes = value
+	case "InvoiceFileStorage":
+		setting.InvoiceFileStorage = value
+	case "InvoiceFileLocalPath":
+		setting.InvoiceFileLocalPath = value
+	case "InvoiceFileSignedURLTTL":
+		if v, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil && v > 0 {
+			setting.InvoiceFileSignedURLTTL = v
+		}
+	case "InvoiceFileOSSEndpoint":
+		setting.InvoiceFileOSSEndpoint = value
+	case "InvoiceFileOSSBucket":
+		setting.InvoiceFileOSSBucket = value
+	case "InvoiceFileOSSRegion":
+		setting.InvoiceFileOSSRegion = value
+	case "InvoiceFileOSSAccessKeyId":
+		setting.InvoiceFileOSSAccessKeyId = value
+	case "InvoiceFileOSSAccessKeySecret":
+		setting.InvoiceFileOSSAccessKeySecret = value
+	case "InvoiceFileOSSCustomDomain":
+		setting.InvoiceFileOSSCustomDomain = value
+	case "InvoiceFileS3Endpoint":
+		setting.InvoiceFileS3Endpoint = value
+	case "InvoiceFileS3Bucket":
+		setting.InvoiceFileS3Bucket = value
+	case "InvoiceFileS3Region":
+		setting.InvoiceFileS3Region = value
+	case "InvoiceFileS3AccessKeyId":
+		setting.InvoiceFileS3AccessKeyId = value
+	case "InvoiceFileS3AccessKeySecret":
+		setting.InvoiceFileS3AccessKeySecret = value
+	case "InvoiceFileS3CustomDomain":
+		setting.InvoiceFileS3CustomDomain = value
+	case "InvoiceFileCOSEndpoint":
+		setting.InvoiceFileCOSEndpoint = value
+	case "InvoiceFileCOSBucket":
+		setting.InvoiceFileCOSBucket = value
+	case "InvoiceFileCOSRegion":
+		setting.InvoiceFileCOSRegion = value
+	case "InvoiceFileCOSSecretId":
+		setting.InvoiceFileCOSSecretId = value
+	case "InvoiceFileCOSSecretKey":
+		setting.InvoiceFileCOSSecretKey = value
+	case "InvoiceFileCOSCustomDomain":
+		setting.InvoiceFileCOSCustomDomain = value
 	case "ServerAddress":
 		system_setting.ServerAddress = value
+	case "TaskPublicAddress":
+		system_setting.TaskPublicAddress = value
 	case "WorkerUrl":
 		system_setting.WorkerUrl = value
 	case "WorkerValidKey":
@@ -425,6 +1008,24 @@ func updateOptionMap(key string, value string) (err error) {
 		operation_setting.EpayId = value
 	case "EpayKey":
 		operation_setting.EpayKey = value
+	case "AntomEnabled":
+		setting.AntomEnabled = value == "true"
+	case "AntomDisplayName":
+		setting.AntomDisplayName = value
+	case "AntomGateway":
+		setting.AntomGateway = value
+	case "AntomClientId":
+		setting.AntomClientId = value
+	case "AntomMerchantPrivateKey":
+		setting.AntomMerchantPrivateKey = value
+		common.OptionMap["AntomMerchantPrivateKeyConfigured"] = strconv.FormatBool(strings.TrimSpace(value) != "")
+	case "AntomPublicKey":
+		setting.AntomPublicKey = value
+		common.OptionMap["AntomPublicKeyConfigured"] = strconv.FormatBool(strings.TrimSpace(value) != "")
+	case "AntomNotifyURL":
+		setting.AntomNotifyURL = value
+	case "AntomRedirectURL":
+		setting.AntomRedirectURL = value
 	case "Price":
 		operation_setting.Price, _ = strconv.ParseFloat(value, 64)
 	case "USDExchangeRate":
@@ -523,10 +1124,6 @@ func updateOptionMap(key string, value string) (err error) {
 		common.TelegramBotToken = value
 	case "TelegramBotName":
 		common.TelegramBotName = value
-	case "TurnstileSiteKey":
-		common.TurnstileSiteKey = value
-	case "TurnstileSecretKey":
-		common.TurnstileSecretKey = value
 	case "QuotaForNewUser":
 		common.QuotaForNewUser, _ = strconv.Atoi(value)
 	case "QuotaForInviter":

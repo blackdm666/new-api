@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { PermissionCatalog } from '@/lib/admin-permissions'
 import { api } from '@/lib/api'
+import type { CustomOAuthBinding } from '@/lib/oauth'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import type {
   User,
@@ -28,6 +30,7 @@ import type {
   ManageUserAction,
   ManageUserQuotaPayload,
   ApiResponse,
+  UserInviterOption,
 } from './types'
 
 // ============================================================================
@@ -86,6 +89,21 @@ export async function searchUsers(
  */
 export async function getUser(id: number): Promise<ApiResponse<User>> {
   const res = await api.get(`/api/user/${id}`)
+  return res.data
+}
+
+export async function getUserInviterOptions(params: {
+  targetUserId: number
+  selectedUserId?: number
+  keyword?: string
+}): Promise<ApiResponse<UserInviterOption[]>> {
+  const res = await api.get('/api/user/inviter-options', {
+    params: {
+      target_id: params.targetUserId,
+      selected_id: params.selectedUserId || undefined,
+      keyword: params.keyword?.trim() || undefined,
+    },
+  })
   return res.data
 }
 
@@ -168,6 +186,7 @@ export async function getGroups(): Promise<ApiResponse<string[]>> {
  */
 export async function getPermissionCatalog(): Promise<PermissionCatalog> {
   const res = await api.get('/api/authz/catalog')
+  requireServerSuccess(res.data)
   return {
     resources: res.data?.data?.resources ?? [],
     roles: res.data?.data?.roles ?? [],
@@ -178,19 +197,12 @@ export async function getPermissionCatalog(): Promise<PermissionCatalog> {
 // Admin Binding Management APIs
 // ============================================================================
 
-export interface OAuthBinding {
-  provider_id: string
-  provider_name: string
-  user_id?: number
-  external_id?: string
-}
-
 /**
  * Get user's custom OAuth bindings (admin)
  */
 export async function getUserOAuthBindings(
   userId: number
-): Promise<ApiResponse<OAuthBinding[]>> {
+): Promise<ApiResponse<CustomOAuthBinding[]>> {
   const res = await api.get(`/api/user/${userId}/oauth/bindings`)
   return res.data
 }
@@ -211,7 +223,7 @@ export async function adminClearUserBinding(
  */
 export async function adminUnbindCustomOAuth(
   userId: number,
-  providerId: string
+  providerId: number
 ): Promise<ApiResponse> {
   const res = await api.delete(
     `/api/user/${userId}/oauth/bindings/${providerId}`
