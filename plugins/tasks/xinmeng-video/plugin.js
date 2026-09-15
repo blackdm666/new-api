@@ -42,17 +42,13 @@ addModel("Seedance-2.0-fast-720p官方版", "doubao-seedance-2-0-fast-720p", "72
 addModel("minimax-h3-768p", "minimax-h3-768p", "768p", { defaultDuration: 4,
   ratios: ["1:1", "16:9", "9:16"], maxPrompt: 2500, images: 10, videos: 5,
   audios: 5, visualWithAudio: true });
-// H3 is served by the DMC plugin through a channel alias. Declaring its public
-// name here would shadow that alias even without an enabled XinMeng H3 channel.
-const MODELS = Object.keys(MODEL_CONFIGS).filter(function (model) { return model !== "minimax-h3-768p"; });
-
 export const meta = {
   apiVersion: 1,
   key: "xinmeng-video",
-  name: "88API渠道集成插件",
-  version: "2.0.2",
+  name: "XinMeng-Video",
+  version: "3.0.0",
   author: { name: "88API" },
-  description: { en: "Video generation through XinMeng", zh: "通过 XinMeng 生成视频" },
+  description: { en: "88API channel integration plugin", zh: "88API渠道集成插件" },
   models: [],
   dynamicModels: true,
   fetchMode: "per_task",
@@ -87,28 +83,28 @@ function secondsFor(req, cfg) {
 }
 function modelConfig(model) {
   if (Object.prototype.hasOwnProperty.call(MODEL_CONFIGS, model)) return MODEL_CONFIGS[model];
-  // Dynamic channel models use the standard XinMeng video contract. Keep
-  // strict overrides for known special models, while allowing newly exposed
-  // single-resolution models to flow through the generic protocol adapter.
+  // Unknown models follow the standard contract without guessed capabilities.
+  // Explicit duration keeps pre-consumption and the submitted quantity identical.
   return {
-    upstream: model, resolution: "720p", defaultDuration: 5, minDuration: 1,
-    maxDuration: 30, defaultRatio: "16:9", ratios: RATIOS, maxPrompt: 5000,
-    images: 30, videos: 10, audios: 10, framesExclusive: false,
-    promptless: false, nativeMedia: false, generateAudio: false,
-    visualWithAudio: false, totalMedia: 0,
+    upstream: model, resolution: "", minDuration: 1,
+    maxDuration: Number.MAX_SAFE_INTEGER, defaultRatio: "", ratios: null,
+    maxPrompt: Infinity, images: Infinity, videos: Infinity, audios: Infinity,
+    promptless: true, generateAudio: true,
   };
 }
 function payloadFor(req, model, upstreamModel) {
-  const cfg = modelConfig(model);
+  const cfg = modelConfig(Object.prototype.hasOwnProperty.call(MODEL_CONFIGS, model) ? model : upstreamModel || model);
   const metadata = object(typeof req.metadata === "string" ? JSON.parse(req.metadata) : req.metadata);
   const all = Object.assign({}, metadata, req);
   const sizeRatios = { "1280x720": "16:9", "1920x1080": "16:9", "2560x1440": "16:9", "720x1280": "9:16", "1080x1920": "9:16", "1440x2560": "9:16", "1024x1024": "1:1", "1440x1440": "1:1", "1920x1440": "4:3", "1440x1920": "3:4" };
   const body = {
     model: upstreamModel && upstreamModel !== model ? upstreamModel : cfg.upstream,
-    ratio: first(all.ratio, all.aspect_ratio, cfg.ratios.includes(req.size) ? req.size : req.size === "3360x1440" ? "21:9" : sizeRatios[req.size], cfg.defaultRatio),
+    ratio: first(all.ratio, all.aspect_ratio, (cfg.ratios || []).includes(req.size) ? req.size : req.size === "3360x1440" ? "21:9" : sizeRatios[req.size], cfg.defaultRatio),
     duration: secondsFor(req, cfg),
-    resolution: cfg.resolution,
+    resolution: cfg.resolution || first(all.resolution, all.quality, all.vquality),
   };
+  if (!body.resolution) delete body.resolution;
+  if (!body.ratio) delete body.ratio;
   const prompt = text(req.prompt);
   if (prompt) body.prompt = prompt;
   const negative = first(req.negative_prompt, metadata.negative_prompt);
@@ -142,7 +138,7 @@ function payloadFor(req, model, upstreamModel) {
   }
   if (!prompt && (!cfg.promptless || !images.length && !videos.length && !audios.length && !firstFrame && !lastFrame && !body.media)) throw new Error("prompt or supported reference media is required");
   if (Array.from(prompt).length > cfg.maxPrompt) throw new Error("prompt must contain at most " + cfg.maxPrompt + " characters");
-  if (!cfg.ratios.includes(body.ratio)) throw new Error("unsupported aspect ratio");
+  if (cfg.ratios && !cfg.ratios.includes(body.ratio)) throw new Error("unsupported aspect ratio");
   const imageCount = images.length + (cfg.nativeMedia ? Number(!!firstFrame) + Number(!!lastFrame) : 0);
   if (imageCount > cfg.images || videos.length > cfg.videos || audios.length > cfg.audios) throw new Error("too many media references");
   if (cfg.totalMedia && imageCount + videos.length + audios.length > cfg.totalMedia) throw new Error("too many media references in total");

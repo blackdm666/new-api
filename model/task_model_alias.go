@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,9 +24,31 @@ type TaskAliasTarget struct {
 
 type taskAliasView struct {
 	generation     uint64
+	routing        *jsplugin.RoutingGeneration
 	expiresAt      time.Time
 	byFold         map[string]TaskAliasTarget
 	dynamicByModel map[string][]string
+}
+
+// TaskPluginsForModel includes channel-scoped providers without turning their
+// models into global registry claims. Pricing and submission share this view.
+func TaskPluginsForModel(g *jsplugin.RoutingGeneration, name string) []*jsplugin.LoadedPlugin {
+	if g == nil {
+		return nil
+	}
+	result := g.PluginsByModel(name)
+	view := loadFreshTaskAliasView(g)
+	if view == nil {
+		return result
+	}
+	for _, key := range view.dynamicByModel[name] {
+		plugin, ok := g.Get(key)
+		if ok && !slices.Contains(result, plugin) {
+			result = append(result, plugin)
+		}
+	}
+	slices.SortFunc(result, func(a, b *jsplugin.LoadedPlugin) int { return strings.Compare(a.Meta.Key, b.Meta.Key) })
+	return result
 }
 
 // DynamicTaskEndpointCandidates returns only plugins actually bound to enabled
@@ -74,13 +97,13 @@ func ResolveTaskModelAlias(g *jsplugin.RoutingGeneration, name string) (TaskAlia
 
 func loadFreshTaskAliasView(g *jsplugin.RoutingGeneration) *taskAliasView {
 	view := taskAliasViewPtr.Load()
-	if taskAliasViewFresh(view, g.Number) {
+	if taskAliasViewFresh(view, g) {
 		return view
 	}
 	taskAliasRebuildMu.Lock()
 	defer taskAliasRebuildMu.Unlock()
 	view = taskAliasViewPtr.Load()
-	if taskAliasViewFresh(view, g.Number) {
+	if taskAliasViewFresh(view, g) {
 		return view
 	}
 	rebuilt := buildTaskAliasView(g)
@@ -88,8 +111,8 @@ func loadFreshTaskAliasView(g *jsplugin.RoutingGeneration) *taskAliasView {
 	return rebuilt
 }
 
-func taskAliasViewFresh(view *taskAliasView, generation uint64) bool {
-	return view != nil && view.generation == generation && time.Now().Before(view.expiresAt)
+func taskAliasViewFresh(view *taskAliasView, generation *jsplugin.RoutingGeneration) bool {
+	return view != nil && view.routing == generation && time.Now().Before(view.expiresAt)
 }
 
 func rebuildTaskAliasView() {
@@ -110,6 +133,7 @@ func buildTaskAliasView(generation *jsplugin.RoutingGeneration) *taskAliasView {
 	}
 	view := &taskAliasView{
 		generation:     genNum,
+		routing:        generation,
 		expiresAt:      time.Now().Add(taskAliasViewTTL),
 		byFold:         make(map[string]TaskAliasTarget),
 		dynamicByModel: make(map[string][]string),

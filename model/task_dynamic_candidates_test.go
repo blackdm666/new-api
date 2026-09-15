@@ -13,7 +13,7 @@ import (
 )
 
 func TestDynamicTaskCandidatesFollowEnabledChannelBindings(t *testing.T) {
-	truncateTables(t)
+	resetPricingEndpointTestTables(t)
 	registry := jsplugin.NewRegistry()
 	for _, key := range []string{"dynamic-alpha", "dynamic-beta", "dynamic-unused"} {
 		_, err := registry.Register(fmt.Sprintf(`

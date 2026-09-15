@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"io/fs"
+	"slices"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -77,7 +78,13 @@ func TestBuiltInTaskPluginResponsesAndUsageContracts(t *testing.T) {
 			actualKeys = append(actualKeys, entry.Name())
 		}
 	}
-	assert.Equal(t, append(append([]string{}, expectedKeys...), "xinmeng-video"), actualKeys)
+	allKeys := append(append([]string{}, expectedKeys...), "xinmeng-video", "dmc-video")
+	slices.Sort(allKeys)
+	assert.Equal(t, allKeys, actualKeys)
+	dmc, found := generation.Get("dmc-video")
+	require.True(t, found)
+	assert.Empty(t, dmc.Meta.Models)
+	assert.True(t, dmc.Meta.DynamicModels)
 	xinmeng, found := generation.Get("xinmeng-video")
 	require.True(t, found, "XinMeng must be included in the factory generation")
 	assert.Empty(t, xinmeng.Meta.Models)

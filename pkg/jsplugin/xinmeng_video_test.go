@@ -178,3 +178,30 @@ func TestXinMengWan3TaskPlugin(t *testing.T) {
 		assert.Equal(t, "FAILURE", missing["status"], "completed without video must terminate instead of polling forever")
 	})
 }
+
+func TestXinMengDynamicModelDoesNotInventCapabilities(t *testing.T) {
+	source, err := os.ReadFile("../../plugins/tasks/xinmeng-video/plugin.js")
+	require.NoError(t, err)
+	p, err := CompilePlugin(string(source), Options{})
+	require.NoError(t, err)
+	req := map[string]any{"prompt": "test", "duration": 60, "resolution": "4k", "ratio": "2:1", "generate_audio": false, "seed": 0}
+	driver := map[string]any{"model": "new-sales-model", "upstreamModel": "new-upstream", "requestBody": req, "baseUrl": "https://example.com"}
+	result, err := p.Engine.Call(context.Background(), "buildSubmitRequest", driver)
+	require.NoError(t, err)
+	body := result.(map[string]any)["body"].(map[string]any)
+	assert.Equal(t, "new-upstream", body["model"])
+	assert.Equal(t, "4k", body["resolution"])
+	assert.Equal(t, "2:1", body["ratio"])
+	assert.EqualValues(t, 60, body["duration"])
+	assert.Equal(t, false, body["generateAudio"])
+	delete(req, "resolution")
+	delete(req, "ratio")
+	result, err = p.Engine.Call(context.Background(), "buildSubmitRequest", driver)
+	require.NoError(t, err)
+	body = result.(map[string]any)["body"].(map[string]any)
+	assert.NotContains(t, body, "resolution")
+	assert.NotContains(t, body, "ratio")
+	delete(req, "duration")
+	_, err = p.Engine.Call(context.Background(), "buildSubmitRequest", driver)
+	require.Error(t, err, "unknown duration must not be guessed for billing")
+}

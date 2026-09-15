@@ -276,6 +276,8 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 	exprStr, exists := billing_setting.ResolveTaskBillingExpr(pluginKey, modelName, info.UpstreamModelName)
 	useTiered := exists || billing_setting.GetBillingMode(modelName) == billing_setting.BillingModeTieredExpr
+	// A retry may select a provider with a different billing mode.
+	info.TieredBillingSnapshot = nil
 	if useTiered {
 		provider, supported := adaptor.(channel.TaskUsageFactsProvider)
 		if billingexpr.UsesFixedPricing(exprStr) {
@@ -284,7 +286,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		if !exists || !supported {
 			return nil, service.TaskErrorWrapper(fmt.Errorf("task model %s has no usage expression or meter", modelName), "model_price_error", http.StatusBadRequest)
 		}
-		sharedModel := pinnedPlugin.Generation.SharedModel(modelName) || pinnedPlugin.Generation.SharedModel(info.UpstreamModelName)
+		sharedModel := len(model.TaskPluginsForModel(pinnedPlugin.Generation, modelName)) > 1 || pinnedPlugin.Generation.SharedModel(info.UpstreamModelName)
 		if sharedModel && pinnedPlugin.Plugin != nil {
 			schema, _ := pinnedPlugin.Plugin.Meta.UsageForModel(info.UpstreamModelName)
 			if !billing_setting.TaskExprCompatible(exprStr, schema) {

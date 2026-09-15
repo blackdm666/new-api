@@ -399,6 +399,9 @@ func updatePricing() {
 
 		usageModel := model
 		plugin, ok := pluginGeneration.GetByModel(model)
+		if providers := TaskPluginsForModel(pluginGeneration, model); len(providers) > 0 {
+			plugin, ok = providers[0], true
+		}
 		if !ok {
 			if target, resolved := ResolveTaskModelAlias(pluginGeneration, model); resolved {
 				plugin, ok = pluginGeneration.Get(target.PluginKey)
@@ -410,7 +413,7 @@ func updatePricing() {
 			pricing.BillingUsageSchema = jsplugin.CloneUsageSchema(usageSchema)
 			pricing.BillingUsageExamples = jsplugin.CloneUsageExamples(usageExamples)
 		}
-		providers := pluginGeneration.PluginsByModel(model)
+		providers := TaskPluginsForModel(pluginGeneration, model)
 		hasProviderOverride := false
 		for _, provider := range providers {
 			if _, configured := billing_setting.GetPluginBillingExpr(provider.Meta.Key, model); configured {

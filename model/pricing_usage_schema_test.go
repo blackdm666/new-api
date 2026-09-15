@@ -297,3 +297,26 @@ func TestPricingSharedPluginVariantsUseEachSchemaAndExpression(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(encoded), "billing_plugin_variants")
 }
+
+func TestDynamicChannelPricingUsesProviderSchema(t *testing.T) {
+	resetPricingEndpointTestTables(t)
+	require.NoError(t, DB.AutoMigrate(&Option{}))
+	const key = "dynamic-pricing-probe"
+	source := strings.Replace(pricingUsagePluginSource("1.0.0", `{seconds:{type:"number",unit:"second"}}`), `key: "pricing-usage-probe"`, `key: "dynamic-pricing-probe"`, 1)
+	source = strings.Replace(source, `models: ["pricing-usage-model"]`, `models: [], dynamicModels: true`, 1)
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(key) })
+	setting := `{"task_plugin_key":"dynamic-pricing-probe"}`
+	ch := Channel{Id: 950001, Name: "dynamic", Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Key: "fixture", Models: "new-video", Group: "default", Setting: &setting}
+	require.NoError(t, ch.Insert())
+	InitChannelCache()
+	snapshot, err := GetModelPricingSnapshot([]string{"new-video"})
+	require.NoError(t, err)
+	require.Equal(t, "second", snapshot.Entries[0].UsageSchema["seconds"].Unit)
+	require.NoError(t, ValidateModelPricing("new-video", PricingValues{"billing_setting.billing_mode": "tiered_expr", "billing_setting.billing_expr": `tier("base", u("seconds") * 0.1)`}))
+	require.Error(t, ValidateModelPricing("new-video", PricingValues{"billing_setting.billing_mode": "tiered_expr", "billing_setting.billing_expr": `tier("base", u("missing") * 0.1)`}))
+	require.NoError(t, ValidateModelPricing("new-video", PricingValues{billing_setting.PluginBillingExprOption: map[string]any{key: `tier("base", u("seconds") * 0.2)`}}))
+	pricing := pricingByModel(GetPricing())
+	require.Equal(t, "second", pricing["new-video"].BillingUsageSchema["seconds"].Unit)
+}

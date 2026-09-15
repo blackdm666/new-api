@@ -271,14 +271,14 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 			ModelPricingDescription: ModelPricingDescription{Effective: effectiveModelPricing(values, name)}}
 		entry.CacheWriteMode = ResolveCacheWriteMode(name, configured)
 		entry.BillingDetails = ResolveLegacyBillingDetails(name, entry.Effective, configured)
-		if plugin, ok := generation.GetByModel(name); ok {
-			entry.UsageSchema, _ = plugin.Meta.UsageForModel(name)
+		if providers := TaskPluginsForModel(generation, name); len(providers) > 0 {
+			entry.UsageSchema, _ = providers[0].Meta.UsageForModel(name)
 		} else if target, ok := ResolveTaskModelAlias(generation, name); ok {
 			if plugin, ok := generation.Get(target.PluginKey); ok {
 				entry.UsageSchema, _ = plugin.Meta.UsageForModel(target.Declared)
 			}
 		}
-		plugins := generation.PluginsByModel(name)
+		plugins := TaskPluginsForModel(generation, name)
 		configuredVariants, _ := configured[billing_setting.PluginBillingExprOption].(map[string]any)
 		if len(plugins) >= 2 || len(configuredVariants) > 0 {
 			keys := make(map[string]bool, len(plugins)+len(configuredVariants))
@@ -292,7 +292,7 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 				configuredValue, overridden := configuredVariants[key]
 				configuredExpr, _ := configuredValue.(string)
 				plugin, exists := generation.Get(key)
-				if !exists || !slices.Contains(plugin.Meta.Models, name) {
+				if !exists || !slices.Contains(TaskPluginsForModel(generation, name), plugin) {
 					variant := ModelPricingPluginVariant{
 						PluginKey: key, PluginName: key, Configured: configuredExpr,
 						UsageSchema: map[string]jsplugin.UsageFieldSchema{}, Stale: true,
@@ -379,7 +379,7 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 				return fmt.Errorf("model %s: plugin %s: billing expression is required", name, key)
 			}
 			plugin, exists := generation.Get(key)
-			if !exists || !slices.Contains(plugin.Meta.Models, name) {
+			if !exists || !slices.Contains(TaskPluginsForModel(generation, name), plugin) {
 				if previousVariants[key] == expression {
 					continue
 				}
@@ -415,7 +415,7 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 				return fmt.Errorf("model %s: %w", name, err)
 			}
 			var err error
-			if plugins := generation.PluginsByModel(name); len(plugins) > 0 {
+			if plugins := TaskPluginsForModel(generation, name); len(plugins) > 0 {
 				for _, plugin := range plugins {
 					if _, overridden := variants[plugin.Meta.Key]; overridden {
 						continue

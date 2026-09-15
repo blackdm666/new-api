@@ -1399,7 +1399,7 @@ test('request processing configuration does not mark the network category as con
   ).not.toHaveAccessibleName(/Configured/)
 })
 
-test('configuration from fields unsupported by the selected provider stays unmarked', async () => {
+test('plugin model update settings are marked while unsupported processing stays unmarked', async () => {
   editingChannel = {
     ...editingChannel,
     type: 63,
@@ -1414,7 +1414,7 @@ test('configuration from fields unsupported by the selected provider stays unmar
   ).not.toHaveAccessibleName(/Configured/)
   expect(
     screen.getByRole('tab', { name: /Other Settings/ })
-  ).not.toHaveAccessibleName(/Configured/)
+  ).toHaveAccessibleName(/Configured/)
 })
 
 test('an invalid edit switches categories and replaces configured styling with the field error', async () => {
@@ -1678,15 +1678,15 @@ test('model configuration keeps unchecked candidates searchable and supports cat
   expect(trigger).toBeDisabled()
 })
 
-test('model configuration is available for a plugin channel without upstream discovery and is disabled when its model list is empty', async () => {
+test('plugin channels expose upstream discovery and disable model configuration when empty', async () => {
   const user = userEvent.setup()
   render(<ConfigurationHarness />)
   await user.click(await screen.findByRole('option', { name: /Video A/ }))
   const trigger = screen.getByRole('button', { name: 'Configure Models' })
   expect(trigger).toBeEnabled()
   expect(
-    screen.queryByRole('button', { name: 'Fetch from Upstream' })
-  ).not.toBeInTheDocument()
+    screen.getByRole('button', { name: 'Fetch from Upstream' })
+  ).toBeVisible()
   await user.click(trigger)
   const dialog = within(
     screen.getByRole('dialog', { name: 'Configure Models' })

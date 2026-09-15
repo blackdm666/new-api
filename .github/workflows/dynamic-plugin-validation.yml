@@ -1,0 +1,42 @@
+name: Dynamic task plugin validation
+on:
+  push:
+    branches: [Newapi-88API]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: fixture-only
+          MYSQL_DATABASE: plugin_test
+        ports: ["3306:3306"]
+        options: --health-cmd="mysqladmin ping -h localhost -pfixture-only" --health-interval=5s --health-timeout=5s --health-retries=30
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: fixture-only
+          POSTGRES_DB: plugin_test
+        ports: ["5432:5432"]
+        options: --health-cmd="pg_isready -U postgres" --health-interval=5s --health-timeout=5s --health-retries=30
+    env:
+      GOWORK: off
+      TEST_MYSQL_DSN: root:fixture-only@tcp(127.0.0.1:3306)/plugin_test?charset=utf8mb4&parseTime=True&loc=Local
+      TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=fixture-only dbname=plugin_test sslmode=disable
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+      - run: mkdir -p web/dist && touch web/dist/index.html
+      - name: Backend regression
+        run: go test ./... -timeout 10m
+      - name: Wallet settlement on MySQL and PostgreSQL
+        run: |
+          TEST_TASK_DB_DIALECT=mysql go test ./controller -run TestImmediateTaskSettlementDatabase -count=1 -v
+          TEST_TASK_DB_DIALECT=postgres go test ./controller -run TestImmediateTaskSettlementDatabase -count=1 -v
