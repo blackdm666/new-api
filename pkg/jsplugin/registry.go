@@ -97,6 +97,9 @@ type Meta struct {
 	Author               AuthorMeta                  `json:"author"`
 	BaseURL              string                      `json:"baseUrl,omitempty"`
 	ChannelTypes         []int                       `json:"channelTypes,omitempty"`
+	// DynamicModels allows a protocol plugin to bind models from enabled
+	// channels at runtime instead of claiming a global fixed model list.
+	DynamicModels        bool                        `json:"dynamicModels,omitempty"`
 	Models               []string                    `json:"models"`
 	FetchMode            string                      `json:"fetchMode"`
 	AllowedHosts         []string                    `json:"allowedHosts"`
@@ -975,7 +978,7 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	for field := range object {
 		switch field {
-		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
+		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "dynamicModels", "models", "fetchMode", "allowedHosts", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
 		default:
 			return Meta{}, &UnknownMetaFieldError{Field: field}
 		}
@@ -1038,6 +1041,13 @@ func decodeMeta(value any) (Meta, error) {
 	meta.ChannelTypes, err = integerSliceMetaField(object, "channelTypes")
 	if err != nil {
 		return Meta{}, err
+	}
+	if raw, exists := object["dynamicModels"]; exists {
+		value, ok := raw.(bool)
+		if !ok {
+			return Meta{}, fmt.Errorf("plugin meta dynamicModels must be a boolean")
+		}
+		meta.DynamicModels = value
 	}
 	if meta.FetchMode, err = stringMetaField(object, "fetchMode"); err != nil {
 		return Meta{}, err
@@ -1245,7 +1255,7 @@ func normalizeV1Meta(meta *Meta) error {
 	if meta.FetchMode != "per_task" && meta.FetchMode != "batch" {
 		return fmt.Errorf("plugin meta fetchMode must be per_task or batch")
 	}
-	if len(meta.Models) == 0 {
+	if len(meta.Models) == 0 && !meta.DynamicModels {
 		return fmt.Errorf("plugin meta models must contain at least one model")
 	}
 	seenChannelTypes := make(map[int]struct{}, len(meta.ChannelTypes))

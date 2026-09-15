@@ -10,7 +10,7 @@ import (
 )
 
 func TestXinMengWan3TaskPlugin(t *testing.T) {
-	source, err := os.ReadFile("../../plugins/tasks/xinmeng-wan3/plugin.js")
+	source, err := os.ReadFile("../../plugins/tasks/xinmeng-video/plugin.js")
 	require.NoError(t, err)
 	registry := NewRegistry()
 	plugin, err := registry.Register(string(source), Options{})
@@ -79,7 +79,10 @@ func TestXinMengWan3TaskPlugin(t *testing.T) {
 	})
 	_, claimed := registry.Generation().GetByModel("doubao-seedance-2.5")
 	assert.False(t, claimed, "unrelated provider aliases must not be claimed")
-	assert.Len(t, plugin.Meta.Models, 19)
+	assert.Empty(t, plugin.Meta.Models)
+	assert.True(t, plugin.Meta.DynamicModels)
+	_, claimsH3 := registry.Generation().GetByModel("minimax-h3-768p")
+	assert.False(t, claimsH3, "H3 must resolve through the DMC channel alias, not XinMeng ownership")
 	assert.Empty(t, plugin.Meta.UsageExamples, "do not restore the removed pricing examples")
 	t.Run("all sales models preserve billing identity and fixed quality", func(t *testing.T) {
 		for _, tc := range []struct {
@@ -164,7 +167,8 @@ func TestXinMengWan3TaskPlugin(t *testing.T) {
 			{"seedance-2.0-mini-720p", map[string]any{"prompt": "test", "generate_audio": false}},
 			{"wan3.0-video-720p", map[string]any{"firstFrame": "https://example.com/a.png", "images": []string{"https://example.com/b.png"}}},
 			{"wan3.0-video-720p", map[string]any{"prompt": "test", "metadata": "[]"}},
-			{"__proto__", map[string]any{"prompt": "test"}},
+			// Unknown names are accepted by the dynamic channel adapter and are
+			// resolved through the channel's model mapping.
 			{"wan3.0-video-720p", map[string]any{"prompt": "test", "callback_url": "https://example.com/callback"}},
 		} {
 			_, err := plugin.Engine.Call(ctx, "decodeRequest", map[string]any{"model": tc.model, "body": map[string]any{"kind": "json", "value": tc.input}})

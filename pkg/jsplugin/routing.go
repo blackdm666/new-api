@@ -492,6 +492,33 @@ func (g *RoutingGeneration) LookupEndpointCandidates(method, path, model string)
 	return append([]ProtocolBinding(nil), bindings...)
 }
 
+// LookupDynamicEndpointCandidates returns protocol candidates from plugins
+// that explicitly opt into channel-scoped model discovery. Dynamic plugins do
+// not claim a global model name; the channel selector supplies the concrete
+// model and plugin identity later in the request pipeline.
+func (g *RoutingGeneration) LookupDynamicEndpointCandidates(method, path string) []ProtocolBinding {
+	if g == nil {
+		return nil
+	}
+	protocolName, definition, known := LookupHostProtocolOperation(method, path)
+	if !known {
+		return nil
+	}
+	result := make([]ProtocolBinding, 0)
+	for _, plugin := range g.plugins {
+		if plugin == nil || !plugin.Meta.DynamicModels {
+			continue
+		}
+		for _, claim := range plugin.Meta.Protocols {
+			if claim.Name != protocolName {
+				continue
+			}
+			result = append(result, ProtocolBinding{Plugin: plugin, Protocol: claim.Name, Operation: definition})
+		}
+	}
+	return result
+}
+
 func (g *RoutingGeneration) Plugins() []*LoadedPlugin {
 	if g == nil {
 		return nil

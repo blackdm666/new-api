@@ -42,16 +42,19 @@ addModel("Seedance-2.0-fast-720p官方版", "doubao-seedance-2-0-fast-720p", "72
 addModel("minimax-h3-768p", "minimax-h3-768p", "768p", { defaultDuration: 4,
   ratios: ["1:1", "16:9", "9:16"], maxPrompt: 2500, images: 10, videos: 5,
   audios: 5, visualWithAudio: true });
-const MODELS = Object.keys(MODEL_CONFIGS);
+// H3 is served by the DMC plugin through a channel alias. Declaring its public
+// name here would shadow that alias even without an enabled XinMeng H3 channel.
+const MODELS = Object.keys(MODEL_CONFIGS).filter(function (model) { return model !== "minimax-h3-768p"; });
 
 export const meta = {
   apiVersion: 1,
-  key: "xinmeng-wan3",
-  name: "XinMeng Video",
-  version: "2.0.1",
+  key: "xinmeng-video",
+  name: "88API渠道集成插件",
+  version: "2.0.2",
   author: { name: "88API" },
   description: { en: "Video generation through XinMeng", zh: "通过 XinMeng 生成视频" },
-  models: MODELS,
+  models: [],
+  dynamicModels: true,
   fetchMode: "per_task",
   protocols: ["openai_video"],
   usageSchema: {
@@ -83,8 +86,17 @@ function secondsFor(req, cfg) {
   return seconds;
 }
 function modelConfig(model) {
-  if (!Object.prototype.hasOwnProperty.call(MODEL_CONFIGS, model)) throw new Error("unsupported XinMeng sales model: " + model);
-  return MODEL_CONFIGS[model];
+  if (Object.prototype.hasOwnProperty.call(MODEL_CONFIGS, model)) return MODEL_CONFIGS[model];
+  // Dynamic channel models use the standard XinMeng video contract. Keep
+  // strict overrides for known special models, while allowing newly exposed
+  // single-resolution models to flow through the generic protocol adapter.
+  return {
+    upstream: model, resolution: "720p", defaultDuration: 5, minDuration: 1,
+    maxDuration: 30, defaultRatio: "16:9", ratios: RATIOS, maxPrompt: 5000,
+    images: 30, videos: 10, audios: 10, framesExclusive: false,
+    promptless: false, nativeMedia: false, generateAudio: false,
+    visualWithAudio: false, totalMedia: 0,
+  };
 }
 function payloadFor(req, model, upstreamModel) {
   const cfg = modelConfig(model);

@@ -361,8 +361,18 @@ func PinTaskPluginEndpoint() gin.HandlerFunc {
 				rewriteTo = target.Alias
 			}
 		}
-		binding, found := generation.LookupEndpoint(c.Request.Method, c.Request.URL.Path, lookupModel)
-		if !found || binding.Plugin == nil {
+	binding, found := generation.LookupEndpoint(c.Request.Method, c.Request.URL.Path, lookupModel)
+	if !found {
+		dynamic := generation.LookupDynamicEndpointCandidates(c.Request.Method, c.Request.URL.Path)
+		if len(dynamic) > 0 {
+			// Dynamic plugins defer model ownership to channel selection. The
+			// concrete model is kept in the request and candidates are filtered
+			// later by channel/plugin identity.
+			binding = dynamic[0]
+			found = true
+		}
+	}
+	if !found || binding.Plugin == nil {
 			c.Set(contextKeyTaskPluginEndpointModel, *modelRequest)
 			c.Next()
 			return
@@ -376,6 +386,9 @@ func PinTaskPluginEndpoint() gin.HandlerFunc {
 		modelRequest.Model = pinModel
 		c.Set(contextKeyTaskPluginEndpointModel, *modelRequest)
 		candidates := generation.LookupEndpointCandidates(c.Request.Method, c.Request.URL.Path, lookupModel)
+		if len(candidates) == 0 {
+			candidates = generation.LookupDynamicEndpointCandidates(c.Request.Method, c.Request.URL.Path)
+		}
 		if len(candidates) == 0 {
 			candidates = []pluginruntime.ProtocolBinding{binding}
 		}
@@ -640,7 +653,7 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 			} else if model, _ := result["model"].(string); strings.TrimSpace(model) == "" {
 				reason = "invalid_model"
 				detail = "decoded request is missing a model"
-			} else if model != pinned.Model || (pinned.MappedModel == "" && !slices.Contains(candidate.Plugin.Meta.Models, model)) {
+			} else if model != pinned.Model || (pinned.MappedModel == "" && !candidate.Plugin.Meta.DynamicModels && !slices.Contains(candidate.Plugin.Meta.Models, model)) {
 				reason = "resolved_model_not_owned"
 				detail = fmt.Sprintf("model %q is not served by this plugin", model)
 			}

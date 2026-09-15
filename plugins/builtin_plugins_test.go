@@ -77,10 +77,13 @@ func TestBuiltInTaskPluginResponsesAndUsageContracts(t *testing.T) {
 			actualKeys = append(actualKeys, entry.Name())
 		}
 	}
-	assert.Equal(t, append(append([]string{}, expectedKeys...), "xinmeng-wan3"), actualKeys)
-	xinmeng, found := generation.Get("xinmeng-wan3")
+	assert.Equal(t, append(append([]string{}, expectedKeys...), "xinmeng-video"), actualKeys)
+	xinmeng, found := generation.Get("xinmeng-video")
 	require.True(t, found, "XinMeng must be included in the factory generation")
-	assert.Len(t, xinmeng.Meta.Models, 19)
+	assert.Empty(t, xinmeng.Meta.Models)
+	assert.True(t, xinmeng.Meta.DynamicModels)
+	_, claimsH3 := generation.LookupEndpoint("POST", "/v1/videos", "minimax-h3-768p")
+	assert.False(t, claimsH3, "factory XinMeng must not shadow the DMC H3 channel alias")
 	for _, model := range xinmeng.Meta.Models {
 		binding, claimed := generation.LookupEndpoint("POST", "/v1/videos", model)
 		require.True(t, claimed, model)

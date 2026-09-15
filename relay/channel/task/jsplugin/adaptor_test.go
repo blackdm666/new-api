@@ -1844,7 +1844,7 @@ func TestAlibabaSubmitDeltaDoesNotMutateControlState(t *testing.T) {
 }
 
 func TestXinMengPluginHostSubmitQueryAndUsage(t *testing.T) {
-	source, err := os.ReadFile("../../../../plugins/tasks/xinmeng-wan3/plugin.js")
+	source, err := os.ReadFile("../../../../plugins/tasks/xinmeng-video/plugin.js")
 	require.NoError(t, err)
 	plugin, err := pluginruntime.NewRegistry().Register(string(source), pluginruntime.Options{})
 	require.NoError(t, err)
