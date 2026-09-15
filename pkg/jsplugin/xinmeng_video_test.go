@@ -81,6 +81,7 @@ func TestXinMengWan3TaskPlugin(t *testing.T) {
 	assert.False(t, claimed, "unrelated provider aliases must not be claimed")
 	assert.Empty(t, plugin.Meta.Models)
 	assert.True(t, plugin.Meta.DynamicModels)
+	require.NotNil(t, registry.Snapshot().Override[0].Models, "empty dynamic model lists must serialize as arrays for channel options")
 	_, claimsH3 := registry.Generation().GetByModel("minimax-h3-768p")
 	assert.False(t, claimsH3, "H3 must resolve through the DMC channel alias, not XinMeng ownership")
 	assert.Empty(t, plugin.Meta.UsageExamples, "do not restore the removed pricing examples")

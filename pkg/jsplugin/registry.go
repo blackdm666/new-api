@@ -84,31 +84,31 @@ func (t *LocalizedText) UnmarshalJSON(data []byte) error {
 }
 
 type Meta struct {
-	RequiredCapabilities []string                    `json:"requiredCapabilities,omitempty"`
-	SubmitResponseTypes  []string                    `json:"submitResponseTypes,omitempty"`
-	SortPriority         int                         `json:"sortPriority,omitempty"`
-	Website              string                      `json:"website,omitempty"`
-	APIVersion           int                         `json:"apiVersion"`
-	Key                  string                      `json:"key"`
-	Name                 string                      `json:"name"`
-	Icon                 string                      `json:"icon,omitempty"`
-	Description          LocalizedText               `json:"description,omitempty"`
-	Version              string                      `json:"version"`
-	Author               AuthorMeta                  `json:"author"`
-	BaseURL              string                      `json:"baseUrl,omitempty"`
-	ChannelTypes         []int                       `json:"channelTypes,omitempty"`
+	RequiredCapabilities []string      `json:"requiredCapabilities,omitempty"`
+	SubmitResponseTypes  []string      `json:"submitResponseTypes,omitempty"`
+	SortPriority         int           `json:"sortPriority,omitempty"`
+	Website              string        `json:"website,omitempty"`
+	APIVersion           int           `json:"apiVersion"`
+	Key                  string        `json:"key"`
+	Name                 string        `json:"name"`
+	Icon                 string        `json:"icon,omitempty"`
+	Description          LocalizedText `json:"description,omitempty"`
+	Version              string        `json:"version"`
+	Author               AuthorMeta    `json:"author"`
+	BaseURL              string        `json:"baseUrl,omitempty"`
+	ChannelTypes         []int         `json:"channelTypes,omitempty"`
 	// DynamicModels allows a protocol plugin to bind models from enabled
 	// channels at runtime instead of claiming a global fixed model list.
-	DynamicModels        bool                        `json:"dynamicModels,omitempty"`
-	Models               []string                    `json:"models"`
-	FetchMode            string                      `json:"fetchMode"`
-	AllowedHosts         []string                    `json:"allowedHosts"`
-	Routes               []Route                     `json:"routes"`
-	Protocols            []ProtocolClaim             `json:"protocols"`
-	UsageSchema          map[string]UsageFieldSchema `json:"usageSchema,omitempty"`
-	UsageExamples        []UsageExample              `json:"usageExamples,omitempty"`
-	UsageProfiles        []UsageProfile              `json:"usageProfiles,omitempty"`
-	Auth                 AuthMeta                    `json:"auth"`
+	DynamicModels bool                        `json:"dynamicModels,omitempty"`
+	Models        []string                    `json:"models"`
+	FetchMode     string                      `json:"fetchMode"`
+	AllowedHosts  []string                    `json:"allowedHosts"`
+	Routes        []Route                     `json:"routes"`
+	Protocols     []ProtocolClaim             `json:"protocols"`
+	UsageSchema   map[string]UsageFieldSchema `json:"usageSchema,omitempty"`
+	UsageExamples []UsageExample              `json:"usageExamples,omitempty"`
+	UsageProfiles []UsageProfile              `json:"usageProfiles,omitempty"`
+	Auth          AuthMeta                    `json:"auth"`
 }
 
 // UsageProfile replaces the plugin's default usage metadata for its models.
@@ -835,7 +835,7 @@ func cloneMeta(meta Meta) Meta {
 	meta.SubmitResponseTypes = slices.Clone(meta.SubmitResponseTypes)
 	meta.RequiredCapabilities = slices.Clone(meta.RequiredCapabilities)
 	meta.ChannelTypes = append([]int(nil), meta.ChannelTypes...)
-	meta.Models = append([]string(nil), meta.Models...)
+	meta.Models = append([]string{}, meta.Models...)
 	meta.AllowedHosts = append([]string(nil), meta.AllowedHosts...)
 	meta.Routes = append([]Route(nil), meta.Routes...)
 	for index := range meta.Routes {

@@ -34,8 +34,9 @@ jobs:
         with:
           go-version-file: go.mod
       - run: mkdir -p web/dist && touch web/dist/index.html
-      - name: Backend regression
-        run: env -u TEST_MYSQL_DSN -u TEST_POSTGRES_DSN go test ./... -timeout 10m
+      # The CI workflow runs the full backend suite independently.
+      - name: Plugin routing and HTTP retry regression
+        run: env -u TEST_MYSQL_DSN -u TEST_POSTGRES_DSN go test ./pkg/jsplugin ./plugins ./model ./middleware ./controller ./relay ./relay/channel/task/jsplugin -run 'Dynamic|XinMeng|DMC|Builtin|TaskPlugin|TaskCandidate' -count=1 -timeout 10m
       - name: Dynamic routing and pricing on MySQL and PostgreSQL
         run: go test ./model -run TestDynamicPluginDatabaseMatrix -count=1 -v
       - name: Wallet settlement on MySQL and PostgreSQL
