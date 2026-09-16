@@ -87,6 +87,25 @@ func getTokenRequestUserGroup(c *gin.Context) (string, error) {
 	return model.GetUserGroup(c.GetInt("id"), false)
 }
 
+// validateTokenGroupForUser rejects unauthorized fixed groups before they are
+// persisted. Empty groups keep inheriting the user's group, while auto keeps
+// its existing per-subgroup validation.
+func validateTokenGroupForUser(c *gin.Context, group string) bool {
+	if group == "" || group == "auto" {
+		return true
+	}
+	userGroup, err := getTokenRequestUserGroup(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return false
+	}
+	if service.IsUserSelectableGroup(userGroup, group) {
+		return true
+	}
+	common.ApiErrorI18n(c, i18n.MsgDistributorGroupAccessDenied)
+	return false
+}
+
 func setTokenAutoGroups(c *gin.Context, token *model.Token, groups []string) bool {
 	if len(groups) == 0 {
 		if err := token.SetAutoGroups(nil); err != nil {
@@ -315,6 +334,9 @@ func AddToken(c *gin.Context) {
 		})
 		return
 	}
+	if !validateTokenGroupForUser(c, token.Group) {
+		return
+	}
 	if token.Group == "auto" {
 		if !setTokenAutoGroups(c, &token, request.AutoGroups.Groups) {
 			return
@@ -429,6 +451,9 @@ func UpdateToken(c *gin.Context) {
 	if statusOnly != "" {
 		cleanToken.Status = token.Status
 	} else {
+		if token.Group != cleanToken.Group && !validateTokenGroupForUser(c, token.Group) {
+			return
+		}
 		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
 		cleanToken.ExpiredTime = token.ExpiredTime
