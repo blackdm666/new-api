@@ -272,6 +272,25 @@ type InputTokenDetails struct {
 	ImageTokens      int `json:"image_tokens"`
 }
 
+// UnmarshalJSON accepts Qwen's OpenAI-compatible cache creation count. Normalize
+// it into the existing field so streaming merges and protocol conversions retain
+// it, without summing aliases that describe the same cache-write tokens.
+func (d *InputTokenDetails) UnmarshalJSON(data []byte) error {
+	type plainInputTokenDetails InputTokenDetails
+	decoded := struct {
+		plainInputTokenDetails
+		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+	}{plainInputTokenDetails: plainInputTokenDetails(*d)}
+	if err := kitutil.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*d = InputTokenDetails(decoded.plainInputTokenDetails)
+	if decoded.CacheCreationInputTokens != nil {
+		d.CachedCreationTokens = max(d.CachedCreationTokens, *decoded.CacheCreationInputTokens)
+	}
+	return nil
+}
+
 // CachedTokenDetails describes subsets of cached_tokens. Pointers distinguish
 // an unreported modality from an explicitly reported zero.
 type CachedTokenDetails struct {

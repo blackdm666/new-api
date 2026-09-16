@@ -760,6 +760,51 @@ func TestCacheWriteTokensTotal(t *testing.T) {
 	})
 }
 
+func TestQwenCacheCreationAliasReachesTieredBilling(t *testing.T) {
+	const expression = `tier("base", p * 0.8 + c * 2.7 + cr * 0.1 + cc * 1)`
+	for _, tc := range []struct {
+		name    string
+		details string
+		write   int
+		quota   int
+	}{
+		{"qwen alias", `"cache_creation_input_tokens":2000`, 2000, 1185},
+		{"duplicate aliases", `"cache_creation_input_tokens":2000,"cached_creation_tokens":2000,"cache_write_tokens":2000`, 2000, 1185},
+		{"larger canonical value", `"cache_creation_input_tokens":1500,"cached_creation_tokens":2000`, 2000, 1185},
+		{"larger native value", `"cache_creation_input_tokens":1500,"cache_write_tokens":2000`, 2000, 1185},
+		{"absent creation", `"text_tokens":3000`, 0, 985},
+		{"zero creation", `"cache_creation_input_tokens":0`, 0, 985},
+		{"negative creation", `"cache_creation_input_tokens":-2000`, 0, 985},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, responses := range []bool{false, true} {
+				var usage dto.Usage
+				details := `{"cached_tokens":1000,` + tc.details + `}`
+				if responses {
+					var response dto.OpenAIResponsesResponse
+					require.NoError(t, common.Unmarshal([]byte(`{"usage":{"input_tokens":3000,"output_tokens":100,"input_tokens_details":`+details+`}}`), &response))
+					require.NotNil(t, response.Usage.InputTokensDetails)
+					usage = dto.Usage{PromptTokens: response.Usage.InputTokens, CompletionTokens: response.Usage.OutputTokens, PromptTokensDetails: *response.Usage.InputTokensDetails}
+				} else {
+					require.NoError(t, common.Unmarshal([]byte(`{"prompt_tokens":3000,"completion_tokens":100,"prompt_tokens_details":`+details+`}`), &usage))
+				}
+				// Streaming usage snapshots must preserve the normalized count,
+				// including when the final upstream snapshot reports zeros.
+				merged := dto.MergeUsageNonZero(nil, &usage)
+				merged = dto.MergeUsageNonZero(merged, &dto.Usage{})
+				require.Equal(t, tc.write, merged.PromptTokensDetails.CacheCreationTokensTotal())
+				params := BuildTieredTokenParams(merged, false, billingexpr.UsedVars(expression))
+				result, err := billingexpr.ComputeTieredQuotaWithRequest(&billingexpr.BillingSnapshot{
+					ExprString: expression, ExprHash: billingexpr.ExprHashString(expression), ExprVersion: 1,
+					QuotaPerUnit: 500000, GroupRatio: 1,
+				}, params, billingexpr.RequestInput{})
+				require.NoError(t, err)
+				assert.Equal(t, tc.quota, result.ActualQuotaAfterGroup)
+			}
+		})
+	}
+}
+
 func TestCalculateTextQuotaSummaryHandlesLegacyClaudeDerivedOpenAIUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
