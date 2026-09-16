@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Delete version {{version}}": "删除版本 {{version}}",
+    "Delete {{name}} ({{key}}), version {{version}}?": "删除 {{name}}（{{key}}）的 {{version}} 版本？",
+    "Only the selected version will be deleted.": "仅删除选中的版本。",
+    "Deleting the current version switches to another installed version when available.": "删除当前版本后，若还有其他已安装版本，系统会切换到其中一版。",
+    "If no versions remain, historical tasks using this plugin may become unavailable.": "如果没有剩余版本，使用此插件的历史任务可能无法访问。",
+    "Deleted version {{version}}. Current version is now {{currentVersion}}.": "已删除版本 {{version}}，当前版本已切换为 {{currentVersion}}。",
+    "Deleted version {{version}}. The built-in plugin is retained.": "已删除版本 {{version}}，内置插件仍保留。",
+    "Deleted version {{version}}. No custom versions remain.": "已删除版本 {{version}}，已无剩余自定义版本。",
+    "Deleted version {{version}}.": "已删除版本 {{version}}。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

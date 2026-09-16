@@ -27,6 +27,7 @@ import type {
   TaskPluginRecord,
   TaskPluginUsage,
   TaskPluginDryRunRequest,
+  TaskPluginDeleteResult,
 } from './types'
 
 const mutationConfig: ApiRequestConfig = {
@@ -173,11 +174,11 @@ export async function deleteTaskPluginVersion(
   version: string,
   force = false
 ) {
-  const response = await api.delete<ApiResponse<null>>(
+  const response = await api.delete<ApiResponse<TaskPluginDeleteResult | null>>(
     `/api/plugin/task/${encodeURIComponent(key)}/versions/${encodeURIComponent(version)}`,
     { ...mutationConfig, params: force ? { force: true } : undefined }
   )
-  requireSuccess(response.data)
+  return requireSuccess(response.data)
 }
 
 export async function getTaskPluginEnabledOption() {

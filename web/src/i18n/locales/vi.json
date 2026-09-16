@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Delete version {{version}}": "Xóa phiên bản {{version}}",
+    "Delete {{name}} ({{key}}), version {{version}}?": "Xóa phiên bản {{version}} của {{name}} ({{key}})?",
+    "Only the selected version will be deleted.": "Chỉ phiên bản đã chọn sẽ bị xóa.",
+    "Deleting the current version switches to another installed version when available.": "Xóa phiên bản hiện tại sẽ chuyển sang phiên bản đã cài đặt khác nếu có.",
+    "If no versions remain, historical tasks using this plugin may become unavailable.": "Nếu không còn phiên bản nào, các tác vụ cũ sử dụng plugin này có thể không truy cập được.",
+    "Deleted version {{version}}. Current version is now {{currentVersion}}.": "Đã xóa phiên bản {{version}}. Phiên bản hiện tại là {{currentVersion}}.",
+    "Deleted version {{version}}. The built-in plugin is retained.": "Đã xóa phiên bản {{version}}. Plugin tích hợp vẫn được giữ lại.",
+    "Deleted version {{version}}. No custom versions remain.": "Đã xóa phiên bản {{version}}. Không còn phiên bản tùy chỉnh nào.",
+    "Deleted version {{version}}.": "Đã xóa phiên bản {{version}}.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

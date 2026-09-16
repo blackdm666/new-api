@@ -440,7 +440,7 @@ func DeleteTaskPluginVersion(c *gin.Context) {
 			return
 		}
 	}
-	_, err := model.DeleteTaskPluginVersion(key, version)
+	deleted, err := model.DeleteTaskPluginVersion(key, version)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.ApiErrorMsg(c, "override plugin version not found; factory plugins cannot be deleted")
@@ -453,7 +453,18 @@ func DeleteTaskPluginVersion(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, nil)
+	promotedVersion := ""
+	if deleted.Promoted != nil {
+		promotedVersion = deleted.Promoted.Version
+	}
+	lastCustomVersion := deleted.DeletedActive && deleted.Promoted == nil
+	hasFactory := taskPluginHasFactory(key)
+	common.ApiSuccess(c, gin.H{
+		"deleted_version":  version,
+		"promoted_version": promotedVersion,
+		"factory_fallback": lastCustomVersion && hasFactory,
+		"plugin_removed":   lastCustomVersion && !hasFactory,
+	})
 }
 
 type taskPluginActivateRequest struct {

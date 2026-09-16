@@ -1,5 +1,23 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RotateCcw, X } from 'lucide-react'
+import { RotateCcw, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -28,24 +46,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import { handleServerError } from '@/lib/handle-server-error'
 import { resolveLocalizedText } from '@/lib/localized-text'
 
@@ -60,6 +60,7 @@ import { PluginIcon } from './plugin-icon'
 import { PluginMetadataCard } from './plugin-metadata-card'
 import { PluginModelList } from './plugin-model-list'
 import { PluginSandbox } from './plugin-sandbox'
+import { PluginVersionDeleteDialog } from './plugin-version-delete-dialog'
 import { SourceDiff } from './source-diff'
 import { UsageSchemaTable } from './usage-schema-table'
 
@@ -75,19 +76,27 @@ export function PluginDetailSheet(props: PluginDetailSheetProps) {
         <PluginDetailContent
           key={props.plugin.meta.key}
           plugin={props.plugin}
+          onDeletedLastVersion={() => props.onOpenChange(false)}
         />
       )}
     </Sheet>
   )
 }
 
-function PluginDetailContent(props: { plugin: TaskPluginListItem }) {
+function PluginDetailContent(props: {
+  plugin: TaskPluginListItem
+  onDeletedLastVersion: () => void
+}) {
   const { t, i18n } = useTranslation()
   const queryClient = useQueryClient()
   const key = props.plugin?.meta.key ?? ''
   const [activeTab, setActiveTab] = useState('overview')
   const [sandboxVisited, setSandboxVisited] = useState(false)
   const [compareVersion, setCompareVersion] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<{
+    version: string
+    active: boolean
+  } | null>(null)
   const detailQuery = useQuery({
     queryKey: ['task-plugin', key],
     queryFn: () => getTaskPlugin(key),
@@ -297,15 +306,38 @@ function PluginDetailContent(props: { plugin: TaskPluginListItem }) {
                       {version.active ? <Badge>{t('Active')}</Badge> : '—'}
                     </TableCell>
                     <TableCell className='text-right'>
-                      <Button
-                        size='sm'
-                        variant='outline'
-                        disabled={version.active || activateMutation.isPending}
-                        onClick={() => activateMutation.mutate(version.version)}
-                      >
-                        <RotateCcw />
-                        {t('Activate / Roll back')}
-                      </Button>
+                      <div className='flex flex-wrap justify-end gap-2'>
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          disabled={
+                            version.active || activateMutation.isPending
+                          }
+                          onClick={() =>
+                            activateMutation.mutate(version.version)
+                          }
+                        >
+                          <RotateCcw />
+                          {t('Activate / Roll back')}
+                        </Button>
+                        <Button
+                          size='sm'
+                          variant='destructive'
+                          aria-label={t('Delete version {{version}}', {
+                            version: version.version,
+                          })}
+                          disabled={activateMutation.isPending}
+                          onClick={() =>
+                            setDeleteTarget({
+                              version: version.version,
+                              active: version.active,
+                            })
+                          }
+                        >
+                          <Trash2 />
+                          {t('Delete')}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -362,6 +394,24 @@ function PluginDetailContent(props: { plugin: TaskPluginListItem }) {
           {sandboxVisited && <PluginSandbox pluginKey={key} />}
         </TabsContent>
       </Tabs>
+      {deleteTarget && (
+        <PluginVersionDeleteDialog
+          key={deleteTarget.version}
+          pluginKey={key}
+          name={detail?.meta.name ?? props.plugin.meta.name}
+          version={deleteTarget.version}
+          active={deleteTarget.active}
+          hasFactoryFallback={
+            Boolean(props.plugin.factory_meta) ||
+            props.plugin.source === 'factory'
+          }
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={(result) => {
+            setCompareVersion('')
+            if (result?.plugin_removed) props.onDeletedLastVersion()
+          }}
+        />
+      )}
     </SheetContent>
   )
 }

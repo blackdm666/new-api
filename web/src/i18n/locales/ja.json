@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Delete version {{version}}": "バージョン {{version}} を削除",
+    "Delete {{name}} ({{key}}), version {{version}}?": "{{name}}（{{key}}）のバージョン {{version}} を削除しますか？",
+    "Only the selected version will be deleted.": "選択したバージョンのみ削除されます。",
+    "Deleting the current version switches to another installed version when available.": "現在のバージョンを削除すると、他のインストール済みバージョンがあれば切り替わります。",
+    "If no versions remain, historical tasks using this plugin may become unavailable.": "バージョンが残っていない場合、このプラグインを使用した過去のタスクにアクセスできなくなる可能性があります。",
+    "Deleted version {{version}}. Current version is now {{currentVersion}}.": "バージョン {{version}} を削除しました。現在のバージョンは {{currentVersion}} です。",
+    "Deleted version {{version}}. The built-in plugin is retained.": "バージョン {{version}} を削除しました。組み込みプラグインは保持されます。",
+    "Deleted version {{version}}. No custom versions remain.": "バージョン {{version}} を削除しました。カスタムバージョンは残っていません。",
+    "Deleted version {{version}}.": "バージョン {{version}} を削除しました。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

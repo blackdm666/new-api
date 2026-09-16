@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Delete version {{version}}": "Supprimer la version {{version}}",
+    "Delete {{name}} ({{key}}), version {{version}}?": "Supprimer la version {{version}} de {{name}} ({{key}}) ?",
+    "Only the selected version will be deleted.": "Seule la version sélectionnée sera supprimée.",
+    "Deleting the current version switches to another installed version when available.": "La suppression de la version actuelle active une autre version installée si disponible.",
+    "If no versions remain, historical tasks using this plugin may become unavailable.": "Si aucune version ne reste, les anciennes tâches utilisant ce plugin peuvent devenir inaccessibles.",
+    "Deleted version {{version}}. Current version is now {{currentVersion}}.": "Version {{version}} supprimée. La version actuelle est maintenant {{currentVersion}}.",
+    "Deleted version {{version}}. The built-in plugin is retained.": "Version {{version}} supprimée. Le plugin intégré est conservé.",
+    "Deleted version {{version}}. No custom versions remain.": "Version {{version}} supprimée. Aucune version personnalisée ne reste.",
+    "Deleted version {{version}}.": "Version {{version}} supprimée.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

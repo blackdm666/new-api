@@ -442,12 +442,42 @@ func TestDeleteActiveOverrideFallsBackToFactoryAndDeletesRecord(t *testing.T) {
 	DeleteTaskPluginVersion(context)
 
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Contains(t, recorder.Body.String(), `"factory_fallback":true`)
+	assert.Contains(t, recorder.Body.String(), `"plugin_removed":false`)
 	versions, err := model.ListTaskPluginVersions("kling")
 	require.NoError(t, err)
 	assert.Empty(t, versions)
 	runtimePlugin, ok := jsplugin.DefaultRegistry.Get("kling")
 	require.True(t, ok)
 	assert.NotEqual(t, loaded.Meta.Version, runtimePlugin.Meta.Version)
+}
+
+func TestDeleteTaskPluginVersionReportsRemainingVersion(t *testing.T) {
+	setupTaskPluginControllerTest(t)
+	const key = "delete-result-probe"
+	cleanupTaskPluginControllerRuntime(t, key)
+	for _, version := range []string{"1.0.0", "2.0.0", "3.0.0"} {
+		source := taskPluginControllerTestSource(key, version)
+		require.NoError(t, model.SaveTaskPlugin(&model.TaskPlugin{
+			Key: key, APIVersion: 1, Version: version, Source: source, SourceHash: version, Enabled: true,
+		}))
+	}
+	for _, tc := range []struct {
+		version, promoted string
+		removed           bool
+	}{
+		{version: "2.0.0"},
+		{version: "1.0.0", promoted: "3.0.0"},
+		{version: "3.0.0", removed: true},
+	} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Params = gin.Params{{Key: "key", Value: key}, {Key: "version", Value: tc.version}}
+		c.Request = httptest.NewRequest(http.MethodDelete, "/api/plugin/task/"+key+"/versions/"+tc.version, nil)
+		DeleteTaskPluginVersion(c)
+		assert.JSONEq(t, fmt.Sprintf(`{"success":true,"message":"","data":{"deleted_version":%q,"promoted_version":%q,"factory_fallback":false,"plugin_removed":%t}}`,
+			tc.version, tc.promoted, tc.removed), recorder.Body.String())
+	}
 }
 
 func TestDeleteActiveTaskPluginPromotesEnabledVersionInRuntime(t *testing.T) {

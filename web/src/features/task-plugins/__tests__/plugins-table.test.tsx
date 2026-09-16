@@ -19,7 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, expect, test, vi } from 'vitest'
+import { toast } from 'sonner'
+import { afterEach, assert, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 
@@ -244,3 +245,55 @@ test.each(['factory', 'override_over_factory'] as const)(
     }
   }
 )
+
+test('deleting the current version explains the fallback and refreshes the displayed version', async () => {
+  const user = userEvent.setup()
+  renderPlugins(false, 'table')
+  const original = clients
+    .at(-1)
+    ?.getQueryData<TaskPluginListItem[]>(['task-plugins'])?.[0]
+  assert.isDefined(original)
+  vi.mocked(api.get).mockResolvedValue({
+    data: {
+      success: true,
+      data: [{ ...original, meta: { ...original.meta, version: '0.9.0' } }],
+    },
+  })
+  const remove = vi.spyOn(api, 'delete').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        deleted_version: '1.0.0',
+        promoted_version: '0.9.0',
+        factory_fallback: false,
+        plugin_removed: false,
+      },
+    },
+  })
+  const notify = vi.spyOn(toast, 'success')
+  await user.click(screen.getAllByRole('button', { name: 'Open menu' })[0])
+  await user.click(
+    screen.getByRole('menuitem', { name: 'Delete active custom version' })
+  )
+  const dialog = await screen.findByRole('alertdialog', {
+    name: 'Delete plugin version?',
+  })
+  expect(dialog).toHaveTextContent('1.0.0')
+  expect(dialog).toHaveTextContent(
+    'Deleting the current version switches to another installed version when available.'
+  )
+  await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+  await waitFor(() =>
+    expect(remove).toHaveBeenCalledExactlyOnceWith(
+      '/api/plugin/task/example/versions/1.0.0',
+      expect.any(Object)
+    )
+  )
+  await waitFor(() =>
+    expect(notify).toHaveBeenCalledWith(
+      'Deleted version 1.0.0. Current version is now 0.9.0.'
+    )
+  )
+  expect(await screen.findByText('0.9.0')).toBeVisible()
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+})

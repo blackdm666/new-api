@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Delete version {{version}}": "Удалить версию {{version}}",
+    "Delete {{name}} ({{key}}), version {{version}}?": "Удалить версию {{version}} плагина {{name}} ({{key}})?",
+    "Only the selected version will be deleted.": "Будет удалена только выбранная версия.",
+    "Deleting the current version switches to another installed version when available.": "После удаления текущей версии система переключится на другую установленную версию, если она есть.",
+    "If no versions remain, historical tasks using this plugin may become unavailable.": "Если версий не останется, старые задачи этого плагина могут стать недоступны.",
+    "Deleted version {{version}}. Current version is now {{currentVersion}}.": "Версия {{version}} удалена. Текущая версия: {{currentVersion}}.",
+    "Deleted version {{version}}. The built-in plugin is retained.": "Версия {{version}} удалена. Встроенный плагин сохранён.",
+    "Deleted version {{version}}. No custom versions remain.": "Версия {{version}} удалена. Пользовательских версий больше нет.",
+    "Deleted version {{version}}.": "Версия {{version}} удалена.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

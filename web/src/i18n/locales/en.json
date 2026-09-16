@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Delete version {{version}}": "Delete version {{version}}",
+    "Delete {{name}} ({{key}}), version {{version}}?": "Delete {{name}} ({{key}}), version {{version}}?",
+    "Only the selected version will be deleted.": "Only the selected version will be deleted.",
+    "Deleting the current version switches to another installed version when available.": "Deleting the current version switches to another installed version when available.",
+    "If no versions remain, historical tasks using this plugin may become unavailable.": "If no versions remain, historical tasks using this plugin may become unavailable.",
+    "Deleted version {{version}}. Current version is now {{currentVersion}}.": "Deleted version {{version}}. Current version is now {{currentVersion}}.",
+    "Deleted version {{version}}. The built-in plugin is retained.": "Deleted version {{version}}. The built-in plugin is retained.",
+    "Deleted version {{version}}. No custom versions remain.": "Deleted version {{version}}. No custom versions remain.",
+    "Deleted version {{version}}.": "Deleted version {{version}}.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

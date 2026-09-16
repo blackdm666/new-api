@@ -21,7 +21,6 @@ import type { ColumnDef, ColumnFiltersState } from '@tanstack/react-table'
 import { Eye, MoreHorizontal, Trash2, Upload } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { DataTablePage, useDataTable } from '@/components/data-table'
@@ -39,7 +38,6 @@ import { handleServerError } from '@/lib/handle-server-error'
 import { resolveLocalizedText } from '@/lib/localized-text'
 
 import {
-  deleteTaskPluginVersion,
   listTaskPlugins,
   setTaskPluginStatus,
   TaskPluginUsageError,
@@ -48,6 +46,7 @@ import { isStaleFactoryOverride } from '../lib/marketplace'
 import type { TaskPluginListItem, TaskPluginUsage } from '../types'
 import { PluginCard } from './plugin-card'
 import { PluginIcon } from './plugin-icon'
+import { PluginVersionDeleteDialog } from './plugin-version-delete-dialog'
 import { PluginWebsiteLink } from './plugin-website-link'
 
 const VIEW_MODE_STORAGE_KEY = 'task-plugins-view-mode'
@@ -64,9 +63,7 @@ export function PluginsTable(props: PluginsTableProps) {
     null
   )
   const [blockedUsage, setBlockedUsage] = useState<TaskPluginUsage | null>(null)
-  const [blockedAction, setBlockedAction] = useState<
-    'delete' | 'disable' | null
-  >(null)
+  const [blockedAction, setBlockedAction] = useState<'disable' | null>(null)
   const [statusTarget, setStatusTarget] = useState<TaskPluginListItem | null>(
     null
   )
@@ -100,23 +97,6 @@ export function PluginsTable(props: PluginsTableProps) {
         setStatusConfirmation(null)
         setBlockedUsage(error.usage)
         setBlockedAction('disable')
-        return
-      }
-      handleServerError(error)
-    },
-  })
-  const deleteMutation = useMutation({
-    mutationFn: (plugin: TaskPluginListItem) =>
-      deleteTaskPluginVersion(plugin.meta.key, plugin.meta.version),
-    onSuccess: () => {
-      setDeleteTarget(null)
-      toast.success(t('Plugin version deleted'))
-      queryClient.invalidateQueries({ queryKey: ['task-plugins'] })
-    },
-    onError: (error) => {
-      if (error instanceof TaskPluginUsageError) {
-        setBlockedUsage(error.usage)
-        setBlockedAction('delete')
         return
       }
       handleServerError(error)
@@ -327,7 +307,6 @@ export function PluginsTable(props: PluginsTableProps) {
     withPaginationRowModel: true,
     withSortedRowModel: true,
   })
-  const hasFactoryFallback = Boolean(deleteTarget?.factory_meta)
   const usageDescription = blockedUsage ? (
     <div className='space-y-2'>
       <p>
@@ -405,28 +384,17 @@ export function PluginsTable(props: PluginsTableProps) {
           })
         }}
       />
-      <ConfirmDialog
-        open={Boolean(deleteTarget)}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null)
-        }}
-        title={t('Delete plugin version?')}
-        destructive
-        isLoading={deleteMutation.isPending}
-        confirmText={t('Delete')}
-        handleConfirm={() => {
-          if (deleteTarget) deleteMutation.mutate(deleteTarget)
-        }}
-        desc={
-          hasFactoryFallback
-            ? t(
-                'Deleting this custom version does not disable the platform. The same-name factory plugin will be restored automatically.'
-              )
-            : t(
-                'This plugin has no factory fallback. Deleting or disabling it makes this platform unavailable.'
-              )
-        }
-      />
+      {deleteTarget && (
+        <PluginVersionDeleteDialog
+          key={`${deleteTarget.meta.key}/${deleteTarget.meta.version}`}
+          pluginKey={deleteTarget.meta.key}
+          name={deleteTarget.meta.name}
+          version={deleteTarget.meta.version}
+          active={deleteTarget.active}
+          hasFactoryFallback={Boolean(deleteTarget.factory_meta)}
+          onClose={() => setDeleteTarget(null)}
+        />
+      )}
       <ConfirmDialog
         open={Boolean(blockedAction)}
         onOpenChange={(open) => {
@@ -459,21 +427,6 @@ export function PluginsTable(props: PluginsTableProps) {
           <Button
             variant='destructive'
             onClick={() => {
-              if (blockedAction === 'delete' && deleteTarget) {
-                deleteTaskPluginVersion(
-                  deleteTarget.meta.key,
-                  deleteTarget.meta.version,
-                  true
-                )
-                  .then(() => {
-                    setBlockedAction(null)
-                    setDeleteTarget(null)
-                    queryClient.invalidateQueries({
-                      queryKey: ['task-plugins'],
-                    })
-                  })
-                  .catch((error: Error) => handleServerError(error))
-              }
               if (blockedAction === 'disable' && statusTarget) {
                 statusMutation.mutate({
                   key: statusTarget.meta.key,

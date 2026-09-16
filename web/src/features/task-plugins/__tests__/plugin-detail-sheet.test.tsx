@@ -55,12 +55,17 @@ function makeItem(): TaskPluginListItem {
   }
 }
 
-function renderSheet(metaOverrides: Partial<TaskPluginMeta>) {
+function renderSheet(
+  metaOverrides: Partial<TaskPluginMeta>,
+  source: TaskPluginListItem['source'] = 'factory',
+  onOpenChange: (open: boolean) => void = () => undefined
+) {
   const item = makeItem()
+  item.source = source
   const detail: TaskPluginDetail = {
     meta: { ...item.meta, ...metaOverrides },
     source: '',
-    layer: 'factory',
+    layer: source === 'factory' ? 'factory' : 'override',
   }
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -70,13 +75,175 @@ function renderSheet(metaOverrides: Partial<TaskPluginMeta>) {
   queryClient.setQueryData(['task-plugin', item.meta.key], detail)
   queryClient.setQueryData(['task-plugin-versions', item.meta.key], [])
   queryClients.push(queryClient)
+  function TestSheet() {
+    const [open, setOpen] = useState(true)
+    return (
+      <PluginDetailSheet
+        plugin={open ? item : null}
+        onOpenChange={(value) => {
+          onOpenChange(value)
+          setOpen(value)
+        }}
+      />
+    )
+  }
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <PluginDetailSheet plugin={item} onOpenChange={() => undefined} />
+      <TestSheet />
     </QueryClientProvider>
   )
   return { ...view, queryClient, item, detail }
 }
+
+test('deleting a historical version requires confirmation and preserves the current version', async () => {
+  const user = userEvent.setup()
+  const fixture = renderSheet({}, 'override')
+  const current = { id: 1, version: '1.2.3', active: true }
+  await act(async () => {
+    fixture.queryClient.setQueryData(
+      ['task-plugin-versions', 'kling'],
+      [current, { id: 2, version: '1.0.0', active: false }]
+    )
+  })
+  vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+    data: {
+      success: true,
+      data: String(url).endsWith('/versions') ? [current] : fixture.detail,
+    },
+  }))
+  const remove = vi.spyOn(api, 'delete').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        deleted_version: '1.0.0',
+        promoted_version: '',
+        factory_fallback: false,
+        plugin_removed: false,
+      },
+    },
+  })
+  await user.click(screen.getByRole('tab', { name: 'Version history' }))
+  await user.click(screen.getByRole('button', { name: 'Delete version 1.0.0' }))
+  let dialog = await screen.findByRole('alertdialog', {
+    name: 'Delete plugin version?',
+  })
+  expect(dialog).toHaveTextContent('kling')
+  expect(dialog).toHaveTextContent('1.0.0')
+  expect(remove).not.toHaveBeenCalled()
+  await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  expect(remove).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('button', { name: 'Delete version 1.0.0' }))
+  dialog = await screen.findByRole('alertdialog', {
+    name: 'Delete plugin version?',
+  })
+  await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('button', { name: 'Delete version 1.0.0' })
+    ).not.toBeInTheDocument()
+  )
+  expect(remove).toHaveBeenCalledExactlyOnceWith(
+    '/api/plugin/task/kling/versions/1.0.0',
+    expect.any(Object)
+  )
+  expect(
+    screen.getByRole('button', { name: 'Delete version 1.2.3' })
+  ).toBeVisible()
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+})
+
+test('deleting an in-use last version requires an explicit force action and then closes its details', async () => {
+  const user = userEvent.setup()
+  const onOpenChange = vi.fn()
+  const fixture = renderSheet({}, 'override', onOpenChange)
+  await act(async () => {
+    fixture.queryClient.setQueryData(
+      ['task-plugin-versions', 'kling'],
+      [{ id: 1, version: '1.2.3', active: true }]
+    )
+  })
+  vi.spyOn(api, 'get').mockResolvedValue({ data: { success: true, data: [] } })
+  const remove = vi
+    .spyOn(api, 'delete')
+    .mockResolvedValueOnce({
+      data: {
+        success: false,
+        message: 'task plugin is still in use',
+        data: {
+          channels: [{ id: 5, name: 'Linked channel' }],
+          in_flight_count: 1,
+        },
+      },
+    })
+    .mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          deleted_version: '1.2.3',
+          promoted_version: '',
+          factory_fallback: false,
+          plugin_removed: true,
+        },
+      },
+    })
+  await user.click(screen.getByRole('tab', { name: 'Version history' }))
+  await user.click(screen.getByRole('button', { name: 'Delete version 1.2.3' }))
+  await user.click(
+    within(await screen.findByRole('alertdialog')).getByRole('button', {
+      name: 'Delete',
+    })
+  )
+  const blocked = await screen.findByRole('alertdialog', {
+    name: 'Plugin is still in use',
+  })
+  expect(blocked).toHaveTextContent('Linked channel')
+  expect(remove).toHaveBeenCalledTimes(1)
+  expect(onOpenChange).not.toHaveBeenCalled()
+  await user.click(
+    within(blocked).getByRole('button', { name: 'Force operation' })
+  )
+  await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('dialog', { name: 'Kling' })
+    ).not.toBeInTheDocument()
+  )
+  expect(remove).toHaveBeenLastCalledWith(
+    '/api/plugin/task/kling/versions/1.2.3',
+    expect.objectContaining({ params: { force: true } })
+  )
+})
+
+test('a failed version deletion keeps the version visible and allows retry', async () => {
+  const user = userEvent.setup()
+  const fixture = renderSheet({}, 'override')
+  await act(async () => {
+    fixture.queryClient.setQueryData(
+      ['task-plugin-versions', 'kling'],
+      [
+        { id: 1, version: '1.2.3', active: true },
+        { id: 2, version: '1.0.0', active: false },
+      ]
+    )
+  })
+  const remove = vi.spyOn(api, 'delete').mockResolvedValue({
+    data: { success: false, message: 'Version could not be deleted' },
+  })
+  await user.click(screen.getByRole('tab', { name: 'Version history' }))
+  await user.click(screen.getByRole('button', { name: 'Delete version 1.0.0' }))
+  const dialog = await screen.findByRole('alertdialog', {
+    name: 'Delete plugin version?',
+  })
+  const confirm = within(dialog).getByRole('button', { name: 'Delete' })
+  await user.click(confirm)
+  await waitFor(() => expect(remove).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(confirm).toBeEnabled())
+  expect(dialog).toBeVisible()
+  await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  expect(
+    screen.getByRole('button', { name: 'Delete version 1.0.0' })
+  ).toBeVisible()
+})
 
 /**
  * The endpoint row that renders `path`, i.e. the list item holding both the

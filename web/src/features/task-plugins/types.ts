@@ -106,6 +106,13 @@ export type TaskPluginUsage = {
   in_flight_count: number
 }
 
+export type TaskPluginDeleteResult = {
+  deleted_version: string
+  promoted_version: string
+  factory_fallback: boolean
+  plugin_removed: boolean
+}
+
 export type TaskPluginDetail = {
   plugin?: TaskPluginRecord
   meta: TaskPluginMeta
