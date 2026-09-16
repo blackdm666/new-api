@@ -401,6 +401,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/task_plugin_options", middleware.AdminAuth(), middleware.RequirePermission(authz.TaskPluginBind), controller.GetTaskPluginOptions)
 		registerChannelRoutes(apiRouter)
 		registerAuthzRoutes(apiRouter)
+		apiRouter.POST("/token/group/migrate", middleware.RootAuth(), middleware.CriticalRateLimit(), controller.MigrateTokenGroupReferences)
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
 		tokenRoute.Use(middleware.TokenOperationAudit())

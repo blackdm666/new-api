@@ -39,6 +39,8 @@ jobs:
         run: env -u TEST_MYSQL_DSN -u TEST_POSTGRES_DSN go test ./pkg/jsplugin ./plugins ./model ./middleware ./controller ./relay ./relay/channel/task/jsplugin -run 'Dynamic|XinMeng|DMC|Builtin|TaskPlugin|TaskCandidate' -count=1 -timeout 10m
       - name: Dynamic routing and pricing on MySQL and PostgreSQL
         run: go test ./model -run TestDynamicPluginDatabaseMatrix -count=1 -v
+      - name: Token group migration on SQLite, MySQL and PostgreSQL
+        run: go test ./controller -run TestTokenGroupMigrationDatabaseMatrix -count=1 -v
       - name: Wallet settlement on MySQL and PostgreSQL
         run: |
           TEST_TASK_DB_DIALECT=mysql go test ./controller -run TestImmediateTaskSettlementDatabase -count=1 -v
