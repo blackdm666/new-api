@@ -44,8 +44,8 @@ addModel("minimax-h3-768p", "minimax-h3-768p", "768p", { defaultDuration: 4,
   audios: 5, visualWithAudio: true });
 export const meta = {
   apiVersion: 1,
-  key: "xinmeng-video",
-  name: "XinMeng-Video",
+  key: "xm-video",
+  name: "XM-Video",
   version: "3.0.0",
   author: { name: "88API" },
   description: { en: "88API channel integration plugin", zh: "88API渠道集成插件" },

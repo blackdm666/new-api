@@ -1,7 +1,7 @@
 export const meta = {
   apiVersion: 1,
-  key: "dmc-video",
-  name: "DMC-Video",
+  key: "minimax-h3",
+  name: "Minimax-H3",
   description: {
     en: "88API channel integration plugin",
     zh: "88API渠道集成插件",

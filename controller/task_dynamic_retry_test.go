@@ -80,9 +80,9 @@ export function listArtifacts(){return [];}
 export function buildContentRequest(){return {};}
 `, key, "/"+letter)
 				if tc.actual {
-					folder, oldKey := "xinmeng-video", "xinmeng-video"
+					folder, oldKey := "xm-video", "xm-video"
 					if i == 1 {
-						folder, oldKey = "dmc-video", "dmc-video"
+						folder, oldKey = "minimax-h3", "minimax-h3"
 					}
 					raw, err := os.ReadFile("../plugins/tasks/" + folder + "/plugin.js")
 					require.NoError(t, err)

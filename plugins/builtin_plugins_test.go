@@ -78,17 +78,23 @@ func TestBuiltInTaskPluginResponsesAndUsageContracts(t *testing.T) {
 			actualKeys = append(actualKeys, entry.Name())
 		}
 	}
-	allKeys := append(append([]string{}, expectedKeys...), "xinmeng-video", "dmc-video")
+	allKeys := append(append([]string{}, expectedKeys...), "xm-video", "minimax-h3")
 	slices.Sort(allKeys)
 	assert.Equal(t, allKeys, actualKeys)
-	dmc, found := generation.Get("dmc-video")
+	dmc, found := generation.Get("minimax-h3")
 	require.True(t, found)
+	assert.Equal(t, "Minimax-H3", dmc.Meta.Name)
 	assert.Empty(t, dmc.Meta.Models)
 	assert.True(t, dmc.Meta.DynamicModels)
-	xinmeng, found := generation.Get("xinmeng-video")
+	xinmeng, found := generation.Get("xm-video")
 	require.True(t, found, "XinMeng must be included in the factory generation")
+	assert.Equal(t, "XM-Video", xinmeng.Meta.Name)
 	assert.Empty(t, xinmeng.Meta.Models)
 	assert.True(t, xinmeng.Meta.DynamicModels)
+	for _, oldKey := range []string{"dmc-video", "xinmeng-video"} {
+		_, present := generation.Get(oldKey)
+		assert.False(t, present, "fresh installations must use the neutral plugin identities")
+	}
 	_, claimsH3 := generation.LookupEndpoint("POST", "/v1/videos", "minimax-h3-768p")
 	assert.False(t, claimsH3, "factory XinMeng must not shadow the DMC H3 channel alias")
 	for _, model := range xinmeng.Meta.Models {

@@ -10,7 +10,7 @@ import (
 )
 
 func TestXinMengWan3TaskPlugin(t *testing.T) {
-	source, err := os.ReadFile("../../plugins/tasks/xinmeng-video/plugin.js")
+	source, err := os.ReadFile("../../plugins/tasks/xm-video/plugin.js")
 	require.NoError(t, err)
 	registry := NewRegistry()
 	plugin, err := registry.Register(string(source), Options{})
@@ -181,7 +181,7 @@ func TestXinMengWan3TaskPlugin(t *testing.T) {
 }
 
 func TestXinMengDynamicModelDoesNotInventCapabilities(t *testing.T) {
-	source, err := os.ReadFile("../../plugins/tasks/xinmeng-video/plugin.js")
+	source, err := os.ReadFile("../../plugins/tasks/xm-video/plugin.js")
 	require.NoError(t, err)
 	p, err := CompilePlugin(string(source), Options{})
 	require.NoError(t, err)
