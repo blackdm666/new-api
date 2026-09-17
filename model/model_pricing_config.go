@@ -271,6 +271,7 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 			ModelPricingDescription: ModelPricingDescription{Effective: effectiveModelPricing(values, name)}}
 		entry.CacheWriteMode = ResolveCacheWriteMode(name, configured)
 		entry.BillingDetails = ResolveLegacyBillingDetails(name, entry.Effective, configured)
+		entry.UsageSchema = billing_setting.NativeVideoUsageSchema(name)
 		if providers := TaskPluginsForModel(generation, name); len(providers) > 0 {
 			entry.UsageSchema, _ = providers[0].Meta.UsageForModel(name)
 		} else if target, ok := ResolveTaskModelAlias(generation, name); ok {
@@ -432,6 +433,8 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 				} else {
 					err = billing_setting.SmokeTestExpr(expression)
 				}
+			} else if schema := billing_setting.NativeVideoUsageSchema(name); schema != nil {
+				err = billing_setting.SmokeTestTaskExpr(expression, schema)
 			} else if previous[key] != expression || len(billingexpr.UsedUsageKeys(expression)) == 0 {
 				err = billing_setting.SmokeTestExpr(expression)
 			}

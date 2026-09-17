@@ -140,6 +140,10 @@ func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info
 	return nil
 }
 
+func (a *TaskAdaptor) ExtractUsageFacts(c *gin.Context, info *relaycommon.RelayInfo) map[string]any {
+	return geminitask.VideoUsageFacts(c, info)
+}
+
 // EstimateBilling returns OtherRatios based on durationSeconds and resolution.
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	v, ok := c.Get("task_request")

@@ -155,6 +155,14 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	return map[string]float64{"seconds": float64(requestDuration(req, cfg))}
 }
 
+func (a *TaskAdaptor) ExtractUsageFacts(c *gin.Context, info *relaycommon.RelayInfo) map[string]any {
+	ratios := a.EstimateBilling(c, info)
+	if ratios == nil {
+		return nil
+	}
+	return map[string]any{"seconds": ratios["seconds"]}
+}
+
 func localTaskError(err error) *dto.TaskError {
 	return &dto.TaskError{Code: "invalid_request", Message: err.Error(), StatusCode: http.StatusBadRequest, LocalError: true, Error: err}
 }

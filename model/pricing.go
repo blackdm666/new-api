@@ -413,6 +413,9 @@ func updatePricing() {
 			pricing.BillingUsageSchema = jsplugin.CloneUsageSchema(usageSchema)
 			pricing.BillingUsageExamples = jsplugin.CloneUsageExamples(usageExamples)
 		}
+		if pricing.BillingUsageSchema == nil {
+			pricing.BillingUsageSchema = billing_setting.NativeVideoUsageSchema(model)
+		}
 		providers := TaskPluginsForModel(pluginGeneration, model)
 		hasProviderOverride := false
 		for _, provider := range providers {
