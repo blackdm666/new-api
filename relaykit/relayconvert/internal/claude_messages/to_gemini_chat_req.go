@@ -58,7 +58,9 @@ func ClaudeMessagesRequestToGeminiGenerateContent(c context.Context, request dto
 		applyClaudeThinkingConfig(geminiRequest, request.Thinking)
 	}
 	if geminiRequest.GenerationConfig.ThinkingConfig == nil {
-		sharedgemini.ApplyThinkingConfig(geminiRequest, info)
+		if err := sharedgemini.ApplyThinkingConfig(c, geminiRequest, info); err != nil {
+			return nil, err
+		}
 	}
 
 	applyClaudeGeminiSafetySettings(geminiRequest, opts)

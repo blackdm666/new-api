@@ -289,6 +289,8 @@ func SetApiRouter(router *gin.Engine) {
 			// /api/option/. Keep the same RootAuth middleware and handler so stale
 			// tabs can save safely until they are refreshed.
 			optionRoute.POST("", controller.UpdateOption)
+			optionRoute.GET("/request_policy", controller.GetRequestPolicy)
+			optionRoute.PATCH("/request_policy", controller.UpdateRequestPolicy)
 			optionRoute.PUT("/", controller.UpdateOption)
 			optionRoute.PUT("/bot-protection", controller.UpdateBotProtectionSettings)
 			optionRoute.POST("/smtp-test", middleware.CriticalRateLimit(), controller.TestSMTPEmail)
@@ -456,6 +458,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			systemTaskRoute.POST("/log-cleanup", controller.CreateLogCleanupSystemTask)
 			systemTaskRoute.GET("/list", controller.ListSystemTasks)
+			systemTaskRoute.DELETE("/history", controller.DeleteSystemTaskHistory)
 			systemTaskRoute.GET("/current", controller.GetCurrentSystemTask)
 			systemTaskRoute.GET("/:task_id", controller.GetSystemTask)
 		}

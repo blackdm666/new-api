@@ -39,8 +39,8 @@ func TestShouldRetryStopsWhenClientRequestDone(t *testing.T) {
 	)
 	active, _ := gin.CreateTestContext(httptest.NewRecorder())
 	active.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	require.True(t, shouldRetry(active, apiErr, 1))
-	require.False(t, shouldRetry(newCanceledRelayTestContext(t, "/v1/chat/completions"), apiErr, 1))
+	require.True(t, service.ShouldRetryRelayError(active, apiErr, 1))
+	require.False(t, service.ShouldRetryRelayError(newCanceledRelayTestContext(t, "/v1/chat/completions"), apiErr, 1))
 }
 
 func TestShouldRetryTaskRelayStopsWhenClientRequestDone(t *testing.T) {
@@ -53,8 +53,8 @@ func TestShouldRetryTaskRelayStopsWhenClientRequestDone(t *testing.T) {
 	taskErr := &taskdto.TaskError{StatusCode: http.StatusInternalServerError}
 	active, _ := gin.CreateTestContext(httptest.NewRecorder())
 	active.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
-	require.True(t, shouldRetryTaskRelay(active, 74, taskErr, 1))
-	require.False(t, shouldRetryTaskRelay(newCanceledRelayTestContext(t, "/v1/videos"), 74, taskErr, 1))
+	require.True(t, (decideTaskRetry(active, taskErr, 1).Action == "retry"))
+	require.False(t, (decideTaskRetry(newCanceledRelayTestContext(t, "/v1/videos"), taskErr, 1).Action == "retry"))
 }
 
 func TestShouldRetryTaskRelayDoesNotReplaceLocalBillingError(t *testing.T) {
@@ -67,7 +67,7 @@ func TestShouldRetryTaskRelayDoesNotReplaceLocalBillingError(t *testing.T) {
 	)
 	taskErr := service.TaskErrorFromAPIError(apiErr)
 
-	require.False(t, shouldRetryTaskRelay(c, 55, taskErr, 3))
+	require.False(t, (decideTaskRetry(c, taskErr, 3).Action == "retry"))
 }
 
 func TestShouldRetryTaskRelayNeverRetriesLocalErrors(t *testing.T) {
@@ -83,7 +83,7 @@ func TestShouldRetryTaskRelayNeverRetriesLocalErrors(t *testing.T) {
 				LocalError: true,
 			}
 
-			require.False(t, shouldRetryTaskRelay(c, 55, taskErr, 3))
+			require.False(t, (decideTaskRetry(c, taskErr, 3).Action == "retry"))
 		})
 	}
 }
@@ -97,10 +97,10 @@ func TestShouldRetryTaskRelayUsesConfiguredStatusCodes(t *testing.T) {
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 
-	require.False(t, shouldRetryTaskRelay(c, 55, &taskdto.TaskError{StatusCode: http.StatusForbidden}, 3))
-	require.True(t, shouldRetryTaskRelay(c, 55, &taskdto.TaskError{StatusCode: http.StatusTooManyRequests}, 3))
-	require.True(t, shouldRetryTaskRelay(c, 55, &taskdto.TaskError{StatusCode: http.StatusInternalServerError}, 3))
-	require.False(t, shouldRetryTaskRelay(c, 55, &taskdto.TaskError{StatusCode: http.StatusGatewayTimeout}, 3))
+	require.False(t, (decideTaskRetry(c, &taskdto.TaskError{StatusCode: http.StatusForbidden}, 3).Action == "retry"))
+	require.True(t, (decideTaskRetry(c, &taskdto.TaskError{StatusCode: http.StatusTooManyRequests}, 3).Action == "retry"))
+	require.True(t, (decideTaskRetry(c, &taskdto.TaskError{StatusCode: http.StatusInternalServerError}, 3).Action == "retry"))
+	require.False(t, (decideTaskRetry(c, &taskdto.TaskError{StatusCode: http.StatusGatewayTimeout}, 3).Action == "retry"))
 }
 
 func TestRespondTaskErrorPreservesLocalRateLimitMessage(t *testing.T) {

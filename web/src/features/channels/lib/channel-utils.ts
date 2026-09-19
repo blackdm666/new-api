@@ -22,6 +22,8 @@ import { formatTimestampToDate } from '@/lib/format'
 import {
   CHANNEL_STATUS_CONFIG,
   CHANNEL_TYPES,
+  CHANNEL_TYPE_VLLM,
+  CHANNEL_TYPE_SGLANG,
   MULTI_KEY_STATUS_CONFIG,
   RESPONSE_TIME_CONFIG,
   RESPONSE_TIME_THRESHOLDS,
@@ -59,6 +61,8 @@ export function getChannelTypeIcon(type: number): string {
     58: 'NewAPI', // Advanced Custom
     59: 'Sub2API', // Sub2API
     60: 'NewAPI', // New API
+    [CHANNEL_TYPE_VLLM]: 'Vllm',
+    [CHANNEL_TYPE_SGLANG]: 'SGLang',
     3: 'Azure', // Azure
 
     // Anthropic

@@ -250,6 +250,8 @@ type ClaudeRequest struct {
 	// Messages surface is used as a compatibility entry point. Converters must
 	// explicitly opt in to interpreting fields from this object.
 	ExtraBody json.RawMessage `json:"extra_body,omitempty"`
+	// vLLM Messages extension; forwarded verbatim when present.
+	ChatTemplateKwargs json.RawMessage `json:"chat_template_kwargs,omitempty"`
 	// Speed specifies the Claude inference speed mode.
 	// This field is filtered by default and can be enabled via channel setting allow_speed.
 	Speed json.RawMessage `json:"speed,omitempty"`

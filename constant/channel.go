@@ -63,7 +63,9 @@ const (
 	_                     = 61 // retired custom channel; never reuse persisted type IDs
 	_                     = 62 // retired custom channel; never reuse persisted type IDs
 	ChannelTypeTaskPlugin = 63
-	ChannelTypeDummy      // this one is only for count, do not add any channel after this
+	ChannelTypeVLLM       = 64
+	ChannelTypeSGLang     = 65
+	ChannelTypeDummy      = 66 // this one is only for count, do not add any channel after this
 
 )
 
@@ -133,7 +135,9 @@ var ChannelBaseURLs = []string{
 	"",                                          //60
 	"",                                          //61 retired
 	"",                                          //62 retired
-	"",                                          //63
+	"",                                          //63 task plugin
+	"",                                          //64 vLLM
+	"",                                          //65 SGLang
 }
 
 func GetChannelBaseURL(channelType int) string {
@@ -202,6 +206,8 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeSub2API:        "Sub2API",
 	ChannelTypeNewAPI:         "New API",
 	ChannelTypeTaskPlugin:     "Task Plugin",
+	ChannelTypeVLLM:           "vLLM",
+	ChannelTypeSGLang:         "SGLang",
 }
 
 func GetChannelTypeName(channelType int) string {
@@ -233,4 +239,14 @@ var ChannelSpecialBases = map[string]ChannelSpecialBase{
 		ClaudeBaseURL: "https://ark.cn-beijing.volces.com/api/coding",
 		OpenAIBaseURL: "https://ark.cn-beijing.volces.com/api/coding/v3",
 	},
+}
+
+// IsAdvancedCustomChannel includes named channels backed by route presets.
+func IsAdvancedCustomChannel(channelType int) bool {
+	switch channelType {
+	case ChannelTypeAdvancedCustom, ChannelTypeVLLM, ChannelTypeSGLang:
+		return true
+	default:
+		return false
+	}
 }
