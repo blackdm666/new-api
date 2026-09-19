@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -61,6 +62,16 @@ func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total 
 }
 
 func SearchRedemptions(keyword string, status string, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
+	return searchRedemptions(keyword, "", "", status, true, startIdx, num)
+}
+
+// SearchRedemptionsByFields searches each field independently. Name uses a
+// prefix match, while redemption code and ID use exact matches.
+func SearchRedemptionsByFields(name string, code string, id string, status string, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
+	return searchRedemptions(name, code, id, status, false, startIdx, num)
+}
+
+func searchRedemptions(name string, code string, id string, status string, legacyKeyword bool, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -72,12 +83,31 @@ func SearchRedemptions(keyword string, status string, startIdx int, num int) (re
 	}()
 
 	query := tx.Model(&Redemption{})
+	name = strings.TrimSpace(name)
+	code = strings.TrimSpace(code)
+	id = strings.TrimSpace(id)
 
-	if keyword != "" {
-		if id, err := strconv.Atoi(keyword); err == nil {
-			query = query.Where("id = ? OR name LIKE ?", id, keyword+"%")
-		} else {
-			query = query.Where("name LIKE ?", keyword+"%")
+	if legacyKeyword {
+		if name != "" {
+			if parsedID, parseErr := strconv.Atoi(name); parseErr == nil {
+				query = query.Where("id = ? OR name LIKE ? OR "+commonKeyCol+" = ?", parsedID, name+"%", name)
+			} else {
+				query = query.Where("name LIKE ? OR "+commonKeyCol+" = ?", name+"%", name)
+			}
+		}
+	} else {
+		if name != "" {
+			query = query.Where("name LIKE ?", name+"%")
+		}
+		if code != "" {
+			query = query.Where(commonKeyCol+" = ?", code)
+		}
+		if id != "" {
+			if parsedID, parseErr := strconv.Atoi(id); parseErr == nil {
+				query = query.Where("id = ?", parsedID)
+			} else {
+				query = query.Where("1 = 0")
+			}
 		}
 	}
 
@@ -164,7 +194,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 		// same code loses here even without a row lock (e.g. on SQLite).
 		result := tx.Model(&Redemption{}).
 			Where("id = ? AND status = ?", redemption.Id, common.RedemptionCodeStatusEnabled).
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"redeemed_time": common.GetTimestamp(),
 				"status":        common.RedemptionCodeStatusUsed,
 				"used_user_id":  userId,
@@ -175,17 +205,24 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if result.RowsAffected == 0 {
 			return errors.New("该兑换码已被使用")
 		}
-		return tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
+		return creditTopUpQuota(tx, userId, redemption.Quota, nil)
 	})
 	if err != nil {
 		common.SysError("redemption failed: " + err.Error())
 		return 0, ErrRedeemFailed
 	}
+	syncCreditUserQuotaCache(userId, redemption.Quota, "redemption")
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
 	return redemption.Quota, nil
 }
 
 func (redemption *Redemption) Insert() error {
+	if redemption.Quota <= 0 {
+		return errors.New("redemption quota must be positive")
+	}
+	if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
+		return err
+	}
 	var err error
 	err = DB.Create(redemption).Error
 	return err
@@ -198,6 +235,12 @@ func (redemption *Redemption) SelectUpdate() error {
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (redemption *Redemption) Update() error {
+	if redemption.Quota <= 0 {
+		return errors.New("redemption quota must be positive")
+	}
+	if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
+		return err
+	}
 	var err error
 	err = DB.Model(redemption).Select("name", "status", "quota", "redeemed_time", "expired_time").Updates(redemption).Error
 	return err
@@ -224,5 +267,19 @@ func DeleteRedemptionById(id int) (err error) {
 func DeleteInvalidRedemptions() (int64, error) {
 	now := common.GetTimestamp()
 	result := DB.Where("status IN ? OR (status = ? AND expired_time != 0 AND expired_time < ?)", []int{common.RedemptionCodeStatusUsed, common.RedemptionCodeStatusDisabled}, common.RedemptionCodeStatusEnabled, now).Delete(&Redemption{})
+	return result.RowsAffected, result.Error
+}
+
+// BatchDeleteRedemptions soft-deletes the selected codes in one statement.
+func BatchDeleteRedemptions(ids []int) (int64, error) {
+	if len(ids) == 0 || len(ids) > 1000 {
+		return 0, errors.New("select between 1 and 1000 redemption codes")
+	}
+	for _, id := range ids {
+		if id <= 0 {
+			return 0, errors.New("redemption IDs must be positive")
+		}
+	}
+	result := DB.Where("id IN ?", ids).Delete(&Redemption{})
 	return result.RowsAffected, result.Error
 }

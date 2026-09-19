@@ -17,6 +17,7 @@ import (
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	geminitask "github.com/QuantumNous/new-api/relay/channel/task/gemini"
+	omnitask "github.com/QuantumNous/new-api/relay/channel/task/omni"
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	vertexcore "github.com/QuantumNous/new-api/relay/channel/vertex"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -40,18 +41,20 @@ type operationVideo struct {
 	MimeType           string `json:"mimeType"`
 	BytesBase64Encoded string `json:"bytesBase64Encoded"`
 	Encoding           string `json:"encoding"`
+	URI                string `json:"uri"`
 }
 
 type operationResponse struct {
 	Name     string `json:"name"`
 	Done     bool   `json:"done"`
 	Response struct {
-		Type                  string           `json:"@type"`
-		RaiMediaFilteredCount int              `json:"raiMediaFilteredCount"`
-		Videos                []operationVideo `json:"videos"`
-		BytesBase64Encoded    string           `json:"bytesBase64Encoded"`
-		Encoding              string           `json:"encoding"`
-		Video                 string           `json:"video"`
+		Type                    string           `json:"@type"`
+		RaiMediaFilteredCount   int              `json:"raiMediaFilteredCount"`
+		RaiMediaFilteredReasons []string         `json:"raiMediaFilteredReasons"`
+		Videos                  []operationVideo `json:"videos"`
+		BytesBase64Encoded      string           `json:"bytesBase64Encoded"`
+		Encoding                string           `json:"encoding"`
+		Video                   string           `json:"video"`
 	} `json:"response"`
 	Error struct {
 		Message string `json:"message"`
@@ -77,8 +80,17 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 
 // ValidateRequestAndSetAction parses body, validates fields and sets default action.
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *taskdto.TaskError) {
-	// Use the standard validation method for TaskSubmitReq
-	return relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionTextGenerate)
+	if taskErr := relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionTextToVideo); taskErr != nil {
+		return taskErr
+	}
+	if omnitask.IsModel(info.UpstreamModelName) {
+		if err := omnitask.ValidateRequest(c, info); err != nil {
+			return service.TaskErrorWrapperLocal(err, "invalid_omni_request", http.StatusBadRequest)
+		}
+	} else if _, err := geminitask.BuildVeoInstance(c, info); err != nil {
+		return service.TaskErrorWrapperLocal(err, "invalid_veo_request", http.StatusBadRequest)
+	}
+	return nil
 }
 
 // BuildRequestURL constructs the upstream URL.
@@ -90,6 +102,9 @@ func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, erro
 	modelName := info.UpstreamModelName
 	if modelName == "" {
 		modelName = "veo-3.0-generate-001"
+	}
+	if omnitask.IsModel(modelName) {
+		return vertexcore.BuildAPIBaseURL(a.baseURL, omnitask.VertexAPIVersion, adc.ProjectID, "global") + "/interactions", nil
 	}
 
 	region := vertexcore.GetModelRegion(info.ApiVersion, modelName)
@@ -119,7 +134,14 @@ func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("x-goog-user-project", adc.ProjectID)
+	if info != nil && omnitask.IsModel(info.UpstreamModelName) {
+		req.Header.Set("Api-Revision", omnitask.APIRevision)
+	}
 	return nil
+}
+
+func (a *TaskAdaptor) ExtractUsageFacts(c *gin.Context, info *relaycommon.RelayInfo) map[string]any {
+	return geminitask.VideoUsageFacts(c, info)
 }
 
 // EstimateBilling returns OtherRatios based on durationSeconds and resolution.
@@ -129,6 +151,9 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 		return nil
 	}
 	req := v.(relaycommon.TaskSubmitReq)
+	if omnitask.IsModel(info.UpstreamModelName) {
+		return map[string]float64{"seconds": float64(omnitask.ResolveDuration(req))}
+	}
 
 	seconds := geminitask.ResolveVeoDuration(req.Metadata, req.Duration, req.Seconds)
 	resolution := geminitask.ResolveVeoResolution(req.Metadata, req.Size)
@@ -142,20 +167,21 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 
 // BuildRequestBody converts request into Vertex specific format.
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
+	if omnitask.IsModel(info.UpstreamModelName) {
+		if err := omnitask.ValidateRequest(c, info); err != nil {
+			return nil, err
+		}
+		return omnitask.BuildRequestBody(c, info)
+	}
 	v, ok := c.Get("task_request")
 	if !ok {
 		return nil, fmt.Errorf("request not found in context")
 	}
 	req := v.(relaycommon.TaskSubmitReq)
 
-	instance := geminitask.VeoInstance{Prompt: req.Prompt}
-	if img := geminitask.ExtractMultipartImage(c, info); img != nil {
-		instance.Image = img
-	} else if len(req.Images) > 0 {
-		if parsed := geminitask.ParseImageInput(req.Images[0]); parsed != nil {
-			instance.Image = parsed
-			info.Action = constant.TaskActionGenerate
-		}
+	instance, err := geminitask.BuildVeoInstance(c, info)
+	if err != nil {
+		return nil, err
 	}
 
 	params := &geminitask.VeoParameters{}
@@ -191,20 +217,33 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 	return channel.DoTaskApiRequest(a, c, info, requestBody)
 }
 
-// DoResponse handles upstream response, returns taskID etc.
-func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *taskdto.TaskError) {
+// ParseResponse handles the upstream response without writing to the client.
+func (a *TaskAdaptor) ParseResponse(_ *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*channel.TaskSubmitResponse, *taskdto.TaskError) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
 	}
 	_ = resp.Body.Close()
+	if omnitask.IsModel(info.UpstreamModelName) {
+		upstreamName, err := omnitask.ParseSubmitResponse(responseBody)
+		if err != nil {
+			return nil, service.TaskErrorWrapper(err, "invalid_interaction_response", http.StatusInternalServerError)
+		}
+		localID := taskcommon.EncodeLocalTaskID(upstreamName)
+		ov := dto.NewOpenAIVideo()
+		ov.ID = info.PublicTaskID
+		ov.TaskID = info.PublicTaskID
+		ov.CreatedAt = time.Now().Unix()
+		ov.Model = info.OriginModelName
+		return &channel.TaskSubmitResponse{UpstreamTaskID: localID, TaskData: responseBody, ClientResponse: ov}, nil
+	}
 
 	var s submitResponse
 	if err := common.Unmarshal(responseBody, &s); err != nil {
-		return "", nil, service.TaskErrorWrapper(err, "unmarshal_response_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(err, "unmarshal_response_failed", http.StatusInternalServerError)
 	}
 	if strings.TrimSpace(s.Name) == "" {
-		return "", nil, service.TaskErrorWrapper(fmt.Errorf("missing operation name"), "invalid_response", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(fmt.Errorf("missing operation name"), "invalid_response", http.StatusInternalServerError)
 	}
 	localID := taskcommon.EncodeLocalTaskID(s.Name)
 	ov := dto.NewOpenAIVideo()
@@ -212,12 +251,12 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	ov.TaskID = info.PublicTaskID
 	ov.CreatedAt = time.Now().Unix()
 	ov.Model = info.OriginModelName
-	c.JSON(http.StatusOK, ov)
-	return localID, responseBody, nil
+	return &channel.TaskSubmitResponse{UpstreamTaskID: localID, TaskData: responseBody, ClientResponse: ov}, nil
 }
 
 func (a *TaskAdaptor) GetModelList() []string {
 	return []string{
+		omnitask.ModelGeminiOmniFlashPreview,
 		"veo-3.0-generate-001",
 		"veo-3.0-fast-generate-001",
 		"veo-3.1-generate-preview",
@@ -243,23 +282,14 @@ func buildFetchOperationURL(baseURL, upstreamName string) (string, error) {
 }
 
 // FetchTask fetch task status
-func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
-	taskID, ok := body["task_id"].(string)
-	if !ok {
+func (a *TaskAdaptor) FetchTask(baseUrl, key string, task *model.Task, proxy string) (*http.Response, error) {
+	if task == nil {
 		return nil, fmt.Errorf("invalid task_id")
 	}
+	taskID := task.GetUpstreamTaskID()
 	upstreamName, err := taskcommon.DecodeLocalTaskID(taskID)
 	if err != nil {
 		return nil, fmt.Errorf("decode task_id failed: %w", err)
-	}
-	url, err := buildFetchOperationURL(baseUrl, upstreamName)
-	if err != nil {
-		return nil, err
-	}
-	payload := fetchOperationPayload{OperationName: upstreamName}
-	data, err := common.Marshal(payload)
-	if err != nil {
-		return nil, err
 	}
 	adc := &vertexcore.Credentials{}
 	if err := common.Unmarshal([]byte(key), adc); err != nil {
@@ -269,7 +299,29 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	if err != nil {
 		return nil, fmt.Errorf("failed to acquire access token: %w", err)
 	}
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	method := http.MethodPost
+	url := ""
+	var requestBody io.Reader
+	if omnitask.IsInteractionTaskName(upstreamName) {
+		interactionID, err := omnitask.InteractionIDFromTaskName(upstreamName)
+		if err != nil {
+			return nil, err
+		}
+		method = http.MethodGet
+		url = vertexcore.BuildAPIBaseURL(baseUrl, omnitask.VertexAPIVersion, adc.ProjectID, "global") + "/interactions/" + interactionID
+	} else {
+		url, err = buildFetchOperationURL(baseUrl, upstreamName)
+		if err != nil {
+			return nil, err
+		}
+		payload := fetchOperationPayload{OperationName: upstreamName}
+		data, err := common.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		requestBody = bytes.NewReader(data)
+	}
+	req, err := http.NewRequest(method, url, requestBody)
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +329,9 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("x-goog-user-project", adc.ProjectID)
+	if omnitask.IsInteractionTaskName(upstreamName) {
+		req.Header.Set("Api-Revision", omnitask.APIRevision)
+	}
 	client, err := service.GetHttpClientWithProxy(proxy)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)
@@ -284,7 +339,10 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	return client.Do(req)
 }
 
-func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
+func (a *TaskAdaptor) ParseTaskResult(_ *model.Task, _ *http.Response, respBody []byte) (*relaycommon.TaskInfo, error) {
+	if omnitask.IsInteractionResponse(respBody) {
+		return omnitask.ParseTaskResult(respBody)
+	}
 	var op operationResponse
 	if err := common.Unmarshal(respBody, &op); err != nil {
 		return nil, fmt.Errorf("unmarshal operation response failed: %w", err)
@@ -301,10 +359,14 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		ti.Progress = "50%"
 		return ti, nil
 	}
-	ti.Status = model.TaskStatusSuccess
 	ti.Progress = "100%"
 	if len(op.Response.Videos) > 0 {
 		v0 := op.Response.Videos[0]
+		if strings.TrimSpace(v0.URI) != "" {
+			ti.Url = strings.TrimSpace(v0.URI)
+			ti.Status = model.TaskStatusSuccess
+			return ti, nil
+		}
 		if v0.BytesBase64Encoded != "" {
 			mime := strings.TrimSpace(v0.MimeType)
 			if mime == "" {
@@ -319,6 +381,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 				}
 			}
 			ti.Url = "data:" + mime + ";base64," + v0.BytesBase64Encoded
+			ti.Status = model.TaskStatusSuccess
 			return ti, nil
 		}
 	}
@@ -332,6 +395,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 			mime = "video/" + enc
 		}
 		ti.Url = "data:" + mime + ";base64," + op.Response.BytesBase64Encoded
+		ti.Status = model.TaskStatusSuccess
 		return ti, nil
 	}
 	if op.Response.Video != "" { // some variants use `video` as base64
@@ -344,8 +408,11 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 			mime = "video/" + enc
 		}
 		ti.Url = "data:" + mime + ";base64," + op.Response.Video
+		ti.Status = model.TaskStatusSuccess
 		return ti, nil
 	}
+	ti.Status = model.TaskStatusFailure
+	ti.Reason = taskcommon.GoogleVideoFailureReason(op.Response.RaiMediaFilteredCount, op.Response.RaiMediaFilteredReasons)
 	return ti, nil
 }
 
@@ -358,6 +425,9 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 		upstreamName = ""
 	}
 	modelName := extractModelFromOperationName(upstreamName)
+	if omnitask.IsInteractionTaskName(upstreamName) {
+		modelName = omnitask.ModelGeminiOmniFlashPreview
+	}
 	if strings.TrimSpace(modelName) == "" {
 		modelName = "veo-3.0-generate-001"
 	}
@@ -368,6 +438,18 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	v.SetProgressStr(task.Progress)
 	v.CreatedAt = task.CreatedAt
 	v.CompletedAt = task.UpdatedAt
+	if task.Status == model.TaskStatusFailure {
+		message := strings.TrimSpace(task.FailReason)
+		if message == "" || strings.HasPrefix(message, "interaction ended with status ") {
+			if recovered := omnitask.FailureReasonFromResponse(task.Data); recovered != "" {
+				message = recovered
+			}
+		}
+		if message == "" {
+			message = "video generation failed"
+		}
+		v.Error = &dto.OpenAIVideoError{Code: omnitask.InteractionFailureCode(message), Message: message}
+	}
 	if resultURL := task.GetResultURL(); strings.HasPrefix(resultURL, "data:") && len(resultURL) > 0 {
 		v.SetMetadata("url", resultURL)
 	}

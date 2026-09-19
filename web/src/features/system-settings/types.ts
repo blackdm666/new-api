@@ -39,6 +39,148 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export interface PasskeyDomainChange {
+  rp_id: string
+  legacy_rp_ids: string
+  origins: string
+  previous_rp_id: string
+  effective_rp_id: string
+  removed_rp_ids: string[]
+  affected_credentials: number
+  unknown_credentials: number
+  confirmation_required: boolean
+  removal_confirmation: string
+}
+
+export interface UpdatePasskeyDomainsRequest {
+  rp_id: string
+  legacy_rp_ids: string
+  origins: string
+  preview: boolean
+  removal_confirmation?: string
+}
+
+export interface UpdatePasskeyDomainsResponse extends UpdateOptionResponse {
+  code?: string
+  data: PasskeyDomainChange
+}
+
+export type BotProtectionSettingsPayload = {
+  enabled: boolean
+  provider: 'cloudflare' | 'custom'
+  site_key: string
+  secret_key: string
+  widget_script_url: string
+  widget_endpoint: string
+  verify_url: string
+  action: string
+  clear_secret: boolean
+}
+
+export type SMTPTestResponse = {
+  success: boolean
+  message: string
+  data?: {
+    recipient: string
+    profile: 'security' | 'notification' | 'marketing'
+    channel: 'security' | 'primary' | 'marketing' | 'backup'
+  }
+}
+
+export type MarketingEmailSenderAccount = {
+  id: number
+  name: string
+  profile: 'marketing'
+  provider: 'aliyun_eventbridge'
+  server: string
+  port: number
+  account: string
+  from: string
+  ssl_enabled: boolean
+  starttls_enabled: boolean
+  insecure_skip_verify: boolean
+  force_auth_login: boolean
+  weight: number
+  rate_limit_per_minute: number
+  enabled: boolean
+  tested_time: number
+  receipt_verified_time: number
+  disabled_until: number
+  health_status: 'pending' | 'healthy' | 'degraded' | 'disabled'
+  consecutive_failures: number
+  last_success_time: number
+  last_failure_time: number
+  last_error: string
+  credential_configured: boolean
+}
+
+export type MarketingEmailSenderAccountInput = {
+  name: string
+  provider: 'aliyun_eventbridge'
+  server: string
+  port: number
+  account: string
+  from: string
+  token: string
+  ssl_enabled: boolean
+  starttls_enabled: boolean
+  insecure_skip_verify: boolean
+  force_auth_login: boolean
+  weight: number
+  rate_limit_per_minute: number
+}
+
+export type EmailReceiptEndpoint = {
+  provider: 'aliyun_eventbridge'
+  enabled: boolean
+  token_configured: boolean
+  callback_url: string
+  last_event_time: number
+  last_verified_time: number
+  last_error: string
+}
+
+export type InvoiceSettingsPayload = {
+  InvoiceApplicationNotifyAdminEnabled: boolean
+  InvoiceIssuedNotifyUserEnabled: boolean
+  InvoiceAdminEmail: string
+  InvoiceMinimumAmountCents: number
+  InvoiceTaxRateBasisPoints: number
+  InvoiceDataRetentionDays: number
+  InvoicePendingExpiryDays: number
+  InvoiceFileEnabled: boolean
+  InvoiceFileStorage: string
+  InvoiceFileMaxSize: number
+  InvoiceFileMaxCount: number
+  InvoiceFileAllowedExts: string
+  InvoiceFileLocalPath: string
+  InvoiceFileSignedURLTTL: number
+  InvoiceFileOSSEndpoint: string
+  InvoiceFileOSSBucket: string
+  InvoiceFileOSSRegion: string
+  InvoiceFileOSSAccessKeyId: string
+  InvoiceFileOSSAccessKeySecret: string
+  InvoiceFileOSSCustomDomain: string
+  InvoiceFileS3Endpoint: string
+  InvoiceFileS3Bucket: string
+  InvoiceFileS3Region: string
+  InvoiceFileS3AccessKeyId: string
+  InvoiceFileS3AccessKeySecret: string
+  InvoiceFileS3CustomDomain: string
+  InvoiceFileCOSEndpoint: string
+  InvoiceFileCOSBucket: string
+  InvoiceFileCOSRegion: string
+  InvoiceFileCOSSecretId: string
+  InvoiceFileCOSSecretKey: string
+  InvoiceFileCOSCustomDomain: string
+}
+
+export type InvoiceSettingsResponse = {
+  success: boolean
+  message: string
+  data?: { storage: string }
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string
@@ -104,6 +246,14 @@ export type SystemTaskListResponse = {
   success: boolean
   message: string
   data?: SystemTask[]
+  total: number
+}
+
+export type SystemTaskFilters = {
+  type?: string
+  status?: SystemTaskStatus | ''
+  scope?: 'active' | 'history'
+  offset?: number
 }
 
 export type SiteSettings = {
@@ -114,6 +264,7 @@ export type SiteSettings = {
   About: string
   HomePageContent: string
   ServerAddress: string
+  TaskPublicAddress: string
   'legal.user_agreement': string
   'legal.privacy_policy': string
   HeaderNavModules: string
@@ -144,6 +295,8 @@ export type AuthSettings = {
   'oidc.token_endpoint': string
   'oidc.user_info_endpoint': string
   TelegramOAuthEnabled: boolean
+  'telegram.client_id': string
+  'telegram.client_secret': string
   TelegramBotToken: string
   TelegramBotName: string
   LinuxDOOAuthEnabled: boolean
@@ -155,11 +308,18 @@ export type AuthSettings = {
   WeChatServerToken: string
   WeChatAccountQRCodeImageURL: string
   TurnstileCheckEnabled: boolean
+  TurnstileProvider: 'cloudflare' | 'custom'
   TurnstileSiteKey: string
   TurnstileSecretKey: string
+  TurnstileSecretKeyConfigured: boolean
+  TurnstileWidgetScriptURL: string
+  TurnstileWidgetEndpoint: string
+  TurnstileVerifyURL: string
+  TurnstileAction: string
   'passkey.enabled': boolean
   'passkey.rp_display_name': string
   'passkey.rp_id': string
+  'passkey.legacy_rp_ids': string
   'passkey.origins': string
   'passkey.allow_insecure_origin': boolean
   'passkey.user_verification': 'required' | 'preferred' | 'discouraged'
@@ -217,6 +377,7 @@ export type ModelSettings = {
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
+  'billing_setting.plugin_billing_expr': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
@@ -226,22 +387,6 @@ export type ModelSettings = {
   MaxTokenAutoGroups: number
   DefaultUseAutoGroup: boolean
   'group_ratio_setting.group_special_usable_group': string
-  RetryTimes: number
-  ChannelDisableThreshold: string
-  AutomaticDisableChannelEnabled: boolean
-  AutomaticEnableChannelEnabled: boolean
-  AutomaticDisableKeywords: string
-  AutomaticDisableStatusCodes: string
-  AutomaticRetryStatusCodes: string
-  'monitor_setting.auto_test_channel_enabled': boolean
-  'monitor_setting.auto_test_channel_minutes': number
-  'monitor_setting.channel_test_mode': 'scheduled_all' | 'passive_recovery'
-  'channel_affinity_setting.enabled': boolean
-  'channel_affinity_setting.switch_on_success': boolean
-  'channel_affinity_setting.keep_on_channel_disabled': boolean
-  'channel_affinity_setting.max_entries': number
-  'channel_affinity_setting.default_ttl_seconds': number
-  'channel_affinity_setting.rules': string
   'model_deployment.ionet.api_key': string
   'model_deployment.ionet.enabled': boolean
 }
@@ -254,6 +399,15 @@ export type BillingSettings = {
   TopUpLink: string
   'general_setting.docs_link': string
   'quota_setting.enable_free_model_pre_consume': boolean
+  AffiliateCommissionEnabled: boolean
+  AffiliateCommissionAutoApprove: boolean
+  AffiliateCommissionInviteeTopUpLimit: number
+  AffiliateCommissionDefaultRateBasisPoints: number
+  AffiliateCommissionGroupRates: string
+  AffiliateUpgradeEffectiveInviteesThreshold: number
+  AffiliateGoldUpgradeEffectiveInviteesThreshold: number
+  AffiliateUpgradeEffectiveTopUpAmountCents: number
+  AffiliateGoldUpgradeEffectiveTopUpAmountCents: number
   QuotaPerUnit: number
   USDExchangeRate: number
   'general_setting.quota_display_type': string
@@ -272,6 +426,7 @@ export type BillingSettings = {
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
+  'billing_setting.plugin_billing_expr': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
@@ -305,6 +460,16 @@ export type BillingSettings = {
   CreemWebhookSecret: string
   CreemTestMode: boolean
   CreemProducts: string
+  AntomEnabled: boolean
+  AntomDisplayName: string
+  AntomGateway: string
+  AntomClientId: string
+  AntomMerchantPrivateKey: string
+  AntomPublicKey: string
+  AntomMerchantPrivateKeyConfigured: boolean
+  AntomPublicKeyConfigured: boolean
+  AntomNotifyURL: string
+  AntomRedirectURL: string
   WaffoEnabled: boolean
   WaffoApiKey: string
   WaffoPrivateKey: string
@@ -346,6 +511,68 @@ export type OperationsSettings = {
   SMTPStartTLSEnabled: boolean
   SMTPInsecureSkipVerify: boolean
   SMTPForceAuthLogin: boolean
+  SMTPBackupEnabled: boolean
+  SMTPBackupServer: string
+  SMTPBackupPort: string
+  SMTPBackupAccount: string
+  SMTPBackupFrom: string
+  SMTPBackupToken: string
+  SMTPBackupSSLEnabled: boolean
+  SMTPBackupStartTLSEnabled: boolean
+  SMTPBackupInsecureSkipVerify: boolean
+  SMTPBackupForceAuthLogin: boolean
+  SMTPSecurityEnabled: boolean
+  SMTPSecurityServer: string
+  SMTPSecurityPort: string
+  SMTPSecurityAccount: string
+  SMTPSecurityFrom: string
+  SMTPSecurityToken: string
+  SMTPSecuritySSLEnabled: boolean
+  SMTPSecurityStartTLSEnabled: boolean
+  SMTPSecurityInsecureSkipVerify: boolean
+  SMTPSecurityForceAuthLogin: boolean
+  SMTPMarketingEnabled: boolean
+  SMTPMarketingServer: string
+  SMTPMarketingPort: string
+  SMTPMarketingAccount: string
+  SMTPMarketingFrom: string
+  SMTPMarketingToken: string
+  SMTPMarketingSSLEnabled: boolean
+  SMTPMarketingStartTLSEnabled: boolean
+  SMTPMarketingInsecureSkipVerify: boolean
+  SMTPMarketingForceAuthLogin: boolean
+  InvoiceApplicationNotifyAdminEnabled: boolean
+  InvoiceIssuedNotifyUserEnabled: boolean
+  InvoiceAdminEmail: string
+  InvoiceMinimumAmountCents: string
+  InvoiceTaxRateBasisPoints: string
+  InvoiceDataRetentionDays: string
+  InvoicePendingExpiryDays: string
+  InvoiceFileEnabled: boolean
+  InvoiceFileStorage: string
+  InvoiceFileMaxSize: string
+  InvoiceFileMaxCount: string
+  InvoiceFileAllowedExts: string
+  InvoiceFileLocalPath: string
+  InvoiceFileSignedURLTTL: string
+  InvoiceFileOSSEndpoint: string
+  InvoiceFileOSSBucket: string
+  InvoiceFileOSSRegion: string
+  InvoiceFileOSSAccessKeyId: string
+  InvoiceFileOSSAccessKeySecret: string
+  InvoiceFileOSSCustomDomain: string
+  InvoiceFileS3Endpoint: string
+  InvoiceFileS3Bucket: string
+  InvoiceFileS3Region: string
+  InvoiceFileS3AccessKeyId: string
+  InvoiceFileS3AccessKeySecret: string
+  InvoiceFileS3CustomDomain: string
+  InvoiceFileCOSEndpoint: string
+  InvoiceFileCOSBucket: string
+  InvoiceFileCOSRegion: string
+  InvoiceFileCOSSecretId: string
+  InvoiceFileCOSSecretKey: string
+  InvoiceFileCOSCustomDomain: string
   WorkerUrl: string
   WorkerValidKey: string
   WorkerAllowHttpImageRequestEnabled: boolean
@@ -415,6 +642,12 @@ export type DifferencesMap = Record<
   Partial<Record<RatioType, RatioDifference>>
 >
 
+export type PricingSyncValues = Partial<Record<RatioType, number | string>>
+export type PricingSyncModels = Record<
+  string,
+  { current: PricingSyncValues; upstreams: Record<string, PricingSyncValues> }
+>
+
 export type UpstreamChannelsResponse = {
   success: boolean
   message: string
@@ -444,6 +677,7 @@ export type UpstreamRatiosResponse = {
   message: string
   data: {
     differences: DifferencesMap
+    prices: PricingSyncModels
     test_results: TestResult[]
   }
 }

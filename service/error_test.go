@@ -51,7 +51,6 @@ func TestResetStatusCode(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -148,6 +147,27 @@ func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {
 	require.NotNil(t, newAPIError)
 	require.NotContains(t, logBuffer.String(), "[truncated")
 	require.Contains(t, logBuffer.String(), body)
+}
+
+func TestTaskErrorFromAPIErrorKeepsPreConsumeFailureLocal(t *testing.T) {
+	t.Parallel()
+
+	quotaErr := fmt.Errorf("预扣费额度失败, 用户剩余额度: 1, 需要预扣费额度: 4")
+	apiErr := types.NewErrorWithStatusCode(
+		quotaErr,
+		types.ErrorCodeInsufficientUserQuota,
+		http.StatusForbidden,
+		types.ErrOptionWithSkipRetry(),
+	)
+
+	taskErr := TaskErrorFromAPIError(apiErr)
+
+	require.NotNil(t, taskErr)
+	require.Equal(t, string(types.ErrorCodeInsufficientUserQuota), taskErr.Code)
+	require.Equal(t, quotaErr.Error(), taskErr.Message)
+	require.Equal(t, http.StatusForbidden, taskErr.StatusCode)
+	require.True(t, taskErr.LocalError)
+	require.ErrorIs(t, taskErr.Error, quotaErr)
 }
 
 func withDebugEnabled(t *testing.T, enabled bool) {

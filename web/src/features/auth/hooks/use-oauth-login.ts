@@ -20,31 +20,39 @@ import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { clearAuthentication, isAuthBundle } from '@/lib/api'
+import { clearAuthentication } from '@/lib/api'
+import { AuthOperationError } from '@/lib/secure-verification'
 
-import { createOAuthFlow, logout, telegramLogin } from '../api'
+import {
+  createOAuthAuthorization,
+  createOAuthFlow,
+  logout,
+  type TurnstileVerificationPayload,
+} from '../api'
 import {
   buildGitHubOAuthUrl,
   buildDiscordOAuthUrl,
   buildOIDCOAuthUrl,
   buildLinuxDOOAuthUrl,
 } from '../lib/oauth'
-import { pickTelegramAuthorization } from '../lib/telegram-login'
+import { rememberOAuthLoginRedirect } from '../lib/oauth-callback-mode'
 import type { SystemStatus, CustomOAuthProviderInfo } from '../types'
-import { useAuthRedirect } from './use-auth-redirect'
+
+export interface OAuthTurnstileVerification extends TurnstileVerificationPayload {
+  validate: () => boolean
+  reset?: () => void
+}
 
 /**
  * Hook for managing OAuth login
  */
 export function useOAuthLogin(
   status: SystemStatus | null,
-  redirectTo?: string
+  redirectTo?: string,
+  turnstileVerification?: OAuthTurnstileVerification
 ) {
   const { t } = useTranslation()
-  const { handleLoginSuccess } = useAuthRedirect()
   const [isLoading, setIsLoading] = useState(false)
-  const [isTelegramDialogOpen, setIsTelegramDialogOpen] = useState(false)
-  const [isTelegramPending, setIsTelegramPending] = useState(false)
   const [githubButtonText, setGithubButtonText] = useState('')
   const [githubButtonDisabled, setGithubButtonDisabled] = useState(false)
   const githubTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -67,9 +75,18 @@ export function useOAuthLogin(
     clearAuthentication()
   }
 
+  const validateTurnstile = () => turnstileVerification?.validate() ?? true
+
+  const verificationPayload = turnstileVerification
+    ? {
+        turnstile: turnstileVerification.turnstile,
+      }
+    : undefined
+
   const handleGitHubLogin = async () => {
     if (!status?.github_client_id) return
     if (githubButtonDisabled) return
+    if (!validateTurnstile()) return
 
     setIsLoading(true)
     setGithubButtonDisabled(true)
@@ -89,11 +106,17 @@ export function useOAuthLogin(
 
     try {
       await resetSession()
-      const state = await createOAuthFlow('github', 'login')
+      const state = await createOAuthFlow(
+        'github',
+        'login',
+        verificationPayload
+      )
+      rememberOAuthLoginRedirect(state, redirectTo)
 
       const url = buildGitHubOAuthUrl(status.github_client_id, state)
       window.open(url, '_self')
     } catch {
+      turnstileVerification?.reset?.()
       toast.error(t('Failed to start GitHub login'))
       if (githubTimeoutRef.current) {
         clearTimeout(githubTimeoutRef.current)
@@ -106,15 +129,22 @@ export function useOAuthLogin(
 
   const handleDiscordLogin = async () => {
     if (!status?.discord_client_id) return
+    if (!validateTurnstile()) return
 
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow('discord', 'login')
+      const state = await createOAuthFlow(
+        'discord',
+        'login',
+        verificationPayload
+      )
+      rememberOAuthLoginRedirect(state, redirectTo)
 
       const url = buildDiscordOAuthUrl(status.discord_client_id, state)
       window.open(url, '_self')
     } catch {
+      turnstileVerification?.reset?.()
       toast.error(t('Failed to start Discord login'))
     } finally {
       setIsLoading(false)
@@ -123,11 +153,13 @@ export function useOAuthLogin(
 
   const handleOIDCLogin = async () => {
     if (!status?.oidc_authorization_endpoint || !status?.oidc_client_id) return
+    if (!validateTurnstile()) return
 
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow('oidc', 'login')
+      const state = await createOAuthFlow('oidc', 'login', verificationPayload)
+      rememberOAuthLoginRedirect(state, redirectTo)
 
       const url = buildOIDCOAuthUrl(
         status.oidc_authorization_endpoint,
@@ -136,6 +168,7 @@ export function useOAuthLogin(
       )
       window.open(url, '_self')
     } catch {
+      turnstileVerification?.reset?.()
       toast.error(t('Failed to start OIDC login'))
     } finally {
       setIsLoading(false)
@@ -144,15 +177,22 @@ export function useOAuthLogin(
 
   const handleLinuxDOLogin = async () => {
     if (!status?.linuxdo_client_id) return
+    if (!validateTurnstile()) return
 
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow('linuxdo', 'login')
+      const state = await createOAuthFlow(
+        'linuxdo',
+        'login',
+        verificationPayload
+      )
+      rememberOAuthLoginRedirect(state, redirectTo)
 
       const url = buildLinuxDOOAuthUrl(status.linuxdo_client_id, state)
       window.open(url, '_self')
     } catch {
+      turnstileVerification?.reset?.()
       toast.error(t('Failed to start LinuxDO login'))
     } finally {
       setIsLoading(false)
@@ -160,56 +200,52 @@ export function useOAuthLogin(
   }
 
   const handleTelegramLogin = async () => {
-    if (!status?.telegram_bot_name?.trim()) {
-      toast.error(t('Login failed'))
+    if (!status?.telegram_oauth_configured) {
+      toast.error(
+        t(
+          'Telegram OAuth is not configured or enabled. Please contact your administrator.'
+        )
+      )
       return
     }
-
+    if (!validateTurnstile()) return
     setIsLoading(true)
     try {
-      await resetSession()
-      setIsTelegramDialogOpen(true)
-    } catch {
-      toast.error(
-        t('Failed to start {{provider}} login', { provider: 'Telegram' })
+      const authorization = await createOAuthAuthorization(
+        'telegram',
+        'login',
+        undefined,
+        undefined,
+        undefined,
+        verificationPayload
       )
+      if (!authorization.authorizationUrl) {
+        throw new AuthOperationError('Failed to initialize OAuth')
+      }
+      await resetSession()
+      rememberOAuthLoginRedirect(authorization.state, redirectTo)
+      window.open(authorization.authorizationUrl, '_self')
+    } catch (error) {
+      turnstileVerification?.reset?.()
+      toast.error(t(AuthOperationError.from(error).message))
     } finally {
       setIsLoading(false)
     }
   }
 
-  const handleTelegramAuthorization = async (value: unknown) => {
-    const authorization = pickTelegramAuthorization(value)
-    if (!authorization) {
-      toast.error(t('Login failed'))
-      return
-    }
-
-    setIsTelegramPending(true)
-    try {
-      const response = await telegramLogin(authorization)
-      if (!response.success || !isAuthBundle(response.data)) {
-        toast.error(t('Login failed'))
-        return
-      }
-
-      setIsTelegramDialogOpen(false)
-      await handleLoginSuccess(response.data, redirectTo)
-      toast.success(t('Welcome back!'))
-    } catch {
-      toast.error(t('Login failed'))
-    } finally {
-      setIsTelegramPending(false)
-    }
-  }
-
   const handleCustomOAuthLogin = async (provider: CustomOAuthProviderInfo) => {
     if (!provider.authorization_endpoint || !provider.client_id) return
+    if (!validateTurnstile()) return
 
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow(provider.slug, 'login')
+      const state = await createOAuthFlow(
+        provider.slug,
+        'login',
+        verificationPayload
+      )
+      rememberOAuthLoginRedirect(state, redirectTo)
 
       const redirectUri = `${window.location.origin}/oauth/${provider.slug}`
       const url = new URL(provider.authorization_endpoint)
@@ -223,6 +259,7 @@ export function useOAuthLogin(
 
       window.open(url.toString(), '_self')
     } catch {
+      turnstileVerification?.reset?.()
       toast.error(
         t('Failed to start {{provider}} login', { provider: provider.name })
       )
@@ -235,15 +272,11 @@ export function useOAuthLogin(
     isLoading,
     githubButtonText,
     githubButtonDisabled,
-    isTelegramDialogOpen,
-    isTelegramPending,
     handleGitHubLogin,
     handleDiscordLogin,
     handleOIDCLogin,
     handleLinuxDOLogin,
     handleTelegramLogin,
-    handleTelegramAuthorization,
-    setIsTelegramDialogOpen,
     handleCustomOAuthLogin,
   }
 }

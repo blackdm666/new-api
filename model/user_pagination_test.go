@@ -64,3 +64,38 @@ func TestSearchUsersSortsBeforePagination(t *testing.T) {
 	assert.Equal(t, int64(42), total)
 	assert.Equal(t, []int{21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40}, collectUserIDs(users))
 }
+
+func TestUserListsPopulateAffiliateLifetimeEarnings(t *testing.T) {
+	truncateTables(t)
+	insertUsersForPaginationTest(t, 3)
+	require.NoError(t, DB.Create(&AffiliateAccount{
+		UserId:              2,
+		AvailableCents:      1_500,
+		LifetimeEarnedCents: 12_345,
+	}).Error)
+
+	users, total, err := GetAllUsers(
+		&common.PageInfo{Page: 1, PageSize: 20},
+		NewUserSortOptions("id", "asc"),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+	require.Len(t, users, 3)
+	assert.Zero(t, users[0].AffEarnedCents)
+	assert.Equal(t, int64(12_345), users[1].AffEarnedCents)
+	assert.Zero(t, users[2].AffEarnedCents)
+
+	searched, total, err := SearchUsers(
+		"user02",
+		"",
+		nil,
+		nil,
+		0,
+		20,
+		NewUserSortOptions("id", "asc"),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, searched, 1)
+	assert.Equal(t, int64(12_345), searched[0].AffEarnedCents)
+}

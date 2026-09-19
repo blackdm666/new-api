@@ -16,44 +16,68 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { TFunction } from 'i18next'
 import {
   Activity,
+  BadgePercent,
   Box,
+  ClipboardList,
   CreditCard,
   FileText,
   FlaskConical,
   Key,
   LayoutDashboard,
   ListTodo,
+  MailPlus,
   MessageSquare,
+  PanelsTopLeft,
+  PlugZap,
   Radio,
+  ReceiptText,
   ServerCog,
   Settings,
-  Ticket,
+  Share2,
+  ShieldCheck,
   User,
   Users,
   Wallet,
 } from 'lucide-react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { type SidebarData } from '@/components/layout/types'
+import type { SidebarData } from '@/components/layout/types'
+import { useStatus } from '@/hooks/use-status'
+import { INFINITE_CANVAS_NAME } from '@/lib/external-links'
+import {
+  DEFAULT_INFINITE_CANVAS_LINK,
+  parseHeaderNavModulesFromStatus,
+  type HeaderNavLink,
+} from '@/lib/nav-modules'
 import { ROLE } from '@/lib/roles'
 
-/**
- * Root navigation groups for the application sidebar.
- *
- * These are shown when the URL does not match any nested sidebar view
- * registered in `layout/lib/sidebar-view-registry.ts`.
- */
-export function useSidebarData(): SidebarData {
-  const { t } = useTranslation()
-
+export function buildSidebarData(
+  t: TFunction,
+  infiniteCanvas: HeaderNavLink = DEFAULT_INFINITE_CANVAS_LINK
+): SidebarData {
   return {
     navGroups: [
       {
         id: 'chat',
         title: t('Chat'),
         items: [
+          ...(infiniteCanvas.enabled
+            ? [
+                {
+                  title:
+                    infiniteCanvas.name === INFINITE_CANVAS_NAME
+                      ? t(INFINITE_CANVAS_NAME)
+                      : infiniteCanvas.name,
+                  url: infiniteCanvas.url,
+                  icon: PanelsTopLeft,
+                  external: true,
+                },
+              ]
+            : []),
           {
             title: t('Playground'),
             url: '/playground',
@@ -91,6 +115,11 @@ export function useSidebarData(): SidebarData {
             icon: FileText,
           },
           {
+            title: t('Audit Logs'),
+            url: '/usage-logs/audit',
+            icon: ClipboardList,
+          },
+          {
             title: t('Task Logs'),
             url: '/usage-logs/task',
             activeUrls: ['/usage-logs/drawing'],
@@ -109,9 +138,24 @@ export function useSidebarData(): SidebarData {
             icon: Wallet,
           },
           {
+            title: t('Referral Program'),
+            url: '/referral',
+            icon: Share2,
+          },
+          {
+            title: t('Invoice Requests'),
+            url: '/invoices',
+            icon: ReceiptText,
+          },
+          {
             title: t('Profile'),
             url: '/profile',
             icon: User,
+          },
+          {
+            title: t('Security & Access'),
+            url: '/security',
+            icon: ShieldCheck,
           },
         ],
       },
@@ -123,26 +167,49 @@ export function useSidebarData(): SidebarData {
             title: t('Channels'),
             url: '/channels',
             icon: Radio,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Models'),
             url: '/models/metadata',
             icon: Box,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Users'),
             url: '/users',
             icon: Users,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Redemption Codes'),
             url: '/redemption-codes',
-            icon: Ticket,
+            icon: BadgePercent,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Subscriptions'),
             url: '/subscriptions',
             icon: CreditCard,
+            requiredRole: ROLE.ADMIN,
+          },
+          {
+            title: t('Invoice Management'),
+            url: '/admin-invoices',
+            icon: ReceiptText,
+            requiredRole: ROLE.ADMIN,
+          },
+          {
+            title: t('Affiliate Management'),
+            url: '/admin-affiliates',
+            icon: Share2,
+            requiredRole: ROLE.ADMIN,
+          },
+          {
+            title: t('Email Marketing'),
+            url: '/admin-marketing',
+            icon: MailPlus,
+            requiredRole: ROLE.SUPER_ADMIN,
           },
           {
             title: t('System Info'),
@@ -151,13 +218,38 @@ export function useSidebarData(): SidebarData {
             requiredRole: ROLE.SUPER_ADMIN,
           },
           {
+            title: t('Task Plugins'),
+            url: '/task-plugins',
+            icon: PlugZap,
+            requiredRole: ROLE.SUPER_ADMIN,
+          },
+          {
             title: t('System Settings'),
             url: '/system-settings/site',
             activeUrls: ['/system-settings'],
             icon: Settings,
+            requiredRole: ROLE.SUPER_ADMIN,
           },
         ],
       },
     ],
   }
+}
+
+/**
+ * Root navigation groups for the application sidebar.
+ *
+ * These are shown when the URL does not match any nested sidebar view
+ * registered in `layout/lib/sidebar-view-registry.ts`.
+ */
+export function useSidebarData(): SidebarData {
+  const { t } = useTranslation()
+  const { status } = useStatus()
+  const infiniteCanvas = useMemo(
+    () =>
+      parseHeaderNavModulesFromStatus(status as Record<string, unknown> | null)
+        .infiniteCanvas,
+    [status]
+  )
+  return buildSidebarData(t, infiniteCanvas)
 }

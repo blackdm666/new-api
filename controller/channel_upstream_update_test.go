@@ -6,16 +6,70 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDynamicPluginFetchesActualUpstreamCatalog(t *testing.T) {
+	const key = "dynamic-catalog-test"
+	source := `export const meta = {apiVersion:1,key:"dynamic-catalog-test",name:"Dynamic",version:"1.0.0",author:{name:"Test"},models:[],dynamicModels:true,fetchMode:"per_task"};
+export function buildSubmitRequest(){return {};}
+export function parseSubmitResponse(){return {};}
+export function buildQueryRequest(){return {};}
+export function parseTaskResult(){return {};}`
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister(key)) })
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		assert.Equal(t, "/v1/models", r.URL.Path)
+		assert.Equal(t, "Bearer fixture", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"data":[{"id":"new-provider-video"},{"id":"another-video"}]}`))
+	}))
+	defer server.Close()
+	setting := `{"task_plugin_key":"dynamic-catalog-test"}`
+	for _, suffix := range []string{"", "/", "/v1", "/v1/"} {
+		base := server.URL + suffix
+		channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, Key: "fixture", BaseURL: &base, Setting: &setting}
+		models, err := fetchChannelUpstreamModelIDs(channel)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"new-provider-video", "another-video"}, models)
+	}
+	assert.Equal(t, 4, requests)
+	// Exercise the unsaved channel form entry point with its explicit plugin
+	// identity, not just the internal catalog-fetch helper.
+	requestBody, err := common.Marshal(map[string]any{"type": constant.ChannelTypeTaskPlugin, "task_plugin_key": key, "key": "fixture", "base_url": server.URL})
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/channel/fetch_models", bytes.NewReader(requestBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	FetchModels(c)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"success":true`)
+	assert.Contains(t, w.Body.String(), "new-provider-video")
+	assert.Equal(t, 5, requests)
+	// Existing fixed-model plugins retain their offline manifest behavior.
+	source = strings.Replace(source, "dynamicModels:true", "dynamicModels:false", 1)
+	source = strings.Replace(source, "models:[]", `models:["fixed-video"]`, 1)
+	_, err = jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, Key: "fixture", BaseURL: &server.URL, Setting: &setting}
+	models, err := fetchChannelUpstreamModelIDs(channel)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"fixed-video"}, models)
+	assert.Equal(t, 5, requests)
+}
 
 func newAdvancedCustomModelListChannel(baseURL string, key string, upstreamPath string, auth *dto.AdvancedCustomRouteAuth) *model.Channel {
 	config := &dto.AdvancedCustomConfig{
@@ -168,6 +222,15 @@ func TestFetchAdvancedCustomModelsRedactsQueryKeyFromTransportErrors(t *testing.
 		Err: errors.New("connection refused"),
 	}, secret)
 	require.EqualError(t, direct, "connection refused")
+
+	queryValue := "prefix-" + secret
+	queryError := sanitizeAdvancedCustomRequestError(
+		errors.New("dial "+queryValue+": connection refused"),
+		queryValue,
+		baseURL+"/v1/models?custom-token="+url.QueryEscape(queryValue),
+	)
+	require.NotContains(t, queryError.Error(), queryValue)
+	require.EqualError(t, queryError, "dial [REDACTED]: connection refused")
 }
 
 func TestFetchOrdinaryOpenAIModelsKeepsExistingEmptyDataBehavior(t *testing.T) {
@@ -525,7 +588,7 @@ func TestCollectPendingUpstreamModelChangesFromModels_WithIgnoredRegexPatterns(t
 
 func TestBuildUpstreamModelUpdateTaskNotificationContent_OmitOverflowDetails(t *testing.T) {
 	channelSummaries := make([]upstreamModelUpdateChannelSummary, 0, 12)
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		channelSummaries = append(channelSummaries, upstreamModelUpdateChannelSummary{
 			ChannelName: "channel-" + string(rune('A'+i)),
 			AddCount:    i + 1,

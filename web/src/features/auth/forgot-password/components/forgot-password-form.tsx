@@ -42,6 +42,9 @@ import {
 } from '@/features/auth/constants'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import { useCountdown } from '@/hooks/use-countdown'
+import { handleServerError } from '@/lib/handle-server-error'
+import { AuthOperationError } from '@/lib/secure-verification'
+import { createServerError } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 export function ForgotPasswordForm({
@@ -50,13 +53,15 @@ export function ForgotPasswordForm({
 }: React.HTMLAttributes<HTMLFormElement>) {
   const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(false)
+  const [turnstileWidgetKey, setTurnstileWidgetKey] = useState(0)
 
   const {
     isTurnstileEnabled,
-    turnstileSiteKey,
+    turnstileConfig,
     turnstileToken,
     setTurnstileToken,
     validateTurnstile,
+    isStatusReady,
   } = useTurnstile()
   const {
     secondsLeft,
@@ -68,7 +73,15 @@ export function ForgotPasswordForm({
     resolver: zodResolver(forgotPasswordFormSchema),
     defaultValues: { email: '' },
   })
-  const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
+  const turnstileReady =
+    isStatusReady && (!isTurnstileEnabled || Boolean(turnstileToken))
+
+  const resetTurnstile = () => {
+    setTurnstileToken('')
+    if (isTurnstileEnabled) {
+      setTurnstileWidgetKey((current) => current + 1)
+    }
+  }
 
   async function onSubmit(data: z.infer<typeof forgotPasswordFormSchema>) {
     if (!validateTurnstile()) return
@@ -81,11 +94,14 @@ export function ForgotPasswordForm({
         startCountdown()
         toast.success(t('Reset email sent, please check your inbox'))
       } else {
-        toast.error(res?.message || t('Failed to send reset email'))
+        throw createServerError(res, t('Failed to send reset email'))
       }
-    } catch (_error) {
-      // Errors are handled by global interceptor
+    } catch (error: unknown) {
+      handleServerError(
+        AuthOperationError.from(error, t('Failed to send reset email'))
+      )
     } finally {
+      resetTurnstile()
       setIsLoading(false)
     }
   }
@@ -125,8 +141,10 @@ export function ForgotPasswordForm({
         {isTurnstileEnabled && (
           <div className='mt-2'>
             <Turnstile
-              siteKey={turnstileSiteKey}
+              key={turnstileWidgetKey}
+              {...turnstileConfig}
               onVerify={setTurnstileToken}
+              onExpire={resetTurnstile}
             />
           </div>
         )}

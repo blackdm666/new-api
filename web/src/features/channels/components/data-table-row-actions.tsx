@@ -31,11 +31,13 @@ import {
   PowerOff,
   Key,
   Trash2,
+  Eraser,
   RefreshCw,
   Loader2,
 } from 'lucide-react'
 import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
@@ -59,6 +61,7 @@ import {
 } from '@/lib/admin-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { resetChannelUsedQuota } from '../api'
 import { MODEL_FETCHABLE_TYPES } from '../constants'
 import {
   channelsQueryKeys,
@@ -85,6 +88,8 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((s) => s.auth.user)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [resetUsedQuotaOpen, setResetUsedQuotaOpen] = useState(false)
+  const [isResettingUsedQuota, setIsResettingUsedQuota] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
 
@@ -94,6 +99,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     currentUser,
     ADMIN_PERMISSION_RESOURCES.CHANNEL,
     ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
+  )
+  const canOperateChannel = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.CHANNEL,
+    ADMIN_PERMISSION_ACTIONS.OPERATE
   )
 
   const handleEdit = () => {
@@ -136,6 +146,34 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const handleCopy = () => {
     setCurrentRow(channel)
     setOpen('copy-channel')
+  }
+
+  const handleResetUsedQuota = async () => {
+    setIsResettingUsedQuota(true)
+    try {
+      const response = await resetChannelUsedQuota(channel.id)
+      if (!response.success) {
+        throw new Error(response.message || t('Failed to reset channel usage'))
+      }
+      toast.success(t('Channel cumulative usage has been reset'))
+      setResetUsedQuotaOpen(false)
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: channelsQueryKeys.lists(),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: channelsQueryKeys.detail(channel.id),
+        }),
+      ])
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to reset channel usage')
+      )
+    } finally {
+      setIsResettingUsedQuota(false)
+    }
   }
 
   const handleManageKeys = () => {
@@ -364,6 +402,25 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
 
           <DropdownMenuSeparator />
 
+          <DropdownMenuItem
+            disabled={!canOperateChannel || isResettingUsedQuota}
+            onSelect={(event) => {
+              event.preventDefault()
+              if (!canOperateChannel || isResettingUsedQuota) return
+              setResetUsedQuotaOpen(true)
+            }}
+            className='text-destructive focus:text-destructive'
+          >
+            {t('Reset cumulative usage')}
+            <DropdownMenuShortcut>
+              {isResettingUsedQuota ? (
+                <Loader2 className='size-4 animate-spin' />
+              ) : (
+                <Eraser size={16} />
+              )}
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
           {/* Delete */}
           <DropdownMenuItem
             disabled={!canEditSensitive}
@@ -381,6 +438,30 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <ConfirmDialog
+        open={resetUsedQuotaOpen}
+        onOpenChange={setResetUsedQuotaOpen}
+        title={t('Reset channel cumulative usage?')}
+        desc={
+          <div className='space-y-2'>
+            <p>
+              {t(
+                'This resets only the local cumulative usage counter so you can observe consumption again from the current moment.'
+              )}
+            </p>
+            <p>
+              {t(
+                'Upstream balance, user billing, and historical usage logs will not be changed. The previous cumulative value cannot be restored.'
+              )}
+            </p>
+          </div>
+        }
+        confirmText={t('Reset cumulative usage')}
+        destructive
+        isLoading={isResettingUsedQuota}
+        handleConfirm={() => void handleResetUsedQuota()}
+      />
 
       <ConfirmDialog
         open={deleteConfirmOpen}

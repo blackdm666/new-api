@@ -31,6 +31,7 @@ import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { Turnstile } from '@/components/turnstile'
+import type { TurnstileClientConfig } from '@/components/turnstile-utils'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { IconBadge } from '@/components/ui/icon-badge'
@@ -43,6 +44,8 @@ import {
 } from '@/components/ui/tooltip'
 import { formatQuotaWithCurrency } from '@/lib/currency'
 import dayjs from '@/lib/dayjs'
+import { handleServerError } from '@/lib/handle-server-error'
+import { createServerError } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 import { getCheckinStatus, performCheckin } from '../api'
@@ -51,13 +54,13 @@ import type { CheckinRecord } from '../types'
 interface CheckinCalendarCardProps {
   checkinEnabled: boolean
   turnstileEnabled: boolean
-  turnstileSiteKey: string
+  turnstileConfig: TurnstileClientConfig
 }
 
 export function CheckinCalendarCard({
   checkinEnabled,
   turnstileEnabled,
-  turnstileSiteKey,
+  turnstileConfig,
 }: CheckinCalendarCardProps) {
   const { t } = useTranslation()
   const [currentMonth, setCurrentMonth] = useState(() => {
@@ -89,7 +92,7 @@ export function CheckinCalendarCard({
       if (res.success && res.data) {
         return res.data
       }
-      throw new Error(res.message || t('Failed to fetch checkin status'))
+      throw createServerError(res, t('Failed to fetch checkin status'))
     },
     enabled: checkinEnabled,
     staleTime: 30000,
@@ -151,25 +154,21 @@ export function CheckinCalendarCard({
           setTurnstileModalVisible(false)
         } else {
           if (!token && shouldTriggerTurnstile(res.message)) {
-            if (!turnstileSiteKey) {
-              toast.error(t('Turnstile is enabled but site key is empty.'))
-              return
-            }
             setTurnstileModalVisible(true)
             return
           }
           if (token && shouldTriggerTurnstile(res.message)) {
             setTurnstileWidgetKey((v) => v + 1)
           }
-          toast.error(res.message || t('Check-in failed'))
+          handleServerError(res, t('Check-in failed'))
         }
-      } catch {
-        toast.error(t('Check-in failed'))
+      } catch (error) {
+        handleServerError(error, t('Check-in failed'))
       } finally {
         setCheckinLoading(false)
       }
     },
-    [refetch, shouldTriggerTurnstile, t, turnstileSiteKey]
+    [refetch, shouldTriggerTurnstile, t]
   )
 
   const handlePrevMonth = () => {
@@ -270,7 +269,7 @@ export function CheckinCalendarCard({
         <div className='flex justify-center py-4'>
           <Turnstile
             key={turnstileWidgetKey}
-            siteKey={turnstileSiteKey}
+            {...turnstileConfig}
             onVerify={(token) => {
               doCheckin(token)
             }}

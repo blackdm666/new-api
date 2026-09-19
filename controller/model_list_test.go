@@ -34,6 +34,11 @@ type userModelsResponse struct {
 	Data    []string `json:"data"`
 }
 
+type userModelDetailsResponse struct {
+	Success bool                    `json:"success"`
+	Data    []playgroundModelDetail `json:"data"`
+}
+
 func setupModelListControllerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -215,6 +220,60 @@ func TestGetUserModelsFiltersByRequestedGroup(t *testing.T) {
 	require.Empty(t, decodeUserModelsResponse(t, vipRecorder))
 }
 
+func TestGetUserModelsReturnsPlaygroundModesWhenRequested(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	model.InvalidatePricingCache()
+	t.Cleanup(model.InvalidatePricingCache)
+
+	require.NoError(t, db.Create(&model.User{
+		Id:       1004,
+		Username: "playground-mode-user",
+		Password: "password",
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&[]model.Channel{
+		{Id: 31, Name: "chat-and-image", Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled},
+		{Id: 32, Name: "native-video", Type: constant.ChannelTypeSora, Status: common.ChannelStatusEnabled},
+		{Id: 33, Name: "gemini-chat-image", Type: constant.ChannelTypeGemini, Status: common.ChannelStatusEnabled},
+		{Id: 34, Name: "grok-image", Type: constant.ChannelTypeSub2API, Status: common.ChannelStatusEnabled},
+	}).Error)
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "default", Model: "gpt-4o", ChannelId: 31, Enabled: true},
+		{Group: "default", Model: "gpt-image-2", ChannelId: 31, Enabled: true},
+		{Group: "default", Model: "sora-2", ChannelId: 32, Enabled: true},
+		{Group: "default", Model: "gemini-3.1-flash-image", ChannelId: 33, Enabled: true},
+		{Group: "default", Model: "grok-imagine-image-quality", ChannelId: 34, Enabled: true},
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/user/models?group=default&details=true", nil)
+	context.Set("id", 1004)
+
+	GetUserModels(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload userModelDetailsResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.True(t, payload.Success)
+	modes := make(map[string]string, len(payload.Data))
+	transports := make(map[string]string, len(payload.Data))
+	for _, item := range payload.Data {
+		modes[item.Model] = item.Mode
+		transports[item.Model] = item.Transport
+	}
+	assert.Equal(t, "chat", modes["gpt-4o"])
+	assert.Equal(t, "image", modes["gpt-image-2"])
+	assert.Equal(t, "video", modes["sora-2"])
+	assert.Equal(t, "image", modes["gemini-3.1-flash-image"])
+	assert.Equal(t, "chat", transports["gemini-3.1-flash-image"])
+	assert.Equal(t, "image", modes["grok-imagine-image-quality"])
+	assert.Equal(t, "image", transports["grok-imagine-image-quality"])
+	assert.Equal(t, "image", transports["gpt-image-2"])
+	assert.Equal(t, "video", transports["sora-2"])
+}
+
 func TestGetUserModelsExpandsAutoGroupsInConfiguredOrder(t *testing.T) {
 	originalAutoGroups := setting.AutoGroups2JsonString()
 	originalUsableGroups := setting.UserUsableGroups2JSONString()
@@ -319,6 +378,41 @@ func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 	require.True(t, ok)
 	require.Empty(t, missingExprPricing.BillingMode)
 	require.Empty(t, missingExprPricing.BillingExpr)
+}
+
+func TestPricingDistinguishesPerRequestAndPerSecondFixedPrices(t *testing.T) {
+	withTieredBillingConfig(t, map[string]string{
+		"zz-fixed-request-model": "per_request",
+		"zz-fixed-second-model":  "per_second",
+	}, nil)
+
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
+		model.InvalidatePricingCache()
+	})
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{
+		"zz-fixed-request-model": 0.5,
+		"zz-fixed-second-model": 0.08
+	}`))
+
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "default", Model: "zz-fixed-request-model", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "zz-fixed-second-model", ChannelId: 1, Enabled: true},
+	}).Error)
+	model.InvalidatePricingCache()
+
+	pricingByName := pricingByModelName(model.GetPricing())
+	requestPricing, ok := pricingByName["zz-fixed-request-model"]
+	require.True(t, ok)
+	assert.Equal(t, "per_request", requestPricing.BillingMode)
+	assert.Equal(t, "request", requestPricing.BillingUnit)
+
+	secondPricing, ok := pricingByName["zz-fixed-second-model"]
+	require.True(t, ok)
+	assert.Equal(t, "per_second", secondPricing.BillingMode)
+	assert.Equal(t, "second", secondPricing.BillingUnit)
 }
 
 func TestListModelsUsesAdvancedCustomEndpointTypesFromPricingCache(t *testing.T) {
@@ -493,49 +587,9 @@ func TestListModelsTokenLimitUsesResolvedCustomAutoGroups(t *testing.T) {
 	require.Empty(t, anthropicResponse.LastID)
 }
 
-func TestCheckUpdatePasswordRequiresCurrentPassword(t *testing.T) {
-	db := setupModelListControllerTestDB(t)
-	hashedPassword, err := common.Password2Hash("CurrentPassword123")
-	require.NoError(t, err)
-	user := &model.User{
-		Username: "password-user",
-		Password: hashedPassword,
-		Status:   common.UserStatusEnabled,
-	}
-	require.NoError(t, db.Create(user).Error)
-
-	updatePassword, err := checkUpdatePassword("", "", user.Id)
-	require.NoError(t, err)
-	assert.False(t, updatePassword)
-
-	updatePassword, err = checkUpdatePassword("", "NewPassword123", user.Id)
-	require.Error(t, err)
-	assert.False(t, updatePassword)
-	assert.ErrorIs(t, err, errOriginalPasswordFail)
-
-	updatePassword, err = checkUpdatePassword("CurrentPassword123", "NewPassword123", user.Id)
-	require.NoError(t, err)
-	assert.True(t, updatePassword)
-}
-
-func TestCheckUpdatePasswordRejectsHistoricalEmptyPassword(t *testing.T) {
-	db := setupModelListControllerTestDB(t)
-	user := &model.User{
-		Username: "legacy-passwordless-user",
-		Password: "",
-		Status:   common.UserStatusEnabled,
-	}
-	require.NoError(t, db.Create(user).Error)
-
-	updatePassword, err := checkUpdatePassword("", "NewPassword123", user.Id)
-	require.Error(t, err)
-	assert.False(t, updatePassword)
-	assert.ErrorIs(t, err, errUserPasswordUnset)
-}
-
 func TestSetupLoginDoesNotTouchPasswordWhenPasswordFieldOmitted(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.UserSession{}))
+	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.AuditLog{}, &model.UserSession{}, &model.TwoFA{}, &model.PasskeyCredential{}))
 
 	hashedPassword, err := common.Password2Hash("CurrentPassword123")
 	require.NoError(t, err)
@@ -551,12 +605,13 @@ func TestSetupLoginDoesNotTouchPasswordWhenPasswordFieldOmitted(t *testing.T) {
 	router := gin.New()
 	router.GET("/", func(c *gin.Context) {
 		setupLogin(&model.User{
-			Id:       user.Id,
-			Username: user.Username,
-			Role:     user.Role,
-			Status:   user.Status,
-			Group:    user.Group,
-		}, c)
+			Id:          user.Id,
+			AuthVersion: user.AuthVersion,
+			Username:    user.Username,
+			Role:        user.Role,
+			Status:      user.Status,
+			Group:       user.Group,
+		}, nil, c)
 	})
 
 	recorder := httptest.NewRecorder()

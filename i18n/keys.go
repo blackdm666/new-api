@@ -1,5 +1,7 @@
 package i18n
 
+const MsgTaskPluginUnknownMetaField = "task_plugin.unknown_meta_field"
+
 // Message keys for i18n translations
 // Use these constants instead of hardcoded strings
 
@@ -99,6 +101,10 @@ const (
 	MsgUserCannotDeleteRootUser      = "user.cannot_delete_root_user"
 	MsgUserCannotDisableRootUser     = "user.cannot_disable_root_user"
 	MsgUserCannotDemoteRootUser      = "user.cannot_demote_root_user"
+	MsgUserInviterInvalid            = "user.inviter_invalid"
+	MsgUserInviterNotFound           = "user.inviter_not_found"
+	MsgUserInviterSelf               = "user.inviter_self"
+	MsgUserInviterCycle              = "user.inviter_cycle"
 	MsgUserAlreadyAdmin              = "user.already_admin"
 	MsgUserAlreadyCommon             = "user.already_common"
 	MsgUserAdminCannotPromote        = "user.admin_cannot_promote"
@@ -144,6 +150,56 @@ const (
 	MsgSubscriptionPurchaseMax      = "subscription.purchase_max"
 	MsgSubscriptionInvalidId        = "subscription.invalid_id"
 	MsgSubscriptionInvalidUserId    = "subscription.invalid_user_id"
+)
+
+// Invoice related messages
+const (
+	MsgInvoiceNotFound                = "invoice.not_found"
+	MsgInvoiceStatusInvalid           = "invoice.status_invalid"
+	MsgInvoiceStatusTransition        = "invoice.status_transition"
+	MsgInvoiceRejectionReasonRequired = "invoice.rejection_reason_required"
+	MsgInvoiceRejectionReasonInvalid  = "invoice.rejection_reason_invalid"
+	MsgInvoiceOrderEmpty              = "invoice.order_empty"
+	MsgInvoiceOrderInvalid            = "invoice.order_invalid"
+	MsgInvoiceOrderDuplicate          = "invoice.order_duplicate"
+	MsgInvoiceAmountTooSmall          = "invoice.amount_too_small"
+	MsgInvoiceTaxFeeInsufficient      = "invoice.tax_fee_insufficient"
+	MsgInvoiceFileRequired            = "invoice.file_required"
+	MsgInvoiceCompanyEmpty            = "invoice.company_empty"
+	MsgInvoiceCompanyInvalid          = "invoice.company_invalid"
+	MsgInvoiceTaxNumberEmpty          = "invoice.tax_number_empty"
+	MsgInvoiceTaxNumberInvalid        = "invoice.tax_number_invalid"
+	MsgInvoiceEmailEmpty              = "invoice.email_empty"
+	MsgInvoiceEmailInvalid            = "invoice.email_invalid"
+	MsgInvoiceOptionalFieldInvalid    = "invoice.optional_field_invalid"
+	MsgInvoiceWithdrawForbidden       = "invoice.withdraw_forbidden"
+	MsgInvoicePurgeForbidden          = "invoice.purge_forbidden"
+	MsgInvoiceFileDisabled            = "invoice.file_disabled"
+	MsgInvoiceFileLimit               = "invoice.file_limit"
+	MsgInvoiceFileMissing             = "invoice.file_missing"
+	MsgInvoiceFileEmpty               = "invoice.file_empty"
+	MsgInvoiceFileTooLarge            = "invoice.file_too_large"
+	MsgInvoiceFileNotFound            = "invoice.file_not_found"
+	MsgInvoiceIssuedFileRequired      = "invoice.issued_file_required"
+	MsgInvoiceFileContentMissing      = "invoice.file_content_missing"
+	MsgInvoiceFileMutationRejected    = "invoice.file_mutation_rejected"
+	MsgInvoiceFileMutationArchived    = "invoice.file_mutation_archived"
+	MsgInvoiceFileMutationFinal       = "invoice.file_mutation_final"
+	MsgInvoiceOperationFailed         = "invoice.operation_failed"
+	MsgInvoiceLoadFailed              = "invoice.load_failed"
+	MsgInvoiceSubmitFailed            = "invoice.submit_failed"
+	MsgInvoiceUpdateFailed            = "invoice.update_failed"
+	MsgInvoiceUploadFailed            = "invoice.upload_failed"
+	MsgInvoiceDownloadFailed          = "invoice.download_failed"
+	MsgInvoiceFileDeleteFailed        = "invoice.file_delete_failed"
+	MsgInvoiceMaintenanceFailed       = "invoice.maintenance_failed"
+	MsgInvoiceSettingsInvalid         = "invoice.settings_invalid"
+	MsgInvoiceSettingsSaveFailed      = "invoice.settings_save_failed"
+	MsgInvoiceStorageTestFailed       = "invoice.storage_test_failed"
+	MsgInvoiceFileNameInvalid         = "invoice.file_name_invalid"
+	MsgInvoiceFileTypeNotAllowed      = "invoice.file_type_not_allowed"
+	MsgInvoiceFileTypeMismatch        = "invoice.file_type_mismatch"
+	MsgInvoiceFileSVGForbidden        = "invoice.file_svg_forbidden"
 )
 
 // Payment related messages
@@ -219,11 +275,14 @@ const (
 
 // Passkey related messages
 const (
-	MsgPasskeyCreateFailed  = "passkey.create_failed"
-	MsgPasskeyLoginAbnormal = "passkey.login_abnormal"
-	MsgPasskeyUpdateFailed  = "passkey.update_failed"
-	MsgPasskeyInvalidUserId = "passkey.invalid_user_id"
-	MsgPasskeyVerifyFailed  = "passkey.verify_failed"
+	MsgPasskeyCreateFailed            = "passkey.create_failed"
+	MsgPasskeyLoginAbnormal           = "passkey.login_abnormal"
+	MsgPasskeyUpdateFailed            = "passkey.update_failed"
+	MsgPasskeyInvalidUserId           = "passkey.invalid_user_id"
+	MsgPasskeyVerifyFailed            = "passkey.verify_failed"
+	MsgPasskeyRPIDInvalid             = "passkey.rp_id_invalid"
+	MsgPasskeyRPIDUnavailable         = "passkey.rp_id_unavailable"
+	MsgPasskeyRPIDRemovalConfirmation = "passkey.rp_id_removal_confirmation"
 )
 
 // 2FA related messages
@@ -239,6 +298,11 @@ const (
 const (
 	MsgRateLimitReached      = "rate_limit.reached"
 	MsgRateLimitTotalReached = "rate_limit.total_reached"
+)
+
+// Video task validation messages
+const (
+	MsgOmniReferenceVideoDurationExceeded = "video.omni.reference_duration_exceeded"
 )
 
 // Setting related messages
@@ -295,6 +359,7 @@ const (
 	MsgOAuthUserBanned      = "oauth.user_banned"
 	MsgOAuthBindSuccess     = "oauth.bind_success"
 	MsgOAuthAlreadyBound    = "oauth.already_bound"
+	MsgOAuthNotAutoLinked   = "oauth.not_auto_linked"
 	MsgOAuthConnectFailed   = "oauth.connect_failed"
 	MsgOAuthTokenFailed     = "oauth.token_failed"
 	MsgOAuthUserInfoEmpty   = "oauth.user_info_empty"
@@ -311,19 +376,20 @@ const (
 
 // Distributor related messages
 const (
-	MsgDistributorInvalidRequest          = "distributor.invalid_request"
-	MsgDistributorInvalidChannelId        = "distributor.invalid_channel_id"
-	MsgDistributorChannelDisabled         = "distributor.channel_disabled"
-	MsgDistributorAffinityChannelDisabled = "distributor.affinity_channel_disabled"
-	MsgDistributorTokenNoModelAccess      = "distributor.token_no_model_access"
-	MsgDistributorTokenModelForbidden     = "distributor.token_model_forbidden"
-	MsgDistributorModelNameRequired       = "distributor.model_name_required"
-	MsgDistributorInvalidPlayground       = "distributor.invalid_playground_request"
-	MsgDistributorGroupAccessDenied       = "distributor.group_access_denied"
-	MsgDistributorGetChannelFailed        = "distributor.get_channel_failed"
-	MsgDistributorNoAvailableChannel      = "distributor.no_available_channel"
-	MsgDistributorInvalidMidjourney       = "distributor.invalid_midjourney_request"
-	MsgDistributorInvalidParseModel       = "distributor.invalid_request_parse_model"
+	MsgDistributorInvalidRequest               = "distributor.invalid_request"
+	MsgDistributorInvalidChannelId             = "distributor.invalid_channel_id"
+	MsgDistributorChannelDisabled              = "distributor.channel_disabled"
+	MsgDistributorAffinityChannelDisabled      = "distributor.affinity_channel_disabled"
+	MsgDistributorTokenNoModelAccess           = "distributor.token_no_model_access"
+	MsgDistributorTokenModelForbidden          = "distributor.token_model_forbidden"
+	MsgDistributorModelNameRequired            = "distributor.model_name_required"
+	MsgDistributorInvalidPlayground            = "distributor.invalid_playground_request"
+	MsgDistributorGroupAccessDenied            = "distributor.group_access_denied"
+	MsgDistributorGetChannelFailed             = "distributor.get_channel_failed"
+	MsgDistributorNoAvailableChannel           = "distributor.no_available_channel"
+	MsgDistributorNoAvailableChannelTaskPlugin = "distributor.no_available_channel_task_plugin"
+	MsgDistributorInvalidMidjourney            = "distributor.invalid_midjourney_request"
+	MsgDistributorInvalidParseModel            = "distributor.invalid_request_parse_model"
 )
 
 // Custom OAuth provider related messages
@@ -335,4 +401,29 @@ const (
 	MsgCustomOAuthHasBindings       = "custom_oauth.has_bindings"
 	MsgCustomOAuthBindingNotFound   = "custom_oauth.binding_not_found"
 	MsgCustomOAuthProviderIdInvalid = "custom_oauth.provider_id_field_invalid"
+)
+
+// Affiliate commission messages
+const (
+	MsgAffiliateCommissionNotFound             = "affiliate.commission_not_found"
+	MsgAffiliateCommissionStatusInvalid        = "affiliate.commission_status_invalid"
+	MsgAffiliateTopUpInvalid                   = "affiliate.topup_invalid"
+	MsgAffiliateRejectReasonRequired           = "affiliate.reject_reason_required"
+	MsgAffiliateUpgradeNotEligible             = "affiliate.upgrade_not_eligible"
+	MsgAffiliatePayoutNotFound                 = "affiliate.payout_not_found"
+	MsgAffiliatePayoutForbidden                = "affiliate.payout_forbidden"
+	MsgAffiliatePayoutStatusInvalid            = "affiliate.payout_status_invalid"
+	MsgAffiliatePayoutAmountTooSmall           = "affiliate.payout_amount_too_small"
+	MsgAffiliatePayoutInsufficientBalance      = "affiliate.payout_insufficient_balance"
+	MsgAffiliatePayoutAccountInvalid           = "affiliate.payout_account_invalid"
+	MsgAffiliatePayoutRequestIdInvalid         = "affiliate.payout_request_id_invalid"
+	MsgAffiliatePayoutRequestConflict          = "affiliate.payout_request_conflict"
+	MsgAffiliatePayoutRejectionReasonRequired  = "affiliate.payout_rejection_reason_required"
+	MsgAffiliatePayoutSettlementNotDue         = "affiliate.payout_settlement_not_due"
+	MsgAffiliateLegacyRewardEnabled            = "affiliate.legacy_reward_enabled"
+	MsgAffiliateAlipayNotConfigured            = "affiliate.alipay_not_configured"
+	MsgAffiliateAlipayConfigInvalid            = "affiliate.alipay_config_invalid"
+	MsgAffiliateAlipayPayoutFailed             = "affiliate.alipay_payout_failed"
+	MsgAffiliateAlipayResponseSignatureInvalid = "affiliate.alipay_response_signature_invalid"
+	MsgAffiliateAlipayClientIPNotTrusted       = "affiliate.alipay_client_ip_not_trusted"
 )

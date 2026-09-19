@@ -147,6 +147,262 @@ func TestAdvancedCustomModelListRouteRequiresExactIncomingPath(t *testing.T) {
 	assert.Equal(t, "/provider/models", route.UpstreamPath)
 }
 
+func TestAdvancedCustomValidateBalanceRouteConstraints(t *testing.T) {
+	valid := &AdvancedCustomConfig{
+		Routes: []AdvancedCustomRoute{{
+			IncomingPath: AdvancedCustomBalancePath,
+			UpstreamPath: "/provider/balance",
+			Converter:    advancedCustomConverterNone,
+		}},
+	}
+	require.NoError(t, valid.Validate())
+
+	route, ok := valid.BalanceRoute()
+	require.True(t, ok)
+	assert.Equal(t, "/provider/balance", route.UpstreamPath)
+
+	tests := []struct {
+		name   string
+		routes []AdvancedCustomRoute
+		want   string
+	}{
+		{
+			name: "model matching rules",
+			routes: []AdvancedCustomRoute{{
+				IncomingPath: AdvancedCustomBalancePath,
+				UpstreamPath: "/provider/balance",
+				Models:       []string{"gpt-4o"},
+			}},
+			want: "models must be empty",
+		},
+		{
+			name: "converter",
+			routes: []AdvancedCustomRoute{{
+				IncomingPath: AdvancedCustomBalancePath,
+				UpstreamPath: "/provider/balance",
+				Converter:    advancedCustomConverterOpenAIChatToOpenAIResponses,
+			}},
+			want: "converter must be none",
+		},
+		{
+			name: "model placeholder",
+			routes: []AdvancedCustomRoute{{
+				IncomingPath: AdvancedCustomBalancePath,
+				UpstreamPath: "/provider/{model}/balance",
+			}},
+			want: "upstream_path must not contain {model}",
+		},
+		{
+			name: "duplicate routes",
+			routes: []AdvancedCustomRoute{
+				{IncomingPath: AdvancedCustomBalancePath, UpstreamPath: "/provider/balance"},
+				{IncomingPath: AdvancedCustomBalancePath, UpstreamPath: "/provider/credits"},
+			},
+			want: "duplicates the /v1/dashboard/billing/credit_grants route",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := (&AdvancedCustomConfig{Routes: tt.routes}).Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
+func TestChannelBalanceQueryConfigValidatesCustomRootRelativeMapping(t *testing.T) {
+	t.Parallel()
+
+	config := &ChannelBalanceQueryConfig{
+		Mode:       ChannelBalanceQueryModeCustom,
+		Path:       "/v1/user/balance",
+		Method:     "GET",
+		Unit:       ChannelBalanceUnitMoney,
+		MetricKind: ChannelBalanceMetricWallet,
+		Multiplier: "1",
+		Auth: &AdvancedCustomRouteAuth{
+			Type:  AdvancedCustomAuthTypeHeader,
+			Name:  "Authorization",
+			Value: "Bearer {api_key}",
+		},
+		Response: ChannelBalanceResponseConfig{
+			RemainingPath: "balance",
+			CurrencyPath:  "currency",
+			ActivePath:    "is_active",
+		},
+	}
+
+	require.NoError(t, config.Validate())
+}
+
+func TestChannelBalanceQueryConfigRejectsAbsolutePathAndMissingRemainingMapping(t *testing.T) {
+	t.Parallel()
+
+	absolute := &ChannelBalanceQueryConfig{
+		Mode:   ChannelBalanceQueryModeCustom,
+		Path:   "https://evil.example/balance",
+		Method: "GET",
+		Response: ChannelBalanceResponseConfig{
+			RemainingPath: "balance",
+		},
+	}
+	require.ErrorContains(t, absolute.Validate(), "single /")
+
+	missing := &ChannelBalanceQueryConfig{
+		Mode:   ChannelBalanceQueryModeCustom,
+		Path:   "/balance",
+		Method: "GET",
+	}
+	require.ErrorContains(t, missing.Validate(), "remaining path")
+}
+
+func TestChannelBalanceQueryConfigAcceptsManualAbsoluteURL(t *testing.T) {
+	t.Parallel()
+
+	config := &ChannelBalanceQueryConfig{
+		Mode:   ChannelBalanceQueryModeCustom,
+		URL:    "https://api.example.com/account/balance",
+		Method: "GET",
+		Auth: &AdvancedCustomRouteAuth{
+			Type:  AdvancedCustomAuthTypeHeader,
+			Name:  "Authorization",
+			Value: "Bearer {api_key}",
+		},
+		Response: ChannelBalanceResponseConfig{RemainingPath: "data.remaining"},
+		Unit:     ChannelBalanceUnitMoney,
+	}
+	require.NoError(t, config.Validate())
+
+	config.URL = "file:///etc/passwd"
+	require.ErrorContains(t, config.Validate(), "query URL")
+}
+
+func TestChannelBalanceQueryConfigSupportsPostHeadersAndDerivedRemaining(t *testing.T) {
+	t.Parallel()
+
+	config := &ChannelBalanceQueryConfig{
+		Mode:          ChannelBalanceQueryModeCustom,
+		URL:           "https://api.example.com/account/balance",
+		Method:        "POST",
+		Body:          `{"scope":"wallet"}`,
+		RemainingMode: ChannelBalanceRemainingTotalMinusUsed,
+		Auth: &AdvancedCustomRouteAuth{
+			Type:  AdvancedCustomAuthTypeHeader,
+			Name:  "Authorization",
+			Value: "Bearer account-token",
+		},
+		Headers: []ChannelBalanceRequestHeader{
+			{Name: "X-Tenant", Value: "tenant-a"},
+		},
+		Response: ChannelBalanceResponseConfig{
+			TotalPath:    "balance",
+			UsedPath:     "frozen_balance",
+			SuccessPath:  "success",
+			SuccessValue: "true",
+		},
+		Unit: ChannelBalanceUnitMoney,
+	}
+	require.NoError(t, config.Validate())
+
+	config.Method = "GET"
+	require.ErrorContains(t, config.Validate(), "cannot include a request body")
+	config.Method = "POST"
+	config.Headers = append(config.Headers, ChannelBalanceRequestHeader{Name: "Authorization", Value: "duplicate"})
+	require.ErrorContains(t, config.Validate(), "duplicate balance query header")
+}
+
+func TestChannelBalanceQueryAutomationValidation(t *testing.T) {
+	t.Parallel()
+
+	disabled := &ChannelBalanceQueryConfig{
+		Mode:           ChannelBalanceQueryModeDisabled,
+		AutoRefresh:    true,
+		RefreshMinutes: 15,
+	}
+	require.ErrorContains(t, disabled.Validate(), "cannot be enabled")
+
+	configured := &ChannelBalanceQueryConfig{
+		Mode: ChannelBalanceQueryModeNewAPI,
+		Auth: &AdvancedCustomRouteAuth{
+			Type:  AdvancedCustomAuthTypeHeader,
+			Name:  "Authorization",
+			Value: "account-token",
+		},
+		AutoRefresh:         true,
+		RefreshMinutes:      15,
+		LowBalanceAlert:     true,
+		LowBalanceThreshold: "10",
+	}
+	require.NoError(t, configured.Validate())
+	configured.LowBalanceThreshold = "0"
+	require.ErrorContains(t, configured.Validate(), "positive number")
+}
+
+func TestChannelBalanceQueryConfigRequiresAccountTokenForNewAPI(t *testing.T) {
+	t.Parallel()
+
+	config := &ChannelBalanceQueryConfig{Mode: ChannelBalanceQueryModeNewAPI}
+	require.ErrorContains(t, config.Validate(), "account access token is required")
+
+	config.Auth = &AdvancedCustomRouteAuth{
+		Type:  AdvancedCustomAuthTypeHeader,
+		Name:  "Authorization",
+		Value: "Bearer {api_key}",
+	}
+	require.ErrorContains(t, config.Validate(), "not the channel API key")
+
+	config.Auth.Value = "upstream-account-access-token"
+	require.NoError(t, config.Validate())
+
+	config.AccountUserID = "not-a-number"
+	require.ErrorContains(t, config.Validate(), "positive integer")
+
+	config.AccountUserID = "300"
+	require.NoError(t, config.Validate())
+
+	config.Auth.Value = ""
+	config.AuthConfigured = true
+	config.AuthMasked = "upst••••ream"
+	require.NoError(t, config.Validate())
+
+	auto := &ChannelBalanceQueryConfig{
+		Mode: ChannelBalanceQueryModeAuto,
+		Auth: &AdvancedCustomRouteAuth{
+			Type: AdvancedCustomAuthTypeHeader,
+			Name: "Authorization",
+		},
+	}
+	require.ErrorContains(t, auto.Validate(), "account access token is required")
+	auto.AuthConfigured = true
+	require.NoError(t, auto.Validate())
+}
+
+func TestChannelBalanceQueryConfigValidatesGCPTrialCredit(t *testing.T) {
+	t.Parallel()
+
+	config := &ChannelBalanceQueryConfig{
+		Mode: ChannelBalanceQueryModeGCPTrial,
+		GCPTrial: &ChannelBalanceGCPTrialConfig{
+			BillingAccountID:    "0112D2-3D1562-101A70",
+			QueryProjectID:      "api-505117",
+			DatasetID:           "billing_export",
+			CredentialChannelID: 69,
+			TotalAmount:         "300",
+			BaselineUsed:        "132",
+			BaselineAt:          1_787_580_000,
+		},
+	}
+	require.NoError(t, config.Validate())
+
+	config.GCPTrial.BaselineUsed = "301"
+	require.ErrorContains(t, config.Validate(), "between zero and the total")
+
+	config.GCPTrial.BaselineUsed = "132"
+	config.GCPTrial.DatasetID = "invalid.dataset"
+	require.ErrorContains(t, config.Validate(), "dataset ID")
+}
+
 func TestAdvancedCustomValidateDuplicateIncomingPathWithDisjointModels(t *testing.T) {
 	config := &AdvancedCustomConfig{
 		Routes: []AdvancedCustomRoute{
@@ -521,6 +777,84 @@ func TestAdvancedCustomValidateAlphaSearchConverterPath(t *testing.T) {
 	}
 }
 
+func TestAdvancedCustomValidateRoutePassThroughBody(t *testing.T) {
+	valid := &AdvancedCustomConfig{
+		Routes: []AdvancedCustomRoute{
+			{
+				IncomingPath:           "/v1/chat/completions",
+				UpstreamPath:           "/v1/chat/completions",
+				PassThroughBodyEnabled: true,
+			},
+			{
+				IncomingPath:           "/v1/rerank",
+				UpstreamPath:           "/v1/rerank",
+				Converter:              AdvancedCustomConverterSGLangRerank,
+				PassThroughBodyEnabled: true,
+			},
+			{
+				IncomingPath: "/v1/messages",
+				UpstreamPath: "/v1/chat/completions",
+				Converter:    advancedCustomConverterClaudeMessagesToOpenAIChat,
+			},
+		},
+	}
+	require.NoError(t, valid.Validate())
+
+	route, ok := valid.MatchPathForModel("/v1/chat/completions", "gpt-4o")
+	require.True(t, ok)
+	assert.True(t, route.PassThroughBodyEnabled)
+	route, ok = valid.MatchPathForModel("/v1/messages", "gpt-4o")
+	require.True(t, ok)
+	assert.False(t, route.PassThroughBodyEnabled)
+
+	encoded, err := json.Marshal(valid.Routes[2])
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "pass_through_body_enabled")
+
+	tests := []struct {
+		name  string
+		route AdvancedCustomRoute
+		want  string
+	}{
+		{
+			name: "converter route",
+			route: AdvancedCustomRoute{
+				IncomingPath:           "/v1/messages",
+				UpstreamPath:           "/v1/chat/completions",
+				Converter:              advancedCustomConverterClaudeMessagesToOpenAIChat,
+				PassThroughBodyEnabled: true,
+			},
+			want: "pass_through_body_enabled requires converter none",
+		},
+		{
+			name: "model list route",
+			route: AdvancedCustomRoute{
+				IncomingPath:           AdvancedCustomModelListPath,
+				UpstreamPath:           "/v1/models",
+				PassThroughBodyEnabled: true,
+			},
+			want: "pass_through_body_enabled must be false for /v1/models",
+		},
+		{
+			name: "balance route",
+			route: AdvancedCustomRoute{
+				IncomingPath:           AdvancedCustomBalancePath,
+				UpstreamPath:           "/provider/balance",
+				PassThroughBodyEnabled: true,
+			},
+			want: "pass_through_body_enabled must be false for /v1/dashboard/billing/credit_grants",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := (&AdvancedCustomConfig{Routes: []AdvancedCustomRoute{tt.route}}).Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
 func TestChannelSettingsHTTPTransportJSONRoundTrip(t *testing.T) {
 	legacy := `{"proxy":"http://127.0.0.1:8080","force_format":true}`
 	var settings ChannelSettings
@@ -577,4 +911,16 @@ func TestChannelSettingsValidateHTTPTransport(t *testing.T) {
 	err = (&ChannelSettings{HTTPProtocol: "http1", HTTP2ConnectionShards: 2}).ValidateHTTPTransport()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "http2_connection_shards")
+}
+
+func TestChannelOtherSettingsValidateToolLossPolicy(t *testing.T) {
+	require.NoError(t, (*ChannelOtherSettings)(nil).ValidateToolLossPolicy())
+	require.NoError(t, (&ChannelOtherSettings{}).ValidateToolLossPolicy())
+	require.NoError(t, (&ChannelOtherSettings{ToolLossPolicy: "allow"}).ValidateToolLossPolicy())
+	require.NoError(t, (&ChannelOtherSettings{ToolLossPolicy: "safe"}).ValidateToolLossPolicy())
+	require.NoError(t, (&ChannelOtherSettings{ToolLossPolicy: "strict"}).ValidateToolLossPolicy())
+
+	err := (&ChannelOtherSettings{ToolLossPolicy: "drop"}).ValidateToolLossPolicy()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tool_loss_policy")
 }
