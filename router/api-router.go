@@ -332,6 +332,9 @@ func SetApiRouter(router *gin.Engine) {
 		marketingRoute := apiRouter.Group("/marketing")
 		marketingRoute.Use(middleware.DisableCache(), middleware.RootAuth())
 		{
+			marketingRoute.GET("/user-notices/users", controller.SearchUserNoticeRecipients)
+			marketingRoute.GET("/user-notices", controller.ListUserNotices)
+			marketingRoute.POST("/user-notices", middleware.CriticalRateLimit(), controller.SubmitUserNotice)
 			marketingRoute.GET("/overview", controller.MarketingOverview)
 			marketingRoute.GET("/campaigns", controller.ListMarketingCampaigns)
 			marketingRoute.POST("/campaigns", controller.CreateMarketingCampaign)

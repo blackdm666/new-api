@@ -20,7 +20,8 @@ def main():
     if os.environ.get("GITHUB_ACTIONS") != "true":
         raise RuntimeError("This rehearsal is restricted to disposable GitHub runners")
     root = Path.cwd()
-    old_image = "ghcr.io/blackdm666/new-api:88api-68b49b0"
+    old_image = os.environ.get("MIGRATION_BASE_IMAGE", "ghcr.io/blackdm666/new-api:88api-68b49b0")
+    baseline = os.environ.get("MIGRATION_BASE_LABEL", "rc37")
     current = root / "new-api-upgrade-test"
     run(["go", "build", "-o", str(current), "."])
     run(["docker", "pull", old_image])
@@ -78,7 +79,7 @@ def main():
                     env["SQL_DSN"] = "postgres://postgres:fixture-only@127.0.0.1:5432/rc38_upgrade?sslmode=disable"
                 stages = []
                 schemas = []
-                for stage, binary in [("rc37", old), ("rc38", current), ("rc38-repeat", current)]:
+                for stage, binary in [(baseline, old), ("candidate", current), ("candidate-repeat", current)]:
                     logfile = work / (dialect + "-" + stage + ".log")
                     with logfile.open("wb") as output:
                         process = subprocess.Popen([str(binary)], cwd=work, env=env, stdout=output, stderr=output)
@@ -97,10 +98,17 @@ def main():
                             else:
                                 raise RuntimeError("Startup timeout: " + dialect + "/" + stage)
                             key = "`key`" if dialect == "mysql" else '"key"'
-                            if stage == "rc37":
+                            if stage == baseline:
                                 query(f"INSERT INTO options ({key}, value) VALUES ('RC38MigrationSentinel', 'preserve-custom-settings');")
+                                query("INSERT INTO email_deliveries (delivery_key, category, recipient, subject, body, priority, state, next_attempt_time, created_time, updated_time) VALUES ('notice-upgrade-sentinel', 'system_alert', 'fixture@example.invalid', 'Preserved subject', 'Preserved body', 100, 'queued', 4102444800, 1, 1);")
                             if query(f"SELECT value FROM options WHERE {key}='RC38MigrationSentinel';") != "preserve-custom-settings":
                                 raise RuntimeError("Existing option data lost")
+                            if query("SELECT body FROM email_deliveries WHERE delivery_key='notice-upgrade-sentinel';") != "Preserved body":
+                                raise RuntimeError("Existing outbox data lost")
+                            if stage == "candidate":
+                                query("INSERT INTO user_notices (kind, subject, body, status, recipient_data, created_by, updated_by, created_time, updated_time) VALUES ('maintenance', 'Migration draft', 'Keep this draft', 'draft', '[]', 1, 1, 1, 1);")
+                            if stage != baseline and query("SELECT body FROM user_notices WHERE subject='Migration draft';") != "Keep this draft":
+                                raise RuntimeError("Notification draft lost on repeated migration")
                             if dialect == "sqlite":
                                 schema = query("SELECT name, sql FROM sqlite_master WHERE type IN ('table','index') AND sql IS NOT NULL ORDER BY name;")
                             elif dialect == "mysql":
@@ -121,7 +129,7 @@ def main():
                         raise RuntimeError("Unexpected shutdown status " + str(process.returncode))
                 if schemas[1] != schemas[2]:
                     raise RuntimeError("Repeated startup changed schema: " + dialect)
-                reports[dialect] = {"stages": stages, "custom_option_preserved": True, "repeated_schema_stable": True}
+                reports[dialect] = {"baseline_image": old_image, "stages": stages, "custom_option_preserved": True, "outbox_preserved": True, "notification_draft_preserved": True, "repeated_schema_stable": True}
     finally:
         run(["docker", "rm", container])
         current.unlink(missing_ok=True)

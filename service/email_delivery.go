@@ -19,7 +19,7 @@ const (
 
 func smtpProfileForCategory(category string) string {
 	switch strings.TrimSpace(category) {
-	case "email_verification", "password_reset":
+	case "email_verification", "password_reset", model.UserNoticeCategory:
 		return common.SMTPProfileSecurity
 	case "marketing_custom", "email_preview":
 		return common.SMTPProfileMarketing
@@ -91,7 +91,7 @@ func QueueMarketingEmail(deliveryKey string, category string, relatedId int, use
 }
 
 func ScheduleSystemEmail(delivery *model.EmailDelivery) {
-	if delivery == nil || delivery.Priority == model.EmailPriorityMarketing || delivery.DeliveredTime != 0 || delivery.DeadLetterTime != 0 {
+	if delivery == nil || delivery.Category == model.UserNoticeCategory || delivery.Priority == model.EmailPriorityMarketing || delivery.DeliveredTime != 0 || delivery.DeadLetterTime != 0 {
 		return
 	}
 	gopool.Go(func() { deliverSystemEmail(delivery) })
@@ -136,6 +136,19 @@ func deliverSystemEmail(delivery *model.EmailDelivery) {
 	if !allowed {
 		return
 	}
+	if delivery.Category == model.UserNoticeCategory {
+		allowed, err = userNoticeDeliveryAllowed(delivery, now)
+		if err != nil {
+			common.SysError(fmt.Sprintf("failed to validate user notice %d: %s", delivery.Id, err.Error()))
+			_ = model.DeferEmailDelivery(delivery.Id, now+60)
+			return
+		}
+		if !allowed {
+			return
+		}
+		// Do not trust a manually edited or legacy outbox profile.
+		delivery.SMTPProfile = common.SMTPProfileSecurity
+	}
 	if delivery.Priority == model.EmailPriorityMarketing || strings.HasPrefix(delivery.Category, "marketing_") {
 		err = SendMarketingEmailDelivery(delivery)
 		if err == nil {
@@ -178,4 +191,38 @@ func deliverSystemEmail(delivery *model.EmailDelivery) {
 			_ = model.SyncInvoiceNotificationFromEmailDelivery(updated)
 		}
 	}
+}
+
+func userNoticeDeliveryAllowed(delivery *model.EmailDelivery, now int64) (bool, error) {
+	eligible, err := model.UserNoticeDeliveryEligible(delivery)
+	if err != nil {
+		return false, err
+	}
+	if !eligible {
+		err = model.DB.Model(&model.EmailDelivery{}).Where("id = ?", delivery.Id).Updates(map[string]any{
+			"state": model.EmailDeliveryStatusFailed, "dead_letter_time": now, "locked_until": 0,
+			"last_error": "Recipient deleted, email changed or delivery restricted", "updated_time": now,
+		}).Error
+		return false, err
+	}
+	var critical int64
+	err = model.DB.Model(&model.EmailDelivery{}).Where(
+		"category IN ? AND state IN ? AND next_attempt_time <= ? AND (expires_time = 0 OR expires_time > ?)",
+		[]string{"email_verification", "password_reset"},
+		[]string{model.EmailDeliveryStatusQueued, model.EmailDeliveryStatusRetrying, model.EmailDeliveryStatusSending}, now, now,
+	).Count(&critical).Error
+	if err != nil {
+		return false, err
+	}
+	if critical > 0 {
+		return false, model.DeferEmailDelivery(delivery.Id, now+60)
+	}
+	reserved, err := model.ReserveEmailDeliveryMinuteQuota("user-notice:security", now/60*60, model.UserNoticePerMinute)
+	if err != nil {
+		return false, err
+	}
+	if !reserved {
+		return false, model.DeferEmailDelivery(delivery.Id, (now/60+1)*60)
+	}
+	return true, nil
 }

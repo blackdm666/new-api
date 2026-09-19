@@ -45,9 +45,14 @@ jobs:
         run: TEST_PERF_MYSQL_DSN="$TEST_MYSQL_DSN" TEST_PERF_POSTGRES_DSN="$TEST_POSTGRES_DSN" go test ./pkg/perf_metrics -run TestPerformanceAggregationAndFlush -count=1 -v
       - name: Token group migration on SQLite, MySQL and PostgreSQL
         run: go test ./controller -run TestTokenGroupMigrationDatabaseMatrix -count=1 -v
+      - name: Targeted user notifications on SQLite, MySQL and PostgreSQL
+        run: go test ./controller -run TestUserNoticeDatabaseMatrix -count=1 -v
       - name: Wallet settlement on MySQL and PostgreSQL
         run: |
           TEST_TASK_DB_DIALECT=mysql go test ./controller -run TestImmediateTaskSettlementDatabase -count=1 -v
           TEST_TASK_DB_DIALECT=postgres go test ./controller -run TestImmediateTaskSettlementDatabase -count=1 -v
-      - name: RC37 to RC38 real startup and repeated migration
+      - name: Production RC38 to user notifications real startup and repeated migration
+        env:
+          MIGRATION_BASE_IMAGE: ghcr.io/blackdm666/new-api:88api-f9dc5aa
+          MIGRATION_BASE_LABEL: rc38-production
         run: python3 deploy/rc38_migration_rehearsal.py

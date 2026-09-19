@@ -121,6 +121,8 @@ import {
   buildMarketingGroupOptions,
   normalizeMarketingGroups,
 } from './lib/marketing-groups'
+import { UserNotificationWorkbench } from './notifications'
+import { localNoticePreviewEnabled } from './notifications/types'
 import type {
   MarketingAudienceRule,
   MarketingAutomation,
@@ -228,8 +230,15 @@ function recipientStatusLabel(status: string, t: TFunction): string {
 
 export function MarketingAdminPage() {
   const { t } = useTranslation()
+  const { status } = useStatus()
+  const notificationPreview = localNoticePreviewEnabled(status?.version)
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState('campaigns')
+  const [activeTab, setActiveTab] = useState(
+    window.location.hash === '#user-notifications'
+      ? 'user-notifications'
+      : 'campaigns'
+  )
+  const isNotificationTab = activeTab === 'user-notifications'
   const [campaignOpen, setCampaignOpen] = useState(false)
   const [campaignTarget, setCampaignTarget] =
     useState<MarketingCampaign | null>(null)
@@ -249,6 +258,12 @@ export function MarketingAdminPage() {
     queryFn: fetchMarketingAutomations,
   })
   const refresh = async () => {
+    if (isNotificationTab) {
+      await queryClient.invalidateQueries({
+        queryKey: ['user-notices'],
+      })
+      return
+    }
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['marketing'] }),
       queryClient.invalidateQueries({ queryKey: ['email-queue'] }),
@@ -267,9 +282,13 @@ export function MarketingAdminPage() {
               {t('Email Marketing')}
             </h1>
             <p className='text-muted-foreground mt-1 text-sm'>
-              {t(
-                'Reach the right users with controlled campaigns and measure click-to-top-up conversion.'
-              )}
+              {isNotificationTab
+                ? t(
+                    'Targeted service notices, separate from marketing campaigns.'
+                  )
+                : t(
+                    'Reach the right users with controlled campaigns and measure click-to-top-up conversion.'
+                  )}
             </p>
           </div>
           <div className='flex gap-2'>
@@ -281,57 +300,69 @@ export function MarketingAdminPage() {
               <RefreshCw className='size-4' />
               {t('Refresh')}
             </Button>
-            <Button
-              type='button'
-              onClick={() => {
-                setCampaignTarget(null)
-                setCampaignOpen(true)
-              }}
-            >
-              <MailPlus className='size-4' />
-              {t('Create campaign')}
-            </Button>
+            {!isNotificationTab && (
+              <Button
+                type='button'
+                onClick={() => {
+                  setCampaignTarget(null)
+                  setCampaignOpen(true)
+                }}
+              >
+                <MailPlus className='size-4' />
+                {t('Create campaign')}
+              </Button>
+            )}
           </div>
         </header>
 
-        {isEmailOperationsTab ? (
-          <EmailQueueOverviewStats />
-        ) : (
-          <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7'>
-            <Stat
-              label={t('Campaigns')}
-              value={overviewQuery.data?.campaigns ?? 0}
-            />
-            <Stat
-              label={t('Waiting')}
-              value={overviewQuery.data?.queued ?? 0}
-            />
-            <Stat
-              label={t('Sent')}
-              value={overviewQuery.data?.delivered ?? 0}
-            />
-            <Stat label={t('Failed')} value={overviewQuery.data?.failed ?? 0} />
-            <Stat
-              label={t('Clicked')}
-              value={overviewQuery.data?.clicked ?? 0}
-            />
-            <Stat
-              label={t('Converted')}
-              value={overviewQuery.data?.converted ?? 0}
-            />
-            <Stat
-              label={t('Attributed top-up')}
-              value={formatLocalCurrencyAmount(
-                (overviewQuery.data?.converted_cents ?? 0) / 100,
-                { digitsLarge: 2, digitsSmall: 2 }
-              )}
-            />
-          </div>
-        )}
+        {!isNotificationTab &&
+          (isEmailOperationsTab ? (
+            <EmailQueueOverviewStats />
+          ) : (
+            <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7'>
+              <Stat
+                label={t('Campaigns')}
+                value={overviewQuery.data?.campaigns ?? 0}
+              />
+              <Stat
+                label={t('Waiting')}
+                value={overviewQuery.data?.queued ?? 0}
+              />
+              <Stat
+                label={t('Sent')}
+                value={overviewQuery.data?.delivered ?? 0}
+              />
+              <Stat
+                label={t('Failed')}
+                value={overviewQuery.data?.failed ?? 0}
+              />
+              <Stat
+                label={t('Clicked')}
+                value={overviewQuery.data?.clicked ?? 0}
+              />
+              <Stat
+                label={t('Converted')}
+                value={overviewQuery.data?.converted ?? 0}
+              />
+              <Stat
+                label={t('Attributed top-up')}
+                value={formatLocalCurrencyAmount(
+                  (overviewQuery.data?.converted_cents ?? 0) / 100,
+                  { digitsLarge: 2, digitsSmall: 2 }
+                )}
+              />
+            </div>
+          ))}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className='gap-4'>
           <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
             <TabsTrigger value='campaigns'>{t('Campaigns')}</TabsTrigger>
+            <TabsTrigger value='user-notifications'>
+              {t('User notifications')}
+              {notificationPreview && (
+                <Badge variant='secondary'>{t('Preview')}</Badge>
+              )}
+            </TabsTrigger>
             <TabsTrigger value='automations'>{t('Automations')}</TabsTrigger>
             <TabsTrigger value='recipients'>{t('Sending records')}</TabsTrigger>
             <TabsTrigger value='suppressions'>
@@ -342,6 +373,9 @@ export function MarketingAdminPage() {
               {t('Email queue rules')}
             </TabsTrigger>
           </TabsList>
+          <TabsContent value='user-notifications'>
+            <UserNotificationWorkbench preview={notificationPreview} />
+          </TabsContent>
           <TabsContent value='campaigns'>
             <CampaignTable
               campaigns={campaignsQuery.data?.items ?? []}
