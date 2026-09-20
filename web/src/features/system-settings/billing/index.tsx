@@ -26,11 +26,9 @@ import {
 
 const defaultBillingSettings: BillingSettings = {
   QuotaForNewUser: 0,
-  PreConsumedQuota: 0,
   QuotaForInviter: 0,
   QuotaForInvitee: 0,
   TopUpLink: '',
-  'general_setting.docs_link': '',
   'quota_setting.enable_free_model_pre_consume': true,
   AffiliateCommissionEnabled: true,
   AffiliateCommissionAutoApprove: false,
@@ -42,6 +40,8 @@ const defaultBillingSettings: BillingSettings = {
   AffiliateGoldUpgradeEffectiveInviteesThreshold: 500,
   AffiliateUpgradeEffectiveTopUpAmountCents: 200000,
   AffiliateGoldUpgradeEffectiveTopUpAmountCents: 2000000,
+  'quota_setting.trust_quota_usd': 10,
+  'quota_setting.pre_consume_multiplier': 1,
   QuotaPerUnit: 500000,
   USDExchangeRate: 7,
   'general_setting.quota_display_type': 'USD',

@@ -50,7 +50,7 @@ type LegacyComboboxProps = {
   allowCustomValue?: boolean
   showSelectedIcon?: boolean
   className?: string
-  dropdownClassName?: string
+  popupClassName?: string
   id?: string
   openOnFocus?: boolean
   disabled?: boolean
@@ -88,7 +88,7 @@ function Combobox(
         placeholder={props.searchPlaceholder ?? props.placeholder}
         emptyText={props.emptyText}
         className={props.className}
-        dropdownClassName={props.dropdownClassName}
+        popupClassName={props.popupClassName}
         allowCustomValue={props.allowCustomValue}
         openOnFocus={props.openOnFocus}
       />
@@ -162,7 +162,7 @@ function OptionCombobox(props: LegacyComboboxProps) {
       </div>
       <ComboboxContent
         anchor={anchor}
-        className={props.dropdownClassName}
+        className={props.popupClassName}
         container={
           anchor.current?.closest<HTMLElement>('[role="dialog"]') ?? undefined
         }

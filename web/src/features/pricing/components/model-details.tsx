@@ -98,7 +98,8 @@ import {
   hasSimpleTaskPricing,
   taskPriceLabel,
   taskUsageUnitLabel,
-  taskPricingConditions,
+  taskTierConditions,
+  pricingDisplayFallbackKey,
 } from '../lib/task-price-display'
 import type {
   ModelCapability,
@@ -729,7 +730,12 @@ function PriceSection(props: {
               {t('Special billing expression')}
             </div>
             <p className='text-muted-foreground mt-1 text-xs'>
-              {t('Unable to parse structured pricing')}
+              {t(
+                pricingDisplayFallbackKey(
+                  dynamicSummary.rawExpression,
+                  props.model.billing_usage_schema
+                )
+              )}
             </p>
             <div className='mt-3'>
               <div className='text-muted-foreground mb-1 text-[10px] font-medium tracking-wider uppercase'>
@@ -1135,7 +1141,10 @@ function ProviderGroupPricingSection(
             </div>
             <p className='text-muted-foreground mt-1 text-xs'>
               {t(
-                'Group prices cannot be expanded because this expression is not a standard tiered pricing expression.'
+                pricingDisplayFallbackKey(
+                  props.model.billing_expr || '',
+                  props.model.billing_usage_schema
+                )
               )}
             </p>
             <div className='mt-3'>
@@ -1210,7 +1219,7 @@ function ProviderGroupPricingSection(
                   headerRowClassName='hover:bg-transparent'
                   data={dynamicTiers}
                   getRowKey={(tier, tierIndex) =>
-                    `${group}-${tier.label || tierIndex}`
+                    `${group}-${tier.label}-${tierIndex}`
                   }
                   columns={[
                     ...(hasSimpleTaskPricing(props.model)
@@ -1227,8 +1236,8 @@ function ProviderGroupPricingSection(
                             cell: (tier: DynamicPricingTier) => {
                               if ('unitPrices' in tier) {
                                 return (
-                                  taskPricingConditions(
-                                    (tier as ParsedTaskTier).conditions,
+                                  taskTierConditions(
+                                    tier as ParsedTaskTier,
                                     props.model.billing_usage_schema,
                                     i18n.language,
                                     t

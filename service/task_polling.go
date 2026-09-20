@@ -72,7 +72,7 @@ func recordTaskTerminalSampleAsync(task *model.Task) {
 	}
 	snapshot := *task
 	gopool.Go(func() {
-		perfmetrics.RecordTaskTerminalSample(&snapshot)
+		perfmetrics.RecordTaskResult(&snapshot, nil)
 	})
 }
 
@@ -290,8 +290,10 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 			tasks = append(tasks, task)
 		}
 	}
+	// The channel type tells plugin adaptors whether the upstream is another
+	// New API gateway, the same signal submission derives from the request.
 	info := &relaycommon.RelayInfo{}
-	info.ChannelMeta = &relaycommon.ChannelMeta{ChannelBaseUrl: baseURL}
+	info.ChannelMeta = &relaycommon.ChannelMeta{ChannelType: ch.Type, ChannelId: ch.Id, ChannelBaseUrl: baseURL}
 	info.ApiKey = ch.Key
 	adaptor.Init(info)
 	resp, err := adaptor.FetchBatchTasks(baseURL, ch.Key, tasks, proxy)
@@ -388,10 +390,7 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 			continue
 		}
 		if terminalTransition {
-			billingSettled := settleTaskBillingOnComplete(ctx, adaptor, task, &responseItem.TaskInfo)
-			if task.Status == model.TaskStatusFailure && !billingSettled && task.Quota != 0 {
-				RefundTaskQuota(ctx, task, task.FailReason)
-			}
+			finalizeTerminalTask(ctx, adaptor, task, &responseItem.TaskInfo)
 		}
 	}
 	return nil
@@ -461,6 +460,8 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 	}
 	info := &relaycommon.RelayInfo{}
 	info.ChannelMeta = &relaycommon.ChannelMeta{
+		ChannelType:    cacheGetChannel.Type,
+		ChannelId:      cacheGetChannel.Id,
 		ChannelBaseUrl: cacheGetChannel.GetBaseURL(),
 	}
 	info.ApiKey = cacheGetChannel.Key
@@ -659,19 +660,22 @@ func FinalizeVideoTaskResult(ctx context.Context, adaptor TaskPollingAdaptor, ta
 		logger.LogDebug(ctx, "No update needed for task %s", task.TaskID)
 	}
 	if shouldFinalizeBilling && terminalTransitionWon {
-		billingSettled := settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
-		if task.Status == model.TaskStatusFailure && !billingSettled && task.Quota != 0 {
-			RefundTaskQuota(ctx, task, task.FailReason)
-		}
-	}
-	if terminalTransitionWon {
-		recordTaskTerminalSampleAsync(task)
-		if task.PrivateData.CallbackEnabled {
-			ScheduleTaskCallback(task.TaskID)
-		}
+		finalizeTerminalTask(ctx, adaptor, task, taskResult)
 	}
 
 	return nil
+}
+
+// finalizeTerminalTask 终态统一收尾（状态 CAS 赢家调用，恰好一次）：采样 + 结算 + 失败兜底退款。
+func finalizeTerminalTask(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
+	perfmetrics.RecordTaskResult(task, taskResult)
+	billingSettled := settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
+	if task.Status == model.TaskStatusFailure && !billingSettled && task.Quota != 0 {
+		RefundTaskQuota(ctx, task, task.FailReason)
+	}
+	if task.PrivateData.CallbackEnabled {
+		ScheduleTaskCallback(task.TaskID)
+	}
 }
 
 func redactVideoResponseBody(body []byte) []byte {
@@ -892,11 +896,7 @@ func failTaskFromPoll(ctx context.Context, adaptor TaskPollingAdaptor, task *mod
 	if !won {
 		return nil
 	}
-	taskResult := relaycommon.FailTaskInfo(reason)
-	billingSettled := settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
-	if !billingSettled && task.Quota != 0 {
-		RefundTaskQuota(ctx, task, reason)
-	}
+	finalizeTerminalTask(ctx, adaptor, task, relaycommon.FailTaskInfo(reason))
 	return nil
 }
 

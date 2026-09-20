@@ -57,6 +57,8 @@ type TaskDto struct {
 	Data                 json.RawMessage `json:"data"`
 	AdminInfo            *TaskAdminInfo  `json:"admin_info,omitempty"`
 	RootInfo             *TaskRootInfo   `json:"root_info,omitempty"`
+	// ResultDiscarded marks a result returned inline but not retained.
+	ResultDiscarded bool `json:"result_discarded,omitempty"`
 }
 
 type TaskPluginInfo struct {

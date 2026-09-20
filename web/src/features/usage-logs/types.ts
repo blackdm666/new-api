@@ -199,11 +199,12 @@ export interface LogOtherData {
   cache_creation_ratio_1h?: number
   is_model_mapped?: boolean
   upstream_model_name?: string
+  // Diagnostic only. Whether the names disagree is derived in the UI via
+  // isResponseModelMismatch so old rows follow the current comparison rule.
   response_model?: {
     requested_model: string
     upstream_model: string
     returned_model: string
-    mismatch: boolean
   }
   audio_ratio?: number
   audio_completion_ratio?: number
@@ -254,6 +255,11 @@ export interface LogOtherData {
   fee_quota?: number
   // Task-related fields (for refund logs, type=6)
   is_task?: boolean
+  // The submitting request returned the task result itself (an immediate
+  // result, or an OpenAI Images request the gateway waited on).
+  task_sync?: boolean
+  // The inline result was not persisted, so no artifact can be retrieved.
+  result_discarded?: boolean
   task_id?: string
   reason?: string
   // Subscription billing fields
@@ -333,6 +339,9 @@ export interface TaskLog {
   progress_message_en?: string
   data?: unknown
   legacy_video_available?: boolean
+  // A synchronous result returned inline and never persisted; artifact
+  // retrieval is not offered for it.
+  result_discarded?: boolean
   fail_reason?: string
   result_url?: string
   properties?: TaskLogProperties
@@ -388,9 +397,25 @@ export interface TaskArtifact {
   content_url: string
 }
 
+export interface AudioClip {
+  clip_id?: string
+  id?: string
+  title?: string
+  tags?: string
+  duration?: number
+  audio_url?: string
+  image_url?: string
+  image_large_url?: string
+  metadata?: {
+    tags?: string
+    duration?: number
+  }
+}
+
 export interface TaskArtifactProjection {
   artifacts: TaskArtifact[]
   legacyContentUrl?: string
+  legacyAudioClips?: AudioClip[]
 }
 
 export interface TaskArtifactsResponse {
@@ -400,6 +425,7 @@ export interface TaskArtifactsResponse {
   data?: {
     artifacts?: unknown
     legacy_content_url?: unknown
+    legacy_audio_clips?: unknown
   }
 }
 

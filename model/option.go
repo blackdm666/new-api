@@ -399,6 +399,9 @@ func validateOptionValue(key string, value string) error {
 			return fmt.Errorf("%s must be between 1 and 65535", key)
 		}
 	}
+	if err := operation_setting.ValidateQuotaOption(key, value); err != nil {
+		return err
+	}
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
 	}

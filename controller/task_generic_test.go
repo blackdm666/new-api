@@ -740,3 +740,68 @@ func TestSelfTaskMediaURLGuard(t *testing.T) {
 	assert.True(t, isTaskMediaFallbackLoop(remoteURL.String(), "task-1"))
 	assert.False(t, isTaskMediaFallbackLoop(remoteURL.String(), "task-2"))
 }
+
+func TestDashboardTaskArtifactsProjectsLegacySunoAudioClips(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	task.Platform = constant.TaskPlatformSuno
+	task.Action = "MUSIC"
+	task.Data = []byte(`[{"id":"clip-1","title":"Song","audio_url":"https://cdn.example/a.mp3","metadata":{"tags":"pop","duration":30},"lyric":"private"},{"id":"clip-2","title":"No audio"}]`)
+	require.NoError(t, model.DB.Save(task).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", task.UserId)
+	c.Set("role", common.RoleCommonUser)
+	c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/task/"+task.TaskID+"/artifacts", nil)
+
+	GetDashboardTaskArtifacts(c)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Artifacts        []taskArtifactResponse `json:"artifacts"`
+			LegacyAudioClips []map[string]any       `json:"legacy_audio_clips"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	assert.Empty(t, response.Data.Artifacts)
+	require.Len(t, response.Data.LegacyAudioClips, 1)
+	assert.Equal(t, "https://cdn.example/a.mp3", response.Data.LegacyAudioClips[0]["audio_url"])
+	assert.Equal(t, "Song", response.Data.LegacyAudioClips[0]["title"])
+	assert.NotContains(t, recorder.Body.String(), "private")
+}
+
+// Task lists omit the data column; the API DTO keeps the key as null so shape
+// checks survive while the payload no longer travels with every row.
+
+func TestTaskListsOmitPersistedSnapshot(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	task.Data = []byte(`{"data":[{"url":"https://cdn.example/a.png"}]}`)
+	require.NoError(t, model.DB.Save(task).Error)
+
+	userTasks := model.TaskGetAllUserTask(task.UserId, 0, 10, model.SyncTaskQueryParams{})
+	require.Len(t, userTasks, 1)
+	assert.Empty(t, userTasks[0].Data)
+	adminTasks := model.TaskGetAllTasks(0, 10, model.SyncTaskQueryParams{})
+	require.Len(t, adminTasks, 1)
+	assert.Empty(t, adminTasks[0].Data)
+	assert.Equal(t, task.TaskID, adminTasks[0].TaskID)
+
+	encoded, err := common.Marshal(tasksToDto(adminTasks, false, common.RoleAdminUser)[0])
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"data":null`)
+	assert.NotContains(t, string(encoded), `"result_discarded"`)
+
+	adminTasks[0].PrivateData.ResultDiscarded = true
+	encoded, err = common.Marshal(tasksToDto(adminTasks, false, common.RoleAdminUser)[0])
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"result_discarded":true`, "task lists tell the UI that an inline result was not retained")
+
+	stored, exists, err := model.GetByTaskId(task.UserId, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.JSONEq(t, string(task.Data), string(stored.Data), "single-task lookups keep the snapshot")
+}
