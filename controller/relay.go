@@ -686,6 +686,18 @@ func executeTaskSubmissionWith(
 		return nil, taskErr
 	}
 	durable = true
+	if immediateTerminal {
+		// Immediate tasks are already terminal and never reach the polling
+		// status CAS. Record them only after persistence succeeds so rejected
+		// or rolled-back submissions do not create health samples.
+		sampleTask := *task
+		if !relayInfo.StartTime.IsZero() {
+			// InitTask runs after the upstream submit call. Use the request
+			// start for this in-memory sample without changing task timestamps.
+			sampleTask.SubmitTime = relayInfo.StartTime.Unix()
+		}
+		perfmetrics.RecordTaskResult(&sampleTask, result.Immediate)
+	}
 	stage = "settle"
 	diagnostics.durable(task)
 	diagnostics.settleStart(task, result.Quota)

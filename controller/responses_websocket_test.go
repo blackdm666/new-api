@@ -815,7 +815,9 @@ func TestResponsesWebSocketInitialUpstreamRejectionRefundsReservation(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			preConsumed := make(chan int, 1)
 			tokenID := make(chan int, 1)
-			fixture := newResponsesWSBillingTest(t, `tier("output", c * 2)`, func(ws *websocket.Conn, _ *http.Request) {
+			// RC39 reserves input only, so use a fixed price to exercise an
+			// actual reservation independently of token estimation being disabled.
+			fixture := newResponsesWSBillingTest(t, `tier("request", fixed(0.00002))`, func(ws *websocket.Conn, _ *http.Request) {
 				if _, _, err := ws.ReadMessage(); !assert.NoError(t, err) {
 					return
 				}
