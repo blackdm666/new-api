@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
@@ -24,13 +25,24 @@ func ClassifyRelayOutcome(ctx context.Context, info *relaycommon.RelayInfo, apiE
 	if info == nil || info.PerformanceBusinessRejection {
 		return OutcomeIgnored
 	}
-	if ctx != nil && ctx.Err() == context.Canceled {
+	stream := info.StreamStatus.OutcomeSnapshot()
+	delivery := common.GetResponseDelivery(ctx)
+	// A proxy may close a completely delivered response while settlement is
+	// still running. Only actual downstream completion may outrank that late
+	// cancellation; status 200, nil error and upstream completion alone cannot.
+	delivered := delivery.BodyComplete
+	if info.IsStream {
+		terminal := stream.Response != relaycommon.ResponseOutcomeUnknown ||
+			stream.EndReason == relaycommon.StreamEndReasonDone ||
+			(!stream.ExpectsTerminal && stream.EndReason == relaycommon.StreamEndReasonEOF)
+		delivered = terminal && delivery.Flushed
+	}
+	if ctx != nil && ctx.Err() == context.Canceled && !delivered {
 		return OutcomeIgnored
 	}
 	if apiErr != nil && errors.Is(apiErr, context.Canceled) {
 		return OutcomeIgnored
 	}
-	stream := info.StreamStatus.OutcomeSnapshot()
 	if stream.Response == relaycommon.ResponseOutcomeFailed {
 		return classifyFailure(false, stream.ErrorCode, stream.ErrorType, stream.ErrorStatus)
 	}
@@ -39,11 +51,14 @@ func ClassifyRelayOutcome(ctx context.Context, info *relaycommon.RelayInfo, apiE
 		local := root.GetErrorType() == types.ErrorTypeNewAPIError
 		return classifyFailure(local, string(root.GetErrorCode()), root.ToOpenAIError().Type, root.StatusCode)
 	}
+	if delivery.Failed {
+		return OutcomeIgnored
+	}
 	deadlineExceeded := info.StreamStatus != nil && errors.Is(info.StreamStatus.EndError, context.DeadlineExceeded)
 	if stream.Response == relaycommon.ResponseOutcomeCancelled || stream.EndReason == relaycommon.StreamEndReasonPingFail {
 		return OutcomeIgnored
 	}
-	if stream.EndReason == relaycommon.StreamEndReasonClientGone && !deadlineExceeded {
+	if stream.EndReason == relaycommon.StreamEndReasonClientGone && !deadlineExceeded && !delivered {
 		return OutcomeIgnored
 	}
 	if stream.Response == relaycommon.ResponseOutcomeIncomplete {

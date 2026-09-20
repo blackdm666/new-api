@@ -39,7 +39,11 @@ func FlushWriter(c *gin.Context) (err error) {
 }
 
 func requestContextDone(c *gin.Context) bool {
-	return c != nil && c.Request != nil && c.Request.Context().Err() != nil
+	if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
+		common.MarkResponseDeliveryAborted(c.Request.Context())
+		return true
+	}
+	return false
 }
 
 func SetEventStreamHeaders(c *gin.Context) {

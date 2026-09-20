@@ -3,6 +3,8 @@ package perfmetrics
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -91,6 +93,35 @@ func TestClientCancellationDuringUpstreamRead(t *testing.T) {
 	deadline := relaycommon.NewStreamStatus()
 	deadline.SetEndReason(relaycommon.StreamEndReasonClientGone, context.DeadlineExceeded)
 	assert.Equal(t, OutcomeFailure, ClassifyRelayOutcome(context.Background(), &relaycommon.RelayInfo{StreamStatus: deadline}, nil))
+}
+
+func TestDeliveredRelayRecordsOneSampleAfterLateCancel(t *testing.T) {
+	hotBuckets.Clear()
+	t.Cleanup(func() { hotBuckets.Clear() })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handler := common.TrackResponseDelivery(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "2")
+		_, err := w.Write([]byte("ok"))
+		require.NoError(t, err)
+		require.NoError(t, http.NewResponseController(w).Flush())
+		cancel()
+		RecordRelayResult(r.Context(), &relaycommon.RelayInfo{
+			OriginModelName: "delivery-fixture",
+			UsingGroup:      "fixture",
+			StartTime:       time.Now(),
+		}, nil)
+	}))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx))
+	var requests, successes int64
+	hotBuckets.Range(func(key, value any) bool {
+		snapshot := value.(*atomicBucket).snapshot()
+		requests += snapshot.requestCount
+		successes += snapshot.successCount
+		return true
+	})
+	assert.Equal(t, int64(1), requests)
+	assert.Equal(t, int64(1), successes)
 }
 
 func TestPerformanceWindowIncludesCurrentHour(t *testing.T) {
