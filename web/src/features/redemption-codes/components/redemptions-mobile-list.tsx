@@ -38,6 +38,7 @@ import { REDEMPTION_STATUS, REDEMPTION_STATUSES } from '../constants'
 import { isRedemptionExpired } from '../lib'
 import type { Redemption } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
+import { RedemptionUserLink } from './redemption-user-link'
 
 const MOBILE_SKELETON_KEYS = [
   'redemption-mobile-skeleton-1',
@@ -73,6 +74,7 @@ function RedemptionsMobileSkeleton() {
 interface RedemptionsMobileListProps {
   table: TanstackTable<Redemption>
   isLoading: boolean
+  onUserClick: (userId: number) => void
 }
 
 export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
@@ -166,6 +168,15 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
               <span className='font-medium tabular-nums'>
                 {formatQuota(redemption.quota)}
               </span>
+            </div>
+
+            <div className='flex items-center justify-between gap-2 text-xs'>
+              <span className='text-muted-foreground'>{t('Redeemed By')}</span>
+              <RedemptionUserLink
+                userId={redemption.used_user_id}
+                redeemedTime={redemption.redeemed_time}
+                onUserClick={props.onUserClick}
+              />
             </div>
           </div>
         )

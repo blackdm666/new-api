@@ -18,12 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { getGroups as getUserGroups } from '@/features/users/api'
 import { api, type ApiRequestConfig } from '@/lib/api'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
+import type { InferenceStatus } from './lib/inference-status'
 import type {
   AddChannelRequest,
   BatchDeleteParams,
   BatchSetTagParams,
   Channel,
+  ChannelBalanceInfo,
+  ChannelBalanceQueryConfig,
   ChannelBalanceResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
@@ -47,6 +51,40 @@ const channelActionConfig = (
   skipBusinessError: true,
   skipErrorHandler: true,
 })
+
+export async function getInferenceStatus(
+  channelId: number,
+  provider: 'vllm' | 'sglang',
+  signal?: AbortSignal
+): Promise<InferenceStatus> {
+  const response = await api.get<{ success: boolean; data: InferenceStatus }>(
+    `/api/channel/${channelId}/${provider}/status`,
+    { signal, disableDuplicate: true }
+  )
+  return requireServerSuccess(response.data).data
+}
+
+export type TaskPluginOption = {
+  sortPriority?: number
+  website?: string
+  key: string
+  name: string
+  description?: Record<string, string> | null
+  icon?: string
+  hasIcon?: boolean
+  baseUrl?: string
+  models: string[]
+  channelTypes?: number[] | null
+  upstreams?: string[] | null
+}
+
+export async function getTaskPluginOptions(): Promise<TaskPluginOption[]> {
+  const response = await api.get<{
+    success: boolean
+    data: TaskPluginOption[]
+  }>('/api/task_plugin_options')
+  return requireServerSuccess(response.data).data
+}
 
 export type CodexUsageResponse = {
   success: boolean
@@ -108,9 +146,24 @@ export async function getChannel(id: number): Promise<GetChannelResponse> {
 /**
  * Get channel operations summary for administrators
  */
-export async function getChannelOps(): Promise<ChannelOpsResponse> {
-  const res = await api.get('/api/channel/ops', channelActionConfig())
+export async function getChannelOps(
+  autoBan?: boolean
+): Promise<ChannelOpsResponse> {
+  const res = await api.get('/api/channel/ops', {
+    ...channelActionConfig(),
+    params: autoBan === undefined ? undefined : { auto_ban: autoBan },
+  })
   return res.data
+}
+
+export async function getChannelDefaultBaseURLs(): Promise<
+  Partial<Record<number, string>>
+> {
+  const response = await api.get<{
+    success: boolean
+    data: Partial<Record<number, string>>
+  }>('/api/channel/default_base_urls')
+  return requireServerSuccess(response.data).data
 }
 
 /**
@@ -234,6 +287,28 @@ export async function updateChannelBalance(
   return res.data
 }
 
+export type ResetChannelUsedQuotaResponse = {
+  success: boolean
+  message?: string
+  data?: {
+    id: number
+    previous_used_quota: number
+    used_quota: number
+  }
+}
+
+/** Reset the local cumulative usage counter without changing upstream balance. */
+export async function resetChannelUsedQuota(
+  id: number
+): Promise<ResetChannelUsedQuotaResponse> {
+  const res = await api.post(
+    `/api/channel/${id}/used_quota/reset`,
+    undefined,
+    channelActionConfig()
+  )
+  return res.data
+}
+
 /**
  * Fetch available models from upstream provider
  */
@@ -295,14 +370,57 @@ export async function deleteDisabledChannels(): Promise<{
  */
 export async function getChannelKey(
   id: number,
-  proofToken?: string
+  proofToken: string,
+  signal?: AbortSignal
 ): Promise<{ success: boolean; message?: string; data?: { key: string } }> {
   const res = await api.post(
     `/api/channel/${id}/key`,
     undefined,
     channelActionConfig({
-      headers: proofToken ? { 'X-Security-Proof': proofToken } : undefined,
+      headers: { 'X-Security-Proof': proofToken },
+      signal,
     })
+  )
+  return res.data
+}
+
+/**
+ * Get the complete balance-query account token as the root administrator.
+ */
+export async function getChannelBalanceQueryToken(
+  id: number,
+  proofToken: string,
+  signal?: AbortSignal
+): Promise<{
+  success: boolean
+  message?: string
+  data?: { token: string }
+}> {
+  const res = await api.post(
+    `/api/channel/${id}/balance_query/token`,
+    undefined,
+    channelActionConfig({ headers: { 'X-Security-Proof': proofToken }, signal })
+  )
+  return res.data
+}
+
+export type TestChannelBalanceQueryResponse = {
+  success: boolean
+  mapping_success?: boolean
+  message?: string
+  balance?: number
+  balance_info?: ChannelBalanceInfo
+  raw_response?: string
+}
+
+export async function testChannelBalanceQuery(
+  id: number,
+  config: ChannelBalanceQueryConfig
+): Promise<TestChannelBalanceQueryResponse> {
+  const res = await api.post(
+    `/api/channel/${id}/balance_query/test`,
+    { config },
+    channelActionConfig()
   )
   return res.data
 }
@@ -527,6 +645,7 @@ export async function getTagModels(
  * Fetch models from the current unsaved channel form configuration.
  */
 export async function fetchModels(data: {
+  task_plugin_key?: string
   base_url: string
   type: number
   key?: string

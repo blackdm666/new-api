@@ -4,8 +4,26 @@ import (
 	"strconv"
 	"strings"
 
+	omnitask "github.com/QuantumNous/new-api/relay/channel/task/omni"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
 )
+
+// VideoUsageFacts uses the same normalized request and defaults as the native
+// Gemini/Vertex request builders and legacy duration billing.
+func VideoUsageFacts(c *gin.Context, info *relaycommon.RelayInfo) map[string]any {
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	if omnitask.IsModel(info.UpstreamModelName) {
+		return map[string]any{"seconds": float64(omnitask.ResolveDuration(req))}
+	}
+	return map[string]any{
+		"seconds":    float64(ResolveVeoDuration(req.Metadata, req.Duration, req.Seconds)),
+		"resolution": ResolveVeoResolution(req.Metadata, req.Size),
+	}
+}
 
 // ParseVeoDurationSeconds extracts durationSeconds from metadata.
 // Returns 8 (Veo default) when not specified or invalid.

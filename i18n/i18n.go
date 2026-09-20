@@ -19,6 +19,10 @@ const (
 	LangZhCN    = "zh-CN"
 	LangZhTW    = "zh-TW"
 	LangEn      = "en"
+	LangFr      = "fr"
+	LangRu      = "ru"
+	LangJa      = "ja"
+	LangVi      = "vi"
 	DefaultLang = LangEn // Fallback to English if language not supported
 )
 
@@ -40,7 +44,10 @@ func Init() error {
 		bundle.RegisterUnmarshalFunc("yaml", yaml.Unmarshal)
 
 		// Load embedded translation files
-		files := []string{"locales/zh-CN.yaml", "locales/zh-TW.yaml", "locales/en.yaml"}
+		files := []string{
+			"locales/zh-CN.yaml", "locales/zh-TW.yaml", "locales/en.yaml",
+			"locales/fr.yaml", "locales/ru.yaml", "locales/ja.yaml", "locales/vi.yaml",
+		}
 		for _, file := range files {
 			_, err := bundle.LoadMessageFileFS(localeFS, file)
 			if err != nil {
@@ -53,6 +60,10 @@ func Init() error {
 		localizers[LangZhCN] = i18n.NewLocalizer(bundle, LangZhCN)
 		localizers[LangZhTW] = i18n.NewLocalizer(bundle, LangZhTW)
 		localizers[LangEn] = i18n.NewLocalizer(bundle, LangEn)
+		localizers[LangFr] = i18n.NewLocalizer(bundle, LangFr, LangEn)
+		localizers[LangRu] = i18n.NewLocalizer(bundle, LangRu, LangEn)
+		localizers[LangJa] = i18n.NewLocalizer(bundle, LangJa, LangEn)
+		localizers[LangVi] = i18n.NewLocalizer(bundle, LangVi, LangEn)
 
 		// Set the TranslateMessage function in common package
 		common.TranslateMessage = T
@@ -203,12 +214,20 @@ func normalizeLang(lang string) string {
 
 	// Handle common variations
 	switch {
-	case strings.HasPrefix(lang, "zh-tw"):
+	case lang == "zhtw", strings.HasPrefix(lang, "zh-tw"), strings.HasPrefix(lang, "zh-hant"):
 		return LangZhTW
-	case strings.HasPrefix(lang, "zh"):
+	case lang == "zhcn", strings.HasPrefix(lang, "zh"):
 		return LangZhCN
 	case strings.HasPrefix(lang, "en"):
 		return LangEn
+	case strings.HasPrefix(lang, "fr"):
+		return LangFr
+	case strings.HasPrefix(lang, "ru"):
+		return LangRu
+	case strings.HasPrefix(lang, "ja"):
+		return LangJa
+	case strings.HasPrefix(lang, "vi"):
+		return LangVi
 	default:
 		return DefaultLang
 	}
@@ -216,7 +235,7 @@ func normalizeLang(lang string) string {
 
 // SupportedLanguages returns a list of supported language codes
 func SupportedLanguages() []string {
-	return []string{LangZhCN, LangZhTW, LangEn}
+	return []string{LangZhCN, LangZhTW, LangEn, LangFr, LangRu, LangJa, LangVi}
 }
 
 // IsSupported checks if a language code is supported

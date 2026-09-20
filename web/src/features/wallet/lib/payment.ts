@@ -93,6 +93,26 @@ export function isWaffoPancakePayment(paymentType: string): boolean {
   return paymentType === PAYMENT_TYPES.WAFFO_PANCAKE
 }
 
+/**
+ * Check if payment method is Antom hosted checkout.
+ */
+export function isAntomPayment(paymentType: string): boolean {
+  return paymentType === PAYMENT_TYPES.ANTOM
+}
+
+export function getPaymentMethodDisplayName(
+  paymentMethod: PaymentMethod,
+  translate: (key: string) => string
+): string {
+  if (
+    isAntomPayment(paymentMethod.type) &&
+    paymentMethod.name === 'Global Wallet Payment'
+  ) {
+    return translate('Global Wallet Payment')
+  }
+  return paymentMethod.name
+}
+
 export interface PaymentProcessors {
   regular: (topupAmount: number, paymentType: string) => Promise<boolean>
   waffo: (topupAmount: number, payMethodIndex: number) => Promise<boolean>

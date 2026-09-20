@@ -40,13 +40,24 @@ export async function getRedemptions(
   return res.data
 }
 
-// Search redemption codes by keyword
+// Search redemption codes with independent field filters
 export async function searchRedemptions(
   params: SearchRedemptionsParams
 ): Promise<GetRedemptionsResponse> {
-  const { keyword = '', status = '', p = 1, page_size = 10 } = params
+  const {
+    name = '',
+    code = '',
+    id = '',
+    keyword = '',
+    status = '',
+    p = 1,
+    page_size = 10,
+  } = params
   const queryParams = new URLSearchParams()
-  queryParams.set('keyword', keyword)
+  if (name) queryParams.set('name', name)
+  if (code) queryParams.set('code', code)
+  if (id) queryParams.set('id', id)
+  if (keyword) queryParams.set('keyword', keyword)
   if (status) queryParams.set('status', status)
   queryParams.set('p', String(p))
   queryParams.set('page_size', String(page_size))
@@ -96,5 +107,12 @@ export async function deleteRedemption(id: number): Promise<ApiResponse> {
 // Delete invalid redemption codes (used, disabled, expired)
 export async function deleteInvalidRedemptions(): Promise<ApiResponse<number>> {
   const res = await api.delete('/api/redemption/invalid')
+  return res.data
+}
+
+export async function batchDeleteRedemptions(
+  ids: number[]
+): Promise<ApiResponse<number>> {
+  const res = await api.post('/api/redemption/batch', { ids })
   return res.data
 }

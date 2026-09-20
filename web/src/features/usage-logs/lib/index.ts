@@ -31,8 +31,12 @@ export {
   isViolationFeeLog,
 } from './format'
 
+// Response model diagnostics
+export { isResponseModelMismatch } from './response-model'
+
 // Filter utilities
 export { buildSearchParams, getLogCategoryLabel } from './filter'
+export { buildQueryParams } from './query-params'
 
 // General utilities
 export {
@@ -41,7 +45,6 @@ export {
   getLogTypeConfig,
   isPerCallBilling,
   getDefaultTimeRange,
-  buildQueryParams,
   buildBaseParams,
   buildApiParams,
   fetchLogsByCategory,

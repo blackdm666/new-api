@@ -1,0 +1,174 @@
+name: Publish 88API image to GHCR
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: "Optional existing fixed image tag to alias without rebuilding"
+        type: string
+        default: ""
+      source_digest:
+        description: "Required expected sha256 digest when aliasing an existing image"
+        type: string
+        default: ""
+      cleanup_legacy:
+        description: "Delete historical Seedance package versions after migrating deployments"
+        type: boolean
+        default: false
+  push:
+    branches:
+      - "Newapi-88API"
+      - "codex/**"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ghcr-88api-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: inputs.source_tag == '' && !inputs.cleanup_legacy
+    name: Build and push linux/amd64 image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Resolve image tags
+        id: tags
+        shell: bash
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          image="ghcr.io/${owner}/new-api"
+          {
+            echo "image=${image}"
+            echo "tags<<IMAGE_TAGS"
+            echo "${image}:88api-${short_sha}"
+            # Only the integration branch advances the shared upgrade aliases.
+            if [[ "$GITHUB_REF" == "refs/heads/Newapi-88API" ]]; then
+              echo "${image}:88api"
+            fi
+            echo "IMAGE_TAGS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Output image
+        env:
+          IMAGE_TAGS: ${{ steps.tags.outputs.tags }}
+        run: |
+          echo "### Published image" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$IMAGE_TAGS" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  alias:
+    name: Alias a verified existing image without rebuilding
+    if: github.event_name == 'workflow_dispatch' && inputs.source_tag != '' && !inputs.cleanup_legacy && github.ref == 'refs/heads/Newapi-88API'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify source and resolve 88API tags
+        id: source
+        env:
+          SOURCE_TAG: ${{ inputs.source_tag }}
+          EXPECTED_DIGEST: ${{ inputs.source_digest }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, re, urllib.request
+          source = os.environ['SOURCE_TAG']
+          expected = os.environ['EXPECTED_DIGEST']
+          match = re.fullmatch(r'seedance-2\.5-([a-f0-9]{7,40})', source)
+          assert match and re.fullmatch(r'sha256:[a-f0-9]{64}', expected)
+          repo = os.environ['GITHUB_REPOSITORY'].lower()
+          with urllib.request.urlopen('https://ghcr.io/token?scope=repository:' + repo + ':pull') as r:
+              token = json.load(r)['token']
+          request = urllib.request.Request('https://ghcr.io/v2/' + repo + '/manifests/' + source,
+              headers={'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'})
+          with urllib.request.urlopen(request) as r:
+              assert r.headers['Docker-Content-Digest'] == expected
+              body = r.read()
+              assert 'sha256:' + hashlib.sha256(body).hexdigest() == expected
+          with open('source-manifest.json', 'wb') as output:
+              output.write(body)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('image=ghcr.io/' + repo + '\nshort=' + match[1] + '\ndigest=' + expected + '\n')
+          PY
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish 88API aliases of the same manifest
+        env:
+          IMAGE: ${{ steps.source.outputs.image }}
+          SHORT_SHA: ${{ steps.source.outputs.short }}
+          DIGEST: ${{ steps.source.outputs.digest }}
+        run: |
+          docker buildx imagetools create --prefer-index=false \
+            --annotation "index:org.opencontainers.image.ref.name=88api-${SHORT_SHA}" \
+            --tag "${IMAGE}:88api-${SHORT_SHA}" \
+            --tag "${IMAGE}:88api" \
+            "${IMAGE}@${DIGEST}"
+          docker buildx imagetools inspect "${IMAGE}:88api-${SHORT_SHA}" --raw > new-manifest.json
+          python3 - <<'PY'
+          import json
+          with open('source-manifest.json') as f: before = json.load(f)
+          with open('new-manifest.json') as f: after = json.load(f)
+          assert before['manifests'] == after['manifests'], 'Image contents changed'
+          assert before['mediaType'] == after['mediaType']
+          PY
+          {
+            echo '### 88API image aliases'
+            echo "${IMAGE}:88api-${SHORT_SHA}"
+            echo "${IMAGE}:88api"
+            echo "Original content digest: ${DIGEST}; platform manifests preserved"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  cleanup:
+    name: Remove explicitly retired image tags
+    if: github.event_name == 'workflow_dispatch' && inputs.cleanup_legacy && github.ref == 'refs/heads/Newapi-88API'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Verify replacement and delete legacy versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPLACEMENT_TAG: ${{ inputs.source_tag }}
+          REPLACEMENT_DIGEST: ${{ inputs.source_digest }}
+        run: python3 deploy/ghcr_cleanup_legacy.py
+      - name: Preserve deletion and restore inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-image-cleanup
+          path: ghcr-cleanup-*.json
+          retention-days: 90

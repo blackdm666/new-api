@@ -60,6 +60,7 @@ var ItemsPerPage = 10
 var MaxRecentItems = 1000
 
 var PasswordLoginEnabled = true
+var PasswordLoginEncryptionEnabled = false
 var PasswordRegisterEnabled = true
 var EmailVerificationEnabled = false
 var GitHubOAuthEnabled = false
@@ -105,6 +106,52 @@ var SMTPAccount = ""
 var SMTPFrom = ""
 var SMTPToken = ""
 
+// Backup SMTP is only used after the primary channel returns an error before
+// delivery has been confirmed by the SMTP server.
+var SMTPBackupEnabled = false
+var SMTPBackupServer = ""
+var SMTPBackupPort = 587
+var SMTPBackupSSLEnabled = false
+var SMTPBackupStartTLSEnabled = false
+var SMTPBackupInsecureSkipVerify = false
+var SMTPBackupForceAuthLogin = false
+var SMTPBackupAccount = ""
+var SMTPBackupFrom = ""
+var SMTPBackupToken = ""
+
+// Security SMTP is reserved for account verification, email binding and
+// password reset. When disabled or unavailable, delivery falls back to the
+// default notification SMTP pair to preserve account access.
+var SMTPSecurityEnabled = false
+var SMTPSecurityServer = ""
+var SMTPSecurityPort = 587
+var SMTPSecuritySSLEnabled = false
+var SMTPSecurityStartTLSEnabled = false
+var SMTPSecurityInsecureSkipVerify = false
+var SMTPSecurityForceAuthLogin = false
+var SMTPSecurityAccount = ""
+var SMTPSecurityFrom = ""
+var SMTPSecurityToken = ""
+
+// Marketing SMTP isolates bulk and campaign mail from security and
+// transactional notification sender reputation. It falls back to the default
+// SMTP pair only when it has not been activated by a successful test.
+var SMTPMarketingEnabled = false
+var SMTPMarketingServer = ""
+var SMTPMarketingPort = 587
+var SMTPMarketingSSLEnabled = false
+var SMTPMarketingStartTLSEnabled = false
+var SMTPMarketingInsecureSkipVerify = false
+var SMTPMarketingForceAuthLogin = false
+var SMTPMarketingAccount = ""
+var SMTPMarketingFrom = ""
+var SMTPMarketingToken = ""
+
+// 发票邮件通知配置。
+var InvoiceApplicationNotifyAdminEnabled = false
+var InvoiceIssuedNotifyUserEnabled = false
+var InvoiceAdminEmail = ""
+
 var GitHubClientId = ""
 var GitHubClientSecret = ""
 var LinuxDOClientId = ""
@@ -128,6 +175,9 @@ var ChannelDisableThreshold = 5.0
 var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false
 var QuotaRemindThreshold = 1000
+
+// PreConsumedQuota is retained for old option clients; token reservations now
+// use quota_setting.pre_consume_multiplier and the estimated input cost.
 var PreConsumedQuota = 500
 
 var RetryTimes = 0
@@ -162,6 +212,16 @@ var BatchUpdateInterval int
 var RelayTimeout int // unit is second
 
 var RelayIdleConnTimeout int // unit is second
+
+// RelayResponseHeaderTimeout limits how long the relay transport waits for the
+// upstream response headers after the request has been fully written.
+// 0 disables it (previous behaviour: wait forever).
+//
+// Note this is NOT the same as RelayTimeout (http.Client.Timeout), which covers
+// the whole response read and therefore breaks legitimate long streaming calls.
+// ResponseHeaderTimeout only bounds the wait for the response headers; once the
+// headers arrive, streaming is unaffected.
+var RelayResponseHeaderTimeout int // unit is second
 var RelayMaxIdleConns int
 var RelayMaxIdleConnsPerHost int
 
@@ -184,6 +244,21 @@ const (
 
 func IsValidateRole(role int) bool {
 	return role == RoleGuestUser || role == RoleCommonUser || role == RoleAdminUser || role == RoleRootUser
+}
+
+func RoleLabel(role int) string {
+	switch role {
+	case RoleGuestUser:
+		return "访客"
+	case RoleCommonUser:
+		return "普通用户"
+	case RoleAdminUser:
+		return "管理员"
+	case RoleRootUser:
+		return "超级管理员"
+	default:
+		return "未知"
+	}
 }
 
 var (

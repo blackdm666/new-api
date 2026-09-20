@@ -50,6 +50,13 @@ func TestSearchRedemptionsFiltersAndPaginates(t *testing.T) {
 			wantIds:   []int{3, 2, 1},
 		},
 		{
+			name:      "keyword finds an exact redemption code",
+			keyword:   "00000000000000000000000000000004",
+			num:       10,
+			wantTotal: 1,
+			wantIds:   []int{4},
+		},
+		{
 			name:      "enabled status excludes expired rows",
 			status:    "1",
 			num:       10,
@@ -91,6 +98,50 @@ func TestSearchRedemptionsFiltersAndPaginates(t *testing.T) {
 			rows, total, err := SearchRedemptions(tt.keyword, tt.status, tt.startIdx, tt.num)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantTotal, total)
+			gotIds := make([]int, 0, len(rows))
+			for _, row := range rows {
+				gotIds = append(gotIds, row.Id)
+			}
+			assert.Equal(t, tt.wantIds, gotIds)
+		})
+	}
+}
+
+func TestSearchRedemptionsByFields(t *testing.T) {
+	require.NoError(t, DB.AutoMigrate(&Redemption{}))
+	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Redemption{}).Error)
+	t.Cleanup(func() {
+		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Redemption{}).Error)
+	})
+
+	redemptions := []Redemption{
+		{Id: 11, Name: "campaign-a", Key: "10000000000000000000000000000011", Status: common.RedemptionCodeStatusEnabled},
+		{Id: 12, Name: "campaign-a", Key: "10000000000000000000000000000012", Status: common.RedemptionCodeStatusEnabled},
+		{Id: 13, Name: "campaign-b", Key: "10000000000000000000000000000013", Status: common.RedemptionCodeStatusDisabled},
+	}
+	require.NoError(t, DB.Create(&redemptions).Error)
+
+	tests := []struct {
+		name      string
+		nameQuery string
+		code      string
+		id        string
+		status    string
+		wantIds   []int
+	}{
+		{name: "name is independent", nameQuery: "campaign-a", wantIds: []int{12, 11}},
+		{name: "code is exact", code: "10000000000000000000000000000012", wantIds: []int{12}},
+		{name: "id is exact", id: "13", wantIds: []int{13}},
+		{name: "invalid id returns no rows", id: "not-a-number", wantIds: []int{}},
+		{name: "fields combine with AND", nameQuery: "campaign-a", id: "12", wantIds: []int{12}},
+		{name: "field and status combine with AND", code: "10000000000000000000000000000013", status: "2", wantIds: []int{13}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, total, err := SearchRedemptionsByFields(tt.nameQuery, tt.code, tt.id, tt.status, 0, 10)
+			require.NoError(t, err)
+			assert.Equal(t, int64(len(tt.wantIds)), total)
 			gotIds := make([]int, 0, len(rows))
 			for _, row := range rows {
 				gotIds = append(gotIds, row.Id)
@@ -148,6 +199,35 @@ func TestRedeemCreditsQuotaExactlyOnce(t *testing.T) {
 	assert.Equal(t, 500, user.Quota)
 }
 
+func TestRedeemRejectsWalletOverflow(t *testing.T) {
+	userId, key := setupRedeemFixture(t, 11)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", userId).Update("quota", common.MaxWalletQuota-10).Error)
+
+	_, err := Redeem(key, userId)
+	require.ErrorIs(t, err, ErrRedeemFailed)
+
+	var user User
+	require.NoError(t, DB.First(&user, "id = ?", userId).Error)
+	assert.Equal(t, common.MaxWalletQuota-10, user.Quota)
+
+	var redemption Redemption
+	require.NoError(t, DB.First(&redemption, "key = ?", key).Error)
+	assert.Equal(t, common.RedemptionCodeStatusEnabled, redemption.Status)
+}
+
+func TestRedemptionQuotaRejectsWalletOverflow(t *testing.T) {
+	setupRedeemFixture(t, 500)
+
+	redemption := &Redemption{
+		Name:        "overflow-redemption",
+		Key:         "10000000000000000000000000000002",
+		Status:      common.RedemptionCodeStatusEnabled,
+		Quota:       common.MaxWalletQuota + 1,
+		CreatedTime: common.GetTimestamp(),
+	}
+	require.Error(t, redemption.Insert())
+}
+
 // Exactly one of several concurrent redeems of the same code may win, and
 // quota must be credited exactly once.
 func TestRedeemConcurrentSingleSuccess(t *testing.T) {
@@ -157,7 +237,7 @@ func TestRedeemConcurrentSingleSuccess(t *testing.T) {
 	successes := make([]bool, goroutines)
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(idx int) {
 			defer wg.Done()
 			if _, err := Redeem(key, userId); err == nil {

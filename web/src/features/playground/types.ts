@@ -138,9 +138,14 @@ export interface ParameterEnabled {
 }
 
 // Model and group options
+export type PlaygroundModelMode = 'chat' | 'image' | 'video'
+export type PlaygroundModelTransport = 'chat' | 'image' | 'video'
+
 export interface ModelOption {
   label: string
   value: string
+  mode: PlaygroundModelMode
+  transport: PlaygroundModelTransport
 }
 
 export interface GroupOption {
@@ -148,4 +153,37 @@ export interface GroupOption {
   value: string
   ratio: number
   desc?: string
+}
+
+export interface ImageGenerationResponse {
+  created: number
+  data: Array<{
+    url?: string
+    b64_json?: string
+    revised_prompt?: string
+  }>
+}
+
+export interface PlaygroundVideo {
+  id: string
+  task_id?: string
+  model?: string
+  status: 'queued' | 'in_progress' | 'completed' | 'failed' | string
+  progress?: number
+  error?: {
+    code?: string
+    message?: string
+  }
+  metadata?: Record<string, unknown>
+}
+
+export type MediaTestState = {
+  status: 'idle' | 'generating' | 'success' | 'error'
+  mode: Exclude<PlaygroundModelMode, 'chat'>
+  prompt: string
+  images: string[]
+  videoUrl?: string
+  progress?: number
+  errorCode?: string
+  errorMessage?: string
 }

@@ -27,6 +27,19 @@ var commonFalseVal string
 var logKeyCol string
 var logGroupCol string
 
+// jsonScanBytes 归一化 json 列的驱动返回值:不同驱动/协议模式下同一列可能
+// 以 []byte 或 string 返回,静默丢弃 string 会导致字段被清零而不报错。
+func jsonScanBytes(value any) []byte {
+	switch v := value.(type) {
+	case []byte:
+		return v
+	case string:
+		return []byte(v)
+	default:
+		return nil
+	}
+}
+
 func initCol() {
 	// init common column names
 	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
@@ -138,10 +151,12 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 		if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 			// Use PostgreSQL
 			common.SysLog("using PostgreSQL as database")
-			db, err := gorm.Open(postgres.New(postgres.Config{
+			// 同时关闭 pgx 隐式与 GORM 显式预处理语句:命名 prepared statement 与
+			// 事务池代理(PgBouncer/Neon/Supabase)不兼容,会触发 FATAL 08P01/42P05。
+			db, err := gorm.Open(postgresMigrationDialector{postgres.Dialector{Config: &postgres.Config{
 				DSN:                  dsn,
-				PreferSimpleProtocol: true, // disables implicit prepared statement usage
-			}), newGormConfig(true))
+				PreferSimpleProtocol: true,
+			}}}, newGormConfig(false))
 			return db, common.DatabaseTypePostgreSQL, err
 		}
 		if strings.HasPrefix(dsn, "local") {
@@ -159,7 +174,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 				dsn += "?parseTime=true"
 			}
 		}
-		db, err := gorm.Open(mysql.Open(dsn), newGormConfig(true))
+		db, err := gorm.Open(mysqlMigrationDialector{mysql.Dialector{Config: &mysql.Config{DSN: dsn}}}, newGormConfig(true))
 		return db, common.DatabaseTypeMySQL, err
 	}
 	// Use SQLite
@@ -185,6 +200,9 @@ func InitDB() (err error) {
 			if err := checkMySQLChineseSupport(DB); err != nil {
 				panic(err)
 			}
+		}
+		if err := ensureUserQuotaColumns(DB, common.MainDatabaseType()); err != nil {
+			return err
 		}
 		sqlDB, err := DB.DB()
 		if err != nil {
@@ -214,6 +232,9 @@ func InitLogDB() (err error) {
 		LOG_DB = DB
 		common.SetLogDatabaseType(common.MainDatabaseType())
 		initCol()
+		if common.IsMasterNode {
+			return MigrateAuditLogs()
+		}
 		return
 	}
 	db, dbType, err := chooseDB("LOG_SQL_DSN", true)
@@ -250,12 +271,67 @@ func InitLogDB() (err error) {
 	return err
 }
 
+var userQuotaColumns = []string{"quota", "used_quota", "aff_quota", "aff_history"}
+
+// ensureUserQuotaColumns rejects a legacy 32-bit wallet schema before any
+// migrations run. The 64-bit-only build intentionally does not auto-upgrade
+// an existing wallet; operators must migrate it explicitly before starting.
+func ensureUserQuotaColumns(db *gorm.DB, dbType common.DatabaseType) error {
+	if common.GetEnvOrDefaultBool("SKIP_64BIT_QUOTA_SCHEMA_CHECK", false) {
+		common.SysLog("SKIP_64BIT_QUOTA_SCHEMA_CHECK=true; skipping user quota schema check")
+		return nil
+	}
+	if db == nil || dbType == common.DatabaseTypeSQLite {
+		return nil
+	}
+	if !db.Migrator().HasTable(&User{}) {
+		return nil
+	}
+	columnTypes, err := db.Migrator().ColumnTypes(&User{})
+	if err != nil {
+		return fmt.Errorf("failed to inspect users schema: %w", err)
+	}
+	for _, expected := range userQuotaColumns {
+		for _, actual := range columnTypes {
+			if !strings.EqualFold(actual.Name(), expected) {
+				continue
+			}
+			dataType := actual.DatabaseTypeName()
+			if !is64BitIntegerType(dbType, dataType) {
+				return fmt.Errorf("users.%s uses %s; 32-bit is not supported", expected, dataType)
+			}
+		}
+	}
+	return nil
+}
+
+func is64BitIntegerType(dbType common.DatabaseType, dataType string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(dataType))
+	switch dbType {
+	case common.DatabaseTypeMySQL:
+		return normalized == "bigint" || normalized == "unsigned bigint" || normalized == "bigint unsigned"
+	case common.DatabaseTypePostgreSQL:
+		return normalized == "bigint" || normalized == "int8"
+	default:
+		return false
+	}
+}
+
 func migrateDB() error {
+	if err := migrateTokenKeyUniqueness(DB); err != nil {
+		return err
+	}
+	if err := migratePrefillGroupUniqueness(DB); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
+	}
+	if err := migrateOptionPrimaryKey(DB); err != nil {
+		common.SysError("failed to migrate options primary key: " + err.Error())
 	}
 
 	err := DB.AutoMigrate(
@@ -267,13 +343,46 @@ func migrateDB() error {
 		&ExternalIdentityClaim{},
 		&PasskeyCredential{},
 		&Option{},
+		&LoginEncryptionKey{},
 		&Redemption{},
 		&Ability{},
 		&Log{},
 		&Midjourney{},
 		&TopUp{},
+		&AffiliateAccount{},
+		&AffiliateCommission{},
+		&AffiliateUpgradeNotice{},
+		&AffiliatePayout{},
+		&AffiliateTransfer{},
+		&InvoiceRequest{},
+		&InvoiceOrderClaim{},
+		&InvoiceStorageProfile{},
+		&InvoiceFileUpload{},
+		&InvoiceFile{},
+		&InvoiceRequestEvent{},
+		&InvoiceSearchTerm{},
+		&InvoiceFileCleanup{},
+		&InvoiceNotificationDelivery{},
+		&EmailDelivery{},
+		&UserNotice{},
+		&UserNoticeRequest{},
+		&EmailSenderAccount{},
+		&EmailDeliveryAttempt{},
+		&EmailReceiptEvent{},
+		&EmailDeliveryThrottle{},
+		&EmailDeliveryMinuteQuota{},
+		&EmailReceiptEndpoint{},
+		&QuotaNotificationState{},
+		&MarketingEmailDailyQuota{},
+		&MarketingCampaign{},
+		&MarketingRecipient{},
+		&MarketingAutomation{},
+		&MarketingSuppression{},
+		&MarketingEvent{},
 		&QuotaData{},
 		&Task{},
+		&TaskCallbackDelivery{},
+		&TaskPlugin{},
 		&Model{},
 		&Vendor{},
 		&PrefillGroup{},
@@ -296,10 +405,31 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := backfillAffiliateAccounts(); err != nil {
+		return err
+	}
+	if err := backfillEmailDeliveryStates(); err != nil {
+		return err
+	}
+	if err := BackfillLegacyMarketingEmailSenderAccount(); err != nil {
+		return err
+	}
+	if err := EnsureMarketingAutomations(); err != nil {
+		return err
+	}
+	if err := ensureInvoiceCleanupCompositeIndex(); err != nil {
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}
 	if err := InitializeExternalIdentityClaims(); err != nil {
+		return err
+	}
+	if err := ensureInvoiceSearchIndexes(); err != nil {
+		return err
+	}
+	if _, err := BackfillInvoiceSearchTerms(100); err != nil {
 		return err
 	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
@@ -335,8 +465,40 @@ func migrateDBFast() error {
 		{&Log{}, "Log"},
 		{&Midjourney{}, "Midjourney"},
 		{&TopUp{}, "TopUp"},
+		{&AffiliateCommission{}, "AffiliateCommission"},
+		{&AffiliateAccount{}, "AffiliateAccount"},
+		{&AffiliateUpgradeNotice{}, "AffiliateUpgradeNotice"},
+		{&AffiliatePayout{}, "AffiliatePayout"},
+		{&AffiliateTransfer{}, "AffiliateTransfer"},
+		{&InvoiceRequest{}, "InvoiceRequest"},
+		{&InvoiceOrderClaim{}, "InvoiceOrderClaim"},
+		{&InvoiceStorageProfile{}, "InvoiceStorageProfile"},
+		{&InvoiceFileUpload{}, "InvoiceFileUpload"},
+		{&InvoiceFile{}, "InvoiceFile"},
+		{&InvoiceRequestEvent{}, "InvoiceRequestEvent"},
+		{&InvoiceSearchTerm{}, "InvoiceSearchTerm"},
+		{&InvoiceFileCleanup{}, "InvoiceFileCleanup"},
+		{&InvoiceNotificationDelivery{}, "InvoiceNotificationDelivery"},
+		{&EmailDelivery{}, "EmailDelivery"},
+		{&UserNotice{}, "UserNotice"},
+		{&UserNoticeRequest{}, "UserNoticeRequest"},
+		{&EmailSenderAccount{}, "EmailSenderAccount"},
+		{&EmailDeliveryAttempt{}, "EmailDeliveryAttempt"},
+		{&EmailReceiptEvent{}, "EmailReceiptEvent"},
+		{&EmailDeliveryThrottle{}, "EmailDeliveryThrottle"},
+		{&EmailDeliveryMinuteQuota{}, "EmailDeliveryMinuteQuota"},
+		{&EmailReceiptEndpoint{}, "EmailReceiptEndpoint"},
+		{&QuotaNotificationState{}, "QuotaNotificationState"},
+		{&MarketingEmailDailyQuota{}, "MarketingEmailDailyQuota"},
+		{&MarketingCampaign{}, "MarketingCampaign"},
+		{&MarketingRecipient{}, "MarketingRecipient"},
+		{&MarketingAutomation{}, "MarketingAutomation"},
+		{&MarketingSuppression{}, "MarketingSuppression"},
+		{&MarketingEvent{}, "MarketingEvent"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
+		{&TaskCallbackDelivery{}, "TaskCallbackDelivery"},
+		{&TaskPlugin{}, "TaskPlugin"},
 		{&Model{}, "Model"},
 		{&Vendor{}, "Vendor"},
 		{&PrefillGroup{}, "PrefillGroup"},
@@ -377,10 +539,31 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := backfillAffiliateAccounts(); err != nil {
+		return err
+	}
+	if err := backfillEmailDeliveryStates(); err != nil {
+		return err
+	}
+	if err := BackfillLegacyMarketingEmailSenderAccount(); err != nil {
+		return err
+	}
+	if err := EnsureMarketingAutomations(); err != nil {
+		return err
+	}
+	if err := ensureInvoiceCleanupCompositeIndex(); err != nil {
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}
 	if err := InitializeExternalIdentityClaims(); err != nil {
+		return err
+	}
+	if err := ensureInvoiceSearchIndexes(); err != nil {
+		return err
+	}
+	if _, err := BackfillInvoiceSearchTerms(100); err != nil {
 		return err
 	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
@@ -396,7 +579,35 @@ func migrateDBFast() error {
 	return nil
 }
 
+func ensureInvoiceSearchIndexes() error {
+	switch common.MainDatabaseType() {
+	case common.DatabaseTypeSQLite:
+		return DB.Exec("CREATE INDEX IF NOT EXISTS idx_invoice_search_terms_value_nocase ON invoice_search_terms (value COLLATE NOCASE)").Error
+	case common.DatabaseTypePostgreSQL:
+		return DB.Exec("CREATE INDEX IF NOT EXISTS idx_invoice_search_terms_value_pattern ON invoice_search_terms (value varchar_pattern_ops)").Error
+	default:
+		return nil
+	}
+}
+
+func ensureInvoiceCleanupCompositeIndex() error {
+	migrator := DB.Migrator()
+	legacyIndex := "idx_invoice_file_cleanups_storage_key"
+	if migrator.HasIndex(&InvoiceFileCleanup{}, legacyIndex) {
+		if err := migrator.DropIndex(&InvoiceFileCleanup{}, legacyIndex); err != nil {
+			return err
+		}
+	}
+	if !migrator.HasIndex(&InvoiceFileCleanup{}, "idx_invoice_cleanup_profile_key") {
+		return migrator.CreateIndex(&InvoiceFileCleanup{}, "idx_invoice_cleanup_profile_key")
+	}
+	return nil
+}
+
 func migrateLOGDB() error {
+	if err := MigrateAuditLogs(); err != nil {
+		return err
+	}
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		return migrateClickHouseLogDB()
 	}

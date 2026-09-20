@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"maps"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -23,12 +25,19 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 			filtered = append(filtered, item)
 			continue
 		}
+		usableEnableGroups := make([]string, 0, len(item.EnableGroup))
 		for _, group := range item.EnableGroup {
 			if _, ok := usableGroup[group]; ok {
-				filtered = append(filtered, item)
-				break
+				usableEnableGroups = append(usableEnableGroups, group)
 			}
 		}
+		if len(usableEnableGroups) == 0 {
+			continue
+		}
+		// item is a copy of the shared pricing cache entry; assign a fresh
+		// slice so the cached EnableGroup is never mutated across requests.
+		item.EnableGroup = usableEnableGroups
+		filtered = append(filtered, item)
 	}
 	return filtered
 }
@@ -38,9 +47,7 @@ func GetPricing(c *gin.Context) {
 	userId, exists := c.Get("id")
 	usableGroup := map[string]string{}
 	groupRatio := map[string]float64{}
-	for s, f := range ratio_setting.GetGroupRatioCopy() {
-		groupRatio[s] = f
-	}
+	maps.Copy(groupRatio, ratio_setting.GetGroupRatioCopy())
 	var group string
 	if exists {
 		user, err := model.GetUserCache(userId.(int))

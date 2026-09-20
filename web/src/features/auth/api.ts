@@ -19,10 +19,17 @@ For commercial licensing, please contact support@quantumnous.com
 import axios from 'axios'
 
 import { api, refreshAuthentication, type RefreshOutcome } from '@/lib/api'
+import { AuthOperationError } from '@/lib/secure-verification'
+import { getServerErrorMessageKey } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
+import {
+  clearPasswordEncryptionCache,
+  encryptPassword,
+} from './lib/password-encryption'
 import { getAffiliateCode } from './lib/storage'
 import type { TelegramAuthorization } from './lib/telegram-login'
+import type { VerificationOperation } from './secure-verification/types'
 import type {
   LoginPayload,
   LoginResponse,
@@ -41,17 +48,39 @@ import type {
 // ----------------------------------------------------------------------------
 
 // User login with username and password
-export async function login(payload: LoginPayload) {
+export async function login(payload: LoginPayload): Promise<LoginResponse> {
   const turnstile = payload.turnstile ?? ''
-  const res = await api.post<LoginResponse>(
-    `/api/user/login?turnstile=${turnstile}`,
-    {
-      username: payload.username,
-      password: payload.password,
-    },
-    { skipAuthRefresh: true }
-  )
-  return res.data
+  try {
+    let passwordFields:
+      | { password: string }
+      | { password_encrypted: string; encryption_key_id: string }
+    if (payload.passwordEncryptionEnabled) {
+      const encryptedPassword = await encryptPassword(payload.password)
+      passwordFields = {
+        password_encrypted: encryptedPassword.password_encrypted,
+        encryption_key_id: encryptedPassword.encryption_key_id,
+      }
+    } else {
+      passwordFields = { password: payload.password }
+    }
+    const res = await api.post<LoginResponse>(
+      `/api/user/login?turnstile=${turnstile}`,
+      {
+        username: payload.username,
+        ...passwordFields,
+      },
+      { skipAuthRefresh: true }
+    )
+    if (payload.passwordEncryptionEnabled && !res.data?.success) {
+      clearPasswordEncryptionCache()
+    }
+    return res.data
+  } catch (error: unknown) {
+    if (payload.passwordEncryptionEnabled) {
+      clearPasswordEncryptionCache()
+    }
+    throw error
+  }
 }
 
 // Two-factor authentication login
@@ -121,15 +150,22 @@ export async function sendPasswordResetEmail(
   email: string,
   turnstile?: string
 ): Promise<ApiResponse> {
-  const res = await api.get('/api/reset_password', {
-    params: { email, turnstile },
-  })
+  const res = await api.post('/api/reset_password', { email, turnstile })
   return res.data
 }
 
 // ----------------------------------------------------------------------------
 // OAuth
 // ----------------------------------------------------------------------------
+
+export interface TurnstileVerificationPayload {
+  turnstile?: string
+}
+
+function getTurnstileQueryParams(verification?: TurnstileVerificationPayload) {
+  if (!verification) return {}
+  return { turnstile: verification.turnstile }
+}
 
 // Start GitHub OAuth flow
 export async function githubOAuthStart(clientId: string, state: string) {
@@ -138,36 +174,93 @@ export async function githubOAuthStart(clientId: string, state: string) {
 }
 
 // Get OAuth state for CSRF protection
-export async function createOAuthFlow(
+export async function createOAuthAuthorization(
   provider: string,
-  intent: 'login' | 'bind'
-): Promise<string> {
+  intent: 'login' | 'bind' | 'verify',
+  operation?: VerificationOperation,
+  signal?: AbortSignal,
+  proofToken?: string,
+  verification?: TurnstileVerificationPayload
+): Promise<{ state: string; authorizationUrl?: string }> {
   const aff = intent === 'login' ? getAffiliateCode() : ''
   const res = await api.post(
     '/api/oauth/state',
-    { provider, intent, aff: aff || undefined },
-    { skipAuthRefresh: intent === 'login' }
+    {
+      provider,
+      intent,
+      aff: aff || undefined,
+      ...getTurnstileQueryParams(verification),
+      scope: operation?.scope,
+      ...(operation?.context ? { context: operation.context } : {}),
+    },
+    {
+      skipAuthRefresh: intent === 'login',
+      ...(proofToken ? { headers: { 'X-Security-Proof': proofToken } } : {}),
+      singleUseAuthorization: intent === 'bind',
+      signal,
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    }
   )
   if (res.data?.success) {
-    if (typeof res.data.data === 'string') return res.data.data
+    if (typeof res.data.data === 'string') return { state: res.data.data }
     if (typeof res.data.data?.flow_token === 'string') {
-      return res.data.data.flow_token
+      return {
+        state: res.data.data.flow_token,
+        authorizationUrl: res.data.data.authorization_url,
+      }
     }
   }
-  throw new Error(res.data?.message || 'Failed to initialize OAuth')
+  throw new AuthOperationError(
+    getServerErrorMessageKey(res.data) ||
+      res.data?.message ||
+      'Failed to initialize OAuth',
+    res.data?.code
+  )
+}
+
+export async function createOAuthFlow(
+  provider: string,
+  intent: 'login' | 'bind' | 'verify',
+  operation?: VerificationOperation | TurnstileVerificationPayload,
+  signal?: AbortSignal
+): Promise<string> {
+  const verification =
+    operation && 'turnstile' in operation ? operation : undefined
+  const verificationOperation =
+    operation && 'scope' in operation ? operation : undefined
+  return (
+    await createOAuthAuthorization(
+      provider,
+      intent,
+      verificationOperation,
+      signal,
+      undefined,
+      verification
+    )
+  ).state
 }
 
 // WeChat login by authorization code
-export async function wechatLoginByCode(code: string): Promise<ApiResponse> {
-  const res = await api.get('/api/oauth/wechat', { params: { code } })
+export async function wechatLoginByCode(
+  code: string,
+  verification?: TurnstileVerificationPayload
+): Promise<ApiResponse> {
+  const res = await api.get('/api/oauth/wechat', {
+    params: { code, ...getTurnstileQueryParams(verification) },
+  })
   return res.data
 }
 
 export async function telegramLogin(
-  authorization: TelegramAuthorization
+  authorization: TelegramAuthorization,
+  verification?: TurnstileVerificationPayload
 ): Promise<ApiResponse> {
   const res = await api.get('/api/oauth/telegram/login', {
-    params: authorization,
+    params: {
+      ...authorization,
+      ...getTurnstileQueryParams(verification),
+    },
     disableDuplicate: true,
     skipAuthRefresh: true,
     skipBusinessError: true,
@@ -193,20 +286,25 @@ export async function sendEmailVerification(
   email: string,
   turnstile?: string
 ): Promise<ApiResponse> {
-  const res = await api.get('/api/verification', {
-    params: { email, turnstile },
-  })
+  const res = await api.post('/api/verification', { email, turnstile })
   return res.data
 }
 
-// Bind email to OAuth account
+// Confirm an authenticated, server-owned email binding flow.
 export async function bindEmail(
-  email: string,
-  code: string
+  flowToken: string,
+  newCode: string,
+  oldCode = '',
+  signal?: AbortSignal
 ): Promise<ApiResponse> {
-  const res = await api.post('/api/oauth/email/bind', {
-    email,
-    code,
-  })
+  const res = await api.post(
+    '/api/oauth/email/bind',
+    {
+      flow_token: flowToken,
+      new_code: newCode,
+      old_code: oldCode,
+    },
+    { singleUseAuthorization: true, signal }
+  )
   return res.data
 }

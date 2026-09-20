@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { parseCurrencyDisplayType } from '@/lib/currency'
 
+import { AffiliateSettingsSection } from '../general/affiliate-settings-section'
 import { CheckinSettingsSection } from '../general/checkin-settings-section'
 import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
@@ -38,6 +39,7 @@ const getModelDefaults = (settings: BillingSettings) => ({
   ExposeRatioEnabled: settings.ExposeRatioEnabled,
   BillingMode: settings['billing_setting.billing_mode'],
   BillingExpr: settings['billing_setting.billing_expr'],
+  PluginBillingExpr: settings['billing_setting.plugin_billing_expr'],
 })
 
 const getGroupDefaults = (settings: BillingSettings) => ({
@@ -52,6 +54,23 @@ const getGroupDefaults = (settings: BillingSettings) => ({
     settings['group_ratio_setting.group_special_usable_group'],
 })
 
+function parseAffiliateGroupRates(value: string): Record<string, number> {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {}
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, number] =>
+          typeof entry[1] === 'number' && Number.isFinite(entry[1])
+      )
+    )
+  } catch {
+    return {}
+  }
+}
+
 const BILLING_SECTIONS = [
   {
     id: 'quota',
@@ -60,14 +79,13 @@ const BILLING_SECTIONS = [
       <QuotaSettingsSection
         defaultValues={{
           QuotaForNewUser: settings.QuotaForNewUser,
-          PreConsumedQuota: settings.PreConsumedQuota,
           QuotaForInviter: settings.QuotaForInviter,
           QuotaForInvitee: settings.QuotaForInvitee,
           TopUpLink: settings.TopUpLink,
-          general_setting: {
-            docs_link: settings['general_setting.docs_link'],
-          },
           quota_setting: {
+            trust_quota_usd: settings['quota_setting.trust_quota_usd'],
+            pre_consume_multiplier:
+              settings['quota_setting.pre_consume_multiplier'],
             enable_free_model_pre_consume:
               settings['quota_setting.enable_free_model_pre_consume'],
           },
@@ -78,6 +96,40 @@ const BILLING_SECTIONS = [
         }
       />
     ),
+  },
+  {
+    id: 'affiliate',
+    titleKey: 'Referral Commission',
+    build: (settings: BillingSettings) => {
+      const groupRates = parseAffiliateGroupRates(
+        settings.AffiliateCommissionGroupRates
+      )
+      return (
+        <AffiliateSettingsSection
+          defaultValues={{
+            enabled: settings.AffiliateCommissionEnabled,
+            autoApprove: settings.AffiliateCommissionAutoApprove,
+            topUpLimit: settings.AffiliateCommissionInviteeTopUpLimit ?? 0,
+            juniorRate:
+              (groupRates.default ??
+                groupRates['初级推广'] ??
+                settings.AffiliateCommissionDefaultRateBasisPoints ??
+                500) / 100,
+            advancedRate: (groupRates['高级推广'] ?? 1000) / 100,
+            goldRate: (groupRates['金牌推广'] ?? 1500) / 100,
+            upgradeThreshold:
+              settings.AffiliateUpgradeEffectiveInviteesThreshold,
+            goldUpgradeThreshold:
+              settings.AffiliateGoldUpgradeEffectiveInviteesThreshold,
+            upgradeAmountThreshold:
+              settings.AffiliateUpgradeEffectiveTopUpAmountCents / 100,
+            goldUpgradeAmountThreshold:
+              settings.AffiliateGoldUpgradeEffectiveTopUpAmountCents / 100,
+          }}
+          fixedInviterReward={settings.QuotaForInviter}
+        />
+      )
+    },
   },
   {
     id: 'currency',
@@ -153,6 +205,14 @@ const BILLING_SECTIONS = [
           CreemWebhookSecret: settings.CreemWebhookSecret,
           CreemTestMode: settings.CreemTestMode,
           CreemProducts: settings.CreemProducts,
+          AntomEnabled: settings.AntomEnabled,
+          AntomDisplayName: settings.AntomDisplayName,
+          AntomGateway: settings.AntomGateway,
+          AntomClientId: settings.AntomClientId,
+          AntomMerchantPrivateKey: settings.AntomMerchantPrivateKey,
+          AntomPublicKey: settings.AntomPublicKey,
+          AntomNotifyURL: settings.AntomNotifyURL,
+          AntomRedirectURL: settings.AntomRedirectURL,
         }}
         waffoDefaultValues={{
           WaffoEnabled: settings.WaffoEnabled ?? false,
@@ -184,6 +244,11 @@ const BILLING_SECTIONS = [
             settings['payment_setting.compliance_terms_version'] ?? '',
           confirmedAt: settings['payment_setting.compliance_confirmed_at'] ?? 0,
           confirmedBy: settings['payment_setting.compliance_confirmed_by'] ?? 0,
+        }}
+        antomCredentialStatus={{
+          privateKeyConfigured:
+            settings.AntomMerchantPrivateKeyConfigured ?? false,
+          publicKeyConfigured: settings.AntomPublicKeyConfigured ?? false,
         }}
       />
     ),
