@@ -613,6 +613,7 @@ export function buildQueryRequest(){throw new Error("completed submissions must 
 			info.UsingGroup = "default"
 			info.IsPlayground = true
 			info.UserSetting.BillingPreference = "wallet_only"
+			info.UserSetting.QuotaWarningThreshold = -1 // This fixture verifies settlement, not background notifications.
 			info.PublicTaskID = model.GenerateTaskID()
 			info.LockedChannel = &ch
 			outcome, taskErr := executeTaskSubmission(c, info)

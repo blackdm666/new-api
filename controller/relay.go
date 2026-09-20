@@ -698,6 +698,18 @@ func executeTaskSubmissionWith(
 		return nil, taskErr
 	}
 	durable = true
+	if immediateTerminal {
+		// Immediate tasks are persisted terminal and never reach the polling
+		// CAS. Sample only after this insert (including its callback transaction)
+		// succeeds, independently of later settlement or client delivery.
+		sampleTask := *task
+		if !relayInfo.StartTime.IsZero() {
+			// InitTask runs after the upstream call. Include that call's latency
+			// in the sample without changing persisted task/billing timestamps.
+			sampleTask.SubmitTime = relayInfo.StartTime.Unix()
+		}
+		perfmetrics.RecordTaskResult(&sampleTask, result.Immediate)
+	}
 	stage = "settle"
 	diagnostics.durable(task)
 	diagnostics.settleStart(task, result.Quota)

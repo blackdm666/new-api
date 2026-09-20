@@ -186,7 +186,13 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 	if info.StreamStatus != nil {
 		upstreamFinished := info.StreamStatus.EndReason == relaycommon.StreamEndReasonDone ||
 			info.StreamStatus.EndReason == relaycommon.StreamEndReasonEOF
-		if upstreamFinished || completedImages > int64(info.RequestedImageCount()) {
+		// A scanner can reach DONE/EOF before the handler drains its buffered
+		// data channel. If the client has already cancelled, the handler may
+		// stop on a write error while the scanner still reports a normal end.
+		// Errors make that end untrusted; otherwise an abort could lower the
+		// reserved image count from the first completed event.
+		trustedFinished := upstreamFinished && !info.StreamStatus.HasErrors()
+		if trustedFinished || completedImages > int64(info.RequestedImageCount()) {
 			info.UpdateImageCount(completedImages)
 		}
 	}

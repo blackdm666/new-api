@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
+	"github.com/go-redis/redis/v8"
 )
 
 var hotBuckets sync.Map
@@ -143,8 +144,8 @@ func supportsOnlyAsyncVideo(endpoints []constant.EndpointType) bool {
 	return hasVideo
 }
 
-// RecordTaskResult samples one async task exactly once, at its terminal
-// transition, after the polling status CAS is won. Latency is the end-to-end
+// RecordTaskResult samples one task at its terminal transition. Callers must
+// own the successful immediate insert or polling status CAS. Latency is the end-to-end
 // task duration (second resolution, unlike the ms-resolution relay samples);
 // throughput is only present when the provider reports tokens.
 func RecordTaskResult(task *model.Task, result *relaycommon.TaskInfo) {
@@ -197,8 +198,18 @@ func Record(sample Sample) {
 	}
 	actual, _ := hotBuckets.LoadOrStore(key, &atomicBucket{})
 	actual.(*atomicBucket).add(sample)
+	// Resolve the optional mirror before enqueueing work. Disabled/unconfigured
+	// Redis needs no worker, and a worker must not reread mutable global state
+	// after its caller (or an isolated test fixture) has finished.
+	if !common.RedisEnabled {
+		return
+	}
+	client := common.RDB
+	if client == nil {
+		return
+	}
 	gopool.Go(func() {
-		recordRedis(key, sample)
+		recordRedis(client, key, sample)
 	})
 }
 
@@ -576,15 +587,12 @@ func avgTps(value counters) float64 {
 	return float64(value.outputTokens) / (float64(value.generationMs) / 1000)
 }
 
-func recordRedis(key bucketKey, sample Sample) {
-	if !common.RedisEnabled || common.RDB == nil {
-		return
-	}
+func recordRedis(client *redis.Client, key bucketKey, sample Sample) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	redisKey := redisBucketKey(key)
-	pipe := common.RDB.TxPipeline()
+	pipe := client.TxPipeline()
 	pipe.HIncrBy(ctx, redisKey, "req", 1)
 	if sample.Success {
 		pipe.HIncrBy(ctx, redisKey, "ok", 1)

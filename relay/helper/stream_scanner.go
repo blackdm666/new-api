@@ -289,7 +289,10 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		if err := scanner.Err(); err != nil && err != io.EOF {
 			logger.LogError(c, "scanner error: "+err.Error())
 			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
-		} else {
+		} else if ctx.Err() == nil {
+			// cleanup cancels ctx before closing the upstream body. A Read
+			// unblocked by that Close may return EOF; it must not promote a
+			// client abort to normal completion (including image settlement).
 			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
 		}
 	})

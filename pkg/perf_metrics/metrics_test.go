@@ -14,6 +14,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -179,6 +181,64 @@ func TestRecordTaskResultSamplesTerminalTasks(t *testing.T) {
 		outputTokens:   5000,
 		generationMs:   100000,
 	}, merged[bucketKey{model: "video-model", group: "a"}])
+}
+
+type redisSampleHook struct{ done chan error }
+
+func (*redisSampleHook) BeforeProcess(ctx context.Context, _ redis.Cmder) (context.Context, error) {
+	return ctx, nil
+}
+func (*redisSampleHook) AfterProcess(context.Context, redis.Cmder) error { return nil }
+func (*redisSampleHook) BeforeProcessPipeline(ctx context.Context, _ []redis.Cmder) (context.Context, error) {
+	return ctx, nil
+}
+func (h *redisSampleHook) AfterProcessPipeline(_ context.Context, cmds []redis.Cmder) error {
+	for _, cmd := range cmds {
+		if err := cmd.Err(); err != nil {
+			h.done <- err
+			return nil
+		}
+	}
+	h.done <- nil
+	return nil
+}
+
+func TestRecordMirrorsCountersToRedis(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr(), MaxRetries: -1})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	hook := &redisSampleHook{done: make(chan error, 2)}
+	client.AddHook(hook)
+	oldEnabled, oldClient := common.RedisEnabled, common.RDB
+	common.RedisEnabled, common.RDB = true, client
+	hotBuckets.Clear()
+	t.Cleanup(func() {
+		common.RedisEnabled, common.RDB = oldEnabled, oldClient
+		hotBuckets.Clear()
+	})
+	Record(Sample{Model: "redis-fixture", Group: "default", Success: true, LatencyMs: 100,
+		HasTtft: true, TtftMs: 10, OutputTokens: 20, GenerationMs: 50})
+	Record(Sample{Model: "redis-fixture", Group: "default", Success: false, LatencyMs: 300})
+	for range 2 {
+		select {
+		case err := <-hook.done:
+			require.NoError(t, err)
+		case <-time.After(3 * time.Second):
+			t.Fatal("Redis sample pipeline did not finish")
+		}
+	}
+	var total counters
+	hotBuckets.Range(func(_, value any) bool {
+		total.requestCount += value.(*atomicBucket).snapshot().requestCount
+		return true
+	})
+	assert.Equal(t, int64(2), total.requestCount, "the Redis mirror must not double local samples")
+	keys := server.Keys()
+	require.Len(t, keys, 1)
+	for field, want := range map[string]string{"req": "2", "ok": "1", "lat": "400", "ttft": "10", "ttft_n": "1", "out": "20", "gen_ms": "50"} {
+		assert.Equal(t, want, server.HGet(keys[0], field), field)
+	}
+	assert.Equal(t, time.Hour, server.TTL(keys[0]))
 }
 
 // TEST_PERF_MYSQL_DSN / TEST_PERF_POSTGRES_DSN optionally run the aggregation

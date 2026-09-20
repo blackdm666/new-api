@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
@@ -1910,4 +1911,146 @@ func TestServeTaskPluginImageProtocolDisconnectDuringSubmissionKeepsDurableSettl
 	assert.Zero(t, polls, "an immediate result is never polled")
 	assert.False(t, c.Writer.Written())
 	assert.Empty(t, recorder.Body.String())
+}
+
+// Use the real image bridge, durable submit, presenter and terminal CAS. Only
+// the upstream result and wallet boundary are fixtures; no paid request is made.
+func TestTaskPluginImagePerformanceSampling(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      model.TaskStatus
+		fault       string
+		wantHTTP    int
+		wantSamples int64
+		wantSuccess float64
+	}{
+		{"immediate success", model.TaskStatusSuccess, "", 200, 1, 100},
+		{"immediate failure", model.TaskStatusFailure, "", 400, 1, 0},
+		{"async completion", "", "", 200, 1, 100},
+		{"submit rejection", model.TaskStatusSuccess, "submit", 400, 0, 0},
+		{"cancel before persistence", model.TaskStatusSuccess, "cancel", 408, 0, 0},
+		{"insert failure", model.TaskStatusSuccess, "insert", 500, 0, 0},
+		{"callback rollback", model.TaskStatusSuccess, "callback", 500, 0, 0},
+		{"settlement failure after persistence", model.TaskStatusSuccess, "settle", 500, 1, 100},
+		{"client leaves after persistence", model.TaskStatusSuccess, "disconnect", 0, 1, 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _ := openTaskDialectDatabase(t, &model.Task{}, &model.User{}, &model.Channel{}, &model.TaskCallbackDelivery{}, &model.PerfMetric{})
+			oldDB, oldRedis, oldConsume := model.DB, common.RedisEnabled, common.LogConsumeEnabled
+			model.DB, common.RedisEnabled, common.LogConsumeEnabled = db, false, false
+			t.Cleanup(func() {
+				model.DB, common.RedisEnabled, common.LogConsumeEnabled = oldDB, oldRedis, oldConsume
+			})
+			require.NoError(t, db.Create(&model.User{Id: 71, Username: "sample-fixture", Quota: 1000000}).Error)
+			require.NoError(t, db.Create(&model.Channel{Id: 1, Name: "sample-fixture"}).Error)
+			if tc.fault == "insert" || tc.fault == "callback" {
+				require.NoError(t, db.Callback().Create().Before("gorm:create").Register("test:reject-insert", func(tx *gorm.DB) {
+					if (tc.fault == "insert" && tx.Statement.Schema.Name == "Task") ||
+						(tc.fault == "callback" && tx.Statement.Schema.Name == "TaskCallbackDelivery") {
+						tx.AddError(errors.New("fixture persistence failure"))
+					}
+				}))
+			}
+			modelName := t.Name()
+			pinned := imageProtocolTestEndpoint(t)
+			c, recorder := newImageProtocolTestContext("")
+			c.Set(pluginruntime.ContextKeyPinnedEndpoint, pinned)
+			c.Set("resolved_task_model", modelName)
+			ctx, cancel := context.WithCancel(c.Request.Context())
+			defer cancel()
+			c.Request = c.Request.WithContext(ctx)
+			// Fixture timing represents time spent in the upstream submit call.
+			start := time.Now().Add(-10 * time.Second)
+			events := []string{}
+			billing := &taskSubmissionTestBilling{events: &events}
+			if tc.fault == "settle" {
+				billing.settleErr = errors.New("fixture settlement failure")
+			}
+			if tc.fault == "disconnect" {
+				billing.onSettle = cancel
+			}
+			deps := pluginProtocolTestDeps()
+			deps.imagePollInterval = time.Nanosecond
+			deps.submissionTimeout = time.Second
+			deps.submit = func(c *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+				submitCtx, cancelSubmit := context.WithCancel(c.Request.Context())
+				defer cancelSubmit()
+				c.Request = c.Request.WithContext(submitCtx)
+				info.Billing = billing
+				info.StartTime = start
+				info.PublicTaskID = model.GenerateTaskID()
+				info.LockedChannel = &model.Channel{Id: 1, Type: constant.ChannelTypeTaskPlugin}
+				info.ChannelMeta = &relaycommon.ChannelMeta{ChannelId: 1, ChannelType: constant.ChannelTypeTaskPlugin}
+				if tc.fault == "callback" {
+					info.CallbackURL = "https://example.invalid/callback"
+				}
+				return executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+					if tc.fault == "cancel" {
+						cancelSubmit()
+					}
+					if tc.fault == "submit" {
+						return nil, service.TaskErrorWrapperLocal(errors.New("fixture rejection"), "invalid_request", 400)
+					}
+					result := &relay.TaskSubmitResult{
+						UpstreamTaskID: "fixture-image", Platform: constant.TaskPlatform(pinned.Plugin.Meta.Key),
+						TaskData: []byte(`{"images":["https://cdn.example/1.png"]}`),
+					}
+					if tc.status != "" {
+						result.Immediate = &relaycommon.TaskInfo{Status: string(tc.status), Progress: "100%", Reason: "fixture failure"}
+					}
+					return result, nil
+				})
+			}
+			release := make(chan struct{})
+			close(release)
+			adaptor := &terminalSettlementPollingAdaptor{started: make(chan struct{}), release: release}
+			polls := 0
+			deps.pollTask = func(ctx context.Context, task *model.Task) error {
+				polls++
+				return service.FinalizeVideoTaskResult(ctx, adaptor, task,
+					&relaycommon.TaskInfo{Status: model.TaskStatusSuccess, Progress: "100%"},
+					[]byte(`{"images":["https://cdn.example/1.png"]}`))
+			}
+			serveTaskPluginImageProtocol(c, pinned, deps)
+			if tc.wantHTTP == 0 {
+				assert.False(t, c.Writer.Written())
+			} else {
+				assert.Equal(t, tc.wantHTTP, recorder.Code, recorder.Body.String())
+			}
+			if tc.wantHTTP == 200 {
+				assert.Contains(t, recorder.Body.String(), "https://cdn.example/1.png")
+			}
+			if tc.status == "" {
+				assert.Equal(t, 1, polls)
+			} else {
+				assert.Zero(t, polls)
+			}
+			var tasks []model.Task
+			require.NoError(t, db.Find(&tasks).Error)
+			require.Len(t, tasks, int(tc.wantSamples), "a rolled-back submission has no durable task")
+			if len(tasks) > 0 {
+				// A fresh copy has the same terminal status: a second poll/CAS
+				// must neither sample again nor settle the task again.
+				stored := tasks[0]
+				require.NoError(t, service.FinalizeVideoTaskResult(context.Background(), adaptor, &stored,
+					&relaycommon.TaskInfo{Status: string(stored.Status), Progress: "100%", Reason: stored.FailReason},
+					stored.Data))
+			}
+			result, err := perfmetrics.QuerySummaryAll(24, nil)
+			require.NoError(t, err)
+			require.True(t, result.Enabled)
+			var sample perfmetrics.ModelSummary
+			for _, row := range result.Models {
+				if row.ModelName == modelName {
+					sample = row
+				}
+			}
+			assert.Equal(t, tc.wantSamples, sample.RequestCount)
+			assert.Equal(t, tc.wantSuccess, sample.SuccessRate)
+			if tc.status != "" && len(tasks) > 0 {
+				assert.Equal(t, (tasks[0].FinishTime-start.Unix())*1000, sample.AvgLatencyMs,
+					"immediate samples include the upstream submit time without rewriting task timestamps")
+			}
+		})
+	}
 }

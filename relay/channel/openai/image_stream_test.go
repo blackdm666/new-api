@@ -392,6 +392,43 @@ func TestOpenaiImageStreamHandlerClientDisconnectRaisesCount(t *testing.T) {
 	require.Equal(t, 2.0, info.PriceData.OtherRatios()["n"], "completed events beyond the recorded n must raise the charge even on abort")
 }
 
+func TestOpenaiImageStreamHandlerBufferedAbortDoesNotLowerCount(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	c, _, resp, info := newImageTestContext(t, "", "text/event-stream", true)
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	t.Cleanup(cancel)
+	c.Request = c.Request.WithContext(ctx)
+	c.Writer = &cancelAfterWriter{
+		ResponseWriter: c.Writer,
+		needle:         `"b64_json":"first"`,
+		cancel:         cancel,
+	}
+	resp.Body = io.NopCloser(strings.NewReader(strings.Join([]string{
+		`data: {"type":"image_generation.completed","b64_json":"first"}`,
+		``,
+		`data: {"type":"image_generation.completed","b64_json":"second"}`,
+		``,
+	}, "\n")))
+	info.PriceData.UsePrice = true
+	info.PriceData.AddOtherRatio("n", 3)
+
+	usage, err := OpenaiImageStreamHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.NotNil(t, info.StreamStatus)
+	require.True(t, info.StreamStatus.HasErrors())
+	require.Equal(t, 3.0, info.PriceData.OtherRatios()["n"],
+		"buffered scanner EOF must not lower the reserved count after client abort")
+}
+
 // TestOpenaiImageStreamHandlerWrapsJSONResponse covers the non-SSE fallback:
 // a JSON upstream response is wrapped into pseudo-SSE completed events.
 func TestOpenaiImageStreamHandlerWrapsJSONResponse(t *testing.T) {
