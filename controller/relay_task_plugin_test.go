@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
@@ -616,6 +617,67 @@ export function buildQueryRequest(){throw new Error("completed submissions must 
 			info.Billing.Refund(c)
 			require.NoError(t, db.First(&updated, user.Id).Error)
 			assert.Equal(t, initial-want, updated.Quota, "terminal settlement is idempotent")
+		})
+	}
+}
+
+func TestExecuteTaskSubmissionSamplesImmediateTerminalResult(t *testing.T) {
+	database, _ := openTaskDialectDatabase(t, &model.User{}, &model.Channel{}, &model.Task{}, &model.PerfMetric{})
+	previousDB := model.DB
+	previousRedisEnabled := common.RedisEnabled
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousLogConsumeEnabled := common.LogConsumeEnabled
+	model.DB = database
+	common.RedisEnabled = false
+	common.MemoryCacheEnabled = false
+	common.LogConsumeEnabled = false
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.RedisEnabled = previousRedisEnabled
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		common.LogConsumeEnabled = previousLogConsumeEnabled
+	})
+	require.NoError(t, database.Create(&model.User{Id: 1, Username: "immediate-sampling"}).Error)
+	require.NoError(t, database.Create(&model.Channel{Id: 1, Name: "immediate-sampling"}).Error)
+
+	for _, tc := range []struct {
+		name        string
+		status      model.TaskStatus
+		wantSuccess float64
+	}{
+		{"success", model.TaskStatusSuccess, 100},
+		{"failure", model.TaskStatusFailure, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := make([]string, 0, 3)
+			modelName := fmt.Sprintf("immediate-sampling-%s", strings.ToLower(tc.name))
+			info := taskSubmissionRelayInfo(&taskSubmissionTestBilling{events: &events})
+			info.OriginModelName = modelName
+			info.StartTime = time.Now().Add(-10 * time.Second)
+			info.PublicTaskID = model.GenerateTaskID()
+
+			outcome, taskErr := executeTaskSubmissionWith(taskSubmissionTestContext(), info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+				return &relay.TaskSubmitResult{
+					UpstreamTaskID: "upstream-private",
+					Platform:       constant.TaskPlatform("plugin"),
+					Immediate:      &relaycommon.TaskInfo{Status: string(tc.status), Progress: "100%"},
+				}, nil
+			})
+
+			require.Nil(t, taskErr)
+			require.NotNil(t, outcome)
+			summary, err := perfmetrics.QuerySummaryAll(1, nil)
+			require.NoError(t, err)
+			var found *perfmetrics.ModelSummary
+			for index := range summary.Models {
+				if summary.Models[index].ModelName == modelName {
+					found = &summary.Models[index]
+					break
+				}
+			}
+			require.NotNil(t, found)
+			assert.Equal(t, int64(1), found.RequestCount)
+			assert.Equal(t, tc.wantSuccess, found.SuccessRate)
 		})
 	}
 }
