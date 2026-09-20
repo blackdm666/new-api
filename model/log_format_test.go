@@ -85,6 +85,42 @@ func TestTaskPluginLogVisibilityIsRoleSeparated(t *testing.T) {
 	})
 }
 
+func TestResponseModelLogVisibilityIsRoleSeparated(t *testing.T) {
+	responseModel := map[string]any{
+		"requested_model": "gpt-6-astra",
+		"upstream_model":  "gpt-6-astra",
+		"returned_model":  "gpt-5.6-luna",
+	}
+	other := common.MapToJsonStr(map[string]any{
+		"response_model": responseModel,
+		"admin_info": map[string]any{
+			"response_model": responseModel,
+		},
+	})
+
+	t.Run("user", func(t *testing.T) {
+		logs := []*Log{{Other: other}}
+		formatUserLogs(logs, 0)
+
+		parsed, err := common.StrToMap(logs[0].Other)
+		require.NoError(t, err)
+		assert.NotContains(t, parsed, "admin_info")
+		assert.NotContains(t, parsed, "response_model")
+	})
+
+	t.Run("admin", func(t *testing.T) {
+		logs := []*Log{{Other: other}}
+		FormatAdminLogs(logs)
+
+		parsed, err := common.StrToMap(logs[0].Other)
+		require.NoError(t, err)
+		assert.Equal(t, responseModel, parsed["response_model"])
+		adminInfo, ok := parsed["admin_info"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, responseModel, adminInfo["response_model"])
+	})
+}
+
 func TestLegacyLogOtherVisibilityIsRoleSeparated(t *testing.T) {
 	other := common.MapToJsonStr(map[string]any{
 		"request_path":  "/v1/chat/completions",

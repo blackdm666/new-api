@@ -21,6 +21,9 @@ var legacySensitiveLogOtherKeys = []string{
 	"channel_name",
 	"channel_type",
 	"reject_reason",
+	// response_model was historically written at the public top level.
+	// Keep filtering it from user projections for backward compatibility.
+	"response_model",
 }
 
 type logOtherVisibility int
