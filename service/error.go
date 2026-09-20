@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
@@ -199,6 +200,13 @@ func TaskErrorWrapperLocal(err error, code string, statusCode int) *taskdto.Task
 
 func TaskErrorWrapper(err error, code string, statusCode int) *taskdto.TaskError {
 	text := err.Error()
+	// JS hooks carry a user-facing message separately from the runtime stack.
+	// Keep the original error below for diagnostics/retry classification, but
+	// do not serialize plugin identities, hook names or source locations.
+	var hookErr *pluginruntime.HookError
+	if errors.As(err, &hookErr) && hookErr != nil {
+		text = hookErr.Message
+	}
 	lowerText := strings.ToLower(text)
 	if strings.Contains(lowerText, "post") || strings.Contains(lowerText, "dial") || strings.Contains(lowerText, "http") {
 		common.SysLog(fmt.Sprintf("error: %s", text))
