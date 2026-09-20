@@ -8,12 +8,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
@@ -557,6 +559,146 @@ func TestRespondTaskSubmissionErrorWithoutCause(t *testing.T) {
 	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "request_failed", Source: "system"}, events[0].Decision)
 	assert.Equal(t, http.StatusServiceUnavailable, events[0].Status)
 	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "local_rejection", Source: "system"}, decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusForbidden, LocalError: true, Message: "billing"}, 2), "local errors stop once the status rules do not force a retry")
+}
+
+func TestTaskPluginValidationMessageHTTP(t *testing.T) {
+	events := []string{}
+	db := setupTaskSubmissionDatabase(t, true, &events)
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Channel{}))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	oldRedis, oldMemory, oldBatch, oldRetry, oldErrorLog := common.RedisEnabled, common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.RetryTimes, constant.ErrorLogEnabled
+	common.RedisEnabled, common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.RetryTimes, constant.ErrorLogEnabled = false, false, false, 2, false
+	t.Cleanup(func() {
+		common.RedisEnabled, common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.RetryTimes, constant.ErrorLogEnabled = oldRedis, oldMemory, oldBatch, oldRetry, oldErrorLog
+	})
+	const source = `
+export const meta={apiVersion:1,key:"hook-validation",name:"Validation",version:"1.0.0",author:{name:"Test"},models:["validation-model"],fetchMode:"per_task",protocols:["openai_video"]};
+export const protocols={openai_video:{decodeRequest:function(ctx){return {kind:"submit",model:ctx.model,action:"text_to_video",requestBody:ctx.body.value};},render:function(ctx,task){return task;}}};
+export function buildSubmitRequest(ctx){
+  if(!ctx.requestBody.ratio)throw new Error("Please choose an aspect ratio.");
+  if(ctx.requestBody.ratio==="auto")throw new Error("当前模型不支持自动比例，请选择具体画幅比例。");
+  return {url:ctx.baseUrl+"/generate",body:ctx.requestBody};
+}
+export function parseSubmitResponse(){return {taskId:"upstream-task"};}
+export function buildQueryRequest(){return {};}
+export function parseTaskResult(){return {status:"IN_PROGRESS"};}
+export function listArtifacts(){return [];}
+export function buildContentRequest(){return {};}
+`
+	_, err = pluginruntime.DefaultRegistry.Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pluginruntime.DefaultRegistry.Unregister("hook-validation")) })
+	var upstreamCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	setting := `{"task_plugin_key":"hook-validation"}`
+	ch := model.Channel{Name: "test provider", Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Models: "validation-model", Group: "default", Key: "fixture", BaseURL: &server.URL, Setting: &setting}
+	require.NoError(t, db.Create(&ch).Error)
+	user := model.User{Username: "validation-user", AffCode: "validation", Quota: 123456}
+	require.NoError(t, db.Create(&user).Error)
+	for _, tc := range []struct{ name, body, message string }{
+		{"missing ratio", `{"model":"validation-model","prompt":"Fixture"}`, "Please choose an aspect ratio."},
+		{"auto ratio", `{"model":"validation-model","prompt":"Fixture","ratio":"auto"}`, "当前模型不支持自动比例，请选择具体画幅比例。"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+			router.POST("/v1/videos", middleware.PinTaskPluginEndpoint(), middleware.PrepareTaskPluginEndpoint(), func(c *gin.Context) {
+				require.Nil(t, middleware.SetupContextForSelectedChannel(c, &ch, "validation-model"))
+				c.Set("group", "default")
+				c.Set("username", user.Username)
+				info := taskSubmissionRelayInfo(nil)
+				info.UserId, info.UserGroup, info.TokenGroup = user.Id, "default", "default"
+				info.OriginModelName, info.IsPlayground, info.LockedChannel = "validation-model", true, &ch
+				info.UserSetting.BillingPreference = "wallet_only"
+				outcome, taskErr := executeTaskSubmission(c, info)
+				assert.Nil(t, outcome)
+				require.NotNil(t, taskErr)
+				assert.True(t, taskErr.LocalError)
+				assert.Nil(t, info.Billing, "validation must precede billing")
+				assert.Equal(t, "stop", decideTaskRetry(c, taskErr, 2).Action)
+				require.Error(t, taskErr.Error)
+				assert.Contains(t, taskErr.Error.Error(), "plugin hook-validation@1.0.0 hook buildSubmitRequest failed:")
+				respondTaskSubmissionError(c, taskErr)
+			})
+			request := httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(tc.body))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			assert.Equal(t, http.StatusBadRequest, recorder.Code)
+			var response map[string]any
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, "plugin_request_invalid", response["code"])
+			assert.Equal(t, tc.message, response["message"])
+			assert.NotContains(t, recorder.Body.String(), "hook-validation")
+			assert.NotContains(t, recorder.Body.String(), "buildSubmitRequest")
+			assert.Zero(t, upstreamCalls.Load())
+			var updated model.User
+			require.NoError(t, db.First(&updated, user.Id).Error)
+			assert.Equal(t, user.Quota, updated.Quota)
+			var tasks int64
+			require.NoError(t, db.Model(&model.Task{}).Count(&tasks).Error)
+			assert.Zero(t, tasks)
+		})
+	}
+}
+
+func TestTaskHookErrorPublicMessage(t *testing.T) {
+	engine, err := pluginruntime.Compile(`
+export function buildSubmitRequest(message){throw new Error(message);}
+export function extractUsage(message){throw new Error(message);}
+export function parseSubmitResponse(message){throw new Error(message);}
+`, pluginruntime.Options{Key: "hook-error-test", Version: "1.2.3"})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, hook, raw, message, code string
+		status                         int
+		local, wrapped                 bool
+	}{
+		{"direct", "buildSubmitRequest", "Please choose a ratio.", "Please choose a ratio.", "plugin_request_invalid", 400, true, false},
+		{"wrapped", "buildSubmitRequest", "请选择具体画幅比例。", "请选择具体画幅比例。", "plugin_request_invalid", 400, true, true},
+		{"usage", "extractUsage", "Please enter whole seconds.", "Please enter whole seconds.", "plugin_usage_invalid", 400, true, false},
+		{"response", "parseSubmitResponse", "The service returned no task ID.", "The service returned no task ID.", "plugin_submit_response_failed", 502, false, false},
+		{"control characters", "buildSubmitRequest", "Line one\nLine two\tend", "Line one Line two end", "plugin_request_invalid", 400, true, false},
+		{"length limit", "buildSubmitRequest", strings.Repeat("中", 520), strings.Repeat("中", 512), "plugin_request_invalid", 400, true, false},
+		{"URL masking", "parseSubmitResponse", "Post https://private.example/jobs failed", "Post " + common.MaskSensitiveInfo("https://private.example/jobs") + " failed", "plugin_submit_response_failed", 502, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, original := engine.Call(context.Background(), tc.hook, tc.raw)
+			require.Error(t, original)
+			if tc.wrapped {
+				original = fmt.Errorf("adapter context: %w", original)
+			}
+			taskErr := service.TaskErrorWrapper(original, tc.code, tc.status)
+			if tc.local {
+				taskErr = service.TaskErrorWrapperLocal(original, tc.code, tc.status)
+			}
+			assert.Same(t, original, taskErr.Error)
+			assert.Equal(t, tc.local, taskErr.LocalError)
+			var hookErr *pluginruntime.HookError
+			require.True(t, errors.As(taskErr.Error, &hookErr))
+			assert.Equal(t, tc.hook, hookErr.Hook)
+			assert.Contains(t, taskErr.Error.Error(), "hook-error-test@1.2.3")
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			respondTaskError(c, taskErr)
+			assert.Equal(t, tc.status, recorder.Code)
+			var response map[string]any
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, tc.code, response["code"])
+			assert.Equal(t, tc.message, response["message"])
+			assert.NotContains(t, recorder.Body.String(), "hook-error-test")
+			assert.NotContains(t, recorder.Body.String(), "adapter context")
+			assert.NotContains(t, recorder.Body.String(), "private.example")
+		})
+	}
+	plain := errors.New("ordinary provider rejection")
+	assert.Equal(t, plain.Error(), service.TaskErrorWrapper(plain, "provider_error", 422).Message)
 }
 
 func TestExecuteTaskSubmissionRefundsWhenFinalReserveFails(t *testing.T) {
