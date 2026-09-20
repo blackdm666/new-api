@@ -302,6 +302,38 @@ func TestExecuteTaskSubmissionHonorsRouteRetainResult(t *testing.T) {
 	}
 }
 
+func TestTaskCallbackInsertHonorsDiscardedSnapshot(t *testing.T) {
+	for _, callbackURL := range []string{"", "https://example.invalid/callback"} {
+		t.Run(fmt.Sprintf("callback=%t", callbackURL != ""), func(t *testing.T) {
+			db, _ := openTaskDialectDatabase(t, &model.Task{}, &model.TaskCallbackDelivery{})
+			oldDB := model.DB
+			model.DB = db
+			t.Cleanup(func() { model.DB = oldDB })
+			task := &model.Task{
+				TaskID: "discard-with-callback", UserId: 7,
+				Status:      model.TaskStatusSuccess,
+				PrivateData: model.TaskPrivateData{TokenId: 9, ResultDiscarded: true},
+				Data:        []byte(`{"payload":"present but not retained"}`),
+			}
+			require.NoError(t, task.InsertWithCallbackContext(context.Background(), callbackURL, "data"))
+			var stored model.Task
+			require.NoError(t, db.First(&stored, task.ID).Error)
+			assert.Empty(t, stored.Data)
+			assert.True(t, stored.PrivateData.ResultDiscarded)
+			assert.NotEmpty(t, task.Data, "the response presenter still needs the in-memory result")
+			var deliveries []model.TaskCallbackDelivery
+			require.NoError(t, db.Find(&deliveries).Error)
+			if callbackURL == "" {
+				assert.Empty(t, deliveries)
+			} else {
+				require.Len(t, deliveries, 1)
+				assert.Equal(t, task.ID, deliveries[0].TaskId)
+				assert.Equal(t, callbackURL, deliveries[0].CallbackURL)
+			}
+		})
+	}
+}
+
 func TestExecuteTaskSubmissionRefundsCancellationBeforeDurableBarrier(t *testing.T) {
 	events := make([]string, 0, 2)
 	setupTaskSubmissionDatabase(t, true, &events)

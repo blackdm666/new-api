@@ -206,7 +206,7 @@ describe('popups outside a drawer', () => {
     expect(view.container).toContainElement(explicitContainer)
   })
 
-  it('keeps combobox options inside a regular dialog and applies the selection', async () => {
+  it('lets combobox options escape a clipping regular dialog and applies the selection without closing it', async () => {
     const change = vi.fn()
     render(
       <Dialog open>
@@ -221,9 +221,7 @@ describe('popups outside a drawer', () => {
     const dialog = screen.getByRole('dialog', { name: 'Provider settings' })
 
     await user.click(within(dialog).getByRole('combobox', { name: 'Provider' }))
-    await user.click(
-      await within(dialog).findByRole('option', { name: 'Google' })
-    )
+    await user.click(await screen.findByRole('option', { name: 'Google' }))
 
     expect(change).toHaveBeenCalledWith('gemini')
     expect(dialog).toBeInTheDocument()

@@ -125,16 +125,16 @@ function PricingNameCell(props: { model: PricingModel }) {
   )
 }
 
-it('shows the Hunyuan fallback icon in the pricing table without overriding configured icons', () => {
+it('shows the Hunyuan fallback icon in the pricing table without overriding configured icons', async () => {
   const view = render(
     <PricingNameCell model={{ ...model, model_name: 'hunyuan-video' }} />
   )
-  expect(screen.getByTitle('Hunyuan')).toBeInTheDocument()
+  expect(await screen.findByTitle('Hunyuan')).toBeInTheDocument()
   view.rerender(
     <PricingNameCell
       model={{ ...model, model_name: 'hunyuan-video', icon: 'OpenAI' }}
     />
   )
   expect(screen.queryByTitle('Hunyuan')).not.toBeInTheDocument()
-  expect(screen.getByTitle('OpenAI')).toBeInTheDocument()
+  expect(await screen.findByTitle('OpenAI')).toBeInTheDocument()
 })

@@ -160,13 +160,7 @@ function OptionCombobox(props: LegacyComboboxProps) {
           )}
         </ComboboxInput>
       </div>
-      <ComboboxContent
-        anchor={anchor}
-        className={props.popupClassName}
-        container={
-          anchor.current?.closest<HTMLElement>('[role="dialog"]') ?? undefined
-        }
-      >
+      <ComboboxContent anchor={anchor} className={props.popupClassName}>
         <ComboboxEmpty>
           {props.emptyText ?? t('No results found')}
         </ComboboxEmpty>
