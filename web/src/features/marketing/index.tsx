@@ -41,6 +41,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { MultiSelect } from '@/components/multi-select'
+import { OverviewStat as Stat } from '@/components/overview-stat'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -274,7 +275,7 @@ export function MarketingAdminPage() {
     activeTab === 'email-queue' || activeTab === 'email-queue-rules'
 
   return (
-    <div className='h-full overflow-y-auto px-4 py-6 sm:px-8'>
+    <div className='h-full [scrollbar-gutter:stable] overflow-y-auto px-4 py-6 sm:px-8'>
       <div className='mx-auto w-full max-w-[1500px] space-y-5'>
         <header className='flex flex-wrap items-start justify-between gap-3'>
           <div>
@@ -356,13 +357,13 @@ export function MarketingAdminPage() {
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className='gap-4'>
           <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
-            <TabsTrigger value='campaigns'>{t('Campaigns')}</TabsTrigger>
             <TabsTrigger value='user-notifications'>
               {t('User notifications')}
               {notificationPreview && (
                 <Badge variant='secondary'>{t('Preview')}</Badge>
               )}
             </TabsTrigger>
+            <TabsTrigger value='campaigns'>{t('Campaigns')}</TabsTrigger>
             <TabsTrigger value='automations'>{t('Automations')}</TabsTrigger>
             <TabsTrigger value='recipients'>{t('Sending records')}</TabsTrigger>
             <TabsTrigger value='suppressions'>
@@ -1900,17 +1901,6 @@ function Field(props: {
       </div>
       {props.children}
     </div>
-  )
-}
-
-function Stat(props: { label: string; value: number | string }) {
-  return (
-    <Card data-card-hover='false'>
-      <CardContent className='py-4'>
-        <div className='text-muted-foreground text-xs'>{props.label}</div>
-        <div className='mt-1 text-xl font-semibold'>{props.value}</div>
-      </CardContent>
-    </Card>
   )
 }
 

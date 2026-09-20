@@ -72,6 +72,7 @@ function renderMarketingPage(options: MarketingPageOptions = {}) {
           total: options.recipients?.length ?? 0,
         })
       case '/api/option/email_deliveries':
+      case '/api/marketing/suppressions':
         return successfulResponse({ items: [], total: 0 })
       case '/api/option/email_deliveries/stats':
         return successfulResponse({
@@ -140,6 +141,57 @@ function renderMarketingPage(options: MarketingPageOptions = {}) {
 }
 
 describe('email marketing navigation', () => {
+  test('places user notifications before campaigns in the tab order', () => {
+    renderMarketingPage()
+
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs[0]).toHaveAccessibleName('User notifications')
+    expect(tabs[1]).toHaveAccessibleName('Campaigns')
+    expect(screen.getByRole('tablist')).toHaveClass('flex-wrap')
+  })
+
+  test.each(['Email Queue', 'Email queue rules'])(
+    '%s uses the suppression overview card size, including long labels',
+    async (tab) => {
+      renderMarketingPage()
+      fireEvent.click(screen.getByRole('tab', { name: 'Suppression list' }))
+      const referenceLabel = screen.getByText('Waiting')
+      const referenceCard = referenceLabel.closest('[data-slot="card"]')
+      expect(referenceCard).not.toBeNull()
+      expect(
+        referenceCard?.querySelector('[data-slot="card-content"]')
+      ).toHaveClass('py-4')
+      expect(referenceLabel.nextElementSibling).toHaveClass('text-xl')
+      expect(
+        screen
+          .getByRole('heading', { name: 'Email Marketing' })
+          .closest('.overflow-y-auto')
+      ).toHaveClass('[scrollbar-gutter:stable]')
+
+      fireEvent.click(screen.getByRole('tab', { name: tab }))
+      const label = await screen.findByText(
+        'SMTP accepted without receipt in 24 hours'
+      )
+      const card = label.closest('[data-slot="card"]')
+      expect(card).toHaveAttribute(
+        'data-size',
+        referenceCard?.getAttribute('data-size')
+      )
+      expect(card?.querySelector('[data-slot="card-content"]')).toHaveClass(
+        'py-4'
+      )
+      expect(label.nextElementSibling).toHaveClass('text-xl')
+      // Long translated labels must not add a second line and stretch the row.
+      expect(label).toHaveClass('truncate')
+      expect(label).toHaveAttribute('title', label.textContent)
+      expect(card?.parentElement).toHaveClass(
+        'sm:grid-cols-2',
+        'lg:grid-cols-4',
+        'xl:grid-cols-7'
+      )
+    }
+  )
+
   test('archives a completed campaign from the actions column', async () => {
     const user = userEvent.setup()
     renderMarketingPage()

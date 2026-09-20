@@ -22,6 +22,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { OverviewStat as QueueStat } from '@/components/overview-stat'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -569,17 +570,6 @@ export function EmailQueueOverviewStats() {
         value={stats?.final_delivered_24h ?? 0}
       />
     </div>
-  )
-}
-
-function QueueStat(props: { label: string; value: number | string }) {
-  return (
-    <Card data-card-hover='false'>
-      <CardContent className='py-4'>
-        <div className='text-muted-foreground text-xs'>{props.label}</div>
-        <div className='mt-1 text-2xl font-semibold'>{props.value}</div>
-      </CardContent>
-    </Card>
   )
 }
 
