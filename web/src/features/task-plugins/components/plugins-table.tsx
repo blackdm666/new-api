@@ -164,7 +164,11 @@ export function PluginsTable(props: PluginsTableProps) {
               : undefined
             return (
               <div className='flex min-w-0 flex-col gap-0.5' title={staleHint}>
-                <Badge>{t('Custom')}</Badge>
+                <Badge>
+                  {t('Custom (overrides factory {{version}})', {
+                    version: factoryVersion,
+                  })}
+                </Badge>
                 {staleHint ? (
                   <span className='text-muted-foreground text-xs'>
                     {staleHint}
