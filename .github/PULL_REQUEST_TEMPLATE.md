@@ -35,7 +35,7 @@ English template: `.github/PULL_REQUEST_TEMPLATE/en.md`
 - [ ] **非重复提交:** 我已搜索现有的 [Issues](https://github.com/QuantumNous/new-api/issues) 与 [PRs](https://github.com/QuantumNous/new-api/pulls)，确认不是重复提交。
 - [ ] **新功能关联 Issue:** 若此 PR 标记为 `New feature`，我已关联对应 Issue；若尚无 Issue，我已先自行创建。
 - [ ] **事前沟通:** 若改动较大或涉及方向性变更，已在关联 Issue 中与维护者沟通并达成一致。
-- [ ] **功能范围:** 本 PR 不是 Coding Plan、逆向渠道、第三方封装接口，也不是对 Codex 渠道类型的改动。
+- [ ] **功能范围:** 本 PR 不是 Coding Plan、逆向渠道或第三方封装接口。
 - [ ] **非透传:** 本 PR 不是针对开启透传后的转发行为；透传会直接发送内容，不会经过 new-api 的逻辑处理。
 - [ ] **范围聚焦:** 本 PR 为一项聚焦改动，未包含无关代码。
 - [ ] **本地验证:** 已按变更路径实际验证，并写明命令与观察结果。仅声明 `go build` 通过或测试通过，不视为有效证明。

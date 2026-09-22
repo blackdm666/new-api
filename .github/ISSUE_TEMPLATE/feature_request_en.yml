@@ -20,7 +20,7 @@ body:
         - Usage questions first: https://deepwiki.com/QuantumNous/new-api
         - Do not report issues when pass-through is enabled; pass-through sends content as-is and does not go through new-api processing logic.
         - State facts and evidence concisely. Do not paste unfiltered AI-generated text in the issue body or in later comments.
-        - Reports about Coding Plan services, reverse-engineered channels, third-party API wrappers, or compatibility issues caused by exposing a Codex endpoint through a reverse proxy as a general-purpose API are not accepted. Protocols or behavior specific to the Codex API should not be treated as standard OpenAI API behavior; confirm such issues with the channel or API provider first.
+        - Requests about Coding Plan services, reverse-engineered channels, or third-party API wrappers are not accepted.
         - This project does not provide official hosting and does not support third-party hosting sites, relays, or API services; contact their operator instead.
         - Warning: issues with this template removed, section headings deleted, or content cleared may be closed directly. Repeated submissions of unfiltered AI-generated text, or repeated abusive submissions, may result in a block.
     validations:
@@ -49,7 +49,7 @@ body:
           required: true
         - label: "**Not pass-through:** I confirm this is not a forwarding report after enabling pass-through; pass-through sends content as-is and does not go through new-api processing logic."
           required: true
-        - label: "**Channel and protocol boundary:** I confirm this is not a feature request for a Coding Plan service, reverse-engineered channel, third-party API wrapper, Codex reverse-proxy endpoint, or treating Codex API-specific behavior as standard OpenAI API behavior. If first observed through such an interface, I have based the request on a standard API protocol supported by this repository."
+        - label: "**Channel and protocol boundary:** I confirm this is not a feature request for a Coding Plan service, reverse-engineered channel, or third-party API wrapper."
           required: true
         - label: "**Template intact:** I have not removed any guidance or section headings from this template and will complete it as requested."
           required: true

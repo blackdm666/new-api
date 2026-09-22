@@ -49,8 +49,6 @@ accept it, point them to the right place when there is one, and **do not file**.
 - Coding Plan
 - Reverse-engineered channels
 - Third-party API wrappers
-- Compatibility issues from exposing a Codex endpoint as a general-purpose API through a reverse proxy
-- Codex API-specific protocol or behavior treated as standard OpenAI API behavior (confirm with the channel or API provider)
 - Pass-through mode forwarding (do not file: pass-through sends content as-is and does not go through new-api processing logic)
 - Relay reports that only paste an upstream error, with no direct-upstream vs new-api comparison
 - Third-party hosting sites, relay services, or API services (contact their operator)

@@ -62,8 +62,6 @@ accept it and **do not open a PR**.
 - Coding Plan
 - Reverse-engineered channels
 - Third-party API wrappers
-- Codex channel-type changes, or compatibility from exposing Codex as a general-purpose API
-- Codex API-specific protocol or behavior treated as standard OpenAI API behavior
 - Pass-through-only forwarding (pass-through sends content as-is and does not go through new-api processing logic)
 - Third-party hosting sites, relay services, or API services
 - Usage, configuration, or integration (answer from docs and code instead)
@@ -162,4 +160,4 @@ Each item needs the command or steps and the observed result.
 
 - Single focused change: yes/no (if no, why):
 - Secrets included: no
-- Out of scope (Coding Plan / reverse-engineered channel / third-party wrapper / Codex / pass-through-only forwarding): no
+- Out of scope (Coding Plan / reverse-engineered channel / third-party wrapper / pass-through-only forwarding): no
