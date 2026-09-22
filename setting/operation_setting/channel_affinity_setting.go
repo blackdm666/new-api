@@ -110,6 +110,24 @@ func buildCodexPassHeaderTemplate() map[string]any {
 				"value":       requestHeaders,
 				"keep_origin": true,
 			},
+			{
+				"mode": "sync_fields",
+				"from": "header:conversation_id",
+				"to":   "json:client_metadata.thread_id",
+			},
+			{
+				"mode": "sync_fields",
+				"from": "header:session_id",
+				"to":   "json:client_metadata.session_id",
+				"conditions": []any{
+					map[string]any{
+						"path":             "client_metadata.thread_id",
+						"mode":             "full",
+						"value":            "",
+						"pass_missing_key": true,
+					},
+				},
+			},
 		},
 	}
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -310,33 +311,123 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	require.True(t, applied)
 	require.Equal(t, 0.2, mergedOverride["temperature"])
 
-	info := &relaycommon.RelayInfo{
-		RequestHeaders: map[string]string{
-			"Originator": "Codex CLI",
-			"Session_id": "sess-123",
-			"User-Agent": "codex-cli-test",
-		},
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ParamOverride: mergedOverride,
-			HeadersOverride: map[string]any{
-				"X-Static": "legacy-static",
+	for _, tc := range []struct {
+		name                  string
+		body                  string
+		requestHeaders        map[string]string
+		headerOverrides       map[string]any
+		expectedHeaders       map[string]string
+		unexpectedHeaderNames []string
+	}{
+		{
+			name: "thread metadata takes precedence for generated identity",
+			body: `{
+				"model":"gpt-5",
+				"prompt_cache_key":"cache-only",
+				"client_metadata":{"thread_id":"thread-body","session_id":"session-body"}
+			}`,
+			requestHeaders: map[string]string{
+				"Originator": "Codex CLI",
+				"User-Agent": "codex-cli-test",
 			},
+			headerOverrides: map[string]any{
+				"Conversation_id": "{client_header:conversation_id}",
+			},
+			expectedHeaders: map[string]string{
+				"conversation_id": "thread-body",
+				"originator":      "Codex CLI",
+				"user-agent":      "codex-cli-test",
+				"x-static":        "legacy-static",
+			},
+			unexpectedHeaderNames: []string{"session_id"},
 		},
+		{
+			name: "session metadata is the fallback when thread metadata is missing",
+			body: `{
+				"model":"gpt-5",
+				"client_metadata":{"session_id":"session-body"}
+			}`,
+			headerOverrides: map[string]any{
+				"Session_id": "{client_header:session_id}",
+			},
+			expectedHeaders: map[string]string{
+				"session_id": "session-body",
+				"x-static":   "legacy-static",
+			},
+			unexpectedHeaderNames: []string{"conversation_id"},
+		},
+		{
+			name: "explicit underscore session header is preserved",
+			body: `{
+				"model":"gpt-5",
+				"client_metadata":{"session_id":"session-body"}
+			}`,
+			requestHeaders: map[string]string{
+				"Session_id": "session-header",
+			},
+			expectedHeaders: map[string]string{
+				"session_id": "session-header",
+				"x-static":   "legacy-static",
+			},
+			unexpectedHeaderNames: []string{"conversation_id"},
+		},
+		{
+			name: "explicit hyphen session header is preserved",
+			body: `{
+				"model":"gpt-5",
+				"client_metadata":{"session_id":"session-body"}
+			}`,
+			requestHeaders: map[string]string{
+				"Session-Id": "session-header",
+			},
+			expectedHeaders: map[string]string{
+				"session-id": "session-header",
+				"x-static":   "legacy-static",
+			},
+			unexpectedHeaderNames: []string{"conversation_id"},
+		},
+		{
+			name: "prompt cache key alone is not promoted to session identity",
+			body: `{
+				"model":"gpt-5",
+				"prompt_cache_key":"cache-only"
+			}`,
+			expectedHeaders: map[string]string{
+				"x-static": "legacy-static",
+			},
+			unexpectedHeaderNames: []string{"conversation_id", "session_id"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			headerOverrides := map[string]any{
+				"X-Static": "legacy-static",
+			}
+			maps.Copy(headerOverrides, tc.headerOverrides)
+			info := &relaycommon.RelayInfo{
+				RequestHeaders: tc.requestHeaders,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ParamOverride:   mergedOverride,
+					HeadersOverride: headerOverrides,
+				},
+			}
+
+			_, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(tc.body), info)
+			require.NoError(t, err)
+			require.True(t, info.UseRuntimeHeadersOverride)
+
+			for name, expected := range tc.expectedHeaders {
+				assert.Equal(t, expected, info.RuntimeHeadersOverride[name], name)
+			}
+			for _, name := range tc.unexpectedHeaderNames {
+				_, exists := info.RuntimeHeadersOverride[name]
+				assert.False(t, exists, name)
+			}
+			_, exists := info.RuntimeHeadersOverride["x-codex-beta-features"]
+			assert.False(t, exists)
+			_, exists = info.RuntimeHeadersOverride["x-codex-turn-metadata"]
+			assert.False(t, exists)
+		})
 	}
-
-	_, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(`{"model":"gpt-5"}`), info)
-	require.NoError(t, err)
-	require.True(t, info.UseRuntimeHeadersOverride)
-
-	require.Equal(t, "legacy-static", info.RuntimeHeadersOverride["x-static"])
-	require.Equal(t, "Codex CLI", info.RuntimeHeadersOverride["originator"])
-	require.Equal(t, "sess-123", info.RuntimeHeadersOverride["session_id"])
-	require.Equal(t, "codex-cli-test", info.RuntimeHeadersOverride["user-agent"])
-
-	_, exists := info.RuntimeHeadersOverride["x-codex-beta-features"]
-	require.False(t, exists)
-	_, exists = info.RuntimeHeadersOverride["x-codex-turn-metadata"]
-	require.False(t, exists)
 }
 
 func TestMidjourneyPolicyAcceptance(t *testing.T) {

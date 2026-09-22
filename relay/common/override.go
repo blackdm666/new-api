@@ -1616,9 +1616,27 @@ func getHeaderValueFromContext(context map[string]any, headerName string) (strin
 			continue
 		}
 		value := strings.TrimSpace(fmt.Sprintf("%v", raw))
-		if value != "" {
-			return value, true
+		if value == "" {
+			continue
 		}
+		if key == paramOverrideContextHeaderOverride {
+			placeholder, hasPrefix := strings.CutPrefix(value, "{client_header:")
+			placeholder, hasSuffix := strings.CutSuffix(placeholder, "}")
+			if hasPrefix && hasSuffix && strings.TrimSpace(placeholder) != "" && !strings.ContainsAny(placeholder, "{}") {
+				clientHeaderName := normalizeHeaderContextKey(placeholder)
+				requestHeaders := ensureMapKeyInContext(context, paramOverrideContextRequestHeaders)
+				clientHeaderRaw, exists := requestHeaders[clientHeaderName]
+				if !exists {
+					continue
+				}
+				clientHeaderValue := strings.TrimSpace(fmt.Sprintf("%v", clientHeaderRaw))
+				if clientHeaderValue == "" {
+					continue
+				}
+				return clientHeaderValue, true
+			}
+		}
+		return value, true
 	}
 	return "", false
 }
