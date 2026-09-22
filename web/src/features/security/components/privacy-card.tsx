@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -27,7 +26,6 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { TitledCard } from '@/components/ui/titled-card'
 import { updateUserSettings } from '@/features/profile/api'
-import { parseUserSettings } from '@/features/profile/lib/format'
 import type { UserProfile } from '@/features/profile/types'
 import { handleServerError } from '@/lib/handle-server-error'
 import { createServerError } from '@/lib/server-error-message'
@@ -39,18 +37,10 @@ type PrivacyCardProps = {
 
 export function PrivacyCard(props: PrivacyCardProps) {
   const { t } = useTranslation()
-  const [recordIpLog, setRecordIpLog] = useState(() =>
-    Boolean(parseUserSettings(props.profile.setting).record_ip_log)
-  )
-  useEffect(() => {
-    setRecordIpLog(
-      Boolean(parseUserSettings(props.profile.setting).record_ip_log)
-    )
-  }, [props.profile.setting])
 
   const save = useMutation({
     mutationFn: async () => {
-      const response = await updateUserSettings({ record_ip_log: recordIpLog })
+      const response = await updateUserSettings({ record_ip_log: true })
       if (!response.success) {
         throw createServerError(response, t('Failed to update settings'))
       }
@@ -71,12 +61,7 @@ export function PrivacyCard(props: PrivacyCardProps) {
     >
       <div className='flex items-center justify-between gap-4'>
         <Label htmlFor='security-record-ip'>{t('Record IP Address')}</Label>
-        <Switch
-          id='security-record-ip'
-          checked={recordIpLog}
-          onCheckedChange={setRecordIpLog}
-          disabled={save.isPending}
-        />
+        <Switch id='security-record-ip' checked disabled />
       </div>
       <div className='mt-4 flex justify-end'>
         <Button

@@ -41,7 +41,7 @@ const profile: UserProfile = {
   aff_quota: 0,
   aff_history_quota: 0,
   created_time: 0,
-  setting: JSON.stringify({ record_ip_log: true }),
+  setting: JSON.stringify({ record_ip_log: false }),
 }
 
 afterEach(() => {
@@ -64,7 +64,18 @@ function renderPrivacy() {
 }
 
 describe('privacy settings', () => {
-  it('keyboard toggling off saves false and refreshes the displayed profile', async () => {
+  it('stays enabled and cannot be toggled off', async () => {
+    const toggle = renderPrivacy()
+    const switchControl = screen.getByRole('switch', {
+      name: 'Record IP Address',
+    })
+
+    expect(switchControl).toBeChecked()
+    expect(switchControl).toHaveAttribute('aria-disabled', 'true')
+    expect(toggle.onUpdate).not.toHaveBeenCalled()
+  })
+
+  it('saves the forced setting as enabled', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({
       data: { success: true, data: profile },
     })
@@ -73,48 +84,24 @@ describe('privacy settings', () => {
       .mockResolvedValue({ data: { success: true } })
     const user = userEvent.setup()
     const { onUpdate } = renderPrivacy()
-    const toggle = screen.getByRole('switch', { name: 'Record IP Address' })
-    expect(toggle).toBeChecked()
-    toggle.focus()
-    await user.keyboard(' ')
-    expect(toggle).not.toBeChecked()
+
     await user.click(screen.getByRole('button', { name: 'Save Settings' }))
     await waitFor(() => expect(onUpdate).toHaveBeenCalled())
     expect(put).toHaveBeenCalledWith(
       '/api/user/setting',
-      expect.objectContaining({ record_ip_log: false })
+      expect.objectContaining({ record_ip_log: true })
     )
   })
 
-  it('failed configuration reads preserve the edited toggle and do not submit or refresh', async () => {
-    vi.spyOn(api, 'get').mockRejectedValue(new Error('offline'))
-    const put = vi.spyOn(api, 'put')
-    const user = userEvent.setup()
-    const { onUpdate } = renderPrivacy()
-    await user.click(screen.getByRole('switch', { name: 'Record IP Address' }))
-    await user.click(screen.getByRole('button', { name: 'Save Settings' }))
-    expect(await screen.findByText('offline')).toBeVisible()
-    expect(put).not.toHaveBeenCalled()
-    expect(onUpdate).not.toHaveBeenCalled()
-    expect(
-      screen.getByRole('switch', { name: 'Record IP Address' })
-    ).not.toBeChecked()
-    expect(screen.getByRole('button', { name: 'Save Settings' })).toBeEnabled()
-  })
-
-  it('failed saves keep the draft available for retry without refreshing the profile', async () => {
+  it('reports a failed forced-setting save', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({
       data: { success: true, data: profile },
     })
     vi.spyOn(api, 'put').mockResolvedValue({ data: { success: false } })
-    const user = userEvent.setup()
     const { onUpdate } = renderPrivacy()
-    await user.click(screen.getByRole('switch', { name: 'Record IP Address' }))
-    await user.click(screen.getByRole('button', { name: 'Save Settings' }))
+
+    screen.getByRole('button', { name: 'Save Settings' }).click()
     expect(await screen.findByText('Failed to update settings')).toBeVisible()
     expect(onUpdate).not.toHaveBeenCalled()
-    expect(
-      screen.getByRole('switch', { name: 'Record IP Address' })
-    ).not.toBeChecked()
   })
 })
