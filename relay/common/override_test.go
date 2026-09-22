@@ -1618,6 +1618,68 @@ func TestApplyParamOverrideSyncFieldsJSONToHeader(t *testing.T) {
 	}
 }
 
+func TestApplyParamOverrideSyncFieldsResolvesClientHeaderPlaceholder(t *testing.T) {
+	override := map[string]any{
+		"operations": []any{
+			map[string]any{
+				"mode": "sync_fields",
+				"from": "header:session_id",
+				"to":   "json:client_metadata.session_id",
+			},
+		},
+	}
+
+	for _, tc := range []struct {
+		name                   string
+		input                  string
+		headerOverride         string
+		requestHeaders         map[string]any
+		expectedJSON           string
+		expectedHeaderOverride string
+	}{
+		{
+			name:                   "missing referenced request header treats placeholder as absent",
+			input:                  `{"model":"gpt-5","client_metadata":{"session_id":"body-session"}}`,
+			headerOverride:         "{client_header:session_id}",
+			expectedJSON:           `{"model":"gpt-5","client_metadata":{"session_id":"body-session"}}`,
+			expectedHeaderOverride: "body-session",
+		},
+		{
+			name:           "present referenced request header resolves to its actual value",
+			input:          `{"model":"gpt-5"}`,
+			headerOverride: "{client_header:X-Codex-Session}",
+			requestHeaders: map[string]any{
+				"x-codex-session": "request-session",
+			},
+			expectedJSON:           `{"model":"gpt-5","client_metadata":{"session_id":"request-session"}}`,
+			expectedHeaderOverride: "{client_header:X-Codex-Session}",
+		},
+		{
+			name:                   "static header override remains a concrete value",
+			input:                  `{"model":"gpt-5"}`,
+			headerOverride:         "static-session",
+			expectedJSON:           `{"model":"gpt-5","client_metadata":{"session_id":"static-session"}}`,
+			expectedHeaderOverride: "static-session",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := map[string]any{
+				"header_override": map[string]any{
+					"session_id": tc.headerOverride,
+				},
+				"request_headers": tc.requestHeaders,
+			}
+
+			out, err := ApplyParamOverride([]byte(tc.input), override, ctx)
+			require.NoError(t, err)
+			assertJSONEqual(t, tc.expectedJSON, string(out))
+
+			headers := ctx["header_override"].(map[string]any)
+			assert.Equal(t, tc.expectedHeaderOverride, headers["session_id"])
+		})
+	}
+}
+
 func TestApplyParamOverrideSyncFieldsNoChangeWhenBothExist(t *testing.T) {
 	input := []byte(`{"model":"gpt-4","prompt_cache_key":"cache-body"}`)
 	override := map[string]any{
