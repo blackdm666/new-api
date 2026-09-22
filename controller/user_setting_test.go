@@ -39,7 +39,7 @@ func TestUpdateUserSettingGatesUnpricedModelsByRole(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodPut, "/api/user/setting", strings.NewReader(
-				`{"notify_type":"email","quota_warning_threshold":1,"accept_unset_model_ratio_model":true}`,
+				`{"notify_type":"email","quota_warning_threshold":1,"accept_unset_model_ratio_model":true,"record_ip_log":false}`,
 			))
 			c.Request.Header.Set("Content-Type", "application/json")
 			c.Set("id", user.Id)
@@ -50,6 +50,7 @@ func TestUpdateUserSettingGatesUnpricedModelsByRole(t *testing.T) {
 			var got model.User
 			require.NoError(t, db.First(&got, user.Id).Error)
 			assert.Equal(t, testCase.want, got.GetSetting().AcceptUnsetRatioModel)
+			assert.True(t, got.GetSetting().RecordIpLog)
 		})
 	}
 }

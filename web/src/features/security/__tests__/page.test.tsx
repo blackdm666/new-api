@@ -159,7 +159,7 @@ async function renderPage(path = '/security') {
 }
 
 describe('security page migration', () => {
-  it('places account management on the left and verification and privacy on the right', async () => {
+  it('places account management on the left and verification on the right', async () => {
     await renderPage()
     const login = await screen.findByRole('region', {
       name: 'Login & Authentication',
@@ -172,7 +172,6 @@ describe('security page migration', () => {
       'Login & Authentication',
       'Sessions & Access',
       'Account Actions',
-      'Privacy',
     ])
     expect(
       within(login).getByRole('button', { name: 'Change Password' })
@@ -185,9 +184,6 @@ describe('security page migration', () => {
     expect(
       await within(verification).findByText('Two-Factor Authentication')
     ).toBeVisible()
-    expect(
-      within(verification).getByRole('switch', { name: 'Record IP Address' })
-    ).toBeVisible()
     expect(verification).toHaveClass('xl:sticky', 'xl:top-0')
     expect(verification.parentElement).toHaveClass(
       'grid',
@@ -199,9 +195,6 @@ describe('security page migration', () => {
     ).toBeVisible()
     expect(
       await within(access).findByText('No active login sessions')
-    ).toBeVisible()
-    expect(
-      screen.getByRole('switch', { name: 'Record IP Address' })
     ).toBeVisible()
     expect(
       within(screen.getByRole('region', { name: 'Account Actions' })).getByRole(
@@ -259,9 +252,6 @@ describe('security page migration', () => {
       screen.queryByRole('button', { name: 'Change Password' })
     ).not.toBeInTheDocument()
     expect(screen.queryByText('Account Bindings')).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('switch', { name: 'Record IP Address' })
-    ).not.toBeInTheDocument()
     expect(api.get).not.toHaveBeenCalledWith('/api/user/passkey')
     expect(api.get).not.toHaveBeenCalledWith('/api/user/2fa/status')
     expect(api.get).not.toHaveBeenCalledWith('/api/user/sessions')
