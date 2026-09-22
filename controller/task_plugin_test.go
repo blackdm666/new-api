@@ -542,7 +542,7 @@ func TestDeleteTaskPluginVersionReportsRemainingVersion(t *testing.T) {
 	for _, version := range []string{"1.0.0", "2.0.0", "3.0.0"} {
 		source := taskPluginControllerTestSource(key, version)
 		require.NoError(t, model.SaveTaskPlugin(&model.TaskPlugin{
-			Key: key, APIVersion: 1, Version: version, Source: source, SourceHash: version, Enabled: true,
+			Key: key, APIVersion: 1, Version: version, Source: model.LongText(source), SourceHash: version, Enabled: true,
 		}))
 	}
 	for _, tc := range []struct {

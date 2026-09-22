@@ -405,11 +405,21 @@ export function PluginsTable(props: PluginsTableProps) {
         }}
         title={t('Plugin is still in use')}
         desc={usageDescription}
-        handleConfirm={() => setBlockedAction(null)}
-        confirmText={t('Cancel')}
+        destructive
+        isLoading={statusMutation.isPending}
+        confirmText={t('Force operation')}
+        handleConfirm={() => {
+          if (blockedAction === 'disable' && statusTarget) {
+            statusMutation.mutate({
+              key: statusTarget.meta.key,
+              enabled: false,
+              options: { cascade: true, force: true },
+            })
+          }
+        }}
       >
-        <div className='flex flex-wrap gap-2'>
-          {blockedAction === 'disable' && blockedUsage?.channels.length ? (
+        {blockedAction === 'disable' && blockedUsage?.channels.length ? (
+          <div className='flex'>
             <Button
               variant='outline'
               onClick={() =>
@@ -423,22 +433,8 @@ export function PluginsTable(props: PluginsTableProps) {
             >
               {t('Cascade disable channels')}
             </Button>
-          ) : null}
-          <Button
-            variant='destructive'
-            onClick={() => {
-              if (blockedAction === 'disable' && statusTarget) {
-                statusMutation.mutate({
-                  key: statusTarget.meta.key,
-                  enabled: false,
-                  options: { cascade: true, force: true },
-                })
-              }
-            }}
-          >
-            {t('Force operation')}
-          </Button>
-        </div>
+          </div>
+        ) : null}
       </ConfirmDialog>
     </>
   )
