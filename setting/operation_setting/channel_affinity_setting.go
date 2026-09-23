@@ -144,6 +144,13 @@ var channelAffinitySetting = ChannelAffinitySetting{
 			ModelRegex: []string{"^gpt-.*$"},
 			PathRegex:  []string{"/v1/responses"},
 			KeySources: []ChannelAffinityKeySource{
+				{Type: "request_header", Key: "conversation_id"},
+				{Type: "request_header", Key: "thread_id"},
+				{Type: "request_header", Key: "thread-id"},
+				{Type: "request_header", Key: "session_id"},
+				{Type: "request_header", Key: "session-id"},
+				{Type: "gjson", Path: "client_metadata.thread_id"},
+				{Type: "gjson", Path: "client_metadata.session_id"},
 				{Type: "gjson", Path: "prompt_cache_key"},
 			},
 			ValueRegex:            "",

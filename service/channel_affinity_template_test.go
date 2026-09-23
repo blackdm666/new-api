@@ -430,6 +430,100 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	}
 }
 
+func TestCodexChannelAffinityExplicitIdentityPrecedence(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	setting := operation_setting.GetChannelAffinitySetting()
+	require.NotNil(t, setting)
+
+	var codexRule *operation_setting.ChannelAffinityRule
+	for i := range setting.Rules {
+		rule := &setting.Rules[i]
+		if strings.EqualFold(strings.TrimSpace(rule.Name), "codex cli trace") {
+			codexRule = rule
+			break
+		}
+	}
+	require.NotNil(t, codexRule)
+
+	for _, tc := range []struct {
+		name               string
+		body               string
+		headers            map[string]string
+		expectedValue      string
+		expectedSourceType string
+		expectedSourceKey  string
+		expectedSourcePath string
+	}{
+		{
+			name:               "body thread works without prompt cache key",
+			body:               `{"client_metadata":{"thread_id":"thread-body","session_id":"session-body"}}`,
+			expectedValue:      "thread-body",
+			expectedSourceType: "gjson",
+			expectedSourcePath: "client_metadata.thread_id",
+		},
+		{
+			name:               "body session works without prompt cache key",
+			body:               `{"client_metadata":{"session_id":"session-body"}}`,
+			expectedValue:      "session-body",
+			expectedSourceType: "gjson",
+			expectedSourcePath: "client_metadata.session_id",
+		},
+		{
+			name:               "body thread precedes body session and cache key",
+			body:               `{"prompt_cache_key":"cache-body","client_metadata":{"thread_id":"thread-body","session_id":"session-body"}}`,
+			expectedValue:      "thread-body",
+			expectedSourceType: "gjson",
+			expectedSourcePath: "client_metadata.thread_id",
+		},
+		{
+			name: "conversation header precedes body identity",
+			body: `{"prompt_cache_key":"cache-body","client_metadata":{"thread_id":"thread-body","session_id":"session-body"}}`,
+			headers: map[string]string{
+				"conversation_id": "conversation-header",
+			},
+			expectedValue:      "conversation-header",
+			expectedSourceType: "request_header",
+			expectedSourceKey:  "conversation_id",
+		},
+		{
+			name:               "prompt cache key remains affinity fallback",
+			body:               `{"prompt_cache_key":"cache-body"}`,
+			expectedValue:      "cache-body",
+			expectedSourceType: "gjson",
+			expectedSourcePath: "prompt_cache_key",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cacheKeySuffix := buildChannelAffinityCacheKeySuffix(*codexRule, "gpt-5", "default", tc.expectedValue)
+			cache := getChannelAffinityCache()
+			require.NoError(t, cache.SetWithTTL(cacheKeySuffix, 9529, time.Minute))
+			t.Cleanup(func() {
+				_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+			})
+
+			rec := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(rec)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(tc.body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			for name, value := range tc.headers {
+				ctx.Request.Header.Set(name, value)
+			}
+
+			channelID, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
+			require.True(t, found)
+			require.Equal(t, 9529, channelID)
+
+			meta, ok := getChannelAffinityMeta(ctx)
+			require.True(t, ok)
+			require.Equal(t, tc.expectedSourceType, meta.KeySourceType)
+			require.Equal(t, tc.expectedSourceKey, meta.KeySourceKey)
+			require.Equal(t, tc.expectedSourcePath, meta.KeySourcePath)
+			require.Equal(t, affinityFingerprint(tc.expectedValue), meta.KeyFingerprint)
+		})
+	}
+}
+
 func TestMidjourneyPolicyAcceptance(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

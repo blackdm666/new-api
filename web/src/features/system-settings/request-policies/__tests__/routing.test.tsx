@@ -692,6 +692,24 @@ it('the empty state can fill templates without saving them to the server', async
   expect(screen.getByRole('table')).toHaveTextContent('codex cli trace')
   expect(screen.getByRole('table')).toHaveTextContent('claude cli trace')
   expect(screen.queryByText('No rules yet')).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('tab', { name: 'JSON' }))
+  const rules = JSON.parse(
+    (screen.getByRole('textbox', { name: 'Rules JSON' }) as HTMLTextAreaElement)
+      .value
+  )
+  expect(
+    rules.find((rule: { name: string }) => rule.name === 'codex cli trace')
+      ?.key_sources
+  ).toEqual([
+    { type: 'request_header', key: 'conversation_id' },
+    { type: 'request_header', key: 'thread_id' },
+    { type: 'request_header', key: 'thread-id' },
+    { type: 'request_header', key: 'session_id' },
+    { type: 'request_header', key: 'session-id' },
+    { type: 'gjson', path: 'client_metadata.thread_id' },
+    { type: 'gjson', path: 'client_metadata.session_id' },
+    { type: 'gjson', path: 'prompt_cache_key' },
+  ])
   expect(api.patch).not.toHaveBeenCalled()
 })
 
