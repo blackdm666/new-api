@@ -704,9 +704,9 @@ it('the empty state can fill templates without saving them to the server', async
     { type: 'request_header', key: 'conversation_id' },
     { type: 'request_header', key: 'thread_id' },
     { type: 'request_header', key: 'thread-id' },
+    { type: 'gjson', path: 'client_metadata.thread_id' },
     { type: 'request_header', key: 'session_id' },
     { type: 'request_header', key: 'session-id' },
-    { type: 'gjson', path: 'client_metadata.thread_id' },
     { type: 'gjson', path: 'client_metadata.session_id' },
     { type: 'gjson', path: 'prompt_cache_key' },
   ])

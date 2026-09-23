@@ -477,6 +477,16 @@ func TestCodexChannelAffinityExplicitIdentityPrecedence(t *testing.T) {
 			expectedSourcePath: "client_metadata.thread_id",
 		},
 		{
+			name: "body thread precedes session header",
+			body: `{"client_metadata":{"thread_id":"thread-body","session_id":"session-body"}}`,
+			headers: map[string]string{
+				"session_id": "session-header",
+			},
+			expectedValue:      "thread-body",
+			expectedSourceType: "gjson",
+			expectedSourcePath: "client_metadata.thread_id",
+		},
+		{
 			name: "conversation header precedes body identity",
 			body: `{"prompt_cache_key":"cache-body","client_metadata":{"thread_id":"thread-body","session_id":"session-body"}}`,
 			headers: map[string]string{
