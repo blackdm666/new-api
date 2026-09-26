@@ -10,34 +10,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTaskPluginCustomBalanceQueryEnabled(t *testing.T) {
+func TestTaskPluginBalanceQueryEnabled(t *testing.T) {
 	baseURL := "https://example.com"
 
-	require.False(t, taskPluginCustomBalanceQueryEnabled(nil))
-	require.False(t, taskPluginCustomBalanceQueryEnabled(&model.Channel{
+	require.False(t, taskPluginBalanceQueryEnabled(nil))
+	require.False(t, taskPluginBalanceQueryEnabled(&model.Channel{
 		Type:    constant.ChannelTypeTaskPlugin,
 		BaseURL: &baseURL,
 	}))
 
-	disabled := dto.ChannelOtherSettings{
-		BalanceQuery: &dto.ChannelBalanceQueryConfig{Mode: dto.ChannelBalanceQueryModeDisabled},
+	testCases := []struct {
+		name    string
+		mode    string
+		enabled bool
+	}{
+		{name: "disabled", mode: dto.ChannelBalanceQueryModeDisabled, enabled: false},
+		{name: "auto", mode: dto.ChannelBalanceQueryModeAuto, enabled: false},
+		{name: "new api account", mode: dto.ChannelBalanceQueryModeNewAPI, enabled: true},
+		{name: "one api account", mode: dto.ChannelBalanceQueryModeOneAPI, enabled: true},
+		{name: "sub2api", mode: dto.ChannelBalanceQueryModeSub2API, enabled: true},
+		{name: "vertex trial credit", mode: dto.ChannelBalanceQueryModeGCPTrial, enabled: true},
+		{name: "custom", mode: dto.ChannelBalanceQueryModeCustom, enabled: true},
 	}
-	disabledJSON, err := json.Marshal(disabled)
-	require.NoError(t, err)
-	require.False(t, taskPluginCustomBalanceQueryEnabled(&model.Channel{
-		Type:          constant.ChannelTypeTaskPlugin,
-		BaseURL:       &baseURL,
-		OtherSettings: string(disabledJSON),
-	}))
-
-	custom := dto.ChannelOtherSettings{
-		BalanceQuery: &dto.ChannelBalanceQueryConfig{Mode: dto.ChannelBalanceQueryModeCustom},
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			settings := dto.ChannelOtherSettings{
+				BalanceQuery: &dto.ChannelBalanceQueryConfig{Mode: testCase.mode},
+			}
+			settingsJSON, err := json.Marshal(settings)
+			require.NoError(t, err)
+			require.Equal(t, testCase.enabled, taskPluginBalanceQueryEnabled(&model.Channel{
+				Type:          constant.ChannelTypeTaskPlugin,
+				BaseURL:       &baseURL,
+				OtherSettings: string(settingsJSON),
+			}))
+		})
 	}
-	customJSON, err := json.Marshal(custom)
-	require.NoError(t, err)
-	require.True(t, taskPluginCustomBalanceQueryEnabled(&model.Channel{
-		Type:          constant.ChannelTypeTaskPlugin,
-		BaseURL:       &baseURL,
-		OtherSettings: string(customJSON),
-	}))
 }

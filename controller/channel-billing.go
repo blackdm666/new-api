@@ -620,7 +620,7 @@ func UpdateChannelBalance(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if channel.Type == constant.ChannelTypeTaskPlugin && !taskPluginCustomBalanceQueryEnabled(channel) {
+	if channel.Type == constant.ChannelTypeTaskPlugin && !taskPluginBalanceQueryEnabled(channel) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "Task Plugin channels do not support balance queries"})
 		return
 	}
@@ -655,13 +655,24 @@ func UpdateChannelBalance(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-func taskPluginCustomBalanceQueryEnabled(channel *model.Channel) bool {
+func taskPluginBalanceQueryEnabled(channel *model.Channel) bool {
 	if channel == nil || channel.Type != constant.ChannelTypeTaskPlugin {
 		return false
 	}
 	balanceQuery := channel.GetOtherSettings().BalanceQuery
-	return balanceQuery != nil &&
-		strings.EqualFold(strings.TrimSpace(balanceQuery.Mode), dto.ChannelBalanceQueryModeCustom)
+	if balanceQuery == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(balanceQuery.Mode)) {
+	case dto.ChannelBalanceQueryModeNewAPI,
+		dto.ChannelBalanceQueryModeOneAPI,
+		dto.ChannelBalanceQueryModeSub2API,
+		dto.ChannelBalanceQueryModeGCPTrial,
+		dto.ChannelBalanceQueryModeCustom:
+		return true
+	default:
+		return false
+	}
 }
 
 func updateAllChannelsBalance() error {
