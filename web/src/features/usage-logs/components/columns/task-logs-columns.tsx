@@ -36,7 +36,12 @@ import { PluginAuthorLink } from '../plugin-author-link'
 import { TaskArtifactsCell } from '../task-artifacts'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import { createDurationColumn, createProgressColumn } from './column-helpers'
-import { TaskChannelCell, TaskCostCell, TaskModelCell } from './task-log-cells'
+import {
+  TaskChannelCell,
+  TaskCostCell,
+  TaskModelCell,
+  TaskOfficialIdCell,
+} from './task-log-cells'
 
 function TaskDetailsCell(props: {
   log: TaskLog
@@ -232,6 +237,17 @@ export function useTaskLogsColumns(
         },
         meta: { mobileTitle: true },
       },
+      ...(isRoot
+        ? [
+            {
+              id: 'official_task_id',
+              header: t('Official Task ID'),
+              accessorFn: (row: TaskLog) => row.official_task_id ?? '',
+              cell: ({ row }) => <TaskOfficialIdCell log={row.original} />,
+              size: 190,
+            } satisfies ColumnDef<TaskLog>,
+          ]
+        : []),
       {
         id: 'cost',
         header: t('Cost'),

@@ -355,8 +355,9 @@ func TestLogTaskConsumptionIncludesTieredSnapshotUsageFacts(t *testing.T) {
 			ExprString:    expression,
 			EstimatedTier: "720P",
 			UsageFacts: map[string]any{
-				"resolution": "720P",
-				"seconds":    5,
+				"resolution":    "720P",
+				"seconds":       5,
+				"upstreamUnits": 40594,
 			},
 		},
 	}
@@ -372,6 +373,7 @@ func TestLogTaskConsumptionIncludesTieredSnapshotUsageFacts(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "720P", facts["resolution"])
 	assert.Equal(t, float64(5), facts["seconds"])
+	assert.Equal(t, 40594, log.CompletionTokens)
 	assert.NotContains(t, other, "resolution")
 	assert.NotContains(t, other, "seconds")
 	assert.Contains(t, log.Content, "计算参数：")

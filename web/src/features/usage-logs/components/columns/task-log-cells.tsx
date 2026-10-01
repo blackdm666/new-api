@@ -141,6 +141,23 @@ export function TaskModelCell(props: { log: TaskLog }) {
   return <ModelBadge modelName={modelName} actualModel={actualModel} />
 }
 
+export function TaskOfficialIdCell(props: { log: TaskLog }) {
+  const officialTaskId = props.log.official_task_id?.trim()
+  if (!officialTaskId) {
+    return <span className='text-muted-foreground/60 text-xs'>-</span>
+  }
+
+  return (
+    <StatusBadge
+      label={officialTaskId}
+      copyText={officialTaskId}
+      variant='neutral'
+      size='sm'
+      className='border-border/60 bg-muted/30 !text-foreground max-w-[190px] truncate rounded-md border px-1.5 py-0.5 font-mono'
+    />
+  )
+}
+
 export function TaskCostCell(props: { log: TaskLog }) {
   const other: LogOtherData | null = props.log.billing_source
     ? { billing_source: props.log.billing_source }

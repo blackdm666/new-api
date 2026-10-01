@@ -29,6 +29,7 @@ import {
   TaskCostCell,
   TaskDetailsCell,
   TaskModelCell,
+  TaskOfficialIdCell,
 } from '../task-log-cells'
 
 vi.mock('@/lib/lobe-icon', () => ({
@@ -84,6 +85,17 @@ describe('task log cells', () => {
     )
 
     expect(screen.getByText('gemini-omni-flash')).toBeVisible()
+  })
+
+  test('shows the official task id as a copyable badge', () => {
+    render(
+      <TaskOfficialIdCell
+        log={{ ...baseTask, official_task_id: 'cgt-official-123' }}
+      />
+    )
+
+    expect(screen.getByText('cgt-official-123')).toBeVisible()
+    expect(screen.getByTitle('Click to copy: cgt-official-123')).toBeVisible()
   })
 
   test('formats the final task quota with the shared cost display', () => {

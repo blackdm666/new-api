@@ -35,6 +35,16 @@ func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
 	require.Contains(t, parsed, "model_price")
 }
 
+func TestTaskUsageTokensBackfillLegacyLogs(t *testing.T) {
+	logs := []*Log{{
+		Other: `{"usage_facts":{"upstreamUnits":40594}}`,
+	}}
+
+	FormatRootLogs(logs)
+
+	assert.Equal(t, 40594, logs[0].CompletionTokens)
+}
+
 func TestTaskPluginLogVisibilityIsRoleSeparated(t *testing.T) {
 	other := common.MapToJsonStr(map[string]any{
 		"model_price": 1.25,

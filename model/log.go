@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -114,6 +115,7 @@ func assignDisplayLogIds(logs []*Log, startIdx int) {
 }
 
 func formatUserLogs(logs []*Log, startIdx int) {
+	hydrateTaskUsageTokens(logs)
 	for i := range logs {
 		logs[i].ChannelName = ""
 		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityUser)
@@ -124,6 +126,7 @@ func formatUserLogs(logs []*Log, startIdx int) {
 // FormatAdminLogs removes root-only diagnostics while retaining operational
 // admin_info. Root callers must not pass their results through this formatter.
 func FormatAdminLogs(logs []*Log) {
+	hydrateTaskUsageTokens(logs)
 	for i := range logs {
 		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityAdmin)
 	}
@@ -132,8 +135,73 @@ func FormatAdminLogs(logs []*Log) {
 // FormatRootLogs normalizes legacy metadata into the current scoped shape
 // without removing root-only diagnostics.
 func FormatRootLogs(logs []*Log) {
+	hydrateTaskUsageTokens(logs)
 	for i := range logs {
 		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityRoot)
+	}
+}
+
+func taskUsageTokenCount(value any) int {
+	var number float64
+	switch value := value.(type) {
+	case int:
+		number = float64(value)
+	case int8:
+		number = float64(value)
+	case int16:
+		number = float64(value)
+	case int32:
+		number = float64(value)
+	case int64:
+		number = float64(value)
+	case uint:
+		number = float64(value)
+	case uint8:
+		number = float64(value)
+	case uint16:
+		number = float64(value)
+	case uint32:
+		number = float64(value)
+	case uint64:
+		number = float64(value)
+	case float32:
+		number = float64(value)
+	case float64:
+		number = value
+	default:
+		return 0
+	}
+	if math.IsNaN(number) || math.IsInf(number, 0) || number <= 0 {
+		return 0
+	}
+	return common.QuotaFromFloat(number)
+}
+
+func taskUsageCompletionTokens(values map[string]any) int {
+	usageFacts, ok := values["usage_facts"].(map[string]any)
+	if !ok {
+		return 0
+	}
+	return taskUsageTokenCount(usageFacts["upstreamUnits"])
+}
+
+func completionTokensFromLogOther(other *LogOther) int {
+	if other == nil {
+		return 0
+	}
+	return taskUsageCompletionTokens(other.Snapshot())
+}
+
+func hydrateTaskUsageTokens(logs []*Log) {
+	for _, log := range logs {
+		if log == nil || log.CompletionTokens > 0 || log.Other == "" {
+			continue
+		}
+		var values map[string]any
+		if err := common.UnmarshalJsonStr(log.Other, &values); err != nil {
+			continue
+		}
+		log.CompletionTokens = taskUsageCompletionTokens(values)
 	}
 }
 
@@ -333,6 +401,10 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
+	completionTokens := params.CompletionTokens
+	if completionTokens <= 0 {
+		completionTokens = completionTokensFromLogOther(params.Other)
+	}
 	otherStr := params.Other.JSONString()
 	log := &Log{
 		UserId:            userId,
@@ -341,7 +413,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		Type:              LogTypeConsume,
 		Content:           params.Content,
 		PromptTokens:      params.PromptTokens,
-		CompletionTokens:  params.CompletionTokens,
+		CompletionTokens:  completionTokens,
 		TokenName:         params.TokenName,
 		ModelName:         params.ModelName,
 		Quota:             params.Quota,
@@ -401,18 +473,19 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 	createdAt := common.GetTimestamp()
 	log := &Log{
-		UserId:    params.UserId,
-		Username:  username,
-		CreatedAt: createdAt,
-		Type:      params.LogType,
-		Content:   params.Content,
-		TokenName: tokenName,
-		ModelName: params.ModelName,
-		Quota:     params.Quota,
-		ChannelId: params.ChannelId,
-		TokenId:   params.TokenId,
-		Group:     params.Group,
-		Other:     params.Other.JSONString(),
+		UserId:           params.UserId,
+		Username:         username,
+		CreatedAt:        createdAt,
+		Type:             params.LogType,
+		Content:          params.Content,
+		TokenName:        tokenName,
+		ModelName:        params.ModelName,
+		Quota:            params.Quota,
+		CompletionTokens: completionTokensFromLogOther(params.Other),
+		ChannelId:        params.ChannelId,
+		TokenId:          params.TokenId,
+		Group:            params.Group,
+		Other:            params.Other.JSONString(),
 	}
 	err := createLog(log)
 	if err != nil {

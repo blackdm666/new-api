@@ -25,10 +25,80 @@ import {
 } from './billing-expr'
 import { readConditionalTaskPricing } from './billing-expression/task-display'
 import {
+  getTaskEnumCombinations,
   getTaskEnumFields,
   taskMatrixRowLabel,
   tryParseTaskMatrixConfig,
 } from './task-expr'
+
+export type TaskCompactPricingMatrix = {
+  rowField: string
+  columnField: string
+  rowValues: string[]
+  columnValues: string[]
+  cells: Map<string, ParsedTaskTier>
+}
+
+export function taskCompactMatrixCellKey(
+  rowValue: string,
+  columnValue: string
+) {
+  return `${rowValue}\u0000${columnValue}`
+}
+
+/**
+ * Return a two-dimensional view for the common two-enum task pricing shape.
+ * The model can opt into this layout without changing the billing expression.
+ * Unsupported or ambiguous expressions return null so the caller can retain
+ * the existing tier table.
+ */
+export function getTaskCompactPricingMatrix(
+  expression: string | null | undefined,
+  schema: BillingUsageSchema | null | undefined
+): TaskCompactPricingMatrix | null {
+  const enumFields = getTaskEnumFields(schema)
+  if (enumFields.length !== 2) return null
+
+  const tiers = getTaskMatrixDisplayTiers(expression, schema)
+  if (!tiers?.length) return null
+
+  const [rowEntry, columnEntry] = enumFields
+  const rowValues = rowEntry[1].enum ?? []
+  const columnValues = columnEntry[1].enum ?? []
+  if (rowValues.length === 0 || columnValues.length === 0) return null
+
+  const cells = new Map<string, ParsedTaskTier>()
+  for (const tier of tiers) {
+    const rowValue = tier.conditions.find(
+      (condition) => condition.field === rowEntry[0]
+    )?.value
+    const columnValue = tier.conditions.find(
+      (condition) => condition.field === columnEntry[0]
+    )?.value
+    if (!rowValue || !columnValue) return null
+    cells.set(taskCompactMatrixCellKey(rowValue, columnValue), tier)
+  }
+
+  if (
+    cells.size !== rowValues.length * columnValues.length ||
+    rowValues.some((rowValue) =>
+      columnValues.some(
+        (columnValue) =>
+          !cells.has(taskCompactMatrixCellKey(rowValue, columnValue))
+      )
+    )
+  ) {
+    return null
+  }
+
+  return {
+    rowField: rowEntry[0],
+    columnField: columnEntry[0],
+    rowValues,
+    columnValues,
+    cells,
+  }
+}
 
 /**
  * Marketplace display helper: expand a recognized task matrix (flat/uniform
@@ -41,19 +111,65 @@ export function getTaskMatrixDisplayTiers(
   schema: BillingUsageSchema | null | undefined
 ): ParsedTaskTier[] | null {
   if (!schema) return null
-  if (getTaskEnumFields(schema).length === 0) return null
+  const enumFields = getTaskEnumFields(schema)
+  if (enumFields.length === 0) return null
 
   const matrix = tryParseTaskMatrixConfig(expression, schema)
-  if (!matrix) return null
+  if (matrix) {
+    return matrix.rows.map((row) => ({
+      label: taskMatrixRowLabel(row.combination),
+      conditions: Object.entries(row.combination)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([field, value]) => ({ field, value })),
+      constant: row.constant,
+      unitPrices: { ...row.unitPrices },
+    }))
+  }
 
-  return matrix.rows.map((row) => ({
-    label: taskMatrixRowLabel(row.combination),
-    conditions: Object.entries(row.combination)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([field, value]) => ({ field, value })),
-    constant: row.constant,
-    unitPrices: { ...row.unitPrices },
-  }))
+  // The expression may encode the same matrix inside a tier's arithmetic,
+  // for example `u("resolution") == "1080p" ? 10 : 5`. The general display
+  // parser can evaluate that shape even though the visual matrix parser
+  // cannot derive a branch tree from it. Expand its resolved tiers over the
+  // declared combinations so the compact table does not require redundant
+  // branches for every equal-price resolution.
+  const resolvedTiers = getTaskPricingDisplayTiers(expression, schema)
+  if (
+    resolvedTiers.length === 0 ||
+    resolvedTiers.some((tier) => tier.conditionText)
+  ) {
+    return null
+  }
+
+  const enumFieldNames = new Set(enumFields.map(([field]) => field))
+  if (
+    resolvedTiers.some((tier) =>
+      tier.conditions.some((condition) => !enumFieldNames.has(condition.field))
+    )
+  ) {
+    return null
+  }
+
+  const combinations = getTaskEnumCombinations(schema)
+  const rows = combinations
+    .map((combination) => {
+      const tier = resolvedTiers.find((candidate) =>
+        candidate.conditions.every(
+          (condition) => combination[condition.field] === condition.value
+        )
+      )
+      if (!tier) return null
+
+      return {
+        label: taskMatrixRowLabel(combination),
+        conditions: Object.entries(combination)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([field, value]) => ({ field, value })),
+        constant: tier.constant,
+        unitPrices: { ...tier.unitPrices },
+      }
+    })
+    .filter((tier): tier is ParsedTaskTier => tier !== null)
+  return rows.length === combinations.length ? rows : null
 }
 
 /** Display explicit conditions for a fallback only when its complement is unique.

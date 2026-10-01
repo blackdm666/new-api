@@ -119,6 +119,7 @@ export function ModelMutateDrawer(props: {
       model_name: '',
       status: 1,
       sync_official: 1,
+      compact_pricing_display: 0,
       name_rule: 0,
     } as Model),
   })
@@ -179,6 +180,7 @@ export function ModelMutateDrawer(props: {
               model_name: currentRow?.model_name ?? '',
               status: 1,
               sync_official: 1,
+              compact_pricing_display: 0,
               name_rule: 0,
             }) as Model
       )
@@ -579,6 +581,31 @@ export function ModelMutateDrawer(props: {
                               <FormDescription>
                                 {t(
                                   'Allows selected fields to be overwritten after a sync preview. No automatic synchronization.'
+                                )}
+                              </FormDescription>
+                            </div>
+                            <FormControl>
+                              <Switch
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name='compact_pricing_display'
+                        render={({ field }) => (
+                          <FormItem className={sideDrawerSwitchItemClassName()}>
+                            <div className='flex flex-col gap-0.5'>
+                              <FormLabel className='text-base'>
+                                {t('Optimized pricing display')}
+                              </FormLabel>
+                              <FormDescription>
+                                {t(
+                                  'Use the compact resolution and reference-input price matrix in the model square.'
                                 )}
                               </FormDescription>
                             </div>

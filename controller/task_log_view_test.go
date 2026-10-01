@@ -14,6 +14,7 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	task := &model.Task{
 		TaskID:   "task_public",
 		Platform: "document-parser",
+		Data:     []byte(`{"id":"official-public"}`),
 		PrivateData: model.TaskPrivateData{
 			Key:            "channel-secret-canary",
 			UpstreamTaskID: "upstream-private",
@@ -61,6 +62,8 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	assert.Equal(t, uint64(42), rootView.RootInfo.TaskPlugin.Generation)
 	assert.Equal(t, "upstream-private", rootView.RootInfo.UpstreamTaskID)
 	assert.Equal(t, "node-a", rootView.RootInfo.NodeName)
+	assert.Equal(t, "official-public", rootView.OfficialTaskID)
+	assert.Empty(t, adminView.OfficialTaskID)
 
 	adminJSON, err := common.Marshal(adminView)
 	require.NoError(t, err)

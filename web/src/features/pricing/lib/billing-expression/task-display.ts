@@ -76,6 +76,13 @@ function taskDisplayCondition(
         continue
       }
       const key = probe.args[0].value
+      if (literal.value === null) {
+        const definition = context.schema[key]
+        if (definition.type !== 'number' || !definition.unit) return null
+        // Usage fields can be absent until an upstream reports billable usage.
+        // Keep the presence check symbolic while parsing the priced branch.
+        return context.source.slice(node.start, node.end)
+      }
       if (!Object.hasOwn(context.facts, key)) return null
       const definition = context.schema[key]
       if (definition.type === 'boolean') {
@@ -303,6 +310,19 @@ export function readConditionalTaskPricing(
           (branch.prices[field] ?? 0) *
           (definition.unit === 'token' ? 1_000_000 : 1)
       }
+      const hasUsagePresenceGuard = [...branch.times].some(([condition]) =>
+        isUsagePresenceCondition(condition)
+      )
+      // Ignore only the zero-cost estimate branch guarded by upstream usage
+      // presence. Other constant-only branches must keep the old fallback
+      // behavior instead of being silently reclassified as price tiers.
+      if (
+        hasUsagePresenceGuard &&
+        branch.constant === 0 &&
+        Object.keys(branch.prices).length === 0
+      ) {
+        continue
+      }
       if (
         !Object.keys(unitPrices).length ||
         !Object.values(unitPrices).every(Number.isFinite)
@@ -310,6 +330,7 @@ export function readConditionalTaskPricing(
         return null
       }
       const conditionText = [...branch.times]
+        .filter(([condition]) => !isUsagePresenceCondition(condition))
         .map(([condition, matches]) =>
           matches ? `(${condition})` : `!(${condition})`
         )
@@ -327,4 +348,8 @@ export function readConditionalTaskPricing(
     }
   }
   return tiers
+}
+
+function isUsagePresenceCondition(condition: string): boolean {
+  return /^u\((?:"[^"]+"|'[^']+')\) (?:!=|==) nil$/.test(condition)
 }

@@ -93,10 +93,15 @@ import {
   getTaskEnumFields,
   getTaskNumberFields,
 } from '../lib/task-expr'
-import { getTaskPricingDisplayTiers } from '../lib/task-matrix-display'
+import {
+  getTaskCompactPricingMatrix,
+  getTaskPricingDisplayTiers,
+  taskCompactMatrixCellKey,
+} from '../lib/task-matrix-display'
 import {
   hasSimpleTaskPricing,
   taskPriceLabel,
+  taskEnumLabel,
   taskUsageUnitLabel,
   taskTierConditions,
   pricingDisplayFallbackKey,
@@ -990,6 +995,91 @@ function getDynamicFormattedPricesByTier(
   )
 }
 
+function getCompactTaskPricingMatrixForModel(model: PricingModel) {
+  const matrix = getTaskCompactPricingMatrix(
+    model.billing_expr,
+    model.billing_usage_schema
+  )
+  if (!matrix) return null
+
+  // Older public pricing payloads omit this metadata and return null. A
+  // recognized two-enum task matrix should still render horizontally in that
+  // case; an explicit 0 remains the opt-out.
+  return model.compact_pricing_display === 0 ? null : matrix
+}
+
+function CompactTaskPricingTable(props: {
+  matrix: NonNullable<ReturnType<typeof getTaskCompactPricingMatrix>>
+  schema: NonNullable<PricingModel['billing_usage_schema']>
+  priceFields: DynamicPriceEntry[]
+  formattedPricesByTier: DynamicFormattedPricesByTier
+}) {
+  const { t, i18n } = useTranslation()
+  const rowDefinition = props.schema[props.matrix.rowField]
+  const columnDefinition = props.schema[props.matrix.columnField]
+  const thClass =
+    'text-muted-foreground py-2 text-xs font-medium whitespace-normal break-words'
+  const getCellUnitLabel = (entry: DynamicPriceEntry) => {
+    if (entry.unit === 'token') return t('Per 1M task tokens')
+    const unitLabelKey = getDynamicPriceUnitLabelKey(entry)
+    return unitLabelKey ? t(unitLabelKey) : ''
+  }
+
+  return (
+    <StaticDataTable
+      className='rounded-none border-0'
+      tableClassName='text-sm'
+      headerRowClassName='hover:bg-transparent'
+      data={props.matrix.rowValues}
+      getRowKey={(rowValue) => rowValue}
+      columns={[
+        {
+          id: props.matrix.rowField,
+          header: taskPriceLabel(
+            rowDefinition?.description,
+            props.matrix.rowField,
+            i18n.language
+          ),
+          className: thClass,
+          cellClassName: 'py-2.5 whitespace-normal break-words',
+          cell: (rowValue) =>
+            taskEnumLabel(rowDefinition, rowValue, i18n.language),
+        },
+        ...props.matrix.columnValues.map((columnValue) => ({
+          id: `${props.matrix.columnField}-${columnValue}`,
+          header: taskEnumLabel(columnDefinition, columnValue, i18n.language),
+          className: thClass,
+          cellClassName: 'py-2.5 font-mono',
+          cell: (rowValue: string) => {
+            const tier = props.matrix.cells.get(
+              taskCompactMatrixCellKey(rowValue, columnValue)
+            )
+            const prices = tier
+              ? props.formattedPricesByTier.get(tier)
+              : undefined
+            return (
+              <div className='space-y-0.5'>
+                {props.priceFields.map((entry) => {
+                  const price = prices?.get(entry.field)
+                  if (!price) return <div key={entry.key}>-</div>
+                  return (
+                    <div key={entry.key} className='whitespace-nowrap'>
+                      <span>{price}</span>
+                      <span className='text-muted-foreground/60 ml-1 text-xs font-normal'>
+                        / {getCellUnitLabel(entry)}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          },
+        })),
+      ]}
+    />
+  )
+}
+
 // ----------------------------------------------------------------------------
 // Group pricing table
 // ----------------------------------------------------------------------------
@@ -1072,6 +1162,9 @@ function ProviderGroupPricingSection(
 
   const isTokenBased = isTokenBasedModel(props.model)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
+  const compactMatrix = getCompactTaskPricingMatrixForModel(props.model)
+  const compactSingleGroup =
+    compactMatrix !== null && availableGroups.length === 1
 
   const extraPriceTypes = useMemo(() => {
     const types: { label: string; type: PriceType }[] = []
@@ -1165,7 +1258,10 @@ function ProviderGroupPricingSection(
       props.model.billing_usage_schema,
       props.model.billing_usage_examples
     )
-    const priceFields = getDynamicPriceFields(dynamicTiers, {
+    const priceTiers = compactMatrix
+      ? [...compactMatrix.cells.values()]
+      : dynamicTiers
+    const priceFields = getDynamicPriceFields(priceTiers, {
       tokenUnit: props.tokenUnit,
       showRechargePrice,
       priceRate: props.priceRate,
@@ -1178,7 +1274,7 @@ function ProviderGroupPricingSection(
         const ratio = getConfiguredGroupRatio(props.groupRatio, group)
         return [
           group,
-          getDynamicFormattedPricesByTier(dynamicTiers, {
+          getDynamicFormattedPricesByTier(priceTiers, {
             tokenUnit: props.tokenUnit,
             showRechargePrice,
             priceRate: props.priceRate,
@@ -1192,16 +1288,30 @@ function ProviderGroupPricingSection(
 
     return (
       <section>
-        {!props.hideTitle && (
+        {!props.hideTitle && !compactSingleGroup && (
           <SectionTitle>{t('Pricing by Group')}</SectionTitle>
         )}
-        <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
+        {!compactSingleGroup && (
+          <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
+        )}
         <div className='space-y-3'>
           {availableGroups.map((group) => {
             const ratio = getConfiguredGroupRatio(props.groupRatio, group)
             const formattedPricesByTier =
               formattedPricesByGroup.get(group) ??
               new Map<DynamicPricingTier, Map<string, string>>()
+
+            if (compactSingleGroup) {
+              return (
+                <CompactTaskPricingTable
+                  key={group}
+                  matrix={compactMatrix}
+                  schema={props.model.billing_usage_schema ?? {}}
+                  priceFields={priceFields}
+                  formattedPricesByTier={formattedPricesByTier}
+                />
+              )
+            }
 
             return (
               <div key={group} className='overflow-hidden rounded-lg border'>
@@ -1213,88 +1323,97 @@ function ProviderGroupPricingSection(
                     description={props.usableGroup[group]}
                   />
                 </div>
-                <StaticDataTable
-                  className='rounded-none border-0'
-                  tableClassName='text-sm'
-                  headerRowClassName='hover:bg-transparent'
-                  data={dynamicTiers}
-                  getRowKey={(tier, tierIndex) =>
-                    `${group}-${tier.label}-${tierIndex}`
-                  }
-                  columns={[
-                    ...(hasSimpleTaskPricing(props.model)
-                      ? []
-                      : [
-                          {
-                            id: 'tier',
-                            header: props.model.billing_usage_schema
-                              ? t('Applicable conditions')
-                              : t('Tier'),
-                            className: thClass,
-                            cellClassName:
-                              'text-muted-foreground py-2.5 whitespace-normal break-words',
-                            cell: (tier: DynamicPricingTier) => {
-                              if ('unitPrices' in tier) {
-                                return (
-                                  taskTierConditions(
-                                    tier as ParsedTaskTier,
-                                    props.model.billing_usage_schema,
-                                    i18n.language,
-                                    t
-                                  ) ||
-                                  t(
-                                    dynamicTiers.length > 1
-                                      ? 'Other cases'
-                                      : 'All requests'
+                {compactMatrix ? (
+                  <CompactTaskPricingTable
+                    matrix={compactMatrix}
+                    schema={props.model.billing_usage_schema ?? {}}
+                    priceFields={priceFields}
+                    formattedPricesByTier={formattedPricesByTier}
+                  />
+                ) : (
+                  <StaticDataTable
+                    className='rounded-none border-0'
+                    tableClassName='text-sm'
+                    headerRowClassName='hover:bg-transparent'
+                    data={dynamicTiers}
+                    getRowKey={(tier, tierIndex) =>
+                      `${group}-${tier.label}-${tierIndex}`
+                    }
+                    columns={[
+                      ...(hasSimpleTaskPricing(props.model)
+                        ? []
+                        : [
+                            {
+                              id: 'tier',
+                              header: props.model.billing_usage_schema
+                                ? t('Applicable conditions')
+                                : t('Tier'),
+                              className: thClass,
+                              cellClassName:
+                                'text-muted-foreground py-2.5 whitespace-normal break-words',
+                              cell: (tier: DynamicPricingTier) => {
+                                if ('unitPrices' in tier) {
+                                  return (
+                                    taskTierConditions(
+                                      tier as ParsedTaskTier,
+                                      props.model.billing_usage_schema,
+                                      i18n.language,
+                                      t
+                                    ) ||
+                                    t(
+                                      dynamicTiers.length > 1
+                                        ? 'Other cases'
+                                        : 'All requests'
+                                    )
                                   )
-                                )
-                              }
-                              if (tier.conditionText) {
-                                return `${tier.label}: ${formatBillingCondition(tier.conditionText, t, i18n.language) ?? tier.conditionText}`
-                              }
-                              return tier.label || t('Default')
+                                }
+                                if (tier.conditionText) {
+                                  return `${tier.label}: ${formatBillingCondition(tier.conditionText, t, i18n.language) ?? tier.conditionText}`
+                                }
+                                return tier.label || t('Default')
+                              },
                             },
-                          },
-                        ]),
-                    ...priceFields.map((fieldEntry) => {
-                      const unitLabelKey =
-                        getDynamicPriceUnitLabelKey(fieldEntry)
-                      let unitLabel = taskUsageUnitLabel(
-                        fieldEntry,
-                        i18n.language,
-                        unitLabelKey ? t(unitLabelKey) : ''
-                      )
-                      if (!unitLabel && hasRequestPrice) {
-                        unitLabel = t('{{unit}} tokens', {
-                          unit: tokenUnitLabel,
-                        })
-                      }
-                      const fieldLabel =
-                        fieldEntry.labelKind === 'schema' ? (
-                          <DynamicPriceEntryLabel entry={fieldEntry} />
-                        ) : (
-                          t(fieldEntry.shortLabel)
+                          ]),
+                      ...priceFields.map((fieldEntry) => {
+                        const unitLabelKey =
+                          getDynamicPriceUnitLabelKey(fieldEntry)
+                        let unitLabel = taskUsageUnitLabel(
+                          fieldEntry,
+                          i18n.language,
+                          unitLabelKey ? t(unitLabelKey) : ''
                         )
-                      return {
-                        id: fieldEntry.field,
-                        header: unitLabel ? (
-                          <>
-                            {fieldLabel}
-                            {` / ${unitLabel}`}
-                          </>
-                        ) : (
-                          fieldLabel
-                        ),
-                        className: `${thClass} text-right`,
-                        cellClassName: 'py-2.5 text-right font-mono',
-                        cell: (tier: (typeof dynamicTiers)[number]) =>
-                          formattedPricesByTier
-                            .get(tier)
-                            ?.get(fieldEntry.field) ?? '-',
-                      }
-                    }),
-                  ]}
-                />
+                        if (!unitLabel && hasRequestPrice) {
+                          unitLabel = t('{{unit}} tokens', {
+                            unit: tokenUnitLabel,
+                          })
+                        }
+                        const fieldLabel =
+                          fieldEntry.labelKind === 'schema' ? (
+                            <DynamicPriceEntryLabel entry={fieldEntry} />
+                          ) : (
+                            t(fieldEntry.shortLabel)
+                          )
+                        return {
+                          id: fieldEntry.field,
+                          header: unitLabel ? (
+                            <>
+                              {fieldLabel}
+                              {` / ${unitLabel}`}
+                            </>
+                          ) : (
+                            fieldLabel
+                          ),
+                          className: `${thClass} text-right`,
+                          cellClassName: 'py-2.5 text-right font-mono',
+                          cell: (tier: (typeof dynamicTiers)[number]) =>
+                            formattedPricesByTier
+                              .get(tier)
+                              ?.get(fieldEntry.field) ?? '-',
+                        }
+                      }),
+                    ]}
+                  />
+                )}
                 {usageExampleRows.length > 0 ? (
                   <div className='border-t'>
                     <div className='text-muted-foreground px-3 pt-2 text-[10px] font-medium tracking-wider uppercase'>
@@ -1338,13 +1457,15 @@ function ProviderGroupPricingSection(
               </div>
             )
           })}
-          <p className='text-muted-foreground/40 mt-1.5 text-[10px]'>
-            {dynamicTiers.some(
-              (tier) => 'unitPrices' in tier || tier.billingUnit === 'request'
-            )
-              ? t('Prices shown per usage unit')
-              : `${t('Prices shown per')} ${tokenUnitLabel} tokens`}
-          </p>
+          {!compactSingleGroup && (
+            <p className='text-muted-foreground/40 mt-1.5 text-[10px]'>
+              {dynamicTiers.some(
+                (tier) => 'unitPrices' in tier || tier.billingUnit === 'request'
+              )
+                ? t('Prices shown per usage unit')
+                : `${t('Prices shown per')} ${tokenUnitLabel} tokens`}
+            </p>
+          )}
         </div>
       </section>
     )
@@ -1503,6 +1624,8 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
     props.model.billing_expr,
     props.model.billing_usage_schema
   )
+  const compactTaskPricingEnabled =
+    getCompactTaskPricingMatrixForModel(props.model) !== null
   const showBasePrices =
     !props.model.billing_usage_schema ||
     simpleTaskPricing ||
@@ -1543,7 +1666,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
                 showRechargePrice={showRechargePrice}
               />
             )}
-            {isDynamic && !simpleTaskPricing && (
+            {isDynamic && !simpleTaskPricing && !compactTaskPricingEnabled && (
               <DynamicPricingBreakdown
                 billingExpr={props.model.billing_expr}
                 usageSchema={props.model.billing_usage_schema}
