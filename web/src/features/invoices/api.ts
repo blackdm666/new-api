@@ -253,15 +253,35 @@ export async function downloadInvoiceFile(
   inline = false
 ): Promise<void> {
   const fileUrl = `/api/invoice/requests/${invoiceId}/files/${file.id}${inline ? '?inline=1' : ''}`
-  if (inline) {
-    window.open(fileUrl, '_blank', 'noopener,noreferrer')
-  } else {
+  // Do not navigate to the endpoint directly: dashboard authentication is
+  // carried in the Authorization header, which a browser navigation/download
+  // cannot attach. Fetching through the shared axios client also preserves its
+  // normal token refresh behavior.
+  const previewWindow = inline
+    ? window.open('about:blank', '_blank', 'noopener,noreferrer')
+    : null
+  try {
+    const response = await api.get<Blob>(fileUrl, {
+      ...invoiceRequestConfig,
+      responseType: 'blob',
+    })
+    const objectUrl = URL.createObjectURL(response.data)
+    if (inline && previewWindow) {
+      previewWindow.location.href = objectUrl
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+      return
+    }
+
     const anchor = document.createElement('a')
-    anchor.href = fileUrl
+    anchor.href = objectUrl
     anchor.download = file.file_name
     document.body.appendChild(anchor)
     anchor.click()
     anchor.remove()
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
+  } catch (error) {
+    previewWindow?.close()
+    throw error
   }
 }
 
