@@ -1301,18 +1301,6 @@ function ProviderGroupPricingSection(
               formattedPricesByGroup.get(group) ??
               new Map<DynamicPricingTier, Map<string, string>>()
 
-            if (compactSingleGroup) {
-              return (
-                <CompactTaskPricingTable
-                  key={group}
-                  matrix={compactMatrix}
-                  schema={props.model.billing_usage_schema ?? {}}
-                  priceFields={priceFields}
-                  formattedPricesByTier={formattedPricesByTier}
-                />
-              )
-            }
-
             return (
               <div key={group} className='overflow-hidden rounded-lg border'>
                 <div className='bg-muted/20 flex items-center justify-between gap-3 border-b px-3 py-2'>

@@ -445,7 +445,7 @@ it('uses the compact resolution and reference-input matrix when recognized', asy
           billing_usage_schema: videoSchema,
         }}
         groupRatio={{ default: 2 }}
-        usableGroup={{ default: { desc: '', ratio: 2 } }}
+        usableGroup={{ default: { desc: 'Default group', ratio: 2 } }}
         endpointMap={{}}
         autoGroups={[]}
         priceRate={1}
@@ -464,6 +464,11 @@ it('uses the compact resolution and reference-input matrix when recognized', asy
   expect(screen.queryByText('Applicable conditions')).not.toBeInTheDocument()
   expect(screen.queryByText('Base Price')).not.toBeInTheDocument()
   expect(screen.queryByText('Pricing by Group')).not.toBeInTheDocument()
+  expect(screen.getAllByText('default', { exact: true }).length).toBeGreaterThan(
+    1
+  )
+  expect(screen.getByText('Default group')).toBeVisible()
+  expect(screen.getByText('2x')).toBeVisible()
   expect(screen.getAllByText('$20').length).toBeGreaterThan(0)
   expect(screen.getAllByText('$12').length).toBeGreaterThan(0)
   expect(screen.getAllByText(/\/ Per 1M/).length).toBeGreaterThan(0)
