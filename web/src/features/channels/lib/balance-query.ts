@@ -16,6 +16,7 @@ import type {
 
 export const CHANNEL_TYPE_SUB2_API = 59
 export const CHANNEL_TYPE_NEW_API = 60
+export const DEFAULT_LOW_BALANCE_THRESHOLD = '10'
 
 export const BALANCE_QUERY_MODE_OPTIONS: Array<{
   value: ChannelBalanceQueryMode
@@ -185,7 +186,8 @@ export function normalizeBalanceQueryConfig(
       Math.max(1, Math.trunc(Number(config.refresh_minutes || 15)))
     ),
     low_balance_alert: config.low_balance_alert === true,
-    low_balance_threshold: config.low_balance_threshold?.trim() || '',
+    low_balance_threshold:
+      config.low_balance_threshold?.trim() || DEFAULT_LOW_BALANCE_THRESHOLD,
   }
   if (mode !== 'custom') {
     if (mode === 'auto') {

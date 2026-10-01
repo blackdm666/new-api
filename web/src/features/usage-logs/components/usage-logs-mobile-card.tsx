@@ -179,6 +179,12 @@ function TaskLogsCard<TData>({
             primaryOnly={field.primaryOnly}
           />
         ))}
+        {cells.has('official_task_id') && (
+          <SummaryField
+            label={t('Official Task ID')}
+            cell={cells.get('official_task_id')}
+          />
+        )}
         <SummaryField
           label={t('Details')}
           cell={cells.get('fail_reason')}

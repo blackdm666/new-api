@@ -492,6 +492,27 @@ export function parseTaskResult() { return {}; }
 				t.Skip("set " + dialect.env + " to run this database")
 			}
 			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
+			t.Run("compact_pricing_display_defaults_off_and_can_be_toggled", func(t *testing.T) {
+				item := &model.Model{ModelName: "matrix-compact-display", Status: 1}
+				require.NoError(t, item.Insert())
+				t.Cleanup(func() {
+					require.NoError(t, db.Unscoped().Delete(&model.Model{}, item.Id).Error)
+				})
+
+				var loaded model.Model
+				require.NoError(t, db.First(&loaded, item.Id).Error)
+				assert.Zero(t, loaded.CompactPricingDisplay)
+
+				item.CompactPricingDisplay = 1
+				require.NoError(t, item.Update())
+				require.NoError(t, db.First(&loaded, item.Id).Error)
+				assert.Equal(t, 1, loaded.CompactPricingDisplay)
+
+				item.CompactPricingDisplay = 0
+				require.NoError(t, item.Update())
+				require.NoError(t, db.First(&loaded, item.Id).Error)
+				assert.Zero(t, loaded.CompactPricingDisplay)
+			})
 			t.Run("explicit_fixed_units_survive_pricing_snapshot_writes", func(t *testing.T) {
 				for _, mode := range []string{billing_setting.BillingModePerRequest, billing_setting.BillingModePerSecond} {
 					name := "matrix-" + mode

@@ -12,8 +12,10 @@ import {
   BALANCE_QUERY_MODE_OPTIONS,
   buildBalanceQueryPreviewURL,
   createBalanceQueryConfig,
+  DEFAULT_LOW_BALANCE_THRESHOLD,
   getEffectiveBalanceQueryPath,
   getGCPTrialBillingTable,
+  normalizeBalanceQueryConfig,
   parseBalanceQueryConfig,
   stringifyBalanceQueryConfig,
   validateBalanceQueryConfig,
@@ -169,6 +171,12 @@ describe('channel balance query configuration', () => {
 
   test('defaults unconfigured channels to disabled and validates automatic alerts', () => {
     expect(parseBalanceQueryConfig('').mode).toBe('disabled')
+    expect(
+      normalizeBalanceQueryConfig({
+        mode: 'new_api',
+        low_balance_alert: true,
+      }).low_balance_threshold
+    ).toBe(DEFAULT_LOW_BALANCE_THRESHOLD)
 
     const config = createBalanceQueryConfig('new_api')
     config.auth = {

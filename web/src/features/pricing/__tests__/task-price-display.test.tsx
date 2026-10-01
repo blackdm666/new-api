@@ -428,6 +428,47 @@ const videoSchema: BillingUsageSchema = {
 const videoExpression =
   'u("video_input") == "none" ? tier("none", u("tokens") * 10 / 1000000) : tier("video", u("tokens") * 6 / 1000000)'
 
+it('uses the compact resolution and reference-input matrix when recognized', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <ModelDetailsContent
+        model={{
+          ...model,
+          model_name: 'seedance-compact',
+          billing_mode: 'tiered_expr',
+          billing_expr: videoExpression,
+          billing_usage_schema: videoSchema,
+        }}
+        groupRatio={{ default: 2 }}
+        usableGroup={{ default: { desc: '', ratio: 2 } }}
+        endpointMap={{}}
+        autoGroups={[]}
+        priceRate={1}
+        usdExchangeRate={1}
+        tokenUnit='M'
+      />
+    </QueryClientProvider>
+  )
+
+  expect(
+    screen.getAllByRole('columnheader', { name: 'Output resolution' })
+  ).toHaveLength(1)
+  expect(
+    screen.getAllByRole('columnheader', { name: 'No reference video' })
+  ).toHaveLength(1)
+  expect(screen.queryByText('Applicable conditions')).not.toBeInTheDocument()
+  expect(screen.queryByText('Base Price')).not.toBeInTheDocument()
+  expect(screen.queryByText('Pricing by Group')).not.toBeInTheDocument()
+  expect(screen.getAllByText('$20').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('$12').length).toBeGreaterThan(0)
+  expect(screen.getAllByText(/\/ Per 1M/).length).toBeGreaterThan(0)
+})
+
 it('uses plugin option labels and infers a unique fallback without expanding unrelated fields', async () => {
   render(
     <DynamicPricingBreakdown

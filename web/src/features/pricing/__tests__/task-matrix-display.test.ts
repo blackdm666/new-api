@@ -24,8 +24,10 @@ import { parseTaskTiersFromExpr } from '../lib/billing-expr'
 import { evaluateBillingExpression } from '../lib/billing-expression/runtime'
 import { getDynamicPriceEntries } from '../lib/dynamic-price'
 import {
+  getTaskCompactPricingMatrix,
   getTaskMatrixDisplayTiers,
   getTaskPricingDisplayTiers,
+  taskCompactMatrixCellKey,
 } from '../lib/task-matrix-display'
 import type { BillingUsageSchema } from '../types'
 
@@ -167,6 +169,36 @@ describe('conditional task price display', () => {
 })
 
 describe('task matrix marketplace display rows', () => {
+  test('builds a two-dimensional compact matrix from two enum fields', () => {
+    const schema: BillingUsageSchema = {
+      tokens: { type: 'number', unit: 'token' },
+      resolution: { enum: ['480p', '720p'] },
+      video_input: { enum: ['none', 'video'] },
+    }
+    const expression =
+      'u("video_input") == "none" ? tier("no-video", u("tokens") * 70 / 1000000) : tier("video", u("tokens") * 42 / 1000000)'
+    const matrix = getTaskCompactPricingMatrix(expression, schema)
+
+    expect(matrix).not.toBeNull()
+    expect(matrix?.rowField).toBe('resolution')
+    expect(matrix?.columnField).toBe('video_input')
+    expect(matrix?.rowValues).toEqual(['480p', '720p'])
+    expect(matrix?.columnValues).toEqual(['none', 'video'])
+    expect(
+      matrix?.cells.get(taskCompactMatrixCellKey('720p', 'video'))?.unitPrices
+        .tokens
+    ).toBe(42)
+  })
+
+  test('does not opt unsupported schemas into the compact matrix', () => {
+    expect(
+      getTaskCompactPricingMatrix(
+        'tier("base", u("seconds") * 0.4)',
+        resolutionSchema
+      )
+    ).toBeNull()
+  })
+
   test('expands a uniform flat expression into every enum combination', () => {
     const rows = getTaskMatrixDisplayTiers(
       'tier("base", u("seconds") * 0.4)',
@@ -193,6 +225,69 @@ describe('task matrix marketplace display rows', () => {
         unitPrices: { seconds: 0.4 },
       },
     ])
+  })
+
+  test('expands shared prices encoded inside tier arithmetic', () => {
+    const schema: BillingUsageSchema = {
+      tokens: { type: 'number', unit: 'token' },
+      resolution: { enum: ['480p', '720p', '1080p', '4k'] },
+      video_input: { enum: ['none', 'video'] },
+    }
+    const expression =
+      'tier("base", u("tokens") * (u("resolution") == "1080p" ? 10 : 5) * (u("video_input") == "video" ? 0.6 : 1) / 1000000)'
+
+    const rows = getTaskMatrixDisplayTiers(expression, schema)
+    expect(rows).toHaveLength(8)
+    expect(rows?.map((row) => row.unitPrices.tokens)).toEqual([
+      5, 3, 5, 3, 10, 6, 5, 3,
+    ])
+
+    const matrix = getTaskCompactPricingMatrix(expression, schema)
+    expect(matrix?.cells.size).toBe(8)
+    expect(
+      matrix?.cells.get(taskCompactMatrixCellKey('720p', 'video'))?.unitPrices
+        .tokens
+    ).toBe(3)
+  })
+
+  test('renders the full matrix behind an upstream usage nil guard', () => {
+    const schema: BillingUsageSchema = {
+      upstreamUnits: { type: 'number', unit: 'token' },
+      resolution: { enum: ['480p', '720p', '1080p', '4K'] },
+      video_input: { enum: ['present', 'absent'] },
+    }
+    const expression =
+      'u("upstreamUnits") != nil ? tier("base", u("upstreamUnits") * (u("resolution") == "1080p" ? 31 : (u("resolution") == "4K" ? 16 : 28)) * (u("video_input") == "present" ? 1 : (u("resolution") == "1080p" ? 51 / 31 : (u("resolution") == "4K" ? 26 / 16 : 46 / 28))) / 1000000) : tier("estimate", 0)'
+
+    const rows = getTaskMatrixDisplayTiers(expression, schema)
+    expect(rows).toHaveLength(8)
+    expect(rows?.every((row) => !row.conditionText)).toBe(true)
+
+    const prices = new Map(
+      rows?.map((row) => [
+        `${row.conditions.find((condition) => condition.field === 'resolution')?.value}:${row.conditions.find((condition) => condition.field === 'video_input')?.value}`,
+        row.unitPrices.upstreamUnits,
+      ])
+    )
+    expect(prices).toEqual(
+      new Map([
+        ['480p:present', 28],
+        ['480p:absent', 46],
+        ['720p:present', 28],
+        ['720p:absent', 46],
+        ['1080p:present', 31],
+        ['1080p:absent', 51],
+        ['4K:present', 16],
+        ['4K:absent', 26],
+      ])
+    )
+
+    const matrix = getTaskCompactPricingMatrix(expression, schema)
+    expect(matrix?.cells.size).toBe(8)
+    expect(
+      matrix?.cells.get(taskCompactMatrixCellKey('4K', 'absent'))?.unitPrices
+        .upstreamUnits
+    ).toBe(26)
   })
 
   test('expands a full non-uniform partition in canonical order with combination labels', () => {

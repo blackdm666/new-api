@@ -262,7 +262,7 @@ describe('balance query editor dialog', () => {
     fireEvent.click(
       screen.getByRole('switch', { name: 'Low balance administrator alert' })
     )
-    expect(screen.getByLabelText('Low balance threshold')).toBeVisible()
+    expect(screen.getByLabelText('Low balance threshold')).toHaveValue('10')
   })
 
   test('shows the Vertex trial credit activation steps and derived table', () => {

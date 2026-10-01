@@ -427,6 +427,11 @@ describe('metadata editing', () => {
     expect(vendorInput).toHaveValue('Another vendor')
     await user.clear(description)
     await user.type(description, 'Updated metadata')
+    const compactPricingSwitch = screen.getByRole('switch', {
+      name: 'Optimized pricing display',
+    })
+    expect(compactPricingSwitch).not.toBeChecked()
+    await user.click(compactPricingSwitch)
     await user.click(
       screen.getByRole('button', { name: /Update Model|Save metadata/ })
     )
@@ -441,6 +446,7 @@ describe('metadata editing', () => {
       model_name: 'example-model',
       vendor_id: 4,
       endpoints: '',
+      compact_pricing_display: 1,
     })
   })
   it('keeps metadata drafts while saving pricing independently and preserves the price draft across tabs', async () => {

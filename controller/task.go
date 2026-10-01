@@ -641,6 +641,7 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 				UpstreamTaskID: task.PrivateData.UpstreamTaskID,
 				NodeName:       task.PrivateData.NodeName,
 			}
+			item.OfficialTaskID = officialTaskID(task)
 			if execution := task.PrivateData.Execution; execution != nil {
 				if snapshot := execution.TaskPlugin; snapshot != nil {
 					rootInfo.TaskPlugin = &dto.TaskPluginRuntimeInfo{
@@ -658,6 +659,34 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 		result[i] = item
 	}
 	return result
+}
+
+func officialTaskID(task *model.Task) string {
+	if task == nil {
+		return ""
+	}
+
+	var snapshot struct {
+		ID     string `json:"id"`
+		TaskID string `json:"task_id"`
+		Data   struct {
+			ID     string `json:"id"`
+			TaskID string `json:"task_id"`
+		} `json:"data"`
+	}
+	if len(task.Data) > 0 && common.Unmarshal(task.Data, &snapshot) == nil {
+		for _, candidate := range []string{
+			snapshot.ID,
+			snapshot.TaskID,
+			snapshot.Data.ID,
+			snapshot.Data.TaskID,
+		} {
+			if candidate = strings.TrimSpace(candidate); candidate != "" {
+				return candidate
+			}
+		}
+	}
+	return strings.TrimSpace(task.PrivateData.UpstreamTaskID)
 }
 
 func taskFailReasonIsLegacyResultURL(value string) bool {
