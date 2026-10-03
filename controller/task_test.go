@@ -118,7 +118,9 @@ func TestGetTaskPreviewURLAllowsAdminToOpenAnotherUsersDirectResult(t *testing.T
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	require.True(t, response.Success)
-	assert.Equal(t, task.PrivateData.ResultURL, response.Data.URL)
+	assert.NotEqual(t, task.PrivateData.ResultURL, response.Data.URL)
+	assert.NotContains(t, response.Data.URL, "account.r2.cloudflarestorage.com")
+	assert.Contains(t, response.Data.URL, "/v1/tasks/"+task.TaskID+"/artifacts/video/content")
 	assert.Zero(t, response.Data.ExpiresIn)
 
 	userRecorder := httptest.NewRecorder()
@@ -170,10 +172,12 @@ func TestGetTaskPreviewURLExtractsAndPersistsUpstreamR2Result(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	require.True(t, response.Success)
-	assert.Equal(t, directURL, response.Data.URL)
+	assert.NotEqual(t, directURL, response.Data.URL)
+	assert.NotContains(t, response.Data.URL, "account.r2.cloudflarestorage.com")
+	assert.Contains(t, response.Data.URL, "/v1/tasks/"+task.TaskID+"/artifacts/video/content")
 
 	var stored model.Task
 	require.NoError(t, db.First(&stored, task.ID).Error)
-	assert.Equal(t, directURL, stored.PrivateData.ResultURL)
+	assert.Equal(t, task.PrivateData.ResultURL, stored.PrivateData.ResultURL)
 	assert.Empty(t, stored.PrivateData.ResultStorageKey)
 }

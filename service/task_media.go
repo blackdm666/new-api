@@ -48,7 +48,7 @@ func PublicTaskVideoURL(task *model.Task) (string, error) {
 // PresentPublicTaskVideo applies one delivery policy after any model renderer.
 // Provider metadata is retained; known result URL slots point to our one copy.
 func PresentPublicTaskVideo(payload []byte, task *model.Task) ([]byte, error) {
-	if !TaskMediaPublicEnabled() || task == nil || task.Status != model.TaskStatusSuccess {
+	if task == nil || task.Status != model.TaskStatusSuccess {
 		return payload, nil
 	}
 	publicURL := TaskVideoDeliveryURL(context.Background(), task)

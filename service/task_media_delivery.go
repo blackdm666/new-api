@@ -2,9 +2,7 @@ package service
 
 import (
 	"context"
-	"net/http"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -12,24 +10,17 @@ import (
 )
 
 // TaskVideoDeliveryURL is presentation-only: it never archives, renews or
-// changes the provider snapshot. Internal download code still uses GetResultURL.
-func TaskVideoDeliveryURL(ctx context.Context, task *model.Task) string {
+// changes the provider snapshot. It never returns a provider URL directly;
+// internal download code still uses GetResultURL.
+func TaskVideoDeliveryURL(_ context.Context, task *model.Task) string {
 	if task == nil {
 		return ""
 	}
-	if !TaskMediaPublicEnabled() || task.Status != model.TaskStatusSuccess {
-		return task.GetResultURL()
+	if task.Status != model.TaskStatusSuccess {
+		return ""
 	}
 	if publicURL, err := PublicTaskVideoURL(task); err == nil {
 		return publicURL
-	}
-	if task.PrivateData.ResultStorageKey == "" {
-		source := ResolveTaskVideoResultURL(task, task.GetResultURL())
-		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		defer cancel()
-		if direct, err := taskVideoURLCanOpenDirectly(probeCtx, task, source); err == nil && direct {
-			return source
-		}
 	}
 	fallback, err := BuildTaskArtifactContentURL(task.TaskID, "video")
 	if err != nil {
@@ -40,6 +31,8 @@ func TaskVideoDeliveryURL(ctx context.Context, task *model.Task) string {
 
 // TaskArtifactDeliverySource is an already validated plugin content descriptor.
 // Credentials and request bodies never enter public response construction.
+// The provider URL is used only for exact-source matching to a stored object;
+// it is never returned directly to a client.
 type TaskArtifactDeliverySource struct {
 	URL       string
 	Method    string
@@ -72,13 +65,8 @@ func TaskArtifactDeliveryURL(ctx context.Context, task *model.Task, artifact typ
 	}
 	// Generic image/audio storage is not implemented. Never infer their mapping
 	// from a video result, or bypass their original access boundary.
-	if artifact.Type != "video" || !singleVideo || !source.Anonymous || (source.Method != http.MethodGet && source.Method != http.MethodHead) {
-		return fallback
-	}
-	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	if direct, err := taskVideoURLCanOpenDirectly(probeCtx, task, source.URL); err == nil && direct {
-		return source.URL
-	}
+	// Do not redirect to or expose a provider URL. The artifact capability URL
+	// keeps the browser on the NewAPI origin and the content endpoint proxies
+	// the provider response server-side.
 	return fallback
 }

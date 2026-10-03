@@ -72,34 +72,49 @@ func TestTaskArtifactDeliveryArchivedStringResults(t *testing.T) {
 	}
 }
 
-func TestTaskArtifactDeliveryKeepsAnonymousTrustedSourceOnly(t *testing.T) {
+func TestTaskArtifactDeliveryNeverReturnsProviderSource(t *testing.T) {
 	for _, tc := range []struct {
-		name, source, method     string
-		anonymous, probe, direct bool
+		name, source, method string
+		anonymous            bool
 	}{
-		{"official", "https://official.example/result.mp4?signature=original", "GET", true, true, true},
-		{"head", "https://official.example/result.mp4", "HEAD", true, true, true},
-		{"auth", "https://official.example/result.mp4", "GET", false, true, false},
-		{"forbidden", "https://official.example/result.mp4", "GET", true, false, false},
-		{"untrusted", "https://unknown.example/result.mp4", "GET", true, true, false},
-		{"plain-http", "http://official.example/result.mp4", "GET", true, true, false},
-		{"credential", "https://official.example/result.mp4?api_key=secret", "GET", true, true, false},
-		{"post", "https://official.example/result.mp4", "POST", true, true, false},
+		{"official", "https://official.example/result.mp4?signature=original", "GET", true},
+		{"head", "https://official.example/result.mp4", "HEAD", true},
+		{"auth", "https://official.example/result.mp4", "GET", false},
+		{"forbidden", "https://official.example/result.mp4", "GET", true},
+		{"untrusted", "https://unknown.example/result.mp4", "GET", true},
+		{"plain-http", "http://official.example/result.mp4", "GET", true},
+		{"credential", "https://official.example/result.mp4?api_key=secret", "GET", true},
+		{"post", "https://official.example/result.mp4", "POST", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			task := deliveryTask(t)
 			task.PrivateData.ResultStorageKey = ""
-			previous := taskVideoDirectProbe
-			taskVideoDirectProbe = func(context.Context, string) (bool, error) { return tc.probe, nil }
-			t.Cleanup(func() { taskVideoDirectProbe = previous })
 			got := TaskArtifactDeliveryURL(context.Background(), task, types.TaskArtifact{Key: "video", Type: "video"}, true, &TaskArtifactDeliverySource{URL: tc.source, Method: tc.method, Anonymous: tc.anonymous}, "capability")
-			if tc.direct {
-				require.Equal(t, tc.source, got)
-			} else {
-				require.Equal(t, "capability", got)
-			}
+			require.NotEqual(t, tc.source, got)
+			require.NotContains(t, got, "official.example")
+			require.NotContains(t, got, "unknown.example")
 		})
 	}
+}
+
+func TestTaskVideoDeliveryNeverReturnsProviderSource(t *testing.T) {
+	task := deliveryTask(t)
+	task.PrivateData.ResultStorageKey = ""
+	got := TaskVideoDeliveryURL(context.Background(), task)
+	require.NotContains(t, got, "official.example")
+	require.NotContains(t, got, "gateway.example")
+	require.Contains(t, got, "/v1/tasks/task_delivery/artifacts/video/content")
+}
+
+func TestVideoPresentationMasksProviderURLWhenPublicMediaIsDisabled(t *testing.T) {
+	task := deliveryTask(t)
+	task.PrivateData.ResultStorageKey = ""
+	t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "false")
+
+	payload, err := PresentPublicTaskVideo([]byte(`{"url":"https://official.example/result.mp4","content":{"video_url":"https://official.example/result.mp4"}}`), task)
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), "official.example")
+	require.Contains(t, string(payload), "/v1/tasks/task_delivery/artifacts/video/content")
 }
 
 func TestPublicVideoPresentationKeepsSnapshotAndOriginalExpiry(t *testing.T) {

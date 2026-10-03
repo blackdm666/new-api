@@ -220,17 +220,11 @@ func TestDashboardTaskArtifactsReturnsArchivedPublicURLWithoutRenewal(t *testing
 	assert.Equal(t, int64(20), stored.FinishTime)
 }
 
-func TestDashboardTaskArtifactsReturnsTrustedDirectURL(t *testing.T) {
+func TestDashboardTaskArtifactsKeepsProviderURLPrivate(t *testing.T) {
 	task := setupGenericTaskTest(t)
 	task.Action = constant.TaskActionTextToVideo
 	task.PrivateData.ResultURL = "https://official-media.example/video.mp4?signature=short-lived"
 	require.NoError(t, model.DB.Save(task).Error)
-
-	previousPreparePreviewURL := prepareTaskVideoPreviewURL
-	prepareTaskVideoPreviewURL = func(context.Context, *model.Task) (string, int64, error) {
-		return task.PrivateData.ResultURL, 0, nil
-	}
-	t.Cleanup(func() { prepareTaskVideoPreviewURL = previousPreparePreviewURL })
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -250,7 +244,9 @@ func TestDashboardTaskArtifactsReturnsTrustedDirectURL(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.True(t, response.Success)
-	assert.Equal(t, task.PrivateData.ResultURL, response.Data.LegacyContentURL)
+	assert.NotEqual(t, task.PrivateData.ResultURL, response.Data.LegacyContentURL)
+	assert.NotContains(t, response.Data.LegacyContentURL, "official-media.example")
+	assert.Contains(t, response.Data.LegacyContentURL, "/v1/tasks/"+task.TaskID+"/artifacts/video/content")
 }
 
 func TestDashboardTaskArtifactsKeepsCapabilityForCachedVideo(t *testing.T) {
@@ -268,13 +264,6 @@ func TestDashboardTaskArtifactsKeepsCapabilityForCachedVideo(t *testing.T) {
 	task.PrivateData.ResultStorageKey = "task-videos/cached.mp4"
 	task.PrivateData.ResultStorageKind = "s3"
 	require.NoError(t, model.DB.Save(task).Error)
-
-	previousPreparePreviewURL := prepareTaskVideoPreviewURL
-	prepareTaskVideoPreviewURL = func(context.Context, *model.Task) (string, int64, error) {
-		t.Fatal("cached videos must not probe or expose their storage URL")
-		return "", 0, nil
-	}
-	t.Cleanup(func() { prepareTaskVideoPreviewURL = previousPreparePreviewURL })
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

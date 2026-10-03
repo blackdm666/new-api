@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -37,7 +36,6 @@ var (
 	errTaskArtifactPluginUnavailable = errors.New("task artifact plugin unavailable")
 	errTaskArtifactPlugin            = errors.New("task artifact plugin error")
 	getTaskVideoPreviewURL           = service.GetTaskVideoPreviewURL
-	prepareTaskVideoPreviewURL       = service.PrepareTaskVideoPreviewURL
 )
 
 func GetTask(c *gin.Context) {
@@ -147,35 +145,7 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 // buildLegacyTaskContentURL shares public delivery with API/plugin outputs.
 // With public delivery disabled the original capability policy is preserved.
 func buildLegacyTaskContentURL(c *gin.Context, task *model.Task) (string, error) {
-	if service.TaskMediaPublicEnabled() {
-		return service.TaskVideoDeliveryURL(c.Request.Context(), task), nil
-	}
-	capabilityURL, err := service.BuildTaskArtifactContentURL(task.TaskID, "video")
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(task.PrivateData.ResultStorageKey) != "" {
-		return capabilityURL, nil
-	}
-
-	previewURL, _, prepareErr := prepareTaskVideoPreviewURL(c.Request.Context(), task)
-	if prepareErr != nil || strings.TrimSpace(task.PrivateData.ResultStorageKey) != "" {
-		return capabilityURL, nil
-	}
-	if isSafeDirectTaskVideoURL(previewURL) {
-		return strings.TrimSpace(previewURL), nil
-	}
-	return capabilityURL, nil
-}
-
-func isSafeDirectTaskVideoURL(rawURL string) bool {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" || len(rawURL) > 64<<10 || strings.ContainsAny(rawURL, "\r\n\\") {
-		return false
-	}
-	parsed, err := url.Parse(rawURL)
-	return err == nil && parsed != nil && parsed.Scheme == "https" &&
-		parsed.Host != "" && parsed.Hostname() != "" && parsed.User == nil && parsed.Fragment == ""
+	return service.TaskVideoDeliveryURL(c.Request.Context(), task), nil
 }
 
 // legacySunoAudioClips projects a pre-plugin Suno task's persisted snapshot
@@ -564,12 +534,12 @@ func GetTaskPreviewURL(c *gin.Context) {
 		return
 	}
 
-	previewURL, expiresIn, err := service.PrepareTaskVideoPreviewURL(c.Request.Context(), task)
-	if err != nil {
-		common.ApiError(c, err)
+	previewURL := service.TaskVideoDeliveryURL(c.Request.Context(), task)
+	if strings.TrimSpace(previewURL) == "" {
+		common.ApiError(c, errors.New("task video preview is unavailable"))
 		return
 	}
-	common.ApiSuccess(c, gin.H{"url": previewURL, "expires_in": expiresIn})
+	common.ApiSuccess(c, gin.H{"url": previewURL, "expires_in": 0})
 }
 
 func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskDto {
