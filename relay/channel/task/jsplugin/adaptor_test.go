@@ -120,6 +120,94 @@ export function parseSubmitResponse(ctx,r){return {taskId:"1"}} export function 
 	assert.Equal(t, "image-bytes", string(content))
 }
 
+func TestTaskAdaptorRunsSDGOStyleFilePreflightBeforeSubmit(t *testing.T) {
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/presign":
+			calls = append(calls, "presign")
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "Bearer fixture-key", r.Header.Get("Authorization"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"data":{"source":"tos://fixture/image.png","upload_url":"http://`+r.Host+`/upload","headers":{"Content-Type":"image/png"}}}`)
+		case "/upload":
+			calls = append(calls, "upload")
+			assert.Equal(t, http.MethodPut, r.Method)
+			assert.Empty(t, r.Header.Get("Authorization"))
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			assert.Equal(t, "image-bytes", string(body))
+			w.WriteHeader(http.StatusOK)
+		case "/submit":
+			calls = append(calls, "submit")
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "Bearer fixture-key", r.Header.Get("Authorization"))
+			var body map[string]any
+			require.NoError(t, common.DecodeJson(r.Body, &body))
+			assert.Equal(t, "asset", body["image_source_mode"])
+			content := body["content"].([]any)
+			image := content[1].(map[string]any)["image_url"].(map[string]any)
+			assert.Equal(t, "tos://fixture/image.png", image["url"])
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"upstream-task"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	source := `
+export const meta = {
+  apiVersion: 1, key: "preflight", name: "Preflight", version: "1.0.0",
+  author: {name: "Test"}, models: ["m"], fetchMode: "per_task",
+  requiredCapabilities: ["task-preflight@1"]
+};
+export function buildPreflightRequest(ctx) {
+  return {url: ctx.baseUrl + "/presign", method: "POST",
+    headers: {Authorization: "Bearer " + ctx.apiKey, "Content-Type": "application/json"},
+    body: {filename: ctx.files[0].filename, size: ctx.files[0].size, content_type: ctx.files[0].mimeType}};
+}
+export function buildUploadRequest(ctx) {
+  return {url: ctx.preflightResponse.data.upload_url, method: "PUT",
+    headers: ctx.preflightResponse.data.headers, bodyType: "file", fileRef: ctx.files[0].ref};
+}
+export function buildSubmitRequest(ctx) {
+  const body = JSON.parse(JSON.stringify(ctx.requestBody));
+  body.content[1].image_url.url = ctx.preflightResponse.data.source;
+  body.image_source_mode = "asset";
+  return {url: ctx.baseUrl + "/submit", method: "POST",
+    headers: {Authorization: "Bearer " + ctx.apiKey, "Content-Type": "application/json"},
+    body};
+}
+export function parseSubmitResponse(ctx, response) { return {taskId: response.body.id}; }
+export function buildQueryRequest() { return {url: "https://example.com"}; }
+export function parseTaskResult() { return {status: "SUCCESS"}; }
+`
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	adaptor := New(plugin)
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:   &relaycommon.ChannelMeta{ChannelBaseUrl: server.URL, ApiKey: "fixture-key", ChannelType: 1001},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+	}
+	adaptor.Init(info)
+	c := newMultipartFileContext(t, "image", "portrait.png", "image/png", []byte("image-bytes"))
+	c.Set("task_request", map[string]any{
+		"model": "m",
+		"content": []any{
+			map[string]any{"type": "text", "text": "fixture"},
+			map[string]any{"type": "image_url", "role": "reference_image", "image_url": map[string]any{
+				"url": map[string]any{"__fileRef": "request_file:image", "encoding": "dataUrl", "mimeType": "image/png"},
+			}},
+		},
+	})
+	body, err := adaptor.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	_, err = adaptor.DoRequest(c, info, body)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"presign", "upload", "submit"}, calls)
+}
+
 func TestTaskAdaptorInlinesJSONFilePlaceholders(t *testing.T) {
 	const fileBytes = "image-bytes"
 	encoded := base64.StdEncoding.EncodeToString([]byte(fileBytes))

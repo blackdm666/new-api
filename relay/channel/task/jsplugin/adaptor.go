@@ -44,6 +44,7 @@ type requestDescriptor struct {
 	Model          string            `json:"model"`
 	RewriteModel   string            `json:"rewriteModel"`
 	BodyType       string            `json:"bodyType"`
+	FileRef        string            `json:"fileRef"`
 	Parts          []requestPart     `json:"parts"`
 }
 
@@ -87,6 +88,10 @@ type TaskAdaptor struct {
 	routeRequest   *pluginruntime.RouteRequestContext
 	requestHeaders map[string]string
 	files          []map[string]any
+	preflightDone  bool
+	preflightBody  any
+	uploadBody     any
+	fileBodies     map[string][]byte
 }
 
 func New(plugin *pluginruntime.LoadedPlugin) *TaskAdaptor { return &TaskAdaptor{plugin: plugin} }
@@ -241,6 +246,46 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if err != nil {
 		return nil, err
 	}
+	return a.buildDescriptorBody(c, descriptor)
+}
+
+func (a *TaskAdaptor) buildDescriptorBody(c *gin.Context, descriptor *requestDescriptor) (io.Reader, error) {
+	var err error
+	if descriptor.BodyType == "file" {
+		if descriptor.FileRef == "" {
+			return nil, fmt.Errorf("file request descriptor is missing fileRef")
+		}
+		if data, ok := a.fileBodies[descriptor.FileRef]; ok {
+			return bytes.NewReader(data), nil
+		}
+		form, parseErr := common.ParseMultipartFormReusable(c)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		defer form.RemoveAll()
+		field, index, validRef := pluginruntime.ParseFileReference(descriptor.FileRef)
+		files := form.File[field]
+		if !validRef || index >= len(files) {
+			return nil, fmt.Errorf("unknown file reference %q", descriptor.FileRef)
+		}
+		file, openErr := files[index].Open()
+		if openErr != nil {
+			return nil, openErr
+		}
+		data, readErr := io.ReadAll(io.LimitReader(file, maxInlineFileBytes()+1))
+		file.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if int64(len(data)) > maxInlineFileBytes() {
+			return nil, fmt.Errorf("file %q exceeds the %d byte limit", descriptor.FileRef, maxInlineFileBytes())
+		}
+		if a.fileBodies == nil {
+			a.fileBodies = make(map[string][]byte)
+		}
+		a.fileBodies[descriptor.FileRef] = data
+		return bytes.NewReader(data), nil
+	}
 	if descriptor.BodyType == "multipart" {
 		form, parseErr := common.ParseMultipartFormReusable(c)
 		if parseErr != nil {
@@ -327,8 +372,163 @@ func maxInlineFileBytes() int64 {
 	return int64(limitMB) << 20
 }
 
+func (a *TaskAdaptor) cacheRequestFiles(c *gin.Context) error {
+	if len(a.files) == 0 {
+		return nil
+	}
+	form, err := common.ParseMultipartFormReusable(c)
+	if err != nil {
+		return err
+	}
+	defer form.RemoveAll()
+	if a.fileBodies == nil {
+		a.fileBodies = make(map[string][]byte)
+	}
+	for _, file := range a.files {
+		ref, _ := file["ref"].(string)
+		field := strings.TrimPrefix(ref, "request_file:")
+		if field == "" {
+			continue
+		}
+		index := 0
+		if base, suffix, found := strings.Cut(field, "#"); found {
+			field = base
+			parsed, parseErr := strconv.Atoi(suffix)
+			if parseErr != nil || parsed < 0 {
+				return fmt.Errorf("invalid file reference %q", ref)
+			}
+			index = parsed
+		}
+		files := form.File[field]
+		if index >= len(files) {
+			return fmt.Errorf("unknown file reference %q", ref)
+		}
+		handle, openErr := files[index].Open()
+		if openErr != nil {
+			return openErr
+		}
+		data, readErr := io.ReadAll(io.LimitReader(handle, maxInlineFileBytes()+1))
+		handle.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if int64(len(data)) > maxInlineFileBytes() {
+			return fmt.Errorf("file %q exceeds the %d byte limit", ref, maxInlineFileBytes())
+		}
+		a.fileBodies[ref] = data
+	}
+	return nil
+}
+
+func decodePreflightBody(resp *http.Response) (any, error) {
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTaskPluginPersistedJSONBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxTaskPluginPersistedJSONBytes {
+		return nil, fmt.Errorf("preflight response exceeds size limit")
+	}
+	var decoded any
+	if len(body) > 0 && common.Unmarshal(body, &decoded) == nil {
+		return decoded, nil
+	}
+	return string(body), nil
+}
+
+func validatePreflightDescriptor(descriptor *requestDescriptor, info *relaycommon.RelayInfo, allowedHosts []string) error {
+	if descriptor == nil || strings.TrimSpace(descriptor.URL) == "" {
+		return fmt.Errorf("plugin returned an empty preflight URL")
+	}
+	if descriptor.ResponseType != "" && descriptor.ResponseType != "json" {
+		return fmt.Errorf("preflight request must use a JSON response")
+	}
+	if err := pluginruntime.ValidateRequestURL(descriptor.URL, info.ChannelBaseUrl, allowedHosts); err != nil {
+		return err
+	}
+	switch descriptor.BodyType {
+	case "", "json", "multipart":
+	case "file":
+		if strings.TrimSpace(descriptor.FileRef) == "" {
+			return fmt.Errorf("file request descriptor is missing fileRef")
+		}
+	default:
+		return fmt.Errorf("unsupported preflight body type %q", descriptor.BodyType)
+	}
+	return nil
+}
+
+func (a *TaskAdaptor) executePreflightDescriptor(c *gin.Context, info *relaycommon.RelayInfo, descriptor *requestDescriptor, allowedHosts []string) (any, error) {
+	if err := validatePreflightDescriptor(descriptor, info, allowedHosts); err != nil {
+		return nil, err
+	}
+	previous := a.submit
+	a.submit = descriptor
+	defer func() { a.submit = previous }()
+	body, err := a.buildDescriptorBody(c, descriptor)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := a.DoRequest(c, info, body)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("preflight returned an empty response")
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		resp.Body.Close()
+		return nil, fmt.Errorf("preflight request failed with HTTP %d", resp.StatusCode)
+	}
+	return decodePreflightBody(resp)
+}
+
+func (a *TaskAdaptor) runPreflight(c *gin.Context, info *relaycommon.RelayInfo) error {
+	if !a.hasHook(c.Request.Context(), "buildPreflightRequest") {
+		return nil
+	}
+	contextValue := a.submitContext(c, info)
+	if err := a.cacheRequestFiles(c); err != nil {
+		return err
+	}
+	value, err := a.plugin.Engine.Call(c.Request.Context(), "buildPreflightRequest", contextValue)
+	if err != nil {
+		return err
+	}
+	if value == nil {
+		return nil
+	}
+	var descriptor requestDescriptor
+	if err = convert(value, &descriptor); err != nil {
+		return err
+	}
+	a.preflightBody, err = a.executePreflightDescriptor(c, info, &descriptor, a.plugin.Meta.AllowedHosts)
+	if err != nil {
+		return err
+	}
+	if !a.hasHook(c.Request.Context(), "buildUploadRequest") {
+		return nil
+	}
+	value, err = a.plugin.Engine.Call(c.Request.Context(), "buildUploadRequest", a.submitContext(c, info))
+	if err != nil {
+		return err
+	}
+	if value == nil {
+		return nil
+	}
+	var upload requestDescriptor
+	if err = convert(value, &upload); err != nil {
+		return err
+	}
+	a.uploadBody, err = a.executePreflightDescriptor(c, info, &upload, a.plugin.Meta.AllowedHosts)
+	return err
+}
+
 func inlineJSONFilePlaceholders(c *gin.Context, body any) (any, error) {
 	cloned := jsonValue(body)
+	if !containsFilePlaceholder(cloned) {
+		return cloned, nil
+	}
 	var form *multipart.Form
 	if c != nil && c.Request != nil && strings.Contains(c.GetHeader("Content-Type"), "multipart/form-data") {
 		parsed, parseErr := common.ParseMultipartFormReusable(c)
@@ -341,6 +541,27 @@ func inlineJSONFilePlaceholders(c *gin.Context, body any) (any, error) {
 	limit := maxInlineFileBytes()
 	var total int64
 	return replaceJSONFilePlaceholders(cloned, form, limit, &total)
+}
+
+func containsFilePlaceholder(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		if _, exists := typed["__fileRef"]; exists {
+			return true
+		}
+		for _, item := range typed {
+			if containsFilePlaceholder(item) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if containsFilePlaceholder(item) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func replaceJSONFilePlaceholders(value any, form *multipart.Form, limit int64, total *int64) (any, error) {
@@ -1197,6 +1418,25 @@ func (a *TaskAdaptor) buildSubmit(c *gin.Context, info *relaycommon.RelayInfo) (
 	if a.submit != nil {
 		return a.submit, nil
 	}
+	if !a.preflightDone {
+		started := time.Now()
+		if err := a.runPreflight(c, info); err != nil {
+			logger.LogDebug(
+				c,
+				"task_plugin subsystem=adaptor event=preflight_failed plugin=%q elapsed_ms=%d",
+				a.plugin.Meta.Key,
+				time.Since(started).Milliseconds(),
+			)
+			return nil, err
+		}
+		logger.LogDebug(
+			c,
+			"task_plugin subsystem=adaptor event=preflight_complete plugin=%q elapsed_ms=%d",
+			a.plugin.Meta.Key,
+			time.Since(started).Milliseconds(),
+		)
+		a.preflightDone = true
+	}
 	started := time.Now()
 	value, err := a.plugin.Engine.Call(c.Request.Context(), "buildSubmitRequest", a.submitContext(c, info))
 	if err != nil {
@@ -1369,6 +1609,12 @@ func (a *TaskAdaptor) submitContext(c *gin.Context, info *relaycommon.RelayInfo)
 	ctx["upstreamModel"] = info.UpstreamModelName
 	ctx["baseUrl"] = info.ChannelBaseUrl
 	ctx["userSetting"] = info.UserSetting
+	if a.preflightBody != nil {
+		ctx["preflightResponse"] = jsonValue(a.preflightBody)
+	}
+	if a.uploadBody != nil {
+		ctx["uploadResponse"] = jsonValue(a.uploadBody)
+	}
 	if err := a.applyUpstreamCredentials(ctx, info.ChannelType, info.ApiKey, info.ChannelSetting.Proxy); err != nil {
 		ctx["authError"] = err.Error()
 	}
