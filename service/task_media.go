@@ -46,7 +46,8 @@ func PublicTaskVideoURL(task *model.Task) (string, error) {
 }
 
 // PresentPublicTaskVideo applies one delivery policy after any model renderer.
-// Provider metadata is retained; known result URL slots point to our one copy.
+// Provider metadata is retained; SDGO result URL slots keep the provider URL,
+// while other providers point to the NewAPI capability/public copy.
 func PresentPublicTaskVideo(payload []byte, task *model.Task) ([]byte, error) {
 	if task == nil || task.Status != model.TaskStatusSuccess {
 		return payload, nil

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
@@ -21,6 +22,14 @@ func deliveryTask(t *testing.T) *model.Task {
 	return &model.Task{TaskID: "task_delivery", Status: model.TaskStatusSuccess, Data: []byte(`{"content":{"url":"https://official.example/result.mp4"}}`), PrivateData: model.TaskPrivateData{
 		ResultStorageKind: "s3", ResultStorageKey: "task-videos/2026/09/" + strings.Repeat("a", 64) + ".mp4", ResultMimeType: "video/mp4", ResultURL: "https://gateway.example/v1/videos/task_delivery/content",
 	}}
+}
+
+func sdgoDeliveryTask(t *testing.T) *model.Task {
+	t.Helper()
+	task := deliveryTask(t)
+	task.Platform = constant.TaskPlatformSDGOVideo
+	task.PrivateData.ResultURL = "https://ark-acg-cn-beijing.tos-cn-beijing.volces.com/video/result.mp4?signature=redacted"
+	return task
 }
 
 func TestTaskArtifactDeliveryMapsOnlyExactSingleVideo(t *testing.T) {
@@ -104,6 +113,39 @@ func TestTaskVideoDeliveryNeverReturnsProviderSource(t *testing.T) {
 	require.NotContains(t, got, "official.example")
 	require.NotContains(t, got, "gateway.example")
 	require.Contains(t, got, "/v1/tasks/task_delivery/artifacts/video/content")
+}
+
+func TestSDGOVideoDeliveryReturnsProviderResultURL(t *testing.T) {
+	task := sdgoDeliveryTask(t)
+	task.PrivateData.ResultStorageKey = ""
+	want := task.GetResultURL()
+
+	require.Equal(t, want, TaskVideoDeliveryURL(context.Background(), task))
+
+	payload, err := PresentPublicTaskVideo([]byte(`{"url":"old","content":{"video_url":"old"}}`), task)
+	require.NoError(t, err)
+	require.Contains(t, string(payload), want)
+	require.NotContains(t, string(payload), "assets.88api.ai")
+}
+
+func TestSDGOArtifactDeliveryReturnsProviderResultURL(t *testing.T) {
+	task := sdgoDeliveryTask(t)
+	task.PrivateData.ResultStorageKey = ""
+	got := TaskArtifactDeliveryURL(
+		context.Background(),
+		task,
+		types.TaskArtifact{Key: "video", Type: "video"},
+		true,
+		&TaskArtifactDeliverySource{URL: task.GetResultURL(), Method: "GET", Anonymous: true},
+		"capability",
+	)
+	require.Equal(t, task.GetResultURL(), got)
+}
+
+func TestFailedTaskNeverReturnsResultURL(t *testing.T) {
+	task := sdgoDeliveryTask(t)
+	task.Status = model.TaskStatusFailure
+	require.Empty(t, TaskVideoDeliveryURL(context.Background(), task))
 }
 
 func TestVideoPresentationMasksProviderURLWhenPublicMediaIsDisabled(t *testing.T) {
