@@ -20,9 +20,6 @@ func NativeVideoUsageSchema(model string) map[string]jsplugin.UsageFieldSchema {
 	if veo {
 		schema["resolution"] = jsplugin.UsageFieldSchema{Enum: []string{"720p", "1080p", "4k"},
 			Description: jsplugin.LocalizedText{"en": "Output video resolution", "zh": "输出视频分辨率"}}
-	} else if strings.HasPrefix(name, "grok-imagine-video") {
-		schema["resolution"] = jsplugin.UsageFieldSchema{Enum: []string{"480p", "720p", "1080p"},
-			Description: jsplugin.LocalizedText{"en": "Output video resolution", "zh": "输出视频分辨率"}}
 	}
 	return schema
 }

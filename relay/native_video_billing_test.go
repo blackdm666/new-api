@@ -41,7 +41,7 @@ func TestNativeVideoExpressionPreservesRequestAndQuota(t *testing.T) {
 		{"gemini omni", "gemini-omni-flash", "gemini-omni-flash-preview", `{"duration":10}`, `tier("base", u("seconds") * 0.2)`, &geminitask.TaskAdaptor{}, 0.2},
 		{"grok base", "grok-imagine-video", "grok-imagine-video", `{"duration":4}`, `tier("base", u("seconds") * 0.1)`, &groktask.TaskAdaptor{}, 0.1},
 		{"grok 1.5 default", "grok-imagine-video-1.5", "grok-imagine-video-1.5", `{}`, `tier("base", u("seconds") * 0.2)`, &groktask.TaskAdaptor{}, 0.2},
-		{"grok 1.5 resolution tiers", "grok-imagine-video-1.5", "grok-imagine-video-1.5", `{"duration":15,"metadata":{"resolution":"1080p"}}`, `u("resolution") == "1080p" ? tier("1080p", u("seconds") * 0.3) : tier("base", u("seconds") * 0.2)`, &groktask.TaskAdaptor{}, 0.3},
+		{"grok mapped 1080", "grok-imagine-video-1.5-1080p", "grok-imagine-video-1.5", `{"duration":15}`, `tier("base", u("seconds") * 0.3)`, &groktask.TaskAdaptor{}, 0.3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			saveBillingConfig(t)
@@ -66,9 +66,6 @@ func TestNativeVideoExpressionPreservesRequestAndQuota(t *testing.T) {
 			require.True(t, ok, "native adapter must expose expression usage")
 			facts := provider.ExtractUsageFacts(ctx, info)
 			require.Equal(t, legacyRatios["seconds"], facts["seconds"])
-			if tc.model == "grok-imagine-video-1.5" && strings.Contains(tc.expression, `u("resolution")`) {
-				require.Equal(t, "1080p", facts["resolution"])
-			}
 			require.NoError(t, billing_setting.SmokeTestTaskExpr(tc.expression, billing_setting.NativeVideoUsageSchema(tc.model)))
 			require.NoError(t, model.ValidateModelPricing(tc.model, model.PricingValues{
 				"billing_setting.billing_mode": "tiered_expr", "billing_setting.billing_expr": tc.expression,
