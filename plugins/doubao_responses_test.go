@@ -139,12 +139,12 @@ func TestDoubaoImageSubmission(t *testing.T) {
 		{"pixel sizes are normalized to WxH", "doubao-seedream-4-5-251128",
 			map[string]any{"prompt": "a banner", "size": "3750 * 1250"},
 			"text_to_image", map[string]any{"size": "3750x1250"}, facts(map[string]any{"images_above_1_5k": float64(1)})},
-		{"the 2.61 megapixel boundary belongs to the lower tier", "doubao-seedream-5-0-pro-260628",
-			map[string]any{"prompt": "a poster", "size": "1500X1740"},
-			"text_to_image", map[string]any{"size": "1500x1740"}, facts(map[string]any{"images_up_to_1_5k": float64(1)})},
-		{"5.0 pro 1.5K with fast prompt optimization", "doubao-seedream-5-0-pro-260628",
+		{"1K stays in the lower pricing tier", "doubao-seedream-5-0-pro-260628",
+			map[string]any{"prompt": "a poster", "size": "1024X1024"},
+			"text_to_image", map[string]any{"size": "1024x1024"}, facts(map[string]any{"images_up_to_1_5k": float64(1)})},
+		{"5.0 pro 1.5K uses the 2K pricing tier", "doubao-seedream-5-0-pro-260628",
 			map[string]any{"prompt": "a poster", "size": "1.5K", "optimize_prompt_options": map[string]any{"mode": "fast"}, "output_format": "png"},
-			"text_to_image", nil, facts(map[string]any{"images_up_to_1_5k": float64(1)})},
+			"text_to_image", nil, facts(map[string]any{"images_above_1_5k": float64(1)})},
 		{"group generation estimates max_images and reference images", "doubao-seedream-5-0-lite-260128",
 			map[string]any{"prompt": "a brand kit", "image": reference, "size": "2K", "sequential_image_generation": "auto", "sequential_image_generation_options": map[string]any{"max_images": 4}, "output_format": "png", "tools": []any{map[string]any{"type": "web_search"}}},
 			"image_to_image", nil, facts(map[string]any{"images_above_1_5k": float64(4), "input_images": float64(1)})},
@@ -235,6 +235,17 @@ func TestDoubaoImageSubmission(t *testing.T) {
 			assert.False(t, found, name)
 			schema, _ := plugin.Meta.UsageForModel(name)
 			assert.ElementsMatch(t, []string{"images_up_to_1_5k", "images_above_1_5k", "input_images", "layer_decomposition"}, keysOf(schema), name)
+			if name == "doubao-seedream-5-0-pro-260628" {
+				assert.Equal(t, "Image generation unit price (1K)", schema["images_up_to_1_5k"].Description["en"], name)
+				assert.Equal(t, "图片生成单价（1K）", schema["images_up_to_1_5k"].Description["zh"], name)
+				assert.Equal(t, "Image generation unit price (2K)", schema["images_above_1_5k"].Description["en"], name)
+				assert.Equal(t, "图片生成单价（2K）", schema["images_above_1_5k"].Description["zh"], name)
+			} else {
+				assert.Equal(t, "Image generation unit price (1.5K and below)", schema["images_up_to_1_5k"].Description["en"], name)
+				assert.Equal(t, "图片生成单价（1.5K 及以下）", schema["images_up_to_1_5k"].Description["zh"], name)
+				assert.Equal(t, "Image generation unit price (above 1.5K)", schema["images_above_1_5k"].Description["en"], name)
+				assert.Equal(t, "图片生成单价（1.5K 以上）", schema["images_above_1_5k"].Description["zh"], name)
+			}
 		}
 		_, found := registry.Generation().LookupEndpoint(http.MethodPost, "/v1/videos", "doubao-seedance-2-0-260128")
 		assert.True(t, found)
@@ -462,7 +473,8 @@ func TestDoubaoImageResults(t *testing.T) {
 		},
 		"usage": map[string]any{"generated_images": 2, "output_tokens": 35600, "total_tokens": 35600},
 	}
-	// 5.0 pro layer decomposition with size auto: base and first layer above 2.61 MP, second layer below.
+	// 5.0 pro layer decomposition with size auto: every delivered output is
+	// above the 1K tier boundary and therefore uses the 2K price tier.
 	layerBody := map[string]any{
 		"model":   pro,
 		"created": 1789733460,
@@ -502,6 +514,7 @@ func TestDoubaoImageResults(t *testing.T) {
 	}
 	groupRequest := map[string]any{"model": lite, "prompt": "a cat", "sequential_image_generation": "auto"}
 	queryContext := map[string]any{"upstreamModel": lite, "model": lite, "action": "text_to_image"}
+	proQueryContext := map[string]any{"upstreamModel": pro, "model": pro, "action": "text_to_image"}
 
 	t.Run("uniform group settles every image at its own tier", func(t *testing.T) {
 		immediate := parseResponse(t, lite, groupRequest, groupBody)
@@ -528,16 +541,16 @@ func TestDoubaoImageResults(t *testing.T) {
 			"model": pro,
 			"data": []any{
 				map[string]any{"url": first, "size": "1024x1024"},
-				map[string]any{"url": second, "size": "1024x1024"},
+				map[string]any{"url": second, "size": "1500x1500"},
 				map[string]any{"url": first, "size": "1024x1024"},
 				map[string]any{"url": second, "size": "1024x1024"},
 				map[string]any{"url": first, "size": "2848x1600"},
 			},
 			"usage": map[string]any{"input_images": 1, "generated_images": 5},
 		}
-		value, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", queryContext, map[string]any{"status": "SUCCESS"}, tieredBody)
+		value, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", proQueryContext, map[string]any{"status": "SUCCESS"}, tieredBody)
 		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"images_up_to_1_5k": float64(4), "images_above_1_5k": float64(1), "input_images": float64(1)}, alibabaObject(t, value), "task expressions keep the tiered facts")
+		assert.Equal(t, map[string]any{"images_up_to_1_5k": float64(3), "images_above_1_5k": float64(2), "input_images": float64(1)}, alibabaObject(t, value), "task expressions keep the tiered facts")
 		for _, tc := range []struct {
 			name string
 			body map[string]any
@@ -560,13 +573,13 @@ func TestDoubaoImageResults(t *testing.T) {
 		request := map[string]any{"model": pro, "image": "https://cdn.example/photo.png", "layer_decomposition": true, "size": "auto"}
 		immediate := parseResponse(t, pro, request, layerBody)
 		assert.Equal(t, "SUCCESS", immediate.Status)
-		assert.Equal(t, map[string]any{"images_up_to_1_5k": float64(1), "images_above_1_5k": float64(2), "input_images": float64(1)}, immediate.UsageFacts)
+		assert.Equal(t, map[string]any{"images_up_to_1_5k": float64(0), "images_above_1_5k": float64(3), "input_images": float64(1)}, immediate.UsageFacts)
 	})
 
 	t.Run("reference images settle from usage.input_images", func(t *testing.T) {
 		request := map[string]any{"model": pro, "prompt": "a cat", "image": []any{"https://cdn.example/a.png", "https://cdn.example/b.png", "https://cdn.example/c.png"}, "size": "1K"}
 		immediate := parseResponse(t, pro, request, referenceBody)
-		assert.Equal(t, map[string]any{"images_up_to_1_5k": float64(1), "images_above_1_5k": float64(0), "input_images": float64(2)}, immediate.UsageFacts)
+		assert.Equal(t, map[string]any{"images_up_to_1_5k": float64(0), "images_above_1_5k": float64(1), "input_images": float64(2)}, immediate.UsageFacts)
 	})
 
 	t.Run("invalid completion counts retain the reservation", func(t *testing.T) {
@@ -581,9 +594,9 @@ func TestDoubaoImageResults(t *testing.T) {
 	t.Run("invalid input image counts keep the estimate while tiers settle", func(t *testing.T) {
 		for _, count := range []any{-1, 1.5, 15, "2"} {
 			payload := map[string]any{"data": []any{map[string]any{"url": first, "size": "1424x800"}}, "usage": map[string]any{"generated_images": 1, "input_images": count}}
-			value, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", queryContext, map[string]any{"status": "SUCCESS"}, payload)
+			value, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", proQueryContext, map[string]any{"status": "SUCCESS"}, payload)
 			require.NoError(t, err)
-			assert.Equal(t, map[string]any{"images_up_to_1_5k": float64(1), "images_above_1_5k": float64(0)}, alibabaObject(t, value), "input_images %v", count)
+			assert.Equal(t, map[string]any{"images_up_to_1_5k": float64(0), "images_above_1_5k": float64(1)}, alibabaObject(t, value), "input_images %v", count)
 		}
 	})
 

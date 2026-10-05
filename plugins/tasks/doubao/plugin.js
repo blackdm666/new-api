@@ -103,9 +103,12 @@ const DEFAULT_IMAGE_PROFILE = {
 };
 const LAYER_SIZE_PRESETS = ["1K", "1.5K", "2K"];
 const IMAGE_ACTIONS = ["text_to_image", "image_to_image"];
-// Official Seedream pricing boundary: every output image at or below 2.61
-// megapixels (1.5K and below) is priced separately from images above it.
+// Other Seedream models retain the official 1.5K-and-below boundary.
 const IMAGE_TIER_MAX_PIXELS = 2610000;
+// This installation exposes only 1K and 2K prices for Seedream 5.0 Pro.
+// Keep the existing fact keys for saved billing expressions, but classify 1.5K
+// and larger outputs into the 2K price tier for that model only.
+const SEEDREAM_5_PRO_TIER_MAX_PIXELS = IMAGE_PRESET_PIXELS["1K"];
 // Documented output ceiling: 15 images per group request, or one base image plus 16 layers.
 const MAX_IMAGE_OUTPUTS = 17;
 // Documented reference-image ceiling across Seedream models; bounds usage.input_images.
@@ -134,14 +137,14 @@ const IMAGE_UNIT_LABEL = { en: "image", zh: "张", "zh-TW": "張", fr: "image", 
 // layers individually). Estimated at submit from the requested size and count;
 // settled from data[].size per successful image.
 const IMAGE_USAGE_SCHEMA = {
-  // Successful output images at or below IMAGE_TIER_MAX_PIXELS.
+  // Successful output images at or below the official 1.5K boundary.
   images_up_to_1_5k: {
     type: "number",
     unit: "count",
     unitLabel: IMAGE_UNIT_LABEL,
     description: { en: "Image generation unit price (1.5K and below)", zh: "图片生成单价（1.5K 及以下）" },
   },
-  // Successful output images above IMAGE_TIER_MAX_PIXELS.
+  // Successful output images above the official 1.5K boundary.
   images_above_1_5k: {
     type: "number",
     unit: "count",
@@ -163,6 +166,29 @@ const IMAGE_USAGE_SCHEMA = {
     description: { en: "Whether layer decomposition is enabled", zh: "是否开启图层拆分" },
   },
 };
+// The field keys intentionally match IMAGE_USAGE_SCHEMA so existing
+// administrator expressions remain valid when only the displayed labels and
+// the Seedream 5.0 Pro classification change.
+const SEEDREAM_5_PRO_USAGE_SCHEMA = Object.assign({}, IMAGE_USAGE_SCHEMA, {
+  images_up_to_1_5k: Object.assign({}, IMAGE_USAGE_SCHEMA.images_up_to_1_5k, {
+    description: { en: "Image generation unit price (1K)", zh: "图片生成单价（1K）" },
+  }),
+  images_above_1_5k: Object.assign({}, IMAGE_USAGE_SCHEMA.images_above_1_5k, {
+    description: { en: "Image generation unit price (2K)", zh: "图片生成单价（2K）" },
+  }),
+});
+const IMAGE_USAGE_EXAMPLES = [
+  { label: "2K · 1 张", facts: { images_up_to_1_5k: 0, images_above_1_5k: 1, input_images: 0, layer_decomposition: false } },
+  { label: "1K · 1 张 · 2 张参考图", facts: { images_up_to_1_5k: 1, images_above_1_5k: 0, input_images: 2, layer_decomposition: false } },
+  { label: "2K · 4 张组图", facts: { images_up_to_1_5k: 0, images_above_1_5k: 4, input_images: 0, layer_decomposition: false } },
+  { label: "图层拆分 · 2K 底图 + 4 层 1.5K", facts: { images_up_to_1_5k: 4, images_above_1_5k: 1, input_images: 1, layer_decomposition: true } },
+];
+const SEEDREAM_5_PRO_USAGE_EXAMPLES = [
+  { label: "2K · 1 张", facts: { images_up_to_1_5k: 0, images_above_1_5k: 1, input_images: 0, layer_decomposition: false } },
+  { label: "1K · 1 张 · 2 张参考图", facts: { images_up_to_1_5k: 1, images_above_1_5k: 0, input_images: 2, layer_decomposition: false } },
+  { label: "2K · 4 张组图", facts: { images_up_to_1_5k: 0, images_above_1_5k: 4, input_images: 0, layer_decomposition: false } },
+  { label: "图层拆分 · 2K 底图 + 4 层 1.5K（均按 2K 计价）", facts: { images_up_to_1_5k: 0, images_above_1_5k: 5, input_images: 1, layer_decomposition: true } },
+];
 
 // Usage facts for one Seedance capability profile: the pricing table then
 // lists only the resolutions and input kinds the model offers.
@@ -246,7 +272,7 @@ export const meta = {
     en: "Volcengine Doubao Seedance video generation and Seedream image generation",
     zh: "火山引擎豆包 Seedance 视频生成与 Seedream 图片生成",
   },
-  version: "1.1.0",
+  version: "1.1.1",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -256,14 +282,14 @@ export const meta = {
   usageExamples: seedanceUsageExamples(DEFAULT_VIDEO_PROFILE),
   usageProfiles: seedanceUsageProfiles().concat([
     {
-      models: Object.keys(IMAGE_MODELS),
+      models: ["doubao-seedream-5-0-pro-260628"],
+      schema: SEEDREAM_5_PRO_USAGE_SCHEMA,
+      examples: SEEDREAM_5_PRO_USAGE_EXAMPLES,
+    },
+    {
+      models: Object.keys(IMAGE_MODELS).filter((model) => model !== "doubao-seedream-5-0-pro-260628"),
       schema: IMAGE_USAGE_SCHEMA,
-      examples: [
-        { label: "2K · 1 张", facts: { images_up_to_1_5k: 0, images_above_1_5k: 1, input_images: 0, layer_decomposition: false } },
-        { label: "1K · 1 张 · 2 张参考图", facts: { images_up_to_1_5k: 1, images_above_1_5k: 0, input_images: 2, layer_decomposition: false } },
-        { label: "2K · 4 张组图", facts: { images_up_to_1_5k: 0, images_above_1_5k: 4, input_images: 0, layer_decomposition: false } },
-        { label: "图层拆分 · 2K 底图 + 4 层 1.5K", facts: { images_up_to_1_5k: 4, images_above_1_5k: 1, input_images: 1, layer_decomposition: true } },
-      ],
+      examples: IMAGE_USAGE_EXAMPLES,
     },
   ]),
   routes: [
@@ -412,6 +438,12 @@ function imageModelCandidates(ctx) {
   return [ctx && ctx.upstreamModel, ctx && ctx.model, req.model].map(trimmed).filter(Boolean);
 }
 
+function imageTierMaxPixels(ctx) {
+  return imageModelCandidates(ctx).includes("doubao-seedream-5-0-pro-260628")
+    ? SEEDREAM_5_PRO_TIER_MAX_PIXELS
+    : IMAGE_TIER_MAX_PIXELS;
+}
+
 function imageProfile(ctx) {
   for (const model of imageModelCandidates(ctx)) {
     if (Object.prototype.hasOwnProperty.call(IMAGE_MODELS, model)) return IMAGE_MODELS[model];
@@ -544,7 +576,7 @@ function convertImage(ctx) {
   let imageCount = 1;
   if (layered) imageCount = MAX_IMAGE_OUTPUTS;
   else if (sequential === "auto") imageCount = Math.max(1, Math.min(maxImages, 15 - images.length)); // reference + generated images ≤ 15
-  const higherTier = size.pixels === null || size.pixels > IMAGE_TIER_MAX_PIXELS;
+  const higherTier = size.pixels === null || size.pixels > imageTierMaxPixels(ctx);
   return {
     body: body,
     action: images.length ? "image_to_image" : "text_to_image",
@@ -588,9 +620,10 @@ function imagePayloads(body) {
 // data[].size (official pricing bills layers individually). Payloads without a
 // parseable size keep the submit-time tier estimate; usage.input_images
 // replaces the estimated reference count only when it is a bounded integer.
-function imageUsage(body) {
+function imageUsage(ctx, body) {
   const usage = body.usage || {};
   const payloads = imagePayloads(body);
+  const tierMaxPixels = imageTierMaxPixels(ctx);
   const facts = {};
   let lower = 0,
     higher = 0,
@@ -601,7 +634,7 @@ function imageUsage(body) {
       sized = false;
       break;
     }
-    if (dims.pixels > IMAGE_TIER_MAX_PIXELS) higher += 1;
+    if (dims.pixels > tierMaxPixels) higher += 1;
     else lower += 1;
   }
   if (sized) {
@@ -901,7 +934,7 @@ export function buildContentRequest(ctx) {
 }
 
 export function extractUsageOnComplete(task, taskResult, body) {
-  if (imageTask(task)) return imageUsage(body || {});
+  if (imageTask(task)) return imageUsage(task, body || {});
   if (!body || body.status !== "succeeded") return {};
   const facts = {};
   const usage = body.usage || {};
