@@ -1020,7 +1020,7 @@ function CompactTaskPricingTable(props: {
   const thClass =
     'text-muted-foreground py-2 text-xs font-medium whitespace-normal break-words'
   const getCellUnitLabel = (entry: DynamicPriceEntry) => {
-    if (entry.unit === 'token') return t('Per 1M task tokens')
+    if (entry.unit === 'token') return t('Per 1M tokens')
     const unitLabelKey = getDynamicPriceUnitLabelKey(entry)
     return unitLabelKey ? t(unitLabelKey) : ''
   }
