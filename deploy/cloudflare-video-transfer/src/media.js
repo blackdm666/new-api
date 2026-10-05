@@ -1,4 +1,6 @@
-const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_RETENTION_DAYS = 7;
+const MIN_RETENTION_DAYS = 1;
+const MAX_RETENTION_DAYS = 365;
 const MAX_UPLOAD_BYTES = 100_000_000;
 const referenceKey = /^reference-media\/[a-f0-9-]{36}\.(mp4|webm|mov|mp3|wav|ogg|m4a|flac|png|jpg|webp|gif)$/;
 const videoKey = /^task-videos\/[0-9]{4}\/[0-9]{2}\/[a-f0-9]{64}\.(mp4|webm|mov)$/;
@@ -7,6 +9,17 @@ const types = {
   mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4", flac: "audio/flac",
   png: "image/png", jpg: "image/jpeg", webp: "image/webp", gif: "image/gif",
 };
+
+function retentionMs(env) {
+  const days = Number.parseInt(env.MEDIA_RETENTION_DAYS ?? "", 10);
+  const normalized =
+    Number.isSafeInteger(days) &&
+    days >= MIN_RETENTION_DAYS &&
+    days <= MAX_RETENTION_DAYS
+      ? days
+      : DEFAULT_RETENTION_DAYS;
+  return normalized * 24 * 60 * 60 * 1000;
+}
 
 function mediaHeaders() {
   return new Headers({
@@ -132,7 +145,7 @@ async function uploadMedia(request, env, key, now, dependencies) {
   if (!stored) return failure(409, "Media already uploaded; reuse its public URL");
   const headers = mediaHeaders();
   headers.set("Content-Type", "application/json");
-  return new Response(JSON.stringify({ url: request.url, size: stored.size, mime_type: permit.mime_type, expires_at: Math.floor((stored.uploaded.getTime() + RETENTION_MS) / 1000) }), { status: 201, headers });
+  return new Response(JSON.stringify({ url: request.url, size: stored.size, mime_type: permit.mime_type, expires_at: Math.floor((stored.uploaded.getTime() + retentionMs(env)) / 1000) }), { status: 201, headers });
 }
 
 function requestedRange(value, size) {
@@ -158,7 +171,7 @@ export async function handleMediaRequest(request, env, dependencies = {}) {
     if (!["GET", "HEAD"].includes(request.method)) return failure(405, "Method not allowed");
     const metadata = await env.VIDEO_BUCKET.head(key);
     if (!metadata) return failure(404, "Media not found");
-    const expires = metadata.uploaded.getTime() + RETENTION_MS;
+    const expires = metadata.uploaded.getTime() + retentionMs(env);
     if (now >= expires) return failure(410, "Media expired; upload a new asset explicitly");
     headers.set("Content-Type", types[key.split(".").at(-1)]);
     headers.set("Content-Disposition", "inline");

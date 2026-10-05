@@ -33,6 +33,9 @@ const (
 	defaultTaskVideoCacheMaxBytes = int64(2 * 1024 * 1024 * 1024)
 	minTaskVideoCacheMaxBytes     = int64(1024 * 1024)
 	maxTaskVideoCacheMaxBytes     = int64(10 * 1024 * 1024 * 1024)
+	defaultTaskVideoRetentionDays = int64(7)
+	minTaskVideoRetentionDays     = int64(1)
+	maxTaskVideoRetentionDays     = int64(365)
 )
 
 // TaskVideoCacheEnabled reports whether protected, untrusted or data-URL video
@@ -83,6 +86,18 @@ func TaskVideoCacheMaxBytes() int64 {
 		return defaultTaskVideoCacheMaxBytes
 	}
 	return maxBytes
+}
+
+// TaskVideoRetentionPeriod is the historical media retention window used when
+// deciding whether an unarchived task may still be repaired. It must match the
+// lifecycle configured on the backing object store.
+func TaskVideoRetentionPeriod() time.Duration {
+	raw := strings.TrimSpace(common.GetEnvOrDefaultString("TASK_VIDEO_CACHE_RETENTION_DAYS", ""))
+	days, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || days < minTaskVideoRetentionDays || days > maxTaskVideoRetentionDays {
+		days = defaultTaskVideoRetentionDays
+	}
+	return time.Duration(days) * 24 * time.Hour
 }
 
 func cacheTaskVideoDataURL(ctx context.Context, task *model.Task, resultURL string) (bool, error) {
