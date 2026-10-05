@@ -181,13 +181,9 @@ func getPayMoneyDecimal(amount int64, group string) decimal.Decimal {
 
 	dTopupGroupRatio := decimal.NewFromFloat(topupGroupRatio)
 	dPrice := decimal.NewFromFloat(operation_setting.Price)
-	// apply optional preset discount by the original request amount (if configured), default 1.0
-	discount := 1.0
-	if ds, ok := operation_setting.GetPaymentSetting().AmountDiscount[int(amount)]; ok {
-		if ds > 0 {
-			discount = ds
-		}
-	}
+	// Apply the highest configured discount threshold reached by the original
+	// request amount.
+	discount := operation_setting.GetAmountDiscount(amount)
 	dDiscount := decimal.NewFromFloat(discount)
 
 	return dAmount.Mul(dPrice).Mul(dTopupGroupRatio).Mul(dDiscount)

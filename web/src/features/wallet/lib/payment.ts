@@ -204,6 +204,34 @@ export function generatePresetAmounts(minAmount: number): PresetAmount[] {
 }
 
 /**
+ * Get the discount for the highest configured amount threshold reached.
+ */
+export function getDiscountRateForAmount(
+  amount: number,
+  discounts: Record<number, number>
+): number {
+  let matchedThreshold = -1
+  let discount = 1.0
+
+  for (const [thresholdKey, candidate] of Object.entries(discounts)) {
+    const threshold = Number(thresholdKey)
+    if (
+      !Number.isFinite(threshold) ||
+      !Number.isFinite(candidate) ||
+      threshold > amount ||
+      threshold <= matchedThreshold
+    ) {
+      continue
+    }
+
+    matchedThreshold = threshold
+    discount = candidate > 0 ? candidate : 1.0
+  }
+
+  return discount
+}
+
+/**
  * Merge custom preset amounts with discounts
  */
 export function mergePresetAmounts(
@@ -216,6 +244,6 @@ export function mergePresetAmounts(
 
   return amountOptions.map((amount) => ({
     value: amount,
-    discount: discounts[amount] || 1.0,
+    discount: getDiscountRateForAmount(amount, discounts),
   }))
 }

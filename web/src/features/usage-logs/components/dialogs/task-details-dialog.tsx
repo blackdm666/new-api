@@ -141,7 +141,7 @@ export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
             value={formatTaskTimestamp(props.log.finish_time)}
             mono
           />
-          {properties?.origin_model_name ? (
+          {props.isAdmin && properties?.origin_model_name ? (
             <DetailRow
               label={t('Original Model')}
               value={properties.origin_model_name}

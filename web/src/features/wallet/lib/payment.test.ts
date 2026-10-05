@@ -21,11 +21,13 @@ import { describe, expect, test } from 'vitest'
 import { PAYMENT_TYPES } from '../constants'
 import {
   dispatchSelectedPayment,
+  getDiscountRateForAmount,
   getPaymentMethodDisplayName,
   isAntomPayment,
   isStripePayment,
   isWaffoPayment,
   isWaffoPancakePayment,
+  mergePresetAmounts,
 } from './payment'
 
 describe('payment type classification', () => {
@@ -55,6 +57,24 @@ describe('payment method display name', () => {
         translate
       )
     ).toBe('88API Global Pay')
+  })
+})
+
+describe('amount discount tiers', () => {
+  test('applies the highest reached threshold to larger recharge amounts', () => {
+    const discounts = { 1000: 0.95, 5000: 0.9 }
+
+    expect(getDiscountRateForAmount(999, discounts)).toBe(1)
+    expect(getDiscountRateForAmount(1000, discounts)).toBe(0.95)
+    expect(getDiscountRateForAmount(10000, discounts)).toBe(0.9)
+  })
+
+  test('uses threshold discounts for preset amounts', () => {
+    expect(mergePresetAmounts([500, 1000, 10000], { 1000: 0.95 })).toEqual([
+      { value: 500, discount: 1 },
+      { value: 1000, discount: 0.95 },
+      { value: 10000, discount: 0.95 },
+    ])
   })
 })
 

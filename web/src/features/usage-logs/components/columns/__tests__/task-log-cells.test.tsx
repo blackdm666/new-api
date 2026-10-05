@@ -71,7 +71,24 @@ describe('task log cells', () => {
     expect(screen.getByText('Vertex video channel')).toBeVisible()
   })
 
-  test('shows the requested model name', () => {
+  test('shows the requested model name to admins', () => {
+    render(
+      <TaskModelCell
+        isAdmin
+        log={{
+          ...baseTask,
+          properties: {
+            origin_model_name: 'gemini-omni-flash',
+            upstream_model_name: 'gemini-omni-flash-preview',
+          },
+        }}
+      />
+    )
+
+    expect(screen.getByText('gemini-omni-flash')).toBeVisible()
+  })
+
+  test('shows only the upstream model name to regular users', () => {
     render(
       <TaskModelCell
         log={{
@@ -84,7 +101,8 @@ describe('task log cells', () => {
       />
     )
 
-    expect(screen.getByText('gemini-omni-flash')).toBeVisible()
+    expect(screen.queryByText('gemini-omni-flash')).not.toBeInTheDocument()
+    expect(screen.getByText('gemini-omni-flash-preview')).toBeVisible()
   })
 
   test('shows the official task id as a copyable badge', () => {
