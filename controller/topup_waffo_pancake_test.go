@@ -28,6 +28,22 @@ func TestFormatWaffoPancakeAmount_UsesDisplayPriceString(t *testing.T) {
 	}
 }
 
+func TestGetAmountDiscountUsesHighestReachedThreshold(t *testing.T) {
+	originalDiscounts := operation_setting.GetPaymentSetting().AmountDiscount
+	t.Cleanup(func() {
+		operation_setting.GetPaymentSetting().AmountDiscount = originalDiscounts
+	})
+
+	operation_setting.GetPaymentSetting().AmountDiscount = map[int]float64{
+		1000: 0.95,
+		5000: 0.9,
+	}
+
+	require.Equal(t, 1.0, operation_setting.GetAmountDiscount(999))
+	require.Equal(t, 0.95, operation_setting.GetAmountDiscount(1000))
+	require.Equal(t, 0.9, operation_setting.GetAmountDiscount(10000))
+}
+
 func TestGetWaffoPancakePayMoney(t *testing.T) {
 	originalUnitPrice := setting.WaffoPancakeUnitPrice
 	originalQuotaDisplayType := operation_setting.GetGeneralSetting().QuotaDisplayType
@@ -87,4 +103,8 @@ func TestGetWaffoPancakePayMoney(t *testing.T) {
 			require.InDelta(t, tc.expected, actual, 0.000001)
 		})
 	}
+
+	operation_setting.GetPaymentSetting().AmountDiscount = map[int]float64{1000: 0.95}
+	operation_setting.GetGeneralSetting().QuotaDisplayType = operation_setting.QuotaDisplayTypeUSD
+	require.InDelta(t, 9500*2.5, getWaffoPancakePayMoney(10000, "default"), 0.000001)
 }
