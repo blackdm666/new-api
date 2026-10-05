@@ -635,6 +635,7 @@ func TestPluginProtocolArchivedArtifactDeliveryInStreamAndFinal(t *testing.T) {
 	for _, data := range []map[string]any{
 		{"content": map[string]any{"url": "https://example.com/result.mp4"}},
 		{"result": "https://example.com/result.mp4"},
+		{"video": map[string]any{"url": "/result.mp4"}},
 	} {
 		task.SetData(data)
 		for _, stream := range []bool{true, false} {

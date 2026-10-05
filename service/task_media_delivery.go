@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -44,6 +45,38 @@ type TaskArtifactDeliverySource struct {
 	URL       string
 	Method    string
 	Anonymous bool
+	// ChannelBaseURL comes from the host's channel configuration, never the
+	// plugin descriptor or a client Host header.
+	ChannelBaseURL string
+}
+
+// matchesVideoResult preserves exact absolute-source matching. A root-relative
+// provider result may additionally resolve against the trusted channel base,
+// but never against the descriptor's origin (which could be another artifact).
+func (source *TaskArtifactDeliverySource) matchesVideoResult(result string) bool {
+	if source.URL == "" || result == "" {
+		return false
+	}
+	if source.URL == result {
+		return true
+	}
+	if !strings.HasPrefix(result, "/") || strings.HasPrefix(result, "//") ||
+		strings.ContainsAny(result, "\\\r\n\t #") || strings.ContainsAny(source.ChannelBaseURL, "\\\r\n\t ") {
+		return false
+	}
+	relative, err := url.Parse(result)
+	if err != nil || relative.IsAbs() || relative.Host != "" || relative.User != nil ||
+		relative.Opaque != "" || relative.Fragment != "" || strings.HasPrefix(relative.Path, "//") {
+		return false
+	}
+	if err := ValidateTaskArtifactBaseURL(source.ChannelBaseURL); err != nil {
+		return false
+	}
+	base, err := url.Parse(source.ChannelBaseURL)
+	if err != nil {
+		return false
+	}
+	return base.ResolveReference(relative).String() == source.URL
 }
 
 // TaskArtifactDeliveryURL resolves one explicit artifact. A legacy task-wide
@@ -65,7 +98,7 @@ func TaskArtifactDeliveryURL(ctx context.Context, task *model.Task, artifact typ
 	if source == nil {
 		return fallback
 	}
-	if artifact.Type == "video" && singleVideo && source.URL != "" && source.URL == ResolveTaskVideoResultURL(task, "") {
+	if artifact.Type == "video" && singleVideo && source.matchesVideoResult(ResolveTaskVideoResultURL(task, "")) {
 		if publicURL, err := PublicTaskVideoURL(task); err == nil {
 			return publicURL
 		}

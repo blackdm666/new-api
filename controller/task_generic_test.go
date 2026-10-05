@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -487,6 +488,114 @@ func TestDisabledArtifactStorePreservesPluginUpstreamContent(t *testing.T) {
 	assert.Equal(t, "artifact-bytes", recorder.Body.String())
 	assert.Equal(t, "video/mp4", recorder.Header().Get("Content-Type"))
 	assert.Equal(t, "bytes 0-13/14", recorder.Header().Get("Content-Range"))
+}
+
+func TestPluginArchivedVideoDeliveryUsesChannelOriginAcrossEndpoints(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "true")
+	t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "https://assets.88api.ai/media")
+	previousRegistry, previousCache, previousSecret := pluginruntime.DefaultRegistry, common.MemoryCacheEnabled, common.CryptoSecret
+	pluginruntime.DefaultRegistry = pluginruntime.NewRegistry()
+	common.MemoryCacheEnabled = false
+	common.CryptoSecret = "archived-artifact-fixture-secret"
+	t.Cleanup(func() {
+		pluginruntime.DefaultRegistry = previousRegistry
+		common.MemoryCacheEnabled = previousCache
+		common.CryptoSecret = previousSecret
+	})
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("archived artifacts must not fetch upstream or upload again")
+	}))
+	defer upstream.Close()
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", task.ChannelId).
+		Updates(map[string]any{"type": constant.ChannelTypeTaskPlugin, "base_url": upstream.URL, "key": "fixture-key"}).Error)
+	_, err := pluginruntime.DefaultRegistry.Register(`
+		export const meta = {apiVersion: 1, key: "archived-video-fixture", name: "Archived Video", version: "1.0.0",
+			author: {name: "Fixture"}, models: ["video-fixture"], fetchMode: "per_task"};
+		export function buildSubmitRequest() { return {}; }
+		export function parseSubmitResponse() { return {}; }
+		export function buildQueryRequest() { return {}; }
+		export function parseTaskResult() { return {}; }
+		export function listArtifacts() { return [{key: "video", type: "video", mimeType: "video/mp4"}]; }
+		export function buildContentRequest(ctx) {
+			const raw = ctx.data.video ? ctx.data.video.url : (ctx.data.content ? ctx.data.content.url : ctx.data.result);
+			return {url: raw.startsWith("/") ? ctx.baseUrl + raw : raw, method: "GET",
+				headers: {Authorization: "Bearer " + ctx.apiKey}};
+		}
+	`, pluginruntime.Options{})
+	require.NoError(t, err)
+	task.Platform = "archived-video-fixture"
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{Key: string(task.Platform), Version: "1.0.0"}}
+	task.PrivateData.ResultStorageKind = "s3"
+	task.PrivateData.ResultStorageKey = "task-videos/2026/10/" + strings.Repeat("a", 64) + ".mp4"
+	task.PrivateData.ResultMimeType = "video/mp4"
+	want := "https://assets.88api.ai/media/" + task.PrivateData.ResultStorageKey
+	for _, data := range []map[string]any{
+		{"video": map[string]any{"url": "/v1/videos/upstream/content"}},
+		{"content": map[string]any{"url": upstream.URL + "/v1/videos/upstream/content"}},
+		{"result": upstream.URL + "/v1/videos/upstream/content"},
+	} {
+		task.SetData(data)
+		require.NoError(t, model.DB.Save(task).Error)
+		before, err := common.Marshal(task)
+		require.NoError(t, err)
+		for _, endpoint := range []string{"api-list", "dashboard-list", "old-get", "old-head", "old-range", "foreign-list", "foreign-content"} {
+			t.Run(endpoint, func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Set("id", task.UserId)
+				c.Set("role", common.RoleCommonUser)
+				c.Params = gin.Params{{Key: "key", Value: task.TaskID}, {Key: "task_id", Value: task.TaskID}, {Key: "artifact_key", Value: "video"}}
+				method := http.MethodGet
+				if endpoint == "old-head" {
+					method = http.MethodHead
+				}
+				c.Request = httptest.NewRequest(method, "/v1/tasks/"+task.TaskID+"/artifacts/video/content", nil)
+				if strings.HasPrefix(endpoint, "old-") {
+					c.Set(middleware.TaskArtifactAccessContextKey, true)
+				}
+				if strings.HasPrefix(endpoint, "foreign-") {
+					c.Set("id", task.UserId+1)
+				}
+				if endpoint == "old-range" {
+					c.Request.Header.Set("Range", "bytes=0-31")
+				}
+				switch endpoint {
+				case "api-list", "foreign-list":
+					GetTaskArtifacts(c)
+				case "dashboard-list":
+					GetDashboardTaskArtifacts(c)
+				default:
+					TaskArtifactContent(c)
+				}
+				// The Gin engine commits a bodyless HEAD response after the
+				// handler returns; direct controller calls must do the same.
+				c.Writer.WriteHeaderNow()
+				switch {
+				case strings.HasPrefix(endpoint, "foreign-"):
+					assert.Equal(t, http.StatusNotFound, recorder.Code)
+					assert.Empty(t, recorder.Header().Get("Location"))
+					assert.NotContains(t, recorder.Body.String(), "assets.88api.ai")
+				case strings.HasPrefix(endpoint, "old-"):
+					assert.Equal(t, http.StatusTemporaryRedirect, recorder.Code)
+					assert.Equal(t, want, recorder.Header().Get("Location"))
+				default:
+					assert.Equal(t, http.StatusOK, recorder.Code)
+					assert.Contains(t, recorder.Body.String(), want)
+					assert.NotContains(t, recorder.Body.String(), "access=")
+					assert.NotContains(t, recorder.Body.String(), upstream.URL)
+				}
+				assert.NotContains(t, recorder.Body.String(), "fixture-key")
+			})
+		}
+		stored, exists, err := model.GetByTaskId(task.UserId, task.TaskID)
+		require.NoError(t, err)
+		require.True(t, exists)
+		after, err := common.Marshal(stored)
+		require.NoError(t, err)
+		require.Equal(t, string(before), string(after))
+		require.Equal(t, task.PrivateData, stored.PrivateData)
+	}
 }
 
 func TestProjectedTaskArtifactValidationRejectsAmbiguousIdentity(t *testing.T) {
