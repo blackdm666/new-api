@@ -90,7 +90,8 @@ func PrepareTaskVideoPreviewURL(ctx context.Context, task *model.Task) (string, 
 	}
 	// References and alternate preview routes must not revive old, unarchived
 	// media. Existing objects above keep their original Worker-enforced expiry.
-	if task.Status == model.TaskStatusSuccess && task.FinishTime > 0 && time.Now().Unix()-task.FinishTime >= 30*24*60*60 {
+	if task.Status == model.TaskStatusSuccess && task.FinishTime > 0 &&
+		time.Now().Unix()-task.FinishTime >= int64(TaskVideoRetentionPeriod().Seconds()) {
 		return "", 0, errors.New("media retention period has ended")
 	}
 

@@ -286,3 +286,16 @@ func TestGetTaskVideoPreviewURLCreatesSevenDayDirectLink(t *testing.T) {
 	assert.Empty(t, signedStorage.filename)
 	assert.True(t, signedStorage.inline)
 }
+
+func TestTaskVideoRetentionPeriodDefaultsToSevenDaysAndAllowsOverride(t *testing.T) {
+	t.Setenv("TASK_VIDEO_CACHE_RETENTION_DAYS", "")
+	assert.Equal(t, 7*24*time.Hour, TaskVideoRetentionPeriod())
+
+	t.Setenv("TASK_VIDEO_CACHE_RETENTION_DAYS", "14")
+	assert.Equal(t, 14*24*time.Hour, TaskVideoRetentionPeriod())
+
+	for _, value := range []string{"0", "-1", "366", "invalid"} {
+		t.Setenv("TASK_VIDEO_CACHE_RETENTION_DAYS", value)
+		assert.Equal(t, 7*24*time.Hour, TaskVideoRetentionPeriod(), value)
+	}
+}

@@ -309,10 +309,28 @@ func resolveTaskArtifactDelivery(ctx context.Context, task *model.Task, artifact
 	var source *service.TaskArtifactDeliverySource
 	if provider != nil {
 		if descriptor, err := provider.BuildContentRequest(task, artifact.Key, relaychannel.TaskArtifactClientRequest{Method: http.MethodGet}); err == nil && descriptor != nil {
-			source = &service.TaskArtifactDeliverySource{URL: descriptor.URL, Method: descriptor.Method, Anonymous: descriptor.Credentialless && len(descriptor.Headers) == 0 && len(descriptor.Body) == 0}
+			source = taskArtifactDeliverySource(task, descriptor)
 		}
 	}
 	return service.TaskArtifactDeliveryURL(ctx, task, artifact, videoCount == 1, source, fallback)
+}
+
+// taskArtifactDeliverySource adds host-owned origin context to a validated
+// descriptor. It neither exposes credentials nor trusts client/plugin origins.
+func taskArtifactDeliverySource(task *model.Task, descriptor *relaychannel.TaskContentRequest) *service.TaskArtifactDeliverySource {
+	source := &service.TaskArtifactDeliverySource{
+		URL: descriptor.URL, Method: descriptor.Method,
+		Anonymous: descriptor.Credentialless && len(descriptor.Headers) == 0 && len(descriptor.Body) == 0,
+	}
+	if result := service.ResolveTaskVideoResultURL(task, ""); strings.HasPrefix(result, "/") && !strings.HasPrefix(result, "//") {
+		if channel, err := model.CacheGetChannel(task.ChannelId); err == nil && channel != nil {
+			source.ChannelBaseURL = channel.GetBaseURL()
+			if source.ChannelBaseURL == "" {
+				source.ChannelBaseURL = constant.GetChannelBaseURL(channel.Type)
+			}
+		}
+	}
+	return source
 }
 
 func taskHasPluginExecution(task *model.Task) bool {
@@ -485,9 +503,7 @@ func TaskArtifactContent(c *gin.Context) {
 			requestedArtifact = artifact
 		}
 	}
-	publicURL := service.TaskArtifactDeliveryURL(c.Request.Context(), task, requestedArtifact, videoCount == 1, &service.TaskArtifactDeliverySource{
-		URL: descriptor.URL, Method: descriptor.Method, Anonymous: descriptor.Credentialless && len(descriptor.Headers) == 0 && len(descriptor.Body) == 0,
-	}, "")
+	publicURL := service.TaskArtifactDeliveryURL(c.Request.Context(), task, requestedArtifact, videoCount == 1, taskArtifactDeliverySource(task, descriptor), "")
 	if publicURL != "" {
 		c.Header("Cache-Control", "private, no-store")
 		c.Redirect(http.StatusTemporaryRedirect, publicURL)

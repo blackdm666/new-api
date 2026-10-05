@@ -72,6 +72,58 @@ func TestTaskArtifactDeliveryArchivedStringResults(t *testing.T) {
 	}
 }
 
+func TestTaskArtifactDeliveryArchivedRootRelativeSource(t *testing.T) {
+	for _, tc := range []struct {
+		name, result, base, source string
+		mapped                     bool
+	}{
+		{"protected", "/v1/videos/upstream/content", "http://sub2api:8080", "http://sub2api:8080/v1/videos/upstream/content", true},
+		{"base-path", "/v1/videos/upstream/content", "http://sub2api:8080/prefix", "http://sub2api:8080/v1/videos/upstream/content", true},
+		{"signed-query", "/v1/videos/upstream/content?sig=one", "http://sub2api:8080", "http://sub2api:8080/v1/videos/upstream/content?sig=one", true},
+		{"missing-base", "/v1/videos/upstream/content", "", "http://sub2api:8080/v1/videos/upstream/content", false},
+		{"different-host", "/v1/videos/upstream/content", "http://sub2api:8080", "http://other:8080/v1/videos/upstream/content", false},
+		{"different-port", "/v1/videos/upstream/content", "http://sub2api:8080", "http://sub2api:8081/v1/videos/upstream/content", false},
+		{"different-scheme", "/v1/videos/upstream/content", "http://sub2api:8080", "https://sub2api:8080/v1/videos/upstream/content", false},
+		{"different-path", "/v1/videos/upstream/content", "http://sub2api:8080", "http://sub2api:8080/v1/videos/other/content", false},
+		{"different-query", "/v1/videos/upstream/content?sig=one", "http://sub2api:8080", "http://sub2api:8080/v1/videos/upstream/content?sig=two", false},
+		{"network-path", "//other:8080/v1/videos/upstream/content", "http://sub2api:8080", "http://other:8080/v1/videos/upstream/content", false},
+		{"path-relative", "v1/videos/upstream/content", "http://sub2api:8080", "http://sub2api:8080/v1/videos/upstream/content", false},
+		{"credential-base", "/v1/videos/upstream/content", "http://key@sub2api:8080", "http://key@sub2api:8080/v1/videos/upstream/content", false},
+		{"query-base", "/v1/videos/upstream/content", "http://sub2api:8080?key=secret", "http://sub2api:8080/v1/videos/upstream/content", false},
+		{"fragment", "/v1/videos/upstream/content#other", "http://sub2api:8080", "http://sub2api:8080/v1/videos/upstream/content#other", false},
+		{"backslash", "/v1/videos\\upstream/content", "http://sub2api:8080", "http://sub2api:8080/v1/videos%5Cupstream/content", false},
+		{"absolute-mismatch", "http://other:8080/v1/videos/upstream/content", "http://sub2api:8080", "http://sub2api:8080/v1/videos/upstream/content", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := deliveryTask(t)
+			task.SetData(map[string]any{"video": map[string]any{"url": tc.result}})
+			beforeData, beforePrivate := string(task.Data), task.PrivateData
+			previousProbe := taskVideoDirectProbe
+			taskVideoDirectProbe = func(context.Context, string) (bool, error) {
+				t.Fatal("archived delivery must not fetch or renew its source")
+				return false, nil
+			}
+			t.Cleanup(func() { taskVideoDirectProbe = previousProbe })
+			source := &TaskArtifactDeliverySource{
+				URL: tc.source, Method: "GET", ChannelBaseURL: tc.base,
+			}
+			artifact := types.TaskArtifact{Key: "video", Type: "video"}
+			want := "capability"
+			if tc.mapped {
+				var err error
+				want, err = PublicTaskVideoURL(task)
+				require.NoError(t, err)
+			}
+			require.Equal(t, want, TaskArtifactDeliveryURL(context.Background(), task, artifact, true, source, "capability"))
+			require.Equal(t, "capability", TaskArtifactDeliveryURL(context.Background(), task, artifact, false, source, "capability"))
+			artifact.Type = "image"
+			require.Equal(t, "capability", TaskArtifactDeliveryURL(context.Background(), task, artifact, true, source, "capability"))
+			require.Equal(t, beforeData, string(task.Data))
+			require.Equal(t, beforePrivate, task.PrivateData)
+		})
+	}
+}
+
 func TestTaskArtifactDeliveryKeepsAnonymousTrustedSourceOnly(t *testing.T) {
 	for _, tc := range []struct {
 		name, source, method     string

@@ -85,7 +85,7 @@ test("media upload is scoped, write-once and anonymous reads support HEAD/ranges
   const invalidRange = await handleRequest(new Request(fixture.url, { headers: { Range: "bytes=999999-" } }), fixture.env);
   assert.equal(invalidRange.status, 416);
   assert.equal(invalidRange.headers.get("Cache-Control"), "no-store");
-  const expired = await handleRequest(new Request(fixture.url), fixture.env, { nowMilliseconds: Date.now() + 31 * 86400000 });
+  const expired = await handleRequest(new Request(fixture.url), fixture.env, { nowMilliseconds: Date.now() + 8 * 86400000 });
   assert.equal(expired.status, 410);
   assert.equal(expired.headers.get("Cache-Control"), "no-store");
   assert.equal(fixture.env.VIDEO_BUCKET.writes, 1);
@@ -98,7 +98,7 @@ test("media cache lifetime never exceeds object expiry, including time spent rea
   const fixture = await mediaUploadFixture();
   await handleRequest(fixture.request(), fixture.env, fixedLengthDependencies);
   const object = fixture.env.VIDEO_BUCKET.objects.get(fixture.key);
-  const expiry = object.uploaded.getTime() + 30 * 86400000;
+  const expiry = object.uploaded.getTime() + 7 * 86400000;
   for (const [remaining, cache] of [[25_250, "public, max-age=25, s-maxage=25, must-revalidate"], [500, "no-store"], [0, "no-store"]]) {
     const response = await handleRequest(new Request(fixture.url), fixture.env, { nowMilliseconds: expiry - remaining });
     assert.equal(response.status, remaining ? 200 : 410);
