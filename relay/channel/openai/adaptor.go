@@ -177,6 +177,15 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		url = strings.Replace(url, "{model}", info.UpstreamModelName, -1)
 		return url, nil
 	default:
+		if isXinMengImageRequest(info) && info.RelayMode == relayconstant.RelayModeImagesEdits {
+			// XinMeng exposes image-to-image through the OpenAI-compatible
+			// generations endpoint and does not provide /images/edits.
+			return relaycommon.GetFullRequestURL(
+				info.ChannelBaseUrl,
+				"/v1/images/generations",
+				info.ChannelType,
+			), nil
+		}
 		if (info.RelayFormat == types.RelayFormatClaude || info.RelayFormat == types.RelayFormatGemini) &&
 			info.RelayMode != relayconstant.RelayModeResponses &&
 			info.RelayMode != relayconstant.RelayModeResponsesCompact {
@@ -518,6 +527,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
 		if isJSONRequest(c) {
+			sanitizeXinMengImageRequest(info, &request)
 			return request, nil
 		}
 
@@ -540,7 +550,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		// 写入所有非文件字段
 		if mf != nil {
 			for key, values := range mf.Value {
-				if key == "model" {
+				if key == "model" || shouldDropXinMengImageField(info, key) {
 					continue
 				}
 				for _, value := range values {
@@ -644,8 +654,62 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		return &requestBody, nil
 
 	default:
+		sanitizeXinMengImageRequest(info, &request)
 		return request, nil
 	}
+}
+
+func isXinMengImageRequest(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	modelName := info.GetUpstreamModelName()
+	return common.IsImageGenerationModel(modelName) && common.IsXinMengImageModel(modelName)
+}
+
+func shouldDropXinMengImageField(info *relaycommon.RelayInfo, field string) bool {
+	if !isXinMengImageRequest(info) {
+		return false
+	}
+	switch strings.ToLower(field) {
+	case "background",
+		"extra_fields",
+		"input_fidelity",
+		"mask",
+		"moderation",
+		"output_compression",
+		"output_format",
+		"partial_images",
+		"stream",
+		"style",
+		"user",
+		"user_id",
+		"watermark",
+		"watermark_enabled":
+		return true
+	default:
+		return false
+	}
+}
+
+func sanitizeXinMengImageRequest(info *relaycommon.RelayInfo, request *dto.ImageRequest) {
+	if request == nil || !isXinMengImageRequest(info) {
+		return
+	}
+	request.Style = nil
+	request.User = nil
+	request.ExtraFields = nil
+	request.Background = nil
+	request.Moderation = nil
+	request.OutputFormat = nil
+	request.OutputCompression = nil
+	request.PartialImages = nil
+	request.Stream = nil
+	request.Mask = nil
+	request.InputFidelity = nil
+	request.Watermark = nil
+	request.WatermarkEnabled = nil
+	request.UserId = nil
 }
 
 func isJSONRequest(c *gin.Context) bool {
