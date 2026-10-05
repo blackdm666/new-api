@@ -43,14 +43,7 @@ var modelConfigs = map[string]modelConfig{
 		defaultRatio:      "16:9",
 		defaultResolution: "720p",
 		ratios:            grokVideoRatios,
-		resolutions:       stringSet("480p", "720p"),
-	},
-	ModelGrokImagineVideo151080: {
-		defaultDuration:   8,
-		defaultRatio:      "16:9",
-		defaultResolution: "1080p",
-		ratios:            grokVideoRatios,
-		resolutions:       stringSet("1080p"),
+		resolutions:       stringSet("480p", "720p", "1080p"),
 	},
 }
 
@@ -160,7 +153,18 @@ func (a *TaskAdaptor) ExtractUsageFacts(c *gin.Context, info *relaycommon.RelayI
 	if ratios == nil {
 		return nil
 	}
-	return map[string]any{"seconds": ratios["seconds"]}
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	cfg, ok := modelConfigForRequest(info, req.Model)
+	if !ok {
+		return nil
+	}
+	return map[string]any{
+		"seconds":    ratios["seconds"],
+		"resolution": requestResolution(req, cfg),
+	}
 }
 
 func localTaskError(err error) *dto.TaskError {
@@ -352,9 +356,6 @@ func requestAspectRatio(req relaycommon.TaskSubmitReq, cfg modelConfig) string {
 }
 
 func requestResolution(req relaycommon.TaskSubmitReq, cfg modelConfig) string {
-	if cfg.defaultResolution == "1080p" {
-		return cfg.defaultResolution
-	}
 	value := strings.ToLower(metadataString(req.Metadata, "resolution"))
 	if value == "" {
 		return cfg.defaultResolution

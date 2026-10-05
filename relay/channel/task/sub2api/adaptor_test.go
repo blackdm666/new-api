@@ -19,12 +19,12 @@ import (
 func TestBuildRequestBodyNormalizesCanvasPayload(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{
-		"model":"grok-imagine-video-1.5-1080p",
+		"model":"grok-imagine-video-1.5",
 		"prompt":"animate this",
 		"duration":5,
 		"size":"9:16",
 		"images":["data:image/png;base64,AAAA"],
-		"metadata":{"resolution":"720p"}
+		"metadata":{"resolution":"1080p"}
 	}`))
 	c.Request.Header.Set("Content-Type", "application/json")
 	defer common.CleanupBodyStorage(c)
@@ -32,7 +32,7 @@ func TestBuildRequestBodyNormalizesCanvasPayload(t *testing.T) {
 	info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{}}
 	adaptor := &TaskAdaptor{}
 	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
-	info.OriginModelName = ModelGrokImagineVideo151080
+	info.OriginModelName = ModelGrokImagineVideo15
 	info.UpstreamModelName = ModelGrokImagineVideo15
 	body, err := adaptor.BuildRequestBody(c, info)
 	require.NoError(t, err)
@@ -49,17 +49,35 @@ func TestBuildRequestBodyNormalizesCanvasPayload(t *testing.T) {
 }
 
 func TestValidateVideo15AllowsTextToVideo(t *testing.T) {
-	for _, modelName := range []string{ModelGrokImagineVideo15, ModelGrokImagineVideo151080} {
-		t.Run(modelName, func(t *testing.T) {
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(fmt.Sprintf(`{"model":%q,"prompt":"test","duration":5}`, modelName)))
-			c.Request.Header.Set("Content-Type", "application/json")
-			defer common.CleanupBodyStorage(c)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(fmt.Sprintf(`{"model":%q,"prompt":"test","duration":5}`, ModelGrokImagineVideo15)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	defer common.CleanupBodyStorage(c)
 
-			taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}})
-			require.Nil(t, taskErr)
-		})
-	}
+	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}})
+	require.Nil(t, taskErr)
+}
+
+func TestValidateVideo15Allows1080pResolution(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(fmt.Sprintf(`{"model":%q,"prompt":"test","duration":5,"metadata":{"resolution":"1080p"}}`, ModelGrokImagineVideo15)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	defer common.CleanupBodyStorage(c)
+
+	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}})
+	require.Nil(t, taskErr)
+}
+
+func TestExtractUsageFactsIncludesResolution(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(fmt.Sprintf(`{"model":%q,"prompt":"test","duration":5,"metadata":{"resolution":"1080p"}}`, ModelGrokImagineVideo15)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	defer common.CleanupBodyStorage(c)
+
+	info := &relaycommon.RelayInfo{OriginModelName: ModelGrokImagineVideo15, TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{}}
+	adaptor := &TaskAdaptor{}
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	assert.Equal(t, map[string]any{"seconds": 5.0, "resolution": "1080p"}, adaptor.ExtractUsageFacts(c, info))
 }
 
 func TestArbitraryMappedAliasUsesResolvedModelConfig(t *testing.T) {
@@ -113,7 +131,7 @@ func TestEstimateBillingUsesGrokVideoDuration(t *testing.T) {
 	}{
 		{name: "base four seconds", model: ModelGrokImagineVideo, body: `{"model":"grok-imagine-video","prompt":"test","duration":4}`, expected: 4},
 		{name: "1.5 six seconds", model: ModelGrokImagineVideo15, body: `{"model":"grok-imagine-video-1.5","prompt":"test","duration":6}`, expected: 6},
-		{name: "1.5 1080p fifteen seconds", model: ModelGrokImagineVideo151080, body: `{"model":"grok-imagine-video-1.5-1080p","prompt":"test","duration":15}`, expected: 15},
+		{name: "1.5 1080p fifteen seconds", model: ModelGrokImagineVideo15, body: `{"model":"grok-imagine-video-1.5","prompt":"test","duration":15,"metadata":{"resolution":"1080p"}}`, expected: 15},
 		{name: "default eight seconds", model: ModelGrokImagineVideo15, body: `{"model":"grok-imagine-video-1.5","prompt":"test"}`, expected: 8},
 	}
 	for _, tt := range tests {
