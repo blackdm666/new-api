@@ -54,7 +54,16 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	var requestBody io.Reader
 	var jsonData []byte
 
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+	passThroughEnabled := model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled
+	// XinMeng's OpenAI-compatible image endpoint accepts a smaller request
+	// schema than GPT Image. Force the normal typed conversion path so
+	// unsupported GPT-only fields cannot bypass provider sanitization.
+	upstreamModelName := info.GetUpstreamModelName()
+	if common.IsImageGenerationModel(upstreamModelName) && common.IsXinMengImageModel(upstreamModelName) {
+		passThroughEnabled = false
+	}
+
+	if passThroughEnabled {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())

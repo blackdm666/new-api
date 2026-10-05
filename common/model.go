@@ -14,7 +14,9 @@ var (
 		"dall-e-2",
 		"prefix:dall-e", // Deprecated upstream models; retained for compatible routes.
 		"gpt-image-",
+		"midjourney",
 		"qwen-image",
+		"seedream",
 		"z-image",
 		"wan2.7-image-pro",
 		"wan2.7-image",
@@ -62,6 +64,12 @@ func IsImageGenerationModel(modelName string) bool {
 		}
 	}
 	return false
+}
+
+func IsXinMengImageModel(modelName string) bool {
+	modelName = strings.ToLower(modelName)
+	return strings.Contains(modelName, "midjourney") ||
+		strings.Contains(modelName, "seedream")
 }
 
 func IsOpenAITextModel(modelName string) bool {
