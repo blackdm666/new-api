@@ -129,15 +129,16 @@ export function TaskChannelCell(props: { log: TaskLog }) {
   )
 }
 
-export function TaskModelCell(props: { log: TaskLog }) {
+export function TaskModelCell(props: { log: TaskLog; isAdmin?: boolean }) {
   const originModel = props.log.properties?.origin_model_name?.trim()
   const upstreamModel = props.log.properties?.upstream_model_name?.trim()
-  const modelName = originModel || upstreamModel
+  const modelName = props.isAdmin ? originModel || upstreamModel : upstreamModel
   if (!modelName) {
     return <span className='text-muted-foreground/60 text-xs'>-</span>
   }
 
-  const actualModel = upstreamModel !== modelName ? upstreamModel : undefined
+  const actualModel =
+    props.isAdmin && upstreamModel !== modelName ? upstreamModel : undefined
   return <ModelBadge modelName={modelName} actualModel={actualModel} />
 }
 

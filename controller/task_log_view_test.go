@@ -14,6 +14,10 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	task := &model.Task{
 		TaskID:   "task_public",
 		Platform: "document-parser",
+		Properties: model.Properties{
+			OriginModelName:   "private-sales-alias",
+			UpstreamModelName: "provider-model",
+		},
 		PrivateData: model.TaskPrivateData{
 			Key:            "channel-secret-canary",
 			UpstreamTaskID: "upstream-private",
@@ -39,8 +43,16 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	userView := tasksToDto([]*model.Task{task}, false, common.RoleCommonUser)[0]
 	assert.Nil(t, userView.AdminInfo)
 	assert.Nil(t, userView.RootInfo)
+	require.IsType(t, model.Properties{}, userView.Properties)
+	userProperties := userView.Properties.(model.Properties)
+	assert.Empty(t, userProperties.OriginModelName)
+	assert.Equal(t, "provider-model", userProperties.UpstreamModelName)
 
 	adminView := tasksToDto([]*model.Task{task}, false, common.RoleAdminUser)[0]
+	require.IsType(t, model.Properties{}, adminView.Properties)
+	adminProperties := adminView.Properties.(model.Properties)
+	assert.Equal(t, "private-sales-alias", adminProperties.OriginModelName)
+	assert.Equal(t, "provider-model", adminProperties.UpstreamModelName)
 	require.NotNil(t, adminView.AdminInfo)
 	require.NotNil(t, adminView.AdminInfo.TaskPlugin)
 	assert.Equal(t, "document-parser", adminView.AdminInfo.TaskPlugin.Key)

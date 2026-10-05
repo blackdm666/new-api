@@ -31,7 +31,7 @@ import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialo
 import { RechargeFormCard } from './components/recharge-form-card'
 import { SubscriptionPlansCard } from './components/subscription-plans-card'
 import { WalletStatsCard } from './components/wallet-stats-card'
-import { DEFAULT_DISCOUNT_RATE, PAYMENT_TYPES } from './constants'
+import { PAYMENT_TYPES } from './constants'
 import {
   useTopupInfo,
   usePayment,
@@ -42,6 +42,7 @@ import {
 } from './hooks'
 import {
   getDefaultPaymentType,
+  getDiscountRateForAmount,
   getMinTopupAmount,
   dispatchSelectedPayment,
 } from './lib'
@@ -302,7 +303,7 @@ export function Wallet(props: WalletProps) {
 
   // Get discount rate for current topup amount
   const getDiscountRate = useCallback(() => {
-    return topupInfo?.discount?.[topupAmount] || DEFAULT_DISCOUNT_RATE
+    return getDiscountRateForAmount(topupAmount, topupInfo?.discount || {})
   }, [topupInfo, topupAmount])
 
   const handleSubscriptionAvailabilityChange = useCallback(

@@ -621,6 +621,14 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 			task.ChannelName = channelNameMap[task.ChannelId]
 		}
 		item := relay.TaskModel2Dto(task)
+		if viewerRole < common.RoleAdminUser {
+			// The requested model can be a private sales alias. Keep it for
+			// internal/admin workflows, but do not expose it in the user task
+			// list or task details response.
+			userProperties := task.Properties
+			userProperties.OriginModelName = ""
+			item.Properties = userProperties
+		}
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)
 		item.ResultDiscarded = task.PrivateData.ResultDiscarded
 		if task.Status == model.TaskStatusSuccess {
