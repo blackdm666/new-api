@@ -45,6 +45,7 @@ type requestDescriptor struct {
 	RewriteModel   string            `json:"rewriteModel"`
 	BodyType       string            `json:"bodyType"`
 	Parts          []requestPart     `json:"parts"`
+	FileRef        string            `json:"fileRef"`
 }
 
 type requestPart struct {
@@ -77,6 +78,12 @@ var taskArtifactKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,1
 
 const maxTaskArtifacts = 64
 
+const (
+	maxTaskPreflightRequestBytes  = 1 << 20
+	maxTaskPreflightResponseBytes = 1 << 20
+	taskPreflightTimeout          = 30 * time.Second
+)
+
 // maxTaskPluginPersistedJSONBytes is the shared ceiling for taskData and plugin state.
 const maxTaskPluginPersistedJSONBytes = 1 << 20
 
@@ -87,6 +94,8 @@ type TaskAdaptor struct {
 	routeRequest   *pluginruntime.RouteRequestContext
 	requestHeaders map[string]string
 	files          []map[string]any
+	preflight      any
+	preflightDone  bool
 }
 
 func New(plugin *pluginruntime.LoadedPlugin) *TaskAdaptor { return &TaskAdaptor{plugin: plugin} }
@@ -129,6 +138,9 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 			return service.TaskErrorWrapperLocal(err, "plugin_usage_invalid", http.StatusBadRequest)
 		}
 	}
+	if err := a.runTaskPreflight(c, info); err != nil {
+		return service.TaskErrorWrapperLocal(err, "plugin_request_invalid", http.StatusBadRequest)
+	}
 	if _, err := a.buildSubmit(c, info); err != nil {
 		return service.TaskErrorWrapperLocal(err, "plugin_request_invalid", http.StatusBadRequest)
 	}
@@ -141,6 +153,226 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		}
 	}
 	return nil
+}
+
+func (a *TaskAdaptor) runTaskPreflight(c *gin.Context, info *relaycommon.RelayInfo) error {
+	if a.preflightDone || !slices.Contains(a.plugin.Meta.RequiredCapabilities, pluginruntime.CapabilityTaskPreflight) {
+		return nil
+	}
+	a.preflightDone = true
+	ctx := c.Request.Context()
+	value, err := a.plugin.Engine.Call(ctx, "buildPreflightRequest", a.submitContext(c, info))
+	if err != nil {
+		return fmt.Errorf("plugin preflight hook failed: %w", err)
+	}
+	if value == nil {
+		return nil
+	}
+	var descriptor requestDescriptor
+	if err = convert(value, &descriptor); err != nil {
+		return fmt.Errorf("plugin returned an invalid preflight request")
+	}
+	response, err := a.executePreflightRequest(c, info, descriptor, false)
+	if err != nil {
+		return err
+	}
+	if response.StatusCode/100 != 2 {
+		_ = response.Body.Close()
+		return fmt.Errorf("plugin preflight request returned status %d", response.StatusCode)
+	}
+	body, err := readTaskPreflightBody(response)
+	if err != nil {
+		return err
+	}
+	var decoded any
+	if err = common.Unmarshal(body, &decoded); err != nil {
+		return fmt.Errorf("plugin preflight response is not valid JSON")
+	}
+	data := decoded
+	if object, ok := decoded.(map[string]any); ok {
+		if nested, exists := object["data"]; exists {
+			data = nested
+		}
+	}
+	a.preflight = map[string]any{
+		"status":  float64(response.StatusCode),
+		"headers": flattenHTTPHeaders(response.Header),
+		"data":    data,
+		"body":    decoded,
+	}
+	if a.preflight == nil || !a.hasHook(ctx, "buildUploadRequest") {
+		return nil
+	}
+	value, err = a.plugin.Engine.Call(ctx, "buildUploadRequest", a.submitContext(c, info))
+	if err != nil {
+		return fmt.Errorf("plugin upload hook failed: %w", err)
+	}
+	if value == nil {
+		return nil
+	}
+	var upload requestDescriptor
+	if err = convert(value, &upload); err != nil {
+		return fmt.Errorf("plugin returned an invalid upload request")
+	}
+	uploadResponse, err := a.executePreflightRequest(c, info, upload, true)
+	if err != nil {
+		return err
+	}
+	if uploadResponse.StatusCode/100 != 2 {
+		_ = uploadResponse.Body.Close()
+		return fmt.Errorf("plugin upload request returned status %d", uploadResponse.StatusCode)
+	}
+	_, err = readTaskPreflightBody(uploadResponse)
+	return err
+}
+
+func (a *TaskAdaptor) executePreflightRequest(c *gin.Context, info *relaycommon.RelayInfo, descriptor requestDescriptor, upload bool) (*http.Response, error) {
+	if strings.TrimSpace(descriptor.URL) == "" {
+		if upload {
+			return nil, fmt.Errorf("plugin returned an empty upload URL")
+		}
+		return nil, fmt.Errorf("plugin returned an empty preflight URL")
+	}
+	if upload {
+		if !descriptor.Credentialless {
+			return nil, fmt.Errorf("upload requests must be credentialless")
+		}
+		if descriptor.BodyType != "file" || strings.TrimSpace(descriptor.FileRef) == "" {
+			return nil, fmt.Errorf("upload requests must provide a file reference")
+		}
+		if err := validateCredentiallessTaskURL(descriptor.URL); err != nil {
+			return nil, err
+		}
+	} else if err := pluginruntime.ValidateRequestURL(descriptor.URL, info.ChannelBaseUrl, a.plugin.Meta.AllowedHosts); err != nil {
+		return nil, err
+	}
+	method := strings.ToUpper(strings.TrimSpace(descriptor.Method))
+	if method == "" {
+		method = http.MethodPost
+	}
+	if method != http.MethodGet && method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch {
+		return nil, fmt.Errorf("plugin returned an unsupported preflight request method")
+	}
+	if descriptor.Credentialless {
+		for name := range descriptor.Headers {
+			switch strings.ToLower(strings.TrimSpace(name)) {
+			case "authorization", "cookie", "proxy-authorization":
+				return nil, fmt.Errorf("credentialless requests must not contain %s", name)
+			}
+		}
+	}
+	var body io.Reader
+	var contentLength int64 = -1
+	if descriptor.BodyType == "file" {
+		if !upload {
+			return nil, fmt.Errorf("preflight requests cannot upload files")
+		}
+		file, err := a.openTaskFile(c, descriptor.FileRef)
+		if err != nil {
+			return nil, err
+		}
+		body = file
+		contentLength = file.size
+		defer file.Close()
+	} else if descriptor.Body != nil {
+		if text, ok := descriptor.Body.(string); ok {
+			if len(text) > maxTaskPreflightRequestBytes {
+				return nil, fmt.Errorf("preflight request body exceeds size limit")
+			}
+			body = strings.NewReader(text)
+		} else {
+			encoded, err := common.Marshal(descriptor.Body)
+			if err != nil {
+				return nil, fmt.Errorf("plugin returned an invalid preflight request body")
+			}
+			if len(encoded) > maxTaskPreflightRequestBytes {
+				return nil, fmt.Errorf("preflight request body exceeds size limit")
+			}
+			body = bytes.NewReader(encoded)
+		}
+	}
+	requestContext, cancel := context.WithTimeout(c.Request.Context(), taskPreflightTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestContext, method, descriptor.URL, body)
+	if err != nil {
+		return nil, err
+	}
+	if contentLength >= 0 {
+		req.ContentLength = contentLength
+	}
+	for name, value := range descriptor.Headers {
+		req.Header.Set(name, value)
+	}
+	client, err := service.GetHttpClientWithProxy(info.ChannelSetting.Proxy)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("preflight request failed: %w", err)
+	}
+	return resp, nil
+}
+
+func validateCredentiallessTaskURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil {
+		return fmt.Errorf("credentialless request URL must be an absolute HTTP(S) URL without credentials")
+	}
+	return nil
+}
+
+func readTaskPreflightBody(response *http.Response) ([]byte, error) {
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxTaskPreflightResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxTaskPreflightResponseBytes {
+		return nil, fmt.Errorf("preflight response exceeds size limit")
+	}
+	return body, nil
+}
+
+func flattenHTTPHeaders(headers http.Header) map[string]string {
+	result := make(map[string]string, len(headers))
+	for name, values := range headers {
+		if len(values) > 0 {
+			result[name] = values[0]
+		}
+	}
+	return result
+}
+
+func (a *TaskAdaptor) openTaskFile(c *gin.Context, ref string) (*taskPreflightFile, error) {
+	form, err := common.ParseMultipartFormReusable(c)
+	if err != nil {
+		return nil, err
+	}
+	field, index, valid := pluginruntime.ParseFileReference(ref)
+	files := form.File[field]
+	if !valid || index >= len(files) {
+		form.RemoveAll()
+		return nil, fmt.Errorf("unknown file reference %q", ref)
+	}
+	file, err := files[index].Open()
+	if err != nil {
+		form.RemoveAll()
+		return nil, err
+	}
+	return &taskPreflightFile{File: file, form: form, size: files[index].Size}, nil
+}
+
+type taskPreflightFile struct {
+	multipart.File
+	form *multipart.Form
+	size int64
+}
+
+func (f *taskPreflightFile) Close() error {
+	err := f.File.Close()
+	f.form.RemoveAll()
+	return err
 }
 
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
@@ -1343,6 +1575,9 @@ func (a *TaskAdaptor) submitContext(c *gin.Context, info *relaycommon.RelayInfo)
 	ctx["requestBody"] = jsonValue(routeRequest.RequestBody)
 	ctx["requestHeaders"] = requestHeaders
 	ctx["files"] = files
+	if a.preflight != nil {
+		ctx["preflightResponse"] = jsonValue(a.preflight)
+	}
 	ctx["action"] = info.Action
 	ctx["originTaskId"] = info.OriginTaskID
 	if info.TaskRelayInfo != nil && len(info.OriginTasks) > 0 {
