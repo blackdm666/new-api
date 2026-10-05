@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -65,7 +66,11 @@ func TaskArtifactDeliveryURL(ctx context.Context, task *model.Task, artifact typ
 	if source == nil {
 		return fallback
 	}
-	if artifact.Type == "video" && singleVideo && source.URL != "" && source.URL == ResolveTaskVideoResultURL(task, "") {
+	// Plugin artifacts may represent the same single video that the legacy
+	// task-media cache already archived. The independent artifact store is
+	// optional, so use the established task-wide cache before falling back to
+	// a capability URL. Never map ambiguous or non-video artifacts this way.
+	if artifact.Type == "video" && singleVideo && source.URL != "" && sameTaskVideoSourceURL(task, source.URL) {
 		if publicURL, err := PublicTaskVideoURL(task); err == nil {
 			return publicURL
 		}
@@ -81,4 +86,25 @@ func TaskArtifactDeliveryURL(ctx context.Context, task *model.Task, artifact typ
 		return source.URL
 	}
 	return fallback
+}
+
+func sameTaskVideoSourceURL(task *model.Task, candidate string) bool {
+	expected := strings.TrimSpace(ResolveTaskVideoResultURL(task, ""))
+	candidate = strings.TrimSpace(candidate)
+	if expected == "" || candidate == "" {
+		return false
+	}
+	if expected == candidate {
+		return true
+	}
+	expectedURL, expectedErr := url.Parse(expected)
+	candidateURL, candidateErr := url.Parse(candidate)
+	if expectedErr != nil || candidateErr != nil ||
+		expectedURL.Path == "" || candidateURL.Path == "" ||
+		expectedURL.RawQuery != candidateURL.RawQuery {
+		return false
+	}
+	// Plugin task snapshots commonly persist a provider-relative result path,
+	// while buildContentRequest expands it against the channel base URL.
+	return strings.HasPrefix(expected, "/") && expectedURL.Path == candidateURL.Path
 }

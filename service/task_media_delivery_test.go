@@ -72,6 +72,52 @@ func TestTaskArtifactDeliveryArchivedStringResults(t *testing.T) {
 	}
 }
 
+func TestTaskArtifactDeliveryUsesArchivedVideoForProtectedPluginSource(t *testing.T) {
+	task := deliveryTask(t)
+	task.Data = []byte(`{"content":{"url":"/v1/videos/upstream/content"}}`)
+	want, err := PublicTaskVideoURL(task)
+	require.NoError(t, err)
+
+	got := TaskArtifactDeliveryURL(
+		context.Background(),
+		task,
+		types.TaskArtifact{Key: "video", Type: "video"},
+		true,
+		&TaskArtifactDeliverySource{
+			URL:       "https://sub2api.example/v1/videos/upstream/content",
+			Method:    "GET",
+			Anonymous: false,
+		},
+		"capability",
+	)
+	require.Equal(t, want, got)
+	require.Equal(t, "capability", TaskArtifactDeliveryURL(
+		context.Background(),
+		task,
+		types.TaskArtifact{Key: "video", Type: "video"},
+		false,
+		&TaskArtifactDeliverySource{
+			URL:       "https://sub2api.example/v1/videos/upstream/content",
+			Method:    "GET",
+			Anonymous: false,
+		},
+		"capability",
+	))
+	task.Data = []byte(`{"content":{"url":"/v1/videos/different/content"}}`)
+	require.Equal(t, "capability", TaskArtifactDeliveryURL(
+		context.Background(),
+		task,
+		types.TaskArtifact{Key: "video", Type: "video"},
+		true,
+		&TaskArtifactDeliverySource{
+			URL:       "https://sub2api.example/v1/videos/upstream/content",
+			Method:    "GET",
+			Anonymous: false,
+		},
+		"capability",
+	))
+}
+
 func TestTaskArtifactDeliveryKeepsAnonymousTrustedSourceOnly(t *testing.T) {
 	for _, tc := range []struct {
 		name, source, method     string
