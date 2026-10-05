@@ -471,7 +471,9 @@ it('uses the compact resolution and reference-input matrix when recognized', asy
   expect(screen.getByText('2x')).toBeVisible()
   expect(screen.getAllByText('$20').length).toBeGreaterThan(0)
   expect(screen.getAllByText('$12').length).toBeGreaterThan(0)
-  expect(screen.getAllByText(/\/ Per 1M/).length).toBeGreaterThan(0)
+  expect(screen.getAllByText('/ Per 1M tokens', { exact: true })).toHaveLength(
+    6
+  )
 })
 
 it('uses plugin option labels and infers a unique fallback without expanding unrelated fields', async () => {
