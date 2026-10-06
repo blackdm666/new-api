@@ -183,13 +183,6 @@ const IMAGE_USAGE_EXAMPLES = [
   { label: "2K · 4 张组图", facts: { images_up_to_1_5k: 0, images_above_1_5k: 4, input_images: 0, layer_decomposition: false } },
   { label: "图层拆分 · 2K 底图 + 4 层 1.5K", facts: { images_up_to_1_5k: 4, images_above_1_5k: 1, input_images: 1, layer_decomposition: true } },
 ];
-const SEEDREAM_5_PRO_USAGE_EXAMPLES = [
-  { label: "2K · 1 张", facts: { images_up_to_1_5k: 0, images_above_1_5k: 1, input_images: 0, layer_decomposition: false } },
-  { label: "1K · 1 张 · 2 张参考图", facts: { images_up_to_1_5k: 1, images_above_1_5k: 0, input_images: 2, layer_decomposition: false } },
-  { label: "2K · 4 张组图", facts: { images_up_to_1_5k: 0, images_above_1_5k: 4, input_images: 0, layer_decomposition: false } },
-  { label: "图层拆分 · 2K 底图 + 4 层 1.5K（均按 2K 计价）", facts: { images_up_to_1_5k: 0, images_above_1_5k: 5, input_images: 1, layer_decomposition: true } },
-];
-
 // Usage facts for one Seedance capability profile: the pricing table then
 // lists only the resolutions and input kinds the model offers.
 function seedanceUsageSchema(profile) {
@@ -272,7 +265,7 @@ export const meta = {
     en: "Volcengine Doubao Seedance video generation and Seedream image generation",
     zh: "火山引擎豆包 Seedance 视频生成与 Seedream 图片生成",
   },
-  version: "1.1.1",
+  version: "1.1.2",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -284,7 +277,7 @@ export const meta = {
     {
       models: ["doubao-seedream-5-0-pro-260628"],
       schema: SEEDREAM_5_PRO_USAGE_SCHEMA,
-      examples: SEEDREAM_5_PRO_USAGE_EXAMPLES,
+      examples: [],
     },
     {
       models: Object.keys(IMAGE_MODELS).filter((model) => model !== "doubao-seedream-5-0-pro-260628"),
