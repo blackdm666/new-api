@@ -190,13 +190,15 @@ describe('task matrix marketplace display rows', () => {
     ).toBe(42)
   })
 
-  test('does not opt unsupported schemas into the compact matrix', () => {
-    expect(
-      getTaskCompactPricingMatrix(
-        'tier("base", u("seconds") * 0.4)',
-        resolutionSchema
-      )
-    ).toBeNull()
+  test('builds a compact one-dimensional matrix for a single enum schema', () => {
+    const matrix = getTaskCompactPricingMatrix(
+      'tier("base", u("seconds") * 0.4)',
+      resolutionSchema
+    )
+
+    expect(matrix?.rowField).toBe('resolution')
+    expect(matrix?.columnField).toBeUndefined()
+    expect(matrix?.rowValues).toEqual(['480P', '720P', '1080P'])
   })
 
   test('expands a uniform flat expression into every enum combination', () => {
@@ -290,7 +292,7 @@ describe('task matrix marketplace display rows', () => {
     ).toBe(26)
   })
 
-  test('keeps Grok per-second resolution prices unchanged without opting into a two-dimensional table', () => {
+  test('keeps Grok per-second resolution prices unchanged in a one-dimensional table', () => {
     const schema: BillingUsageSchema = {
       seconds: { type: 'number', unit: 'second' },
       resolution: { enum: ['480p', '720p', '1080p'] },
@@ -302,7 +304,16 @@ describe('task matrix marketplace display rows', () => {
     expect(rows.map((row) => row.unitPrices.seconds)).toEqual([
       0.08, 0.16, 0.22,
     ])
-    expect(getTaskCompactPricingMatrix(expression, schema)).toBeNull()
+    const matrix = getTaskCompactPricingMatrix(expression, schema)
+
+    expect(matrix?.rowField).toBe('resolution')
+    expect(matrix?.columnField).toBeUndefined()
+    expect(matrix?.rowValues).toEqual(['480p', '720p', '1080p'])
+    expect(matrix?.columnValues).toEqual([''])
+    expect(
+      matrix?.cells.get(taskCompactMatrixCellKey('1080p', ''))?.unitPrices
+        .seconds
+    ).toBe(0.22)
   })
 
   test('does not hide a nonzero constant estimate behind an upstream usage nil guard', () => {

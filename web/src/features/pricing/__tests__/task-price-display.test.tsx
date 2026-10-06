@@ -476,6 +476,62 @@ it('uses the compact resolution and reference-input matrix when recognized', asy
   )
 })
 
+it('uses a compact resolution price table and hides examples for one-enum tasks', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <ModelDetailsContent
+        model={{
+          ...model,
+          model_name: 'grok-imagine-video-1.5',
+          billing_mode: 'tiered_expr',
+          compact_pricing_display: 1,
+          billing_expr:
+            'u("resolution") == "480p" ? tier("480p", u("seconds") * 0.08) : u("resolution") == "720p" ? tier("720p", u("seconds") * 0.16) : tier("1080p", u("seconds") * 0.22)',
+          billing_usage_schema: {
+            seconds: {
+              type: 'number',
+              unit: 'second',
+              description: {
+                en: 'Video generation unit price',
+                zh: '视频生成单价',
+              },
+            },
+            resolution: {
+              enum: ['480p', '720p', '1080p'],
+              description: { en: 'Output resolution', zh: '输出分辨率' },
+            },
+          },
+          billing_usage_examples: [
+            { label: '5 seconds', facts: { resolution: '720p', seconds: 5 } },
+          ],
+        }}
+        groupRatio={{ default: 1 }}
+        usableGroup={{ default: { desc: 'Default group', ratio: 1 } }}
+        endpointMap={{}}
+        autoGroups={[]}
+        priceRate={1}
+        usdExchangeRate={1}
+        tokenUnit='M'
+      />
+    </QueryClientProvider>
+  )
+
+  expect(
+    screen.getAllByRole('columnheader', { name: 'Output resolution' })
+  ).toHaveLength(1)
+  expect(screen.getAllByText('$0.08').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('$0.16').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('$0.22').length).toBeGreaterThan(0)
+  expect(screen.queryByText('Applicable conditions')).not.toBeInTheDocument()
+  expect(screen.queryByText('Price examples')).not.toBeInTheDocument()
+  expect(screen.queryByText('5 seconds')).not.toBeInTheDocument()
+})
+
 it('uses plugin option labels and infers a unique fallback without expanding unrelated fields', async () => {
   render(
     <DynamicPricingBreakdown
@@ -565,6 +621,7 @@ it('switches provider group prices, localized conditions and examples, and shows
     ...model,
     quota_type: 1,
     model_price: 0.25,
+    compact_pricing_display: 0,
     billing_plugin_variants: [
       {
         plugin_key: 'alpha',

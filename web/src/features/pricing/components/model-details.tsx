@@ -1003,8 +1003,8 @@ function getCompactTaskPricingMatrixForModel(model: PricingModel) {
   if (!matrix) return null
 
   // Older public pricing payloads omit this metadata and return null. A
-  // recognized two-enum task matrix should still render horizontally in that
-  // case; an explicit 0 remains the opt-out.
+  // recognized task matrix should still render compactly in that case; an
+  // explicit 0 remains the opt-out.
   return model.compact_pricing_display === 0 ? null : matrix
 }
 
@@ -1016,13 +1016,72 @@ function CompactTaskPricingTable(props: {
 }) {
   const { t, i18n } = useTranslation()
   const rowDefinition = props.schema[props.matrix.rowField]
-  const columnDefinition = props.schema[props.matrix.columnField]
+  const columnDefinition = props.matrix.columnField
+    ? props.schema[props.matrix.columnField]
+    : undefined
   const thClass =
     'text-muted-foreground py-2 text-xs font-medium whitespace-normal break-words'
   const getCellUnitLabel = (entry: DynamicPriceEntry) => {
     if (entry.unit === 'token') return t('Per 1M tokens')
     const unitLabelKey = getDynamicPriceUnitLabelKey(entry)
     return unitLabelKey ? t(unitLabelKey) : ''
+  }
+
+  if (!props.matrix.columnField) {
+    return (
+      <StaticDataTable
+        className='rounded-none border-0'
+        tableClassName='text-sm'
+        headerRowClassName='hover:bg-transparent'
+        data={props.matrix.rowValues}
+        getRowKey={(rowValue) => rowValue}
+        columns={[
+          {
+            id: props.matrix.rowField,
+            header: taskPriceLabel(
+              rowDefinition?.description,
+              props.matrix.rowField,
+              i18n.language
+            ),
+            className: thClass,
+            cellClassName: 'py-2.5 whitespace-normal break-words',
+            cell: (rowValue) =>
+              taskEnumLabel(rowDefinition, rowValue, i18n.language),
+          },
+          ...props.priceFields.map((entry) => {
+            const unitLabel = getCellUnitLabel(entry)
+            const fieldLabel =
+              entry.labelKind === 'schema' ? (
+                <DynamicPriceEntryLabel entry={entry} />
+              ) : (
+                t(entry.shortLabel)
+              )
+            return {
+              id: entry.field,
+              header: unitLabel ? (
+                <>
+                  {fieldLabel}
+                  {` / ${unitLabel}`}
+                </>
+              ) : (
+                fieldLabel
+              ),
+              className: `${thClass} text-right`,
+              cellClassName: 'py-2.5 text-right font-mono',
+              cell: (rowValue: string) => {
+                const tier = props.matrix.cells.get(
+                  taskCompactMatrixCellKey(rowValue, '')
+                )
+                if (!tier) return '-'
+                return (
+                  props.formattedPricesByTier.get(tier)?.get(entry.field) ?? '-'
+                )
+              },
+            }
+          }),
+        ]}
+      />
+    )
   }
 
   return (
@@ -1402,7 +1461,7 @@ function ProviderGroupPricingSection(
                     ]}
                   />
                 )}
-                {usageExampleRows.length > 0 ? (
+                {!compactMatrix && usageExampleRows.length > 0 ? (
                   <div className='border-t'>
                     <div className='text-muted-foreground px-3 pt-2 text-[10px] font-medium tracking-wider uppercase'>
                       {t('Price examples')}
