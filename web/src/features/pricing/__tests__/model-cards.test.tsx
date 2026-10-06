@@ -382,6 +382,7 @@ describe('model cards', () => {
       <ModelCard
         model={pricingModel({
           billing_mode: 'tiered_expr',
+          compact_pricing_display: 0,
           billing_expr:
             'u("mode") == "pro" ? tier("pro", u("tokens") * 70 / 1000000) : tier("std", u("tokens") * 42 / 1000000)',
           billing_usage_schema: {
@@ -400,6 +401,26 @@ describe('model cards', () => {
       '$42 – $70 / 1M token'
     )
     expect(screen.getByText(/480p · 5s ≈/)).toBeVisible()
+  })
+
+  it('hides usage examples for compact task pricing cards', () => {
+    const compactModel = pricingModel({
+      model_name: 'grok-imagine-video-1.5',
+      billing_mode: 'tiered_expr',
+      billing_expr:
+        'u("resolution") == "480p" ? tier("480p", u("seconds") * 0.08) : u("resolution") == "720p" ? tier("720p", u("seconds") * 0.16) : tier("1080p", u("seconds") * 0.22)',
+      billing_usage_schema: {
+        seconds: { type: 'number', unit: 'second' },
+        resolution: { enum: ['480p', '720p', '1080p'] },
+      },
+      billing_usage_examples: [
+        { label: '8s · 720p', facts: { seconds: 8, resolution: '720p' } },
+      ],
+    })
+
+    render(<ModelCard model={compactModel} onClick={vi.fn()} />)
+
+    expect(screen.queryByText(/8s · 720p ≈/)).not.toBeInTheDocument()
   })
 
   it('keeps an unrecognized expression visible with the special billing message', () => {

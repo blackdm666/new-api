@@ -40,6 +40,7 @@ import { parseTags } from '../lib/filters'
 import { getFixedPriceUnitLabel, isTokenBasedModel } from '../lib/model-helpers'
 import { resolvePricingModelIcon } from '../lib/model-icon'
 import { formatPrice, formatRequestPrice } from '../lib/price'
+import { getTaskCompactPricingMatrix } from '../lib/task-matrix-display'
 import { taskPriceLabel, taskUsageUnitLabel } from '../lib/task-price-display'
 import type { PricingModel, PriceType, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
@@ -102,7 +103,16 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     [props.model, dynamicPriceOptions, currency]
   )
   const cardExamplePrice = useMemo(
-    () => getCardExamplePrice(props.model, dynamicPriceOptions),
+    () => {
+      const compactMatrix = getTaskCompactPricingMatrix(
+        props.model.billing_expr,
+        props.model.billing_usage_schema
+      )
+      if (compactMatrix && props.model.compact_pricing_display !== 0) {
+        return null
+      }
+      return getCardExamplePrice(props.model, dynamicPriceOptions)
+    },
     // Currency is read indirectly by the price formatter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [props.model, dynamicPriceOptions, currency]
