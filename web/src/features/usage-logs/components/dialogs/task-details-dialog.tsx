@@ -116,6 +116,13 @@ export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
       <div className='space-y-3'>
         <DetailSection label={t('Basic Information')}>
           <DetailRow label={t('Task ID')} value={props.log.task_id} mono />
+          {properties?.origin_model_name ? (
+            <DetailRow
+              label={t('Request Model')}
+              value={properties.origin_model_name}
+              mono
+            />
+          ) : null}
           <DetailRow
             label={t('Progress')}
             value={props.log.progress || '-'}
@@ -136,13 +143,6 @@ export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
             value={formatTaskTimestamp(props.log.finish_time)}
             mono
           />
-          {properties?.origin_model_name ? (
-            <DetailRow
-              label={t('Original Model')}
-              value={properties.origin_model_name}
-              mono
-            />
-          ) : null}
           {props.isAdmin && properties?.upstream_model_name ? (
             <DetailRow
               label={t('Actual Model')}
