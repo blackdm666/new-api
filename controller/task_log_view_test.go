@@ -45,7 +45,7 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	assert.Nil(t, userView.RootInfo)
 	require.IsType(t, model.Properties{}, userView.Properties)
 	userProperties := userView.Properties.(model.Properties)
-	assert.Empty(t, userProperties.OriginModelName)
+	assert.Equal(t, "private-sales-alias", userProperties.OriginModelName)
 	assert.Empty(t, userProperties.UpstreamModelName)
 
 	adminView := tasksToDto([]*model.Task{task}, false, common.RoleAdminUser)[0]

@@ -87,7 +87,7 @@ describe('task log cells', () => {
     expect(screen.getByText('gemini-omni-flash')).toBeVisible()
   })
 
-  test('hides both model names from regular users', () => {
+  test('shows the requested model but not the provider model to regular users', () => {
     render(
       <TaskModelCell
         log={{
@@ -100,7 +100,7 @@ describe('task log cells', () => {
       />
     )
 
-    expect(screen.queryByText('gemini-omni-flash')).not.toBeInTheDocument()
+    expect(screen.getByText('gemini-omni-flash')).toBeVisible()
     expect(
       screen.queryByText('gemini-omni-flash-preview')
     ).not.toBeInTheDocument()
