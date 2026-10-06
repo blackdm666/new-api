@@ -132,7 +132,7 @@ export function TaskChannelCell(props: { log: TaskLog }) {
 export function TaskModelCell(props: { log: TaskLog; isAdmin?: boolean }) {
   const originModel = props.log.properties?.origin_model_name?.trim()
   const upstreamModel = props.log.properties?.upstream_model_name?.trim()
-  const modelName = props.isAdmin ? originModel || upstreamModel : upstreamModel
+  const modelName = props.isAdmin ? originModel || upstreamModel : ''
   if (!modelName) {
     return <span className='text-muted-foreground/60 text-xs'>-</span>
   }

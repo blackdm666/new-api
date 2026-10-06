@@ -203,10 +203,7 @@ export function useTaskLogsColumns(
       {
         id: 'model',
         header: t('Model'),
-        accessorFn: (row) =>
-          isAdmin
-            ? row.properties?.origin_model_name
-            : row.properties?.upstream_model_name,
+        accessorFn: (row) => (isAdmin ? row.properties?.origin_model_name : ''),
         cell: ({ row }) => (
           <TaskModelCell log={row.original} isAdmin={isAdmin} />
         ),

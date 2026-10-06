@@ -604,7 +604,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	}
 
 	// 通用 TaskDto 格式
-	publicTask := TaskModel2Dto(originTask)
+	publicTask := TaskModel2DtoForUser(originTask)
 	publicTask.ResultURL = service.TaskVideoDeliveryURL(c.Request.Context(), originTask)
 	respBody, err = common.Marshal(dto.TaskResponse[any]{
 		Code: "success",
@@ -751,4 +751,16 @@ func TaskModel2Dto(task *model.Task) *dto.TaskDto {
 		Username:      task.Username,
 		Data:          task.Data,
 	}
+}
+
+// TaskModel2DtoForUser projects a task into the public user view. Model
+// aliases and provider model names are internal routing details and must not
+// be returned to ordinary users.
+func TaskModel2DtoForUser(task *model.Task) *dto.TaskDto {
+	result := TaskModel2Dto(task)
+	properties := task.Properties
+	properties.OriginModelName = ""
+	properties.UpstreamModelName = ""
+	result.Properties = properties
+	return result
 }

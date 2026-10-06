@@ -46,7 +46,7 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	require.IsType(t, model.Properties{}, userView.Properties)
 	userProperties := userView.Properties.(model.Properties)
 	assert.Empty(t, userProperties.OriginModelName)
-	assert.Equal(t, "provider-model", userProperties.UpstreamModelName)
+	assert.Empty(t, userProperties.UpstreamModelName)
 
 	adminView := tasksToDto([]*model.Task{task}, false, common.RoleAdminUser)[0]
 	require.IsType(t, model.Properties{}, adminView.Properties)

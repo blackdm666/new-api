@@ -87,7 +87,7 @@ describe('task log cells', () => {
     expect(screen.getByText('gemini-omni-flash')).toBeVisible()
   })
 
-  test('shows only the upstream model name to regular users', () => {
+  test('hides both model names from regular users', () => {
     render(
       <TaskModelCell
         log={{
@@ -101,7 +101,9 @@ describe('task log cells', () => {
     )
 
     expect(screen.queryByText('gemini-omni-flash')).not.toBeInTheDocument()
-    expect(screen.getByText('gemini-omni-flash-preview')).toBeVisible()
+    expect(
+      screen.queryByText('gemini-omni-flash-preview')
+    ).not.toBeInTheDocument()
   })
 
   test('formats the final task quota with the shared cost display', () => {
