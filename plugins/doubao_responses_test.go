@@ -228,14 +228,14 @@ func TestDoubaoImageSubmission(t *testing.T) {
 	})
 
 	t.Run("image models are Responses-only host protocol models", func(t *testing.T) {
-		for _, name := range []string{"doubao-seedream-5-0-pro-260628", "doubao-seedream-5-0-lite-260128", "doubao-seedream-4-5-251128", "doubao-seedream-4-0-250828"} {
+		for _, name := range []string{"doubao-seedream-5-0-pro", "doubao-seedream-5-0-pro-260628", "doubao-seedream-5-0-lite-260128", "doubao-seedream-4-5-251128", "doubao-seedream-4-0-250828"} {
 			_, found := registry.Generation().LookupEndpoint(http.MethodPost, "/v1/responses", name)
 			assert.True(t, found, name)
 			_, found = registry.Generation().LookupEndpoint(http.MethodPost, "/v1/videos", name)
 			assert.False(t, found, name)
 			schema, examples := plugin.Meta.UsageForModel(name)
 			assert.ElementsMatch(t, []string{"images_up_to_1_5k", "images_above_1_5k", "input_images", "layer_decomposition"}, keysOf(schema), name)
-			if name == "doubao-seedream-5-0-pro-260628" {
+			if name == "doubao-seedream-5-0-pro" || name == "doubao-seedream-5-0-pro-260628" {
 				assert.Empty(t, examples, name)
 				assert.Equal(t, "Image generation unit price (1K)", schema["images_up_to_1_5k"].Description["en"], name)
 				assert.Equal(t, "图片生成单价（1K）", schema["images_up_to_1_5k"].Description["zh"], name)

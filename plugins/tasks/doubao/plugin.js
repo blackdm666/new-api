@@ -23,19 +23,25 @@ const DEFAULT_VIDEO_PROFILE = { resolutions: SEEDANCE_RESOLUTIONS, videoInput: t
 // outputFormat/tools/fastPromptMode mirror the per-model support lists in the API
 // reference and were confirmed by live 400s; background marks the models whose
 // documented transparency combination rules are enforced locally.
+const SEEDREAM_5_PRO_MODELS = [
+  "doubao-seedream-5-0-pro",
+  "doubao-seedream-5-0-pro-260628",
+];
+const SEEDREAM_5_PRO_IMAGE_PROFILE = {
+  presets: ["1K", "1.5K", "2K"],
+  minPixels: 921600,
+  maxPixels: 4624220,
+  maxReferenceImages: 10,
+  sequential: false,
+  layers: true,
+  outputFormat: true,
+  background: true,
+  tools: false,
+  fastPromptMode: true,
+};
 const IMAGE_MODELS = {
-  "doubao-seedream-5-0-pro-260628": {
-    presets: ["1K", "1.5K", "2K"],
-    minPixels: 921600,
-    maxPixels: 4624220,
-    maxReferenceImages: 10,
-    sequential: false,
-    layers: true,
-    outputFormat: true,
-    background: true,
-    tools: false,
-    fastPromptMode: true,
-  },
+  "doubao-seedream-5-0-pro": SEEDREAM_5_PRO_IMAGE_PROFILE,
+  "doubao-seedream-5-0-pro-260628": SEEDREAM_5_PRO_IMAGE_PROFILE,
   "doubao-seedream-5-0-lite-260128": {
     presets: ["2K", "3K", "4K"],
     minPixels: 3686400,
@@ -275,12 +281,12 @@ export const meta = {
   usageExamples: seedanceUsageExamples(DEFAULT_VIDEO_PROFILE),
   usageProfiles: seedanceUsageProfiles().concat([
     {
-      models: ["doubao-seedream-5-0-pro-260628"],
+      models: SEEDREAM_5_PRO_MODELS,
       schema: SEEDREAM_5_PRO_USAGE_SCHEMA,
       examples: [],
     },
     {
-      models: Object.keys(IMAGE_MODELS).filter((model) => model !== "doubao-seedream-5-0-pro-260628"),
+      models: Object.keys(IMAGE_MODELS).filter((model) => !SEEDREAM_5_PRO_MODELS.includes(model)),
       schema: IMAGE_USAGE_SCHEMA,
       examples: IMAGE_USAGE_EXAMPLES,
     },
@@ -432,7 +438,7 @@ function imageModelCandidates(ctx) {
 }
 
 function imageTierMaxPixels(ctx) {
-  return imageModelCandidates(ctx).includes("doubao-seedream-5-0-pro-260628")
+  return imageModelCandidates(ctx).some((model) => SEEDREAM_5_PRO_MODELS.includes(model))
     ? SEEDREAM_5_PRO_TIER_MAX_PIXELS
     : IMAGE_TIER_MAX_PIXELS;
 }
