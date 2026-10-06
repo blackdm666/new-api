@@ -32,7 +32,7 @@ func TestTaskModel2DtoExposesTaskLogDisplayFields(t *testing.T) {
 	assert.Equal(t, task.GetResultURL(), result.ResultURL)
 }
 
-func TestTaskModel2DtoForUserHidesModelRoutingDetails(t *testing.T) {
+func TestTaskModel2DtoForUserKeepsRequestedModelAndHidesUpstreamModel(t *testing.T) {
 	task := &model.Task{
 		Properties: model.Properties{
 			OriginModelName:   "private-sales-alias",
@@ -46,6 +46,6 @@ func TestTaskModel2DtoForUserHidesModelRoutingDetails(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected model.Properties, got %T", result.Properties)
 	}
-	assert.Empty(t, properties.OriginModelName)
+	assert.Equal(t, "private-sales-alias", properties.OriginModelName)
 	assert.Empty(t, properties.UpstreamModelName)
 }

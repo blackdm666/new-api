@@ -622,8 +622,8 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 		}
 		item := relay.TaskModel2Dto(task)
 		if viewerRole < common.RoleAdminUser {
-			// Model aliases and provider model names are both internal routing
-			// details. Keep them available to administrators only.
+			// Keep the provider model name out of ordinary user task views.
+			// The requested/sales model remains visible as task context.
 			item = relay.TaskModel2DtoForUser(task)
 		}
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)

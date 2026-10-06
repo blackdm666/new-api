@@ -753,13 +753,12 @@ func TaskModel2Dto(task *model.Task) *dto.TaskDto {
 	}
 }
 
-// TaskModel2DtoForUser projects a task into the public user view. Model
-// aliases and provider model names are internal routing details and must not
-// be returned to ordinary users.
+// TaskModel2DtoForUser projects a task into the public user view. The model
+// requested by the user remains useful task information; the provider model
+// selected after routing is an internal detail and must not be returned.
 func TaskModel2DtoForUser(task *model.Task) *dto.TaskDto {
 	result := TaskModel2Dto(task)
 	properties := task.Properties
-	properties.OriginModelName = ""
 	properties.UpstreamModelName = ""
 	result.Properties = properties
 	return result
