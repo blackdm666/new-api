@@ -74,6 +74,97 @@ func TestConvertClaudeRequestPreservesNativeClaudeCodeThinking(t *testing.T) {
 	assert.Empty(t, info.ConversionDiagnostics())
 }
 
+func TestConvertClaudeRequestNormalizesOpus55EnabledThinkingWhenConfigured(t *testing.T) {
+	budget := 2048
+	maxTokens := uint(4000)
+	req := &dto.ClaudeRequest{
+		Model:     "claude-opus-5-5",
+		MaxTokens: &maxTokens,
+		Thinking:  &dto.Thinking{Type: "enabled", BudgetTokens: &budget},
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "hello"},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: req.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: req.Model,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeAdaptiveThinkingCompatibility: true,
+			},
+		},
+	}
+
+	out, err := (&Adaptor{}).ConvertClaudeRequest(nil, info, req)
+	require.NoError(t, err)
+	converted := out.(*dto.ClaudeRequest)
+	require.NotNil(t, converted.Thinking)
+	assert.Equal(t, "adaptive", converted.Thinking.Type)
+	assert.Nil(t, converted.Thinking.BudgetTokens)
+	assert.JSONEq(t, `{"effort":"medium"}`, string(converted.OutputConfig))
+	assert.Equal(t, "medium", info.GetReasoningEffort())
+	require.NotEmpty(t, info.ConversionDiagnostics())
+	assert.Equal(t, "claude_budget_to_adaptive", info.ConversionDiagnostics()[0].Code)
+}
+
+func TestConvertClaudeRequestDegradesOpus55DisabledThinkingWhenConfigured(t *testing.T) {
+	maxTokens := uint(4000)
+	req := &dto.ClaudeRequest{
+		Model:     "claude-opus-5-5",
+		MaxTokens: &maxTokens,
+		Thinking:  &dto.Thinking{Type: "disabled"},
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "hello"},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: req.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: req.Model,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeAdaptiveThinkingCompatibility: true,
+			},
+		},
+	}
+
+	out, err := (&Adaptor{}).ConvertClaudeRequest(nil, info, req)
+	require.NoError(t, err)
+	converted := out.(*dto.ClaudeRequest)
+	require.NotNil(t, converted.Thinking)
+	assert.Equal(t, "adaptive", converted.Thinking.Type)
+	assert.Nil(t, converted.Thinking.BudgetTokens)
+	assert.JSONEq(t, `{"effort":"low"}`, string(converted.OutputConfig))
+	assert.Equal(t, "low", info.GetReasoningEffort())
+	require.NotEmpty(t, info.ConversionDiagnostics())
+	assert.Equal(t, "claude_thinking_disable_unsupported", info.ConversionDiagnostics()[0].Code)
+}
+
+func TestConvertClaudeRequestKeepsOpus55NativeThinkingWithoutCompatibility(t *testing.T) {
+	maxTokens := uint(4000)
+	req := &dto.ClaudeRequest{
+		Model:     "claude-opus-5-5",
+		MaxTokens: &maxTokens,
+		Thinking:  &dto.Thinking{Type: "disabled"},
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "hello"},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: req.Model,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: req.Model,
+		},
+	}
+
+	out, err := (&Adaptor{}).ConvertClaudeRequest(nil, info, req)
+	require.NoError(t, err)
+	converted := out.(*dto.ClaudeRequest)
+	require.NotNil(t, converted.Thinking)
+	assert.Equal(t, "disabled", converted.Thinking.Type)
+	assert.Nil(t, converted.OutputConfig)
+	assert.Empty(t, info.ConversionDiagnostics())
+}
+
 func TestConvertClaudeRequestPreservesMessageOutputConfig(t *testing.T) {
 	body := `{"model":"claude-opus-5-5","max_tokens":64,"output_config":{"effort":"medium"},"messages":[` +
 		`{"role":"user","content":"summary"},` +

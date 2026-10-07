@@ -3099,6 +3099,34 @@ export function ChannelMutateDrawer({
                   )}
                 />
               )}
+
+              {currentType === 14 && (
+                <FormField
+                  control={form.control}
+                  name='claude_adaptive_thinking_compatibility'
+                  render={({ field }) => (
+                    <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                      <div className='space-y-0.5'>
+                        <FormLabel className='text-sm'>
+                          {t('Enable Claude adaptive thinking compatibility')}
+                        </FormLabel>
+                        <FormDescription>
+                          {t(
+                            'Convert legacy enabled or disabled thinking controls for Claude models that only support adaptive thinking'
+                          )}
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          disabled={sensitiveLocked}
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+              )}
             </>
           )}
         </div>

@@ -30,11 +30,18 @@ type claudeCapabilities struct {
 	supportsXHigh   bool
 	supportsMax     bool
 	strictSampling  bool
+	// defaultEffort is the model's default reasoning strength when the
+	// request does not provide one.
+	defaultEffort Effort
 }
 
 func claudeCapabilitiesFor(model string) claudeCapabilities {
 	model = strings.ToLower(model)
-	capabilities := claudeCapabilities{supportsManual: true, supportsDisable: true}
+	capabilities := claudeCapabilities{
+		supportsManual:  true,
+		supportsDisable: true,
+		defaultEffort:   EffortHigh,
+	}
 
 	switch {
 	case strings.HasPrefix(model, "claude-fable-5"),
@@ -60,6 +67,10 @@ func claudeCapabilitiesFor(model string) claudeCapabilities {
 		capabilities.supportsManual = false
 		if strings.HasPrefix(model, "claude-opus-5") || strings.HasPrefix(model, "claude-sonnet-5") {
 			capabilities.defaultThinking = true
+		}
+		if strings.HasPrefix(model, "claude-opus-5-5") {
+			capabilities.defaultEffort = EffortMedium
+			capabilities.supportsDisable = false
 		}
 		capabilities.supportsEffort = true
 		capabilities.supportsXHigh = true
@@ -113,12 +124,12 @@ func RenderClaude(model string, intent Intent, maxTokens *uint, adapterBudgetPer
 			}
 			return ClaudeRender{
 				Thinking:        thinking,
-				EffectiveEffort: EffortHigh,
+				EffectiveEffort: capabilities.defaultEffort,
 				ClearSampling:   capabilities.strictSampling,
 			}, nil
 		}
 		if capabilities.defaultThinking {
-			return ClaudeRender{EffectiveEffort: EffortHigh, ClearSampling: capabilities.strictSampling}, nil
+			return ClaudeRender{EffectiveEffort: capabilities.defaultEffort, ClearSampling: capabilities.strictSampling}, nil
 		}
 		return ClaudeRender{ClearSampling: capabilities.strictSampling}, nil
 	}
@@ -139,7 +150,7 @@ func RenderClaude(model string, intent Intent, maxTokens *uint, adapterBudgetPer
 					}
 				}
 				outputEffort := Effort("")
-				effectiveEffort := EffortHigh
+				effectiveEffort := capabilities.defaultEffort
 				if capabilities.supportsEffort {
 					outputEffort = EffortLow
 					effectiveEffort = EffortLow
@@ -175,7 +186,7 @@ func RenderClaude(model string, intent Intent, maxTokens *uint, adapterBudgetPer
 			effort = EffortFromBudget(*intent.BudgetTokens)
 		}
 		if effort == "" && intent.Mode == ModeEnabled {
-			effort = EffortHigh
+			effort = capabilities.defaultEffort
 		}
 		normalizedEffort := normalizeClaudeEffort(effort, capabilities)
 		if effort != "" && normalizedEffort != effort {
@@ -187,7 +198,7 @@ func RenderClaude(model string, intent Intent, maxTokens *uint, adapterBudgetPer
 		effort = normalizedEffort
 		effectiveEffort := effort
 		if effectiveEffort == "" && intent.Mode == ModeAdaptive {
-			effectiveEffort = EffortHigh
+			effectiveEffort = capabilities.defaultEffort
 		}
 
 		// Claude effort can be used without enabling thinking. Preserve that
@@ -227,7 +238,7 @@ func RenderClaude(model string, intent Intent, maxTokens *uint, adapterBudgetPer
 		))
 		intent.Mode = ModeEnabled
 		if intent.Effort == "" {
-			intent.Effort = EffortHigh
+			intent.Effort = capabilities.defaultEffort
 		}
 	}
 	if intent.Mode == ModeUnset {
@@ -333,12 +344,25 @@ func IsKnownClaudeModel(model string) bool {
 	return isKnownClaudeModel(model)
 }
 
+// IsClaudeAdaptiveOnlyModel reports whether a native Claude request needs
+// compatibility normalization because the upstream model does not accept the
+// legacy enabled/disabled thinking modes.
+func IsClaudeAdaptiveOnlyModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(model), "claude-opus-5-5")
+}
+
+// ClaudeDefaultEffort is the model's default reasoning strength when a
+// request does not provide one.
+func ClaudeDefaultEffort(model string) Effort {
+	return claudeCapabilitiesFor(model).defaultEffort
+}
+
 func ResolveClaudeDefault(model string, intent Intent) Intent {
 	if intent.HasStrength() || !claudeCapabilitiesFor(model).defaultThinking {
 		return intent
 	}
 	intent.Mode = ModeAdaptive
-	intent.Effort = EffortHigh
+	intent.Effort = ClaudeDefaultEffort(model)
 	return intent
 }
 
