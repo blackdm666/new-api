@@ -304,6 +304,35 @@ func TestInitChannelMetaAppliesAdvancedCustomRoutePassThrough(t *testing.T) {
 	}
 }
 
+func TestInitChannelMetaAppliesAdvancedCustomClaudeThinkingCompatibility(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+	ctx.Set("original_model", "claude-opus-5-5")
+	common.SetContextKey(ctx, constant.ContextKeyChannelType, constant.ChannelTypeAdvancedCustom)
+	common.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+		AdvancedCustom: &dto.AdvancedCustomConfig{
+			Routes: []dto.AdvancedCustomRoute{
+				{
+					IncomingPath:                        "/v1/messages",
+					UpstreamPath:                        "/v1/messages",
+					Models:                              []string{"claude-opus-5-5"},
+					ClaudeAdaptiveThinkingCompatibility: true,
+				},
+			},
+		},
+	})
+
+	info, err := GenRelayInfo(ctx, types.RelayFormatClaude, &dto.ClaudeRequest{
+		Model: "claude-opus-5-5",
+	}, nil)
+	require.NoError(t, err)
+
+	info.InitChannelMeta(ctx)
+
+	assert.True(t, info.ConvOptions().Claude.AdaptiveThinkingCompatibilityEnabled)
+}
+
 func TestInitChannelMetaResetsPerAttemptStreamStateAndPreservesRequestState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())

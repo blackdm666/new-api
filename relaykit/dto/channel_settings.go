@@ -481,6 +481,9 @@ type AdvancedCustomRoute struct {
 	Models                 []string                 `json:"models,omitempty"`
 	Auth                   *AdvancedCustomRouteAuth `json:"auth,omitempty"`
 	PassThroughBodyEnabled bool                     `json:"pass_through_body_enabled,omitempty"`
+	// ClaudeAdaptiveThinkingCompatibility normalizes legacy native Claude
+	// thinking controls for this route when it targets an adaptive-only model.
+	ClaudeAdaptiveThinkingCompatibility bool `json:"claude_adaptive_thinking_compatibility,omitempty"`
 }
 
 // SupportsPassThroughBody reports whether the route converter leaves the request body untouched.
@@ -821,6 +824,10 @@ func (c *AdvancedCustomConfig) Validate() error {
 		}
 		if route.PassThroughBodyEnabled && !route.SupportsPassThroughBody() {
 			return fmt.Errorf("advanced_custom.advanced_routes[%d].pass_through_body_enabled requires converter none: %s", i, route.Converter)
+		}
+		if route.ClaudeAdaptiveThinkingCompatibility &&
+			(route.IncomingPath != "/v1/messages" || !route.IsNative()) {
+			return fmt.Errorf("advanced_custom.advanced_routes[%d].claude_adaptive_thinking_compatibility requires native /v1/messages route", i)
 		}
 		if err := validateAdvancedCustomRouteAuth(i, route.Auth); err != nil {
 			return err

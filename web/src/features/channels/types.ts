@@ -219,6 +219,7 @@ export interface AdvancedCustomRoute {
   models?: string[]
   auth?: AdvancedCustomRouteAuth
   pass_through_body_enabled?: boolean
+  claude_adaptive_thinking_compatibility?: boolean
 }
 
 export interface AdvancedCustomRouteAuth {

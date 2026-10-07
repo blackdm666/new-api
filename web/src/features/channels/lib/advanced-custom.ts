@@ -805,6 +805,9 @@ function normalizeAdvancedCustomRoute(
   if (route.pass_through_body_enabled === true) {
     nextRoute.pass_through_body_enabled = true
   }
+  if (route.claude_adaptive_thinking_compatibility === true) {
+    nextRoute.claude_adaptive_thinking_compatibility = true
+  }
   if (route.auth) {
     nextRoute.auth = {
       type: route.auth.type,

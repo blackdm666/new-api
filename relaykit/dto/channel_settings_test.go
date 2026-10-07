@@ -59,6 +59,50 @@ func TestAdvancedCustomValidateResponsesToChatConverterPath(t *testing.T) {
 	}
 }
 
+func TestAdvancedCustomValidateClaudeAdaptiveThinkingCompatibility(t *testing.T) {
+	valid := &AdvancedCustomConfig{
+		Routes: []AdvancedCustomRoute{
+			{
+				IncomingPath:                        "/v1/messages",
+				UpstreamPath:                        "/v1/messages",
+				ClaudeAdaptiveThinkingCompatibility: true,
+			},
+		},
+	}
+	require.NoError(t, valid.Validate())
+
+	tests := []struct {
+		name  string
+		route AdvancedCustomRoute
+	}{
+		{
+			name: "non-Claude path",
+			route: AdvancedCustomRoute{
+				IncomingPath:                        "/v1/chat/completions",
+				UpstreamPath:                        "/v1/chat/completions",
+				ClaudeAdaptiveThinkingCompatibility: true,
+			},
+		},
+		{
+			name: "converted route",
+			route: AdvancedCustomRoute{
+				IncomingPath:                        "/v1/messages",
+				UpstreamPath:                        "/v1/chat/completions",
+				Converter:                           advancedCustomConverterClaudeMessagesToOpenAIChat,
+				ClaudeAdaptiveThinkingCompatibility: true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := (&AdvancedCustomConfig{Routes: []AdvancedCustomRoute{tt.route}}).Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "requires native /v1/messages route")
+		})
+	}
+}
+
 func TestAdvancedCustomValidateModelListRouteConstraints(t *testing.T) {
 	valid := &AdvancedCustomConfig{
 		Routes: []AdvancedCustomRoute{
