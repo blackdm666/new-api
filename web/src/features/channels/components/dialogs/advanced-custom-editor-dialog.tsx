@@ -1345,6 +1345,11 @@ function RouteEditor({
     !isModelListRoute && isAdvancedCustomPassThroughAllowed(converter)
   const passThroughEnabled =
     passThroughAllowed && route.pass_through_body_enabled === true
+  const claudeAdaptiveThinkingCompatibilityAllowed =
+    !isModelListRoute && incomingPath === '/v1/messages' && converter === 'none'
+  const claudeAdaptiveThinkingCompatibilityEnabled =
+    claudeAdaptiveThinkingCompatibilityAllowed &&
+    route.claude_adaptive_thinking_compatibility === true
 
   const setConverter = (nextConverter: AdvancedCustomConverter) => {
     let nextIncomingPath = incomingPath
@@ -1365,6 +1370,10 @@ function RouteEditor({
       )
         ? route.pass_through_body_enabled
         : false,
+      claude_adaptive_thinking_compatibility:
+        nextConverter === 'none' && nextIncomingPath === '/v1/messages'
+          ? route.claude_adaptive_thinking_compatibility
+          : false,
     })
   }
 
@@ -1626,6 +1635,32 @@ function RouteEditor({
             {t(passThroughDescriptionKey)}
           </p>
         </FieldBlock>
+
+        {claudeAdaptiveThinkingCompatibilityAllowed ? (
+          <FieldBlock
+            label={t('Claude adaptive thinking compatibility')}
+            className='lg:gap-1'
+            labelClassName='lg:sr-only'
+          >
+            <div className='flex h-9 items-center lg:h-8'>
+              <Switch
+                checked={claudeAdaptiveThinkingCompatibilityEnabled}
+                disabled={passThroughEnabled}
+                aria-label={t('Claude adaptive thinking compatibility')}
+                onCheckedChange={(checked) =>
+                  onChange({
+                    claude_adaptive_thinking_compatibility: checked,
+                  })
+                }
+              />
+            </div>
+            <p className='text-muted-foreground text-xs leading-relaxed lg:hidden'>
+              {t(
+                'Normalize enabled or disabled thinking controls for adaptive-only Claude models'
+              )}
+            </p>
+          </FieldBlock>
+        ) : null}
 
         <div className='hidden items-center justify-end gap-1 lg:flex'>
           <TooltipIconButton

@@ -298,6 +298,9 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		if matched && route.PassThroughBodyEnabled {
 			channelMeta.ChannelSetting.PassThroughBodyEnabled = true
 		}
+		if matched && route.ClaudeAdaptiveThinkingCompatibility {
+			channelMeta.ChannelOtherSettings.ClaudeAdaptiveThinkingCompatibility = true
+		}
 	}
 
 	if streamSupportedChannels[channelMeta.ChannelType] {
