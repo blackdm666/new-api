@@ -38,6 +38,11 @@ type ClaudeOptions struct {
 	// is rendered onto Claude thinking / output_config. Suffix parsing itself
 	// is the host entry layer's job (standalone users call Parse* themselves).
 	ThinkingAdapterEnabled bool
+	// AdaptiveThinkingCompatibilityEnabled normalizes native thinking controls
+	// for Claude models that only accept adaptive thinking. The host enables
+	// this per channel when the upstream is known to require the compatibility
+	// behavior.
+	AdaptiveThinkingCompatibilityEnabled bool
 	// ThinkingAdapterBudgetTokensPercentage sizes thinking budget_tokens as a
 	// fraction of max_tokens when the adapter fires.
 	ThinkingAdapterBudgetTokensPercentage float64

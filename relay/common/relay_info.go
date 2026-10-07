@@ -928,6 +928,7 @@ func (info *RelayInfo) ConvOptions() *convmeta.Options {
 	options := &convmeta.Options{
 		Claude: convmeta.ClaudeOptions{
 			ThinkingAdapterEnabled:                claudeSettings.ThinkingAdapterEnabled,
+			AdaptiveThinkingCompatibilityEnabled:  info != nil && info.ChannelMeta != nil && info.ChannelOtherSettings.ClaudeAdaptiveThinkingCompatibility,
 			ThinkingAdapterBudgetTokensPercentage: claudeSettings.ThinkingAdapterBudgetTokensPercentage,
 			DefaultMaxTokens:                      claudeSettings.GetDefaultMaxTokens,
 		},

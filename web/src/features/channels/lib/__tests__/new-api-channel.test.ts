@@ -54,6 +54,32 @@ function newAPIForm(baseUrl: string) {
 }
 
 describe('New API channel', () => {
+  test('preserves Claude adaptive thinking compatibility setting', () => {
+    const channel = channelSchema.parse({
+      id: 1,
+      name: 'Claude channel',
+      key: '',
+      type: 14,
+      status: 1,
+      created_time: 0,
+      test_time: 0,
+      response_time: 0,
+      balance_updated_time: 0,
+      settings: JSON.stringify({
+        claude_adaptive_thinking_compatibility: true,
+      }),
+    })
+
+    const values = transformChannelToFormDefaults(channel)
+    expect(values.claude_adaptive_thinking_compatibility).toBe(true)
+    const payload = transformFormDataToUpdatePayload(values, channel.id)
+    expect(typeof payload.settings).toBe('string')
+    expect(
+      JSON.parse(String(payload.settings))
+        .claude_adaptive_thinking_compatibility
+    ).toBe(true)
+  })
+
   test('registers selection, ordering, model discovery, and icon metadata', () => {
     const option = CHANNEL_TYPE_OPTIONS.find(
       (item) => item.value === CHANNEL_TYPE_NEW_API

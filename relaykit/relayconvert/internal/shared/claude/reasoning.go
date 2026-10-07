@@ -31,10 +31,35 @@ func ApplyReasoning(ctx context.Context, req *dto.ClaudeRequest, info convmeta.M
 	}
 	// A native Claude request without a host modifier is already in the target
 	// protocol, including Claude-compatible proxies that keep native controls
-	// instead of applying Anthropic model rules. Read portable effort for
-	// accounting metadata, but do not run the capability renderer or rewrite
-	// provider-native controls.
+	// instead of applying Anthropic model rules. Preserve those controls by
+	// default; the per-channel adaptive compatibility option is the explicit
+	// exception for known adaptive-only models.
 	if !crossProtocol && source.IsEmpty() && suffix.IsEmpty() {
+		if opts.Claude.AdaptiveThinkingCompatibilityEnabled &&
+			reasoning.IsClaudeAdaptiveOnlyModel(req.Model) &&
+			req.Thinking != nil &&
+			(req.Thinking.Type == "enabled" || req.Thinking.Type == "disabled") {
+			native, diagnostics, err := reasoning.FromClaude(req)
+			if err != nil {
+				return err
+			}
+			convdiag.Add(ctx, diagnostics...)
+
+			rendered, err := reasoning.RenderClaude(
+				req.Model,
+				native,
+				req.MaxTokens,
+				opts.Claude.ThinkingAdapterBudgetTokensPercentage,
+			)
+			if err != nil {
+				return err
+			}
+			convdiag.Add(ctx, rendered.Diagnostics...)
+			if err := applyClaudeRender(ctx, req, info, req.Model, rendered); err != nil {
+				return err
+			}
+		}
+
 		if info != nil {
 			effort := req.GetEfforts()
 			if effort == "" && req.Thinking != nil {
@@ -44,7 +69,7 @@ func ApplyReasoning(ctx context.Context, req *dto.ClaudeRequest, info convmeta.M
 				case req.Thinking.BudgetTokens != nil:
 					effort = string(reasoning.EffortFromBudget(*req.Thinking.BudgetTokens))
 				case req.Thinking.Type == "enabled" || req.Thinking.Type == "adaptive":
-					effort = string(reasoning.EffortHigh)
+					effort = string(reasoning.ClaudeDefaultEffort(req.Model))
 				}
 			}
 			info.SetReasoningEffort(effort)
@@ -111,6 +136,19 @@ func ApplyReasoning(ctx context.Context, req *dto.ClaudeRequest, info convmeta.M
 	}
 	convdiag.Add(ctx, rendered.Diagnostics...)
 	req.Model = baseModel
+	if err := applyClaudeRender(ctx, req, info, capabilityModel, rendered); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyClaudeRender(
+	ctx context.Context,
+	req *dto.ClaudeRequest,
+	info convmeta.Meta,
+	capabilityModel string,
+	rendered reasoning.ClaudeRender,
+) error {
 	if rendered.MaxTokens != nil {
 		req.MaxTokens = rendered.MaxTokens
 	}
