@@ -268,6 +268,149 @@ func newMultipartFileContext(t *testing.T, field, filename, contentType string, 
 	return c
 }
 
+func TestTaskPreflightReadsResponseAfterHeaders(t *testing.T) {
+	bodyReady := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		select {
+		case <-bodyReady:
+			_, _ = w.Write([]byte(`{"data":{"source":"asset://uploaded"}}`))
+		case <-r.Context().Done():
+		}
+	}))
+	defer server.Close()
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/submit", nil)
+	adaptor := New(&pluginruntime.LoadedPlugin{})
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: server.URL},
+	}
+	response, err := adaptor.executePreflightRequest(c, info, requestDescriptor{
+		URL: server.URL, Method: http.MethodGet,
+	}, false)
+	close(bodyReady)
+	require.NoError(t, err)
+	body, err := readTaskPreflightBody(response)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"data":{"source":"asset://uploaded"}}`, string(body))
+}
+
+func TestTaskPreflightRejectsUnsafeDescriptors(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		descriptor requestDescriptor
+		upload     bool
+		message    string
+	}{
+		{"unapproved host", requestDescriptor{URL: "https://other.example/presign"}, false, "not allowed"},
+		{"authenticated upload", requestDescriptor{URL: "https://example.com/upload", BodyType: "file", FileRef: "request_file:image"}, true, "credentialless"},
+		{"credential-bearing URL", requestDescriptor{URL: "https://secret@example.com/upload", Credentialless: true, BodyType: "file", FileRef: "request_file:image"}, true, "without credentials"},
+		{"credential-bearing headers", requestDescriptor{URL: "https://example.com/upload", Credentialless: true, BodyType: "file", FileRef: "request_file:image", Headers: map[string]string{"authorization": "secret"}}, true, "authorization"},
+		{"missing file reference", requestDescriptor{URL: "https://example.com/upload", Credentialless: true, BodyType: "file"}, true, "file reference"},
+		{"unsupported method", requestDescriptor{URL: "https://example.com/presign", Method: http.MethodDelete}, false, "method"},
+		{"oversized request", requestDescriptor{URL: "https://example.com/presign", Body: strings.Repeat("x", maxTaskPreflightRequestBytes+1)}, false, "size limit"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/submit", nil)
+			adaptor := New(&pluginruntime.LoadedPlugin{})
+			info := &relaycommon.RelayInfo{
+				ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://example.com"},
+			}
+			response, err := adaptor.executePreflightRequest(c, info, test.descriptor, test.upload)
+			require.Error(t, err)
+			assert.Nil(t, response)
+			assert.Contains(t, err.Error(), test.message)
+		})
+	}
+}
+
+func TestTaskAdaptorRunsPreflightAndCredentiallessUpload(t *testing.T) {
+	var preflightCalls, uploadCalls, submitCalls int
+	serverURLPlaceholder := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/presign":
+			preflightCalls++
+			assert.Equal(t, "Bearer secret", r.Header.Get("Authorization"))
+			var body map[string]any
+			require.NoError(t, common.DecodeJson(r.Body, &body))
+			assert.Equal(t, "ref.png", body["filename"])
+			_, _ = w.Write([]byte(`{"data":{"upload_url":"` + serverURLPlaceholder + `/upload","source":"asset://uploaded"}}`))
+		case "/upload":
+			uploadCalls++
+			assert.Empty(t, r.Header.Get("Authorization"))
+			data, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			assert.Equal(t, []byte("image-bytes"), data)
+		case "/submit":
+			submitCalls++
+			assert.Equal(t, "Bearer secret", r.Header.Get("Authorization"))
+			var body map[string]any
+			require.NoError(t, common.DecodeJson(r.Body, &body))
+			assert.Equal(t, "asset://uploaded", body["source"])
+			_, _ = w.Write([]byte(`{"id":"task-1"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	// Replace the placeholder after the server has selected its listening URL.
+	serverURLPlaceholder = server.URL
+	source := `
+export const meta = {
+  apiVersion:1, key:"preflight", name:"Preflight", version:"1.0.0",
+  author:{name:"Test"}, models:["m"], fetchMode:"per_task",
+  requiredCapabilities:["task-preflight@1"]
+};
+export function buildPreflightRequest(ctx) {
+  if (!ctx.files.length) return null;
+  return {url:ctx.baseUrl+"/presign", method:"POST", headers:{Authorization:"Bearer "+ctx.apiKey, "Content-Type":"application/json"}, body:{filename:ctx.files[0].filename, size:ctx.files[0].size}};
+}
+export function buildUploadRequest(ctx) {
+  return {url:ctx.preflightResponse.data.upload_url, method:"PUT", credentialless:true, bodyType:"file", fileRef:ctx.files[0].ref};
+}
+export function buildSubmitRequest(ctx) {
+  return {url:ctx.baseUrl+"/submit", method:"POST", headers:{Authorization:"Bearer "+ctx.apiKey, "Content-Type":"application/json"}, body:{source:ctx.preflightResponse.data.source}};
+}
+export function parseSubmitResponse(ctx,r){return {taskId:r.body.id}}
+export function buildQueryRequest(){return {url:"https://example.com"}}
+export function parseTaskResult(){return {status:"SUCCESS"}}
+`
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	adaptor := New(plugin)
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelBaseUrl: server.URL, ApiKey: "secret"},
+		OriginModelName: "m",
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{PublicTaskID: "public-1"},
+	}
+	adaptor.Init(info)
+	c := newMultipartFileContext(t, "image", "ref.png", "image/png", []byte("image-bytes"))
+	c.Set("task_request", map[string]any{"prompt": "p"})
+	require.Equal(t, server.URL, info.ChannelBaseUrl)
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	assert.Equal(t, 1, preflightCalls)
+	assert.Equal(t, 1, uploadCalls)
+	assert.Zero(t, submitCalls)
+
+	body, err := adaptor.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	response, err := adaptor.DoRequest(c, info, body)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	assert.Equal(t, 1, submitCalls)
+	parsed, taskErr := adaptor.ParseResponse(c, response, info)
+	require.Nil(t, taskErr)
+	require.NotNil(t, parsed)
+	assert.Equal(t, "task-1", parsed.UpstreamTaskID)
+}
+
 func TestTaskAdaptorDoesNotEmitInjectedMultipartDispositionHeaders(t *testing.T) {
 	tests := []struct {
 		name string
