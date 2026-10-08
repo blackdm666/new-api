@@ -1016,13 +1016,38 @@ function CompactTaskPricingTable(props: {
 }) {
   const { t, i18n } = useTranslation()
   const rowDefinition = props.schema[props.matrix.rowField]
-  const columnDefinition = props.schema[props.matrix.columnField]
+  const columnDefinition = props.matrix.columnField
+    ? props.schema[props.matrix.columnField]
+    : undefined
   const thClass =
     'text-muted-foreground py-2 text-xs font-medium whitespace-normal break-words'
   const getCellUnitLabel = (entry: DynamicPriceEntry) => {
     if (entry.unit === 'token') return t('Per 1M task tokens')
     const unitLabelKey = getDynamicPriceUnitLabelKey(entry)
     return unitLabelKey ? t(unitLabelKey) : ''
+  }
+  const renderPriceCell = (rowValue: string, columnValue = '') => {
+    const tier = props.matrix.cells.get(
+      taskCompactMatrixCellKey(rowValue, columnValue)
+    )
+    const prices = tier ? props.formattedPricesByTier.get(tier) : undefined
+
+    return (
+      <div className='space-y-0.5'>
+        {props.priceFields.map((entry) => {
+          const price = prices?.get(entry.field)
+          if (!price) return <div key={entry.key}>-</div>
+          return (
+            <div key={entry.key} className='whitespace-nowrap'>
+              <span>{price}</span>
+              <span className='text-muted-foreground/60 ml-1 text-xs font-normal'>
+                / {getCellUnitLabel(entry)}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    )
   }
 
   return (
@@ -1045,36 +1070,28 @@ function CompactTaskPricingTable(props: {
           cell: (rowValue) =>
             taskEnumLabel(rowDefinition, rowValue, i18n.language),
         },
-        ...props.matrix.columnValues.map((columnValue) => ({
-          id: `${props.matrix.columnField}-${columnValue}`,
-          header: taskEnumLabel(columnDefinition, columnValue, i18n.language),
-          className: thClass,
-          cellClassName: 'py-2.5 font-mono',
-          cell: (rowValue: string) => {
-            const tier = props.matrix.cells.get(
-              taskCompactMatrixCellKey(rowValue, columnValue)
-            )
-            const prices = tier
-              ? props.formattedPricesByTier.get(tier)
-              : undefined
-            return (
-              <div className='space-y-0.5'>
-                {props.priceFields.map((entry) => {
-                  const price = prices?.get(entry.field)
-                  if (!price) return <div key={entry.key}>-</div>
-                  return (
-                    <div key={entry.key} className='whitespace-nowrap'>
-                      <span>{price}</span>
-                      <span className='text-muted-foreground/60 ml-1 text-xs font-normal'>
-                        / {getCellUnitLabel(entry)}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          },
-        })),
+        ...(props.matrix.columnField
+          ? (props.matrix.columnValues ?? []).map((columnValue) => ({
+              id: `${props.matrix.columnField}-${columnValue}`,
+              header: taskEnumLabel(
+                columnDefinition,
+                columnValue,
+                i18n.language
+              ),
+              className: thClass,
+              cellClassName: 'py-2.5 font-mono',
+              cell: (rowValue: string) =>
+                renderPriceCell(rowValue, columnValue),
+            }))
+          : [
+              {
+                id: 'price',
+                header: t('Price'),
+                className: `${thClass} text-right`,
+                cellClassName: 'py-2.5 text-right font-mono',
+                cell: (rowValue: string) => renderPriceCell(rowValue),
+              },
+            ]),
       ]}
     />
   )
