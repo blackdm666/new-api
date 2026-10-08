@@ -17,13 +17,14 @@ import (
 )
 
 const (
-	ModelGeminiOmniFlashPreview = "gemini-omni-flash-preview"
-	GeminiAPIVersion            = "v1beta"
-	VertexAPIVersion            = "v1beta1"
-	APIRevision                 = "2026-05-20"
-	MaxImages                   = 10
-	MinDurationSeconds          = 3
-	MaxDurationSeconds          = 10
+	ModelGeminiOmniFlashPreview   = "gemini-omni-flash-preview"
+	ModelGeminiOmni11FlashPreview = "gemini-omni-1.1-flash-preview"
+	GeminiAPIVersion              = "v1beta"
+	VertexAPIVersion              = "v1beta1"
+	APIRevision                   = "2026-05-20"
+	MaxImages                     = 10
+	MinDurationSeconds            = 3
+	MaxDurationSeconds            = 10
 
 	interactionTaskPrefix = "interactions/"
 )
@@ -82,7 +83,12 @@ type interactionResponse struct {
 
 // IsModel reports whether modelName uses the Omni Interactions protocol.
 func IsModel(modelName string) bool {
-	return strings.TrimSpace(modelName) == ModelGeminiOmniFlashPreview
+	switch strings.TrimSpace(modelName) {
+	case ModelGeminiOmniFlashPreview, ModelGeminiOmni11FlashPreview:
+		return true
+	default:
+		return false
+	}
 }
 
 // IsInteractionTaskName reports whether a stored upstream task name is an interaction.

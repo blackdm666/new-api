@@ -38,6 +38,7 @@ func TestNativeVideoExpressionPreservesRequestAndQuota(t *testing.T) {
 		{"gemini veo default", "veo-3.1", "veo-3.1-generate-001", `{}`, `u("resolution") == "4k" ? tier("4k", u("seconds") * 0.375) : tier("base", u("seconds") * 0.25)`, &geminitask.TaskAdaptor{}, 0.25},
 		{"gemini metadata duration", "veo-3.1", "veo-3.1-generate-001", `{"duration":4,"metadata":{"durationSeconds":6,"resolution":"1080p"}}`, `tier("base", u("seconds") * 0.25)`, &geminitask.TaskAdaptor{}, 0.25},
 		{"vertex omni default", "gemini-omni-flash", "gemini-omni-flash-preview", `{}`, `tier("base", u("seconds") * 0.2)`, &vertextask.TaskAdaptor{}, 0.2},
+		{"vertex omni 1.1", "gemini-omni-flash-1.1", "gemini-omni-1.1-flash-preview", `{"duration":3}`, `tier("base", u("seconds") * 0.2)`, &vertextask.TaskAdaptor{}, 0.2},
 		{"gemini omni", "gemini-omni-flash", "gemini-omni-flash-preview", `{"duration":10}`, `tier("base", u("seconds") * 0.2)`, &geminitask.TaskAdaptor{}, 0.2},
 		{"grok base", "grok-imagine-video", "grok-imagine-video", `{"duration":4}`, `tier("base", u("seconds") * 0.1)`, &groktask.TaskAdaptor{}, 0.1},
 		{"grok 1.5 default", "grok-imagine-video-1.5", "grok-imagine-video-1.5", `{}`, `tier("base", u("seconds") * 0.2)`, &groktask.TaskAdaptor{}, 0.2},

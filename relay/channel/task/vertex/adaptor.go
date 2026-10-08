@@ -134,7 +134,9 @@ func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("x-goog-user-project", adc.ProjectID)
-	if info != nil && omnitask.IsModel(info.UpstreamModelName) {
+	// Omni 1.1 uses the current Interactions contract. Keep the pinned legacy
+	// revision only for existing Omni Flash requests.
+	if info != nil && strings.TrimSpace(info.UpstreamModelName) == omnitask.ModelGeminiOmniFlashPreview {
 		req.Header.Set("Api-Revision", omnitask.APIRevision)
 	}
 	return nil
@@ -257,6 +259,7 @@ func (a *TaskAdaptor) ParseResponse(_ *gin.Context, resp *http.Response, info *r
 func (a *TaskAdaptor) GetModelList() []string {
 	return []string{
 		omnitask.ModelGeminiOmniFlashPreview,
+		omnitask.ModelGeminiOmni11FlashPreview,
 		"veo-3.0-generate-001",
 		"veo-3.0-fast-generate-001",
 		"veo-3.1-generate-preview",
@@ -329,7 +332,9 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, task *model.Task, proxy str
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("x-goog-user-project", adc.ProjectID)
-	if omnitask.IsInteractionTaskName(upstreamName) {
+	// Historical tasks without a stored model still use the legacy revision.
+	if omnitask.IsInteractionTaskName(upstreamName) &&
+		strings.TrimSpace(task.Properties.UpstreamModelName) != omnitask.ModelGeminiOmni11FlashPreview {
 		req.Header.Set("Api-Revision", omnitask.APIRevision)
 	}
 	client, err := service.GetHttpClientWithProxy(proxy)
