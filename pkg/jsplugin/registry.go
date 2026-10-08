@@ -325,6 +325,9 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 	engine.key = meta.Key
 	engine.version = meta.Version
 	requiredHooks := []string{"buildSubmitRequest", "parseSubmitResponse", "parseTaskResult"}
+	if slices.Contains(meta.RequiredCapabilities, CapabilityTaskPreflight) {
+		requiredHooks = append(requiredHooks, "buildPreflightRequest")
+	}
 	if slices.Contains(meta.SubmitResponseTypes, "sse") {
 		if slices.Contains(meta.RequiredCapabilities, CapabilitySubmitSSEDelta) {
 			requiredHooks = append(requiredHooks, "parseSubmitEventDelta")
