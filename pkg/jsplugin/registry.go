@@ -325,6 +325,9 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 	engine.key = meta.Key
 	engine.version = meta.Version
 	requiredHooks := []string{"buildSubmitRequest", "parseSubmitResponse", "parseTaskResult"}
+	if slices.Contains(meta.RequiredCapabilities, CapabilityQuerySSEDelta) {
+		requiredHooks = append(requiredHooks, "parseQueryEventDelta")
+	}
 	if slices.Contains(meta.RequiredCapabilities, CapabilityTaskPreflight) {
 		requiredHooks = append(requiredHooks, "buildPreflightRequest")
 	}
@@ -1201,6 +1204,9 @@ func normalizeV1Meta(meta *Meta) error {
 		}
 		if name == CapabilitySubmitSSEDelta && !slices.Contains(meta.SubmitResponseTypes, "sse") {
 			return fmt.Errorf("%s requires submitResponseTypes to include sse", name)
+		}
+		if name == CapabilityQuerySSEDelta && meta.FetchMode == "batch" {
+			return fmt.Errorf("%s requires per_task fetchMode", name)
 		}
 		seenCapabilities[name] = true
 	}

@@ -15,8 +15,10 @@ import (
 const (
 	CapabilityJSONClone      = "json-clone@1"
 	CapabilitySubmitSSEDelta = "submit-sse-delta@1"
+	CapabilityQuerySSEDelta  = "query-sse-delta@1"
 	CapabilityTaskPreflight  = "task-preflight@1"
 	MaxJSONToolBytes         = 1 << 20
+	MaxQueryJSONBytes        = 128 << 20
 	maxJSONToolDepth         = 32
 	maxJSONToolNodes         = 32768
 	maxJSONChanges           = 256
@@ -24,7 +26,8 @@ const (
 
 // HasCapability describes host APIs independently of a plugin's mutable globals.
 func HasCapability(name string) bool {
-	return name == CapabilityJSONClone || name == CapabilitySubmitSSEDelta || name == CapabilityTaskPreflight
+	return name == CapabilityJSONClone || name == CapabilitySubmitSSEDelta ||
+		name == CapabilityQuerySSEDelta || name == CapabilityTaskPreflight
 }
 
 // JSONState owns a request-local JSON result. Appended strings stay in Go and
@@ -202,6 +205,12 @@ func NewJSONState(limit int) *JSONState {
 	return &JSONState{root: &jsonStateNode{bytes: 4, nodes: 1}, limit: max(0, min(limit, MaxJSONToolBytes))}
 }
 
+// NewQueryJSONState permits large media only at the query transport boundary.
+// It does not raise json.clone, submission, or persisted plugin-state limits.
+func NewQueryJSONState() *JSONState {
+	return &JSONState{root: &jsonStateNode{bytes: 4, nodes: 1}, limit: MaxQueryJSONBytes}
+}
+
 // Apply accepts a bounded batch of set, append and appendText operations.
 // Failure invalidates the stream: callers must discard the state rather than
 // continue after an error. No partially updated result may be published.
@@ -363,18 +372,30 @@ func (s *JSONState) Apply(ctx context.Context, changes any) (err error) {
 // Value returns the final ordinary JSON tree and verifies the incremental byte
 // accounting against the configured codec before callers can persist it.
 func (s *JSONState) Value() (any, error) {
+	value, _, err := s.validatedValue()
+	return value, err
+}
+
+// EncodedValue avoids a second full serialization when replacing an SSE body
+// with the canonical JSON response consumed by polling and media redaction.
+func (s *JSONState) EncodedValue() ([]byte, error) {
+	_, encoded, err := s.validatedValue()
+	return encoded, err
+}
+
+func (s *JSONState) validatedValue() (any, []byte, error) {
 	if s.failed != nil {
-		return nil, s.failed
+		return nil, nil, s.failed
 	}
 	value := s.root.value()
 	encoded, err := common.Marshal(value)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(encoded) != s.root.bytes || len(encoded) > s.limit {
-		return nil, fmt.Errorf("JSON state encoded size does not match its bounded representation")
+		return nil, nil, fmt.Errorf("JSON state encoded size does not match its bounded representation")
 	}
-	return value, nil
+	return value, encoded, nil
 }
 
 func (n *jsonStateNode) value() any {
