@@ -134,7 +134,15 @@ func GetOptions(c *gin.Context) {
 			optionValues[k] = value
 		}
 	}
+	_, directHostsSaved := common.OptionMap[system_setting.TaskVideoDirectHostsOptionKey]
 	common.OptionMapRWMutex.Unlock()
+	if !directHostsSaved {
+		// Until an administrator saves the option, the environment value is effective.
+		options = append(options, &model.Option{
+			Key:   system_setting.TaskVideoDirectHostsOptionKey,
+			Value: system_setting.TaskVideoDirectHosts(),
+		})
+	}
 	// Display the same effective expressions used by pricing and settlement,
 	// including built-in defaults absent from persisted administrator options.
 	for key, values := range map[string]map[string]string{

@@ -21,6 +21,7 @@ import { EmailSettingsSection } from '../integrations/email-settings-section'
 import { EmailTemplateSettingsSection } from '../integrations/email-template-section'
 import { InvoiceSettingsSection } from '../integrations/invoice-section'
 import { MonitoringSettingsSection } from '../integrations/monitoring-settings-section'
+import { VideoDirectHostsSection } from '../integrations/video-direct-hosts-section'
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
 import { LogSettingsSection } from '../maintenance/log-settings-section'
 import { PerformanceSection } from '../maintenance/performance-section'
@@ -173,6 +174,13 @@ const OPERATIONS_SECTIONS = [
             settings.WorkerAllowHttpImageRequestEnabled,
         }}
       />
+    ),
+  },
+  {
+    id: 'video-delivery',
+    titleKey: 'Video Direct Delivery',
+    build: (settings: OperationsSettings) => (
+      <VideoDirectHostsSection defaultValue={settings.TaskVideoDirectHosts} />
     ),
   },
   {

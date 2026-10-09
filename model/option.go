@@ -405,6 +405,9 @@ func validateOptionValue(key string, value string) error {
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
 	}
+	if key == system_setting.TaskVideoDirectHostsOptionKey {
+		return system_setting.ValidateTaskVideoDirectHosts(value)
+	}
 	switch key {
 	case "ModelPrice", "ModelRatio", "CompletionRatio", "CacheRatio", "CreateCacheRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio":
 		return ratio_setting.ValidateNumericPricingMapJSONString(key, value)

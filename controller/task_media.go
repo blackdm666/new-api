@@ -12,8 +12,10 @@ import (
 
 var publicMediaTaskIDPattern = regexp.MustCompile(`^task_[A-Za-z0-9_-]{8,186}$`)
 
-// PublicVideoContent only redirects persisted video objects. It never invokes
-// providers, renders task data, backfills storage, or revives an expired object.
+// PublicVideoContent redirects a persisted video object, or for unarchived
+// results the allow-listed official upstream URL the task query also presents.
+// It never invokes providers, proxies bytes, backfills storage, or revives an
+// expired object; other unarchived results stay hidden.
 func PublicVideoContent(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Referrer-Policy", "no-referrer")
@@ -34,8 +36,15 @@ func PublicVideoContent(c *gin.Context) {
 	}
 	publicURL, err := service.PublicTaskVideoURL(task)
 	if err != nil {
-		videoProxyError(c, http.StatusNotFound, "media_not_found", "Media not found")
-		return
+		directURL, direct := "", false
+		if task.ResultRetrievable() {
+			directURL, direct = service.TaskVideoDirectContentURL(task)
+		}
+		if !direct {
+			videoProxyError(c, http.StatusNotFound, "media_not_found", "Media not found")
+			return
+		}
+		publicURL = directURL
 	}
 	c.Redirect(http.StatusTemporaryRedirect, publicURL)
 }
