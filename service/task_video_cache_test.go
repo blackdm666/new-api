@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service/invoicefile"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -243,12 +244,12 @@ func TestPrepareTaskVideoResultCachesUntrustedPublicURL(t *testing.T) {
 func TestTaskVideoDirectHostAllowedRequiresExactOrWildcardMatch(t *testing.T) {
 	t.Setenv("TASK_VIDEO_DIRECT_HOSTS", "official.example, *.cdn.example;ignored.example")
 
-	assert.True(t, taskVideoDirectHostAllowed("official.example"))
-	assert.True(t, taskVideoDirectHostAllowed("media.cdn.example"))
-	assert.True(t, taskVideoDirectHostAllowed("ignored.example"))
-	assert.False(t, taskVideoDirectHostAllowed("cdn.example"))
-	assert.False(t, taskVideoDirectHostAllowed("official.example.evil.test"))
-	assert.False(t, taskVideoDirectHostAllowed("unlisted.example"))
+	assert.True(t, system_setting.TaskVideoDirectHostAllowed("official.example"))
+	assert.True(t, system_setting.TaskVideoDirectHostAllowed("media.cdn.example"))
+	assert.True(t, system_setting.TaskVideoDirectHostAllowed("ignored.example"))
+	assert.False(t, system_setting.TaskVideoDirectHostAllowed("cdn.example"))
+	assert.False(t, system_setting.TaskVideoDirectHostAllowed("official.example.evil.test"))
+	assert.False(t, system_setting.TaskVideoDirectHostAllowed("unlisted.example"))
 }
 
 func TestPrepareTaskVideoResultCachesProtectedInternalURL(t *testing.T) {

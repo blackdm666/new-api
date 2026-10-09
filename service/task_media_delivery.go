@@ -23,11 +23,10 @@ func TaskVideoDeliveryURL(ctx context.Context, task *model.Task) string {
 	if publicURL, err := PublicTaskVideoURL(task); err == nil {
 		return publicURL
 	}
-	if task.PrivateData.ResultStorageKey == "" {
-		source := ResolveTaskVideoResultURL(task, task.GetResultURL())
+	if source, ok := TaskVideoDirectContentURL(task); ok {
 		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
-		if direct, err := taskVideoURLCanOpenDirectly(probeCtx, task, source); err == nil && direct {
+		if direct, err := taskVideoDirectProbe(probeCtx, source); err == nil && direct {
 			return source
 		}
 	}
@@ -36,6 +35,21 @@ func TaskVideoDeliveryURL(ctx context.Context, task *model.Task) string {
 		return "" // Fail closed; never expose a private provider URL on configuration failure.
 	}
 	return fallback
+}
+
+// TaskVideoDirectContentURL returns the upstream result of a successful,
+// unarchived task when it passes the shared direct-delivery policy. It is the
+// same source TaskVideoDeliveryURL presents, without the liveness probe, so
+// anonymous content requests never trigger outbound traffic.
+func TaskVideoDirectContentURL(task *model.Task) (string, bool) {
+	if task == nil || task.Status != model.TaskStatusSuccess || task.PrivateData.ResultStorageKey != "" {
+		return "", false
+	}
+	source := ResolveTaskVideoResultURL(task, task.GetResultURL())
+	if !taskVideoURLDirectEligible(task, source) {
+		return "", false
+	}
+	return strings.TrimSpace(source), true
 }
 
 // TaskArtifactDeliverySource is an already validated plugin content descriptor.

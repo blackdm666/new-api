@@ -15,6 +15,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 )
 
 // TaskVideoSource is an authenticated provider response ready to be copied to
@@ -195,54 +196,35 @@ func isTaskVideoURLCandidate(candidate string) bool {
 
 func taskVideoURLCanOpenDirectly(ctx context.Context, task *model.Task, resultURL string) (bool, error) {
 	resultURL = strings.TrimSpace(resultURL)
-	if resultURL == "" || isTaskVideoProxyURL(resultURL, task.TaskID) {
-		return false, nil
-	}
-	parsed, err := url.Parse(resultURL)
-	if err != nil || parsed.Hostname() == "" || parsed.Scheme != "https" || parsed.User != nil || parsed.Fragment != "" || strings.ContainsAny(resultURL, "\r\n\\") {
-		return false, nil
-	}
-	if taskVideoURLContainsProviderCredential(parsed) {
-		return false, nil
-	}
-	if !isBrowserRoutableVideoHost(parsed.Hostname()) {
-		return false, nil
-	}
-	if !isCloudflareR2URL(parsed) && !taskVideoDirectHostAllowed(parsed.Hostname()) {
+	if !taskVideoURLDirectEligible(task, resultURL) {
 		return false, nil
 	}
 	return taskVideoDirectProbe(ctx, resultURL)
 }
 
-// taskVideoDirectHostAllowed checks the operator-maintained list of official
-// media hosts. Exact names and leading-wildcard subdomains are supported;
-// Cloudflare R2 is handled separately and never needs to be listed.
-func taskVideoDirectHostAllowed(host string) bool {
-	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-	if host == "" {
+// taskVideoURLDirectEligible is the only policy deciding whether an upstream
+// video URL may be handed to clients instead of being archived. It performs no
+// network request. Cloudflare R2 never needs to be listed; every other host
+// must pass system_setting.TaskVideoDirectHostAllowed.
+func taskVideoURLDirectEligible(task *model.Task, resultURL string) bool {
+	resultURL = strings.TrimSpace(resultURL)
+	if task == nil || resultURL == "" || isTaskVideoProxyURL(resultURL, task.TaskID) {
 		return false
 	}
-	raw := common.GetEnvOrDefaultString("TASK_VIDEO_DIRECT_HOSTS", "")
-	patterns := strings.FieldsFunc(raw, func(r rune) bool {
-		return r == ',' || r == ';' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
-	})
-	for _, pattern := range patterns {
-		pattern = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(pattern), "."))
-		if pattern == "" || pattern == "*" {
-			continue
-		}
-		if strings.HasPrefix(pattern, "*.") {
-			suffix := strings.TrimPrefix(pattern, "*.")
-			if suffix != "" && host != suffix && strings.HasSuffix(host, "."+suffix) {
-				return true
-			}
-			continue
-		}
-		if host == pattern {
-			return true
-		}
+	parsed, err := url.Parse(resultURL)
+	if err != nil || parsed.Hostname() == "" || parsed.Scheme != "https" || parsed.User != nil || parsed.Fragment != "" || strings.ContainsAny(resultURL, "\r\n\\") {
+		return false
 	}
-	return false
+	if port := parsed.Port(); port != "" && port != "443" {
+		return false
+	}
+	if taskVideoURLContainsProviderCredential(parsed) {
+		return false
+	}
+	if !isBrowserRoutableVideoHost(parsed.Hostname()) {
+		return false
+	}
+	return isCloudflareR2URL(parsed) || system_setting.TaskVideoDirectHostAllowed(parsed.Hostname())
 }
 
 func taskVideoURLContainsProviderCredential(parsed *url.URL) bool {
