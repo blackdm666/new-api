@@ -381,7 +381,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// or 202 Accepted, and parseSubmitResponse receives the exact status code.
 	if resp.StatusCode/100 != 2 {
 		responseBody, _ := io.ReadAll(resp.Body)
-		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
+		// The raw body reaches both the client and the user's error log, and its
+		// envelope, codes and URLs can identify the upstream. Only its error
+		// message is public; the body stays in the server log for diagnosis.
+		logger.LogWarn(c, fmt.Sprintf("task upstream rejected submission (channel #%d, status %d): %s", info.ChannelId, resp.StatusCode, common.LocalLogPreview(string(responseBody))))
+		return nil, service.TaskErrorWrapper(errors.New(upstreamTaskErrorMessage(responseBody, resp.StatusCode)), "fail_to_fetch_task", resp.StatusCode)
 	}
 
 	// 10. Parse only. The controller presents the response after the durable
@@ -506,6 +510,26 @@ func noteTaskQuotaClamp(info *relaycommon.RelayInfo, clamp *common.QuotaClamp) {
 	}
 }
 
+// upstreamTaskErrorMessage is the public description of a rejected task
+// submission: the provider's error message without its response envelope.
+// Bodies without a recognizable message fall back to the status code.
+func upstreamTaskErrorMessage(body []byte, statusCode int) string {
+	var envelope map[string]any
+	if common.Unmarshal(body, &envelope) == nil {
+		var candidates []any
+		if nested, ok := envelope["error"].(map[string]any); ok {
+			candidates = append(candidates, nested["message"])
+		}
+		candidates = append(candidates, envelope["error"], envelope["message"], envelope["msg"], envelope["detail"])
+		for _, candidate := range candidates {
+			if message, ok := candidate.(string); ok && strings.TrimSpace(message) != "" {
+				return strings.TrimSpace(message)
+			}
+		}
+	}
+	return fmt.Sprintf("upstream task submission failed with status %d", statusCode)
+}
+
 var fetchRespBuilders = map[int]func(c *gin.Context) (respBody []byte, taskResp *dto.TaskError){
 	relayconstant.RelayModeVideoFetchByID: videoFetchByIDRespBodyBuilder,
 }
@@ -608,6 +632,8 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	// 通用 TaskDto 格式
 	publicTask := TaskModel2Dto(originTask)
 	publicTask.ResultURL = service.TaskVideoDeliveryURL(c.Request.Context(), originTask)
+	// The raw upstream snapshot identifies the provider; ResultURL is the public deliverable.
+	publicTask.Data = nil
 	respBody, err = common.Marshal(dto.TaskResponse[any]{
 		Code: "success",
 		Data: publicTask,

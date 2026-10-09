@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -84,6 +86,24 @@ func TestTasksToDtoAddsAdminChannelName(t *testing.T) {
 	require.Len(t, userResult, 1)
 	assert.Empty(t, userResult[0].Username)
 	assert.Empty(t, userResult[0].ChannelName)
+}
+
+func TestTasksToDtoHidesUpstreamSnapshotFromUsers(t *testing.T) {
+	setupTaskControllerTestDB(t)
+	video := &model.Task{TaskID: "task_video", Platform: "63", Status: model.TaskStatusSuccess,
+		Data: json.RawMessage(`{"id":"upstream-task-1","url":"https://bucket.provider-cdn.example/v.mp4?sig=1"}`)}
+	suno := &model.Task{TaskID: "task_suno", Platform: constant.TaskPlatformSuno, Status: model.TaskStatusSuccess,
+		Data: json.RawMessage(`[{"id":"clip-1","audio_url":"https://cdn.example/a.mp3","title":"Song","model_name":"chirp-v4","prompt":"private"}]`)}
+
+	admin := tasksToDto([]*model.Task{video, suno}, true, common.RoleAdminUser)
+	require.Len(t, admin, 2)
+	assert.JSONEq(t, string(video.Data), string(admin[0].Data))
+	assert.JSONEq(t, string(suno.Data), string(admin[1].Data))
+
+	user := tasksToDto([]*model.Task{video, suno}, false, common.RoleCommonUser)
+	require.Len(t, user, 2)
+	assert.Nil(t, user[0].Data)
+	assert.JSONEq(t, `[{"id":"clip-1","audio_url":"https://cdn.example/a.mp3","title":"Song"}]`, string(user[1].Data))
 }
 
 func TestGetTaskPreviewURLAllowsAdminToOpenAnotherUsersDirectResult(t *testing.T) {
