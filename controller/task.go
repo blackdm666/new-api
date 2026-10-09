@@ -612,6 +612,14 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 			userProperties := task.Properties
 			userProperties.OriginModelName = ""
 			item.Properties = userProperties
+			// Data is the raw upstream snapshot (provider task IDs, storage URLs)
+			// and would identify the upstream. Users only need the Suno preview clips.
+			item.Data = nil
+			if task.Platform == constant.TaskPlatformSuno && task.Status == model.TaskStatusSuccess {
+				if clips, err := common.Marshal(legacySunoAudioClips(task.Data)); err == nil {
+					item.Data = clips
+				}
+			}
 		}
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)
 		item.ResultDiscarded = task.PrivateData.ResultDiscarded

@@ -50,6 +50,7 @@ func TestRetiredNativeVideoTasksRemainReadable(t *testing.T) {
 		t.Run(fmt.Sprintf("%s-%s-owner%d", tc.platform, tc.status, tc.owner), func(t *testing.T) {
 			require.Nil(t, GetTaskAdaptor(constant.TaskPlatform(tc.platform)))
 			task := &model.Task{TaskID: "task_retired", UserId: 7, ChannelId: 99, Platform: constant.TaskPlatform(tc.platform), Status: tc.status, Action: constant.TaskActionTextToVideo, Progress: "100%", FinishTime: 20,
+				Data:        []byte(`{"id":"upstream-task-1","url":"https://bucket.provider-cdn.example/v.mp4"}`),
 				PrivateData: model.TaskPrivateData{Execution: &model.TaskExecutionSnapshot{}, ResultStorageKind: "s3", ResultStorageKey: "task-videos/2026/09/" + strings.Repeat("a", 64) + ".mp4", ResultMimeType: "video/mp4"}}
 			require.NoError(t, db.Create(task).Error)
 			t.Cleanup(func() { db.Delete(task) })
@@ -70,6 +71,18 @@ func TestRetiredNativeVideoTasksRemainReadable(t *testing.T) {
 				assert.Equal(t, "https://assets.88api.ai/media/"+task.PrivateData.ResultStorageKey, result["url"])
 			}
 			assert.Equal(t, int64(20), task.FinishTime)
+
+			// The generic task API returns the deliverable, never the upstream snapshot.
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/video/generations/"+task.TaskID, nil)
+			body, taskErr = videoFetchByIDRespBodyBuilder(c)
+			require.Nil(t, taskErr)
+			var generic struct {
+				Data map[string]any `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(body, &generic))
+			assert.Equal(t, task.TaskID, generic.Data["task_id"])
+			assert.Nil(t, generic.Data["data"])
+			assert.NotContains(t, string(body), "upstream-task-1")
 
 		})
 	}
@@ -460,7 +473,7 @@ func TestSharedTaskBillingExpressionSelectionAndFrozenSettlement(t *testing.T) {
 
 // Issue #7478: task APIs answer 201 Created or 202 Accepted on submission.
 // Every 2xx must reach parseSubmitResponse; only other statuses are upstream
-// failures that keep the upstream status and body.
+// failures that keep the upstream status and expose only the error message.
 func TestRelayTaskSubmitAcceptsAnySuccessfulUpstreamStatus(t *testing.T) {
 	service.InitHttpClient()
 	const source = `
@@ -489,7 +502,7 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tc.status)
-				_, _ = w.Write([]byte(`{"id":"job-42","message":"upstream body"}`))
+				_, _ = w.Write([]byte(`{"id":"job-42","message":"upstream body","provider_trace":"vendor-internal"}`))
 			}))
 			defer server.Close()
 
@@ -507,7 +520,9 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 				require.NotNil(t, taskErr)
 				assert.Equal(t, tc.wantCode, taskErr.Code)
 				assert.Equal(t, tc.status, taskErr.StatusCode)
-				assert.Contains(t, taskErr.Message, "upstream body")
+				// Both the client response and the user error log (taskErr.Error) omit the envelope.
+				assert.Equal(t, "upstream body", taskErr.Message)
+				assert.Equal(t, "upstream body", taskErr.Error.Error())
 				assert.Nil(t, result)
 				return
 			}
@@ -515,6 +530,25 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 			require.NotNil(t, result)
 			assert.Equal(t, "job-42", result.UpstreamTaskID)
 			assert.JSONEq(t, `{"status":`+strconv.Itoa(tc.status)+`}`, string(result.TaskData))
+		})
+	}
+}
+
+func TestUpstreamTaskErrorMessageOmitsProviderEnvelope(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"openai style", `{"error":{"type":"invalid_request_error","message":"This variant supports 4-15 seconds","code":"unsupported_duration","submission_created":false}}`, "This variant supports 4-15 seconds"},
+		{"string error", `{"error":" quota exceeded "}`, "quota exceeded"},
+		{"message field", `{"code":1001,"message":"prompt rejected","request_id":"req-1"}`, "prompt rejected"},
+		{"msg field", `{"code":500,"msg":"busy"}`, "busy"},
+		{"detail field", `{"detail":"not found"}`, "not found"},
+		{"empty nested message falls through", `{"error":{"message":" "},"message":"fallback"}`, "fallback"},
+		{"no message", `{"error":{"code":"x"},"trace":"vendor"}`, "upstream task submission failed with status 400"},
+		{"not json", `<html>vendor gateway</html>`, "upstream task submission failed with status 400"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, upstreamTaskErrorMessage([]byte(tc.body), http.StatusBadRequest))
 		})
 	}
 }
