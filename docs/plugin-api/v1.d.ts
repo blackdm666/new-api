@@ -1,5 +1,5 @@
 export type JSONValue = null | boolean | number | string | readonly JSONValue[] | {readonly [key: string]: JSONValue};
-export type HostCapability = "json-clone@1" | "submit-sse-delta@1" | "task-preflight@1";
+export type HostCapability = "json-clone@1" | "submit-sse-delta@1" | "query-sse-delta@1" | "task-preflight@1";
 /** Kinds of upstream a driver can address: the vendor API itself, or another New API gateway with the same plugin installed. */
 export type UpstreamKind = "vendor" | "new_api";
 /** Host-injected on every driver hook context. With "new_api" the driver uses its own native-route prefix and the host already set Bearer credentials. */
@@ -80,6 +80,9 @@ export type JSONChange =
 export interface SubmitEventDeltaResult {changes: readonly JSONChange[]; state: JSONValue; done: boolean}
 /** With submit-sse-delta@1, state is small control data; changes build the separate response body. */
 export declare function parseSubmitEventDelta(ctx: DriverContext, event: SubmitEvent, previousState: JSONValue | null): SubmitEventDeltaResult;
+export interface QueryEvent {event: string; id: string; body: JSONValue}
+/** Optional per-task query normalization. Native JSON decoding avoids reparsing huge media in JS. */
+export declare function parseQueryEventDelta(ctx: TaskQueryContext, event: QueryEvent, previousState: JSONValue | null): SubmitEventDeltaResult;
 export declare function parseSubmitEvent(ctx: DriverContext, event: SubmitEvent, previousState: JSONValue | null): {state: JSONValue; done: boolean};
 export declare function parseSubmitResponse(ctx: DriverContext, response: UpstreamResponse): {taskId: string; taskData?: unknown; immediate?: NormalizedTaskResult; state?: unknown};
 export declare function buildQueryRequest(ctx: TaskQueryContext): RequestDescriptor;

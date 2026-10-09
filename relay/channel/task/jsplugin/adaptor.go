@@ -854,7 +854,36 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, task *model.Task, proxy str
 	if err != nil {
 		return nil, err
 	}
-	return a.doFetchDescriptor(baseURL, proxy, value)
+	var descriptor requestDescriptor
+	if err := convert(value, &descriptor); err != nil {
+		return nil, err
+	}
+	if descriptor.ResponseType != "" && descriptor.ResponseType != "json" && descriptor.ResponseType != "sse" {
+		return nil, fmt.Errorf("unsupported query response type %q", descriptor.ResponseType)
+	}
+	if descriptor.ResponseType == "sse" &&
+		!slices.Contains(a.plugin.Meta.RequiredCapabilities, pluginruntime.CapabilityQuerySSEDelta) {
+		return nil, fmt.Errorf("SSE queries require %s", pluginruntime.CapabilityQuerySSEDelta)
+	}
+	resp, err := a.doFetchDescriptor(baseURL, proxy, value)
+	if err != nil || descriptor.ResponseType != "sse" || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return resp, err
+	}
+	// Normalize before the shared poller parses, redacts, caches or persists
+	// the response. Never store a raw SSE transcript in Task.Data.
+	encoded, readErr := a.readQueryEvents(resp, ctx)
+	_ = resp.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(encoded))
+	resp.ContentLength = int64(len(encoded))
+	resp.TransferEncoding = nil
+	resp.Header = resp.Header.Clone()
+	resp.Header.Set("Content-Type", "application/json")
+	resp.Header.Set("Content-Length", strconv.Itoa(len(encoded)))
+	resp.Header.Del("Content-Encoding")
+	return resp, nil
 }
 
 func (a *TaskAdaptor) doFetchDescriptor(baseURL, proxy string, value any) (*http.Response, error) {

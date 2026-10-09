@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +83,40 @@ func TestPrepareTaskVideoResultPersistsAndReopensDataURL(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, videoBytes, actual)
 	assert.Equal(t, "video/mp4", mimeType)
+}
+
+func TestPrepareTaskVideoResultCaptured4KBytes(t *testing.T) {
+	directory := os.Getenv("VERTEX_SSE_CAPTURE_DIR")
+	if directory == "" {
+		t.Skip("private captured media is supplied only for local acceptance")
+	}
+	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "true")
+	useLocalTaskVideoCache(t)
+	paths, err := filepath.Glob(filepath.Join(directory, "*.mp4"))
+	require.NoError(t, err)
+	require.Len(t, paths, 2)
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			task := &model.Task{TaskID: "task_local_" + filepath.Base(path)}
+			resultURL := "data:video/mp4;base64," + base64.StdEncoding.EncodeToString(data)
+			prepared, err := PrepareTaskVideoResult(context.Background(), task, resultURL)
+			require.NoError(t, err)
+			require.True(t, prepared.Cached)
+			reader, mimeType, found, err := OpenTaskVideoCache(context.Background(), task)
+			require.NoError(t, err)
+			require.True(t, found)
+			defer reader.Close()
+			hash := sha256.New()
+			size, err := io.Copy(hash, reader)
+			require.NoError(t, err)
+			assert.EqualValues(t, len(data), size)
+			assert.Equal(t, sha256.Sum256(data), [32]byte(hash.Sum(nil)))
+			assert.Equal(t, "video/mp4", mimeType)
+			assert.NotEmpty(t, task.PrivateData.ResultStorageKey)
+		})
+	}
 }
 
 func TestPublicVideoDeliveryArchivesOnceAndDoesNotReviveDeletedMedia(t *testing.T) {

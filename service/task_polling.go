@@ -520,7 +520,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassTransport, resp.StatusCode, err.Error())
 	}
 
-	logger.LogDebug(ctx, "updateVideoSingleTask response: %s", responseBody)
+	logger.LogDebug(ctx, "updateVideoSingleTask response status=%d bytes=%d", resp.StatusCode, len(responseBody))
 
 	switch classifyPollHTTP(resp.StatusCode) {
 	case pollClassNotFound:
@@ -554,7 +554,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassUnrecognized, resp.StatusCode, unrecognizedPollDetail(taskResult.Reason, responseBody))
 	}
 
-	logger.LogDebug(ctx, "updateVideoSingleTask taskResult: %+v", taskResult)
+	logger.LogDebug(ctx, "updateVideoSingleTask parsed status=%s progress=%s", taskResult.Status, taskResult.Progress)
 	return FinalizeVideoTaskResult(ctx, adaptor, task, taskResult, responseBody)
 }
 
@@ -570,8 +570,6 @@ func FinalizeVideoTaskResult(ctx context.Context, adaptor TaskPollingAdaptor, ta
 		ctx = context.Background()
 	}
 	snap := task.Snapshot()
-	task.Data = redactVideoResponseBody(responseBody)
-
 	parsedStatus := model.TaskStatus(taskResult.Status)
 
 	task.Data = redactVideoResponseBody(responseBody)
