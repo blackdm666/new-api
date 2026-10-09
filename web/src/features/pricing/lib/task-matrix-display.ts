@@ -33,9 +33,9 @@ import {
 
 export type TaskCompactPricingMatrix = {
   rowField: string
-  columnField: string
+  columnField?: string
   rowValues: string[]
-  columnValues: string[]
+  columnValues?: string[]
   cells: Map<string, ParsedTaskTier>
 }
 
@@ -47,7 +47,7 @@ export function taskCompactMatrixCellKey(
 }
 
 /**
- * Return a two-dimensional view for the common two-enum task pricing shape.
+ * Return a compact view for task pricing with one or two enum fields.
  * The model can opt into this layout without changing the billing expression.
  * Unsupported or ambiguous expressions return null so the caller can retain
  * the existing tier table.
@@ -57,14 +57,14 @@ export function getTaskCompactPricingMatrix(
   schema: BillingUsageSchema | null | undefined
 ): TaskCompactPricingMatrix | null {
   const enumFields = getTaskEnumFields(schema)
-  if (enumFields.length !== 2) return null
+  if (enumFields.length === 0 || enumFields.length > 2) return null
 
   const tiers = getTaskMatrixDisplayTiers(expression, schema)
   if (!tiers?.length) return null
 
   const [rowEntry, columnEntry] = enumFields
   const rowValues = rowEntry[1].enum ?? []
-  const columnValues = columnEntry[1].enum ?? []
+  const columnValues = columnEntry?.[1].enum ?? ['']
   if (rowValues.length === 0 || columnValues.length === 0) return null
 
   const cells = new Map<string, ParsedTaskTier>()
@@ -72,10 +72,11 @@ export function getTaskCompactPricingMatrix(
     const rowValue = tier.conditions.find(
       (condition) => condition.field === rowEntry[0]
     )?.value
-    const columnValue = tier.conditions.find(
-      (condition) => condition.field === columnEntry[0]
-    )?.value
-    if (!rowValue || !columnValue) return null
+    const columnValue = columnEntry
+      ? tier.conditions.find((condition) => condition.field === columnEntry[0])
+          ?.value
+      : ''
+    if (!rowValue || columnValue === undefined) return null
     cells.set(taskCompactMatrixCellKey(rowValue, columnValue), tier)
   }
 
@@ -93,10 +94,14 @@ export function getTaskCompactPricingMatrix(
 
   return {
     rowField: rowEntry[0],
-    columnField: columnEntry[0],
     rowValues,
-    columnValues,
     cells,
+    ...(columnEntry
+      ? {
+          columnField: columnEntry[0],
+          columnValues,
+        }
+      : {}),
   }
 }
 

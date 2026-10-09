@@ -190,13 +190,40 @@ describe('task matrix marketplace display rows', () => {
     ).toBe(42)
   })
 
-  test('does not opt unsupported schemas into the compact matrix', () => {
+  test('builds a one-dimensional compact matrix from a flat expression', () => {
+    const matrix = getTaskCompactPricingMatrix(
+      'tier("base", u("seconds") * 0.4)',
+      resolutionSchema
+    )
+
+    expect(matrix).not.toBeNull()
+    expect(matrix?.rowValues).toEqual(['480P', '720P', '1080P'])
+    expect(matrix?.columnField).toBeUndefined()
     expect(
-      getTaskCompactPricingMatrix(
-        'tier("base", u("seconds") * 0.4)',
-        resolutionSchema
-      )
-    ).toBeNull()
+      matrix?.cells.get(taskCompactMatrixCellKey('720P', ''))?.unitPrices
+        .seconds
+    ).toBe(0.4)
+  })
+
+  test('builds a one-dimensional compact matrix from one enum field', () => {
+    const matrix = getTaskCompactPricingMatrix(
+      'u("resolution") == "1080P" ? tier("1080P", u("seconds") * 0.9) : tier("base", u("seconds") * 0.35)',
+      resolutionSchema
+    )
+
+    expect(matrix).not.toBeNull()
+    expect(matrix?.rowField).toBe('resolution')
+    expect(matrix?.columnField).toBeUndefined()
+    expect(matrix?.rowValues).toEqual(['480P', '720P', '1080P'])
+    expect(matrix?.columnValues).toBeUndefined()
+    expect(
+      matrix?.cells.get(taskCompactMatrixCellKey('480P', ''))?.unitPrices
+        .seconds
+    ).toBe(0.35)
+    expect(
+      matrix?.cells.get(taskCompactMatrixCellKey('1080P', ''))?.unitPrices
+        .seconds
+    ).toBe(0.9)
   })
 
   test('expands a uniform flat expression into every enum combination', () => {
