@@ -145,36 +145,47 @@ func TestProcessChannelErrorMasksDisableReasonAndNotification(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, apiErr.StatusCode)
 }
 
-func TestReportUpstreamQuotaExhaustedFollowsAutomaticDisable(t *testing.T) {
+func TestReportUpstreamQuotaExhaustedAlertsWithoutDisabling(t *testing.T) {
 	quotaNotifyType := func(channelID int) string {
 		return fmt.Sprintf("%s_%d_upstream_quota", kitdto.NotifyTypeChannelUpdate, channelID)
 	}
+	for _, autoBan := range []bool{true, false} {
+		t.Run(fmt.Sprintf("auto_ban=%v", autoBan), func(t *testing.T) {
+			channel, notifications := setupChannelNotificationFixture(t, autoDisabledNotifyType, quotaNotifyType)
+			ReportUpstreamQuotaExhausted(types.ChannelError{ChannelId: channel.Id, ChannelName: channel.Name, AutoBan: autoBan}, "req-quota")
+			notification := receiveNotification(t, notifications)
+			assert.Contains(t, notification.Title, fmt.Sprintf("通道「%s」（#%d）上游账户余额或额度不足", channel.Name, channel.Id))
+			assert.Contains(t, notification.Content, "请求 ID：req-quota")
+			assert.Regexp(t, `时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}`, notification.Content)
+			loaded, err := model.GetChannelById(channel.Id, true)
+			require.NoError(t, err)
+			assert.Equal(t, common.ChannelStatusEnabled, loaded.Status, "balance errors never disable the channel")
+		})
+	}
 
-	t.Run("auto ban disables the channel and notifies once", func(t *testing.T) {
+	t.Run("alerts are rate limited per channel", func(t *testing.T) {
 		channel, notifications := setupChannelNotificationFixture(t, autoDisabledNotifyType, quotaNotifyType)
-		ReportUpstreamQuotaExhausted(types.ChannelError{ChannelId: channel.Id, ChannelName: channel.Name, AutoBan: true}, "req-quota")
-		notification := receiveNotification(t, notifications)
-		assert.Contains(t, notification.Content, "上游账户余额或额度不足")
-		loaded, err := model.GetChannelById(channel.Id, true)
-		require.NoError(t, err)
-		assert.Equal(t, common.ChannelStatusAutoDisabled, loaded.Status)
-		assert.Equal(t, "上游账户余额或额度不足", loaded.GetOtherInfo()["status_reason"])
-		select {
-		case <-notifications:
-			t.Fatal("a disabled channel must not also send the quota alert")
-		case <-time.After(200 * time.Millisecond):
+		oldDuration := constant.NotificationLimitDurationMinute
+		t.Cleanup(func() { constant.NotificationLimitDurationMinute = oldDuration })
+		constant.NotifyLimitCount, constant.NotificationLimitDurationMinute = 1, 10
+		ReportUpstreamQuotaExhausted(types.ChannelError{ChannelId: channel.Id, ChannelName: channel.Name}, "req-first")
+		assert.Contains(t, receiveNotification(t, notifications).Content, "req-first")
+		for _, requestID := range []string{"req-second", "req-third"} {
+			ReportUpstreamQuotaExhausted(types.ChannelError{ChannelId: channel.Id, ChannelName: channel.Name}, requestID)
+			select {
+			case <-notifications:
+				t.Fatalf("%s passed the per-channel notification limit", requestID)
+			case <-time.After(200 * time.Millisecond):
+			}
 		}
-	})
 
-	t.Run("without auto ban the channel stays enabled and the alert names the request", func(t *testing.T) {
-		channel, notifications := setupChannelNotificationFixture(t, autoDisabledNotifyType, quotaNotifyType)
-		ReportUpstreamQuotaExhausted(types.ChannelError{ChannelId: channel.Id, ChannelName: channel.Name, AutoBan: false}, "req-quota")
-		notification := receiveNotification(t, notifications)
-		assert.Contains(t, notification.Content, "上游返回余额或额度不足")
-		assert.Contains(t, notification.Content, "req-quota")
-		loaded, err := model.GetChannelById(channel.Id, true)
-		require.NoError(t, err)
-		assert.Equal(t, common.ChannelStatusEnabled, loaded.Status)
+		other := &model.Channel{Name: "relay-review-other", Key: "fixture-key", Type: 1, Status: common.ChannelStatusEnabled, Group: "default", Models: "test-model"}
+		require.NoError(t, other.Insert())
+		otherKey := fmt.Sprintf("%d:%s:%s", model.GetRootUser().Id, quotaNotifyType(other.Id), time.Now().Format("2006010215"))
+		notifyLimitStore.Delete(otherKey)
+		t.Cleanup(func() { notifyLimitStore.Delete(otherKey) })
+		ReportUpstreamQuotaExhausted(types.ChannelError{ChannelId: other.Id, ChannelName: other.Name}, "req-other")
+		assert.Contains(t, receiveNotification(t, notifications).Content, "req-other", "the limit is per channel")
 	})
 }
 

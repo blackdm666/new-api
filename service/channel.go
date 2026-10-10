@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -48,21 +49,15 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 }
 
 // ReportUpstreamQuotaExhausted tells the root user that a channel's provider
-// account cannot pay for submissions. The channel follows the automatic
-// disable switches (disabling notifies on its own); otherwise the alert is
+// account cannot pay for submissions. The channel stays enabled: requests fall
+// over to other channels and disabling it is left to the operator. Alerts are
 // rate limited per channel like other notifications.
 func ReportUpstreamQuotaExhausted(channelError types.ChannelError, requestID string) {
-	const reason = "上游账户余额或额度不足"
-	common.SysLog(fmt.Sprintf("通道「%s」（#%d）%s，request id: %s", channelError.ChannelName, channelError.ChannelId, reason, requestID))
-	if common.AutomaticDisableChannelEnabled && channelError.AutoBan {
-		gopool.Go(func() {
-			DisableChannel(channelError, reason)
-		})
-		return
-	}
-	subject := fmt.Sprintf("通道「%s」（#%d）%s", channelError.ChannelName, channelError.ChannelId, reason)
-	content := fmt.Sprintf("通道「%s」（#%d）提交任务时上游返回余额或额度不足，客户收到的是“服务暂时不可用”。该渠道未开启自动禁用，请充值或手动停用。请求 ID：%s",
-		channelError.ChannelName, channelError.ChannelId, requestID)
+	at := time.Now().Format("2006-01-02 15:04:05 MST")
+	common.SysLog(fmt.Sprintf("通道「%s」（#%d）上游账户余额或额度不足，request id: %s", channelError.ChannelName, channelError.ChannelId, requestID))
+	subject := fmt.Sprintf("通道「%s」（#%d）上游账户余额或额度不足", channelError.ChannelName, channelError.ChannelId)
+	content := fmt.Sprintf("通道「%s」（#%d）提交任务时上游返回余额或额度不足。请求已尝试同分组的其他渠道；没有可用渠道时客户收到“服务暂时不可用”。渠道未被禁用，请充值或手动处理。时间：%s，请求 ID：%s",
+		channelError.ChannelName, channelError.ChannelId, at, requestID)
 	notifyType := fmt.Sprintf("%s_%d_upstream_quota", dto.NotifyTypeChannelUpdate, channelError.ChannelId)
 	gopool.Go(func() {
 		NotifyRootUser(notifyType, subject, content)

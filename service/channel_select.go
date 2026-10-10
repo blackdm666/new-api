@@ -41,6 +41,29 @@ func AppendTaskPluginIdentityFilter(c *gin.Context, pluginKey string) {
 	})
 }
 
+// ExcludeChannelFromRetry keeps the remaining attempts of this request off a
+// channel that already failed it, so a retry falls over to another channel of
+// the same group and model instead of replaying the request there.
+func ExcludeChannelFromRetry(c *gin.Context, channelID int) {
+	constraints := GetChannelConstraints(c)
+	for i := range constraints.Filters {
+		if constraints.Filters[i].Kind == dto.FilterExcludedChannels {
+			constraints.Filters[i].ExcludedChannelIDs = append(constraints.Filters[i].ExcludedChannelIDs, channelID)
+			return
+		}
+	}
+	constraints.AddFilter(dto.ChannelFilter{Kind: dto.FilterExcludedChannels, ExcludedChannelIDs: []int{channelID}})
+}
+
+func excludesChannels(filters []dto.ChannelFilter) bool {
+	for _, filter := range filters {
+		if filter.Kind == dto.FilterExcludedChannels && len(filter.ExcludedChannelIDs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 type RetryParam struct {
 	Ctx          *gin.Context
 	TokenGroup   string
@@ -154,6 +177,11 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 				filters,
 			)
 			if channel == nil {
+				// Excluding failed channels must not turn a retry into a cross-group
+				// retry the token did not enable.
+				if !crossGroupRetry && param.GetRetry() > 0 && excludesChannels(filters) {
+					return nil, autoGroup, nil
+				}
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
 				logger.LogDebug(param.Ctx, "No available channel in group %s for model %s at priorityRetry %d, trying next group", autoGroup, param.ModelName, priorityRetry)
