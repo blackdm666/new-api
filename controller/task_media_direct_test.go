@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -98,6 +99,36 @@ func TestPublicVideoContentDeliveryOrder(t *testing.T) {
 			})
 		}
 	}
+
+	t.Run("expired-signature", func(t *testing.T) {
+		signedAt := func(at time.Time) string {
+			return "https://cdn.official.example/result.mp4?X-Tos-Date=" + at.UTC().Format("20060102T150405Z") + "&X-Tos-Expires=86400&X-Tos-Signature=s"
+		}
+		for taskID, signed := range map[string]time.Time{
+			"task_unarchived_expired": time.Now().Add(-25 * time.Hour),
+			"task_unarchived_fresh":   time.Now().Add(-time.Hour),
+		} {
+			require.NoError(t, model.DB.Create(&model.Task{TaskID: taskID, Status: model.TaskStatusSuccess, UserId: 7, ChannelId: 1,
+				Platform: "openai_video", PrivateData: model.TaskPrivateData{ResultURL: signedAt(signed)}}).Error)
+		}
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			gone := requestPublicVideoContent(t, method, "task_unarchived_expired", nil)
+			assert.Equal(t, http.StatusGone, gone.Code, method)
+			assert.Empty(t, gone.Header().Get("Location"), method)
+			assert.Contains(t, gone.Header().Get("Cache-Control"), "no-store", method)
+			if method == http.MethodGet {
+				assert.Contains(t, gone.Body.String(), "media_expired")
+				assert.NotContains(t, gone.Body.String(), "official.example")
+			}
+			fresh := requestPublicVideoContent(t, method, "task_unarchived_fresh", nil)
+			assert.Equal(t, http.StatusTemporaryRedirect, fresh.Code, method)
+		}
+		// Archived objects never depend on the upstream signature.
+		archivedExpired := &model.Task{TaskID: "task_archived_expired_source", Status: model.TaskStatusSuccess, UserId: 7, ChannelId: 1, Platform: "openai_video",
+			PrivateData: model.TaskPrivateData{ResultURL: signedAt(time.Now().Add(-25 * time.Hour)), ResultStorageKind: "s3", ResultStorageKey: storageKey, ResultMimeType: "video/mp4"}}
+		require.NoError(t, model.DB.Create(archivedExpired).Error)
+		assert.Equal(t, archivedURL, requestPublicVideoContent(t, http.MethodGet, archivedExpired.TaskID, nil).Header().Get("Location"))
+	})
 
 	// The same option drives the redirect; saving it applies without restart.
 	common.OptionMapRWMutex.Lock()

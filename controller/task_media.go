@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -15,7 +16,8 @@ var publicMediaTaskIDPattern = regexp.MustCompile(`^task_[A-Za-z0-9_-]{8,186}$`)
 // PublicVideoContent redirects a persisted video object, or for unarchived
 // results the allow-listed official upstream URL the task query also presents.
 // It never invokes providers, proxies bytes, backfills storage, or revives an
-// expired object; other unarchived results stay hidden.
+// expired object; an upstream link whose signature has lapsed answers 410 and
+// other unarchived results stay hidden.
 func PublicVideoContent(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Referrer-Policy", "no-referrer")
@@ -36,15 +38,21 @@ func PublicVideoContent(c *gin.Context) {
 	}
 	publicURL, err := service.PublicTaskVideoURL(task)
 	if err != nil {
-		directURL, direct := "", false
+		var source service.TaskVideoDirectSource
+		direct := false
 		if task.ResultRetrievable() {
-			directURL, direct = service.TaskVideoDirectContentURL(task)
+			source, direct = service.TaskVideoDirectContent(task)
 		}
 		if !direct {
 			videoProxyError(c, http.StatusNotFound, "media_not_found", "Media not found")
 			return
 		}
-		publicURL = directURL
+		if source.Expired(time.Now()) {
+			videoProxyError(c, http.StatusGone, "media_expired", "Media link expired at "+
+				time.Unix(source.ExpiresAt, 0).UTC().Format(time.RFC3339)+"; download results before the provider retention ends")
+			return
+		}
+		publicURL = source.URL
 	}
 	c.Redirect(http.StatusTemporaryRedirect, publicURL)
 }

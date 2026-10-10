@@ -68,6 +68,11 @@ func PresentPublicTaskVideo(payload []byte, task *model.Task) ([]byte, error) {
 			}
 		}
 	}
+	if _, err := PublicTaskVideoURL(task); err != nil {
+		if source, ok := TaskVideoDirectContent(task); ok && source.ExpiresAt > 0 {
+			value["expires_at"] = source.ExpiresAt
+		}
+	}
 	return common.Marshal(value)
 }
 
