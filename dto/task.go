@@ -14,7 +14,7 @@ type TaskError struct {
 	LocalError bool   `json:"-"`
 	Error      error  `json:"-"`
 	// UpstreamQuotaExhausted marks a provider account that cannot pay for the
-	// submission; it is retried on other channels and the channel is reported.
+	// submission; it is retried on the group's other channels.
 	UpstreamQuotaExhausted bool `json:"-"`
 }
 

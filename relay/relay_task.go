@@ -549,8 +549,8 @@ func taskRequestFailedError(c *gin.Context, channelID int, err error) *dto.TaskE
 // the provider's error message without its response envelope. Overload and
 // gateway failures carry provider internals (HTML pages, key-scoped rate
 // limits) and become a generic busy message. An exhausted provider account is
-// not the customer's balance: it reads as a temporary outage, is retried on
-// the group's other channels and is flagged so the channel gets reported.
+// not the customer's balance: it reads as a temporary outage and is flagged
+// so the submission is retried on the group's other channels.
 func upstreamTaskSubmitError(body []byte, statusCode int) *dto.TaskError {
 	message := upstreamTaskErrorText(body)
 	if upstreamQuotaExhausted(body, statusCode, message) {

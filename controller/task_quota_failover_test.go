@@ -22,15 +22,16 @@ import (
 )
 
 const (
-	failoverQuotaBody = `{"error":{"message":"预扣费额度失败, 用户剩余额度: ＄0.01, 需要预扣费额度: ＄1.00","code":"insufficient_user_quota"}}`
-	failoverBusyBody  = `{"error":{"message":"fixture unavailable"}}`
+	failoverQuotaBody  = `{"error":{"message":"预扣费额度失败, 用户剩余额度: ＄0.01, 需要预扣费额度: ＄1.00","code":"insufficient_user_quota"}}`
+	failoverCreditBody = `{"error":{"message":"Your credit balance is too low to access the API."}}`
+	failoverBusyBody   = `{"error":{"message":"fixture unavailable"}}`
 )
 
 type failoverChannel struct {
 	letter   string
 	priority int64
 	weight   uint
-	reply    string // quota, busy or ok
+	reply    string // quota, credit, busy or ok
 }
 
 type failoverAttempt struct {
@@ -47,6 +48,7 @@ type failoverResult struct {
 	initial  int
 	tasks    int64
 	logs     []model.Log
+	disabled []int
 }
 
 // Submissions go through the real middleware, channel cache, plugin adaptor
@@ -58,14 +60,14 @@ func runTaskFailover(t *testing.T, channels []failoverChannel) failoverResult {
 	require.NoError(t, db.Callback().Create().Remove("test:task-submit-order"))
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Channel{}, &model.Ability{}, &model.Log{}, &model.QuotaNotificationState{}))
 	oldLog, oldMemory, oldRedis, oldBatch, oldConsume, oldRetry := model.LOG_DB, common.MemoryCacheEnabled, common.RedisEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled, common.RetryTimes
-	oldRanges, oldErrorLog := operation_setting.AutomaticRetryStatusCodeRanges, constant.ErrorLogEnabled
+	oldRanges, oldErrorLog, oldAutoDisable := operation_setting.AutomaticRetryStatusCodeRanges, constant.ErrorLogEnabled, common.AutomaticDisableChannelEnabled
 	model.LOG_DB = db
 	common.MemoryCacheEnabled, common.RedisEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled, common.RetryTimes = true, false, false, true, 2
-	constant.ErrorLogEnabled = true
+	constant.ErrorLogEnabled, common.AutomaticDisableChannelEnabled = true, true
 	t.Cleanup(func() {
 		model.LOG_DB = oldLog
 		common.MemoryCacheEnabled, common.RedisEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled, common.RetryTimes = oldMemory, oldRedis, oldBatch, oldConsume, oldRetry
-		operation_setting.AutomaticRetryStatusCodeRanges, constant.ErrorLogEnabled = oldRanges, oldErrorLog
+		operation_setting.AutomaticRetryStatusCodeRanges, constant.ErrorLogEnabled, common.AutomaticDisableChannelEnabled = oldRanges, oldErrorLog, oldAutoDisable
 	})
 	require.NoError(t, operation_setting.AutomaticRetryStatusCodesFromString("100-199,300-399,401-407,409-450,452-503,505-523,525-599"))
 	withTieredBillingConfig(t, map[string]string{"failover-sale": "tiered_expr"}, map[string]string{"failover-sale": `tier("base", u("seconds") * 0.1)`})
@@ -85,6 +87,9 @@ func runTaskFailover(t *testing.T, channels []failoverChannel) failoverResult {
 		case "quota":
 			w.WriteHeader(http.StatusForbidden)
 			fmt.Fprint(w, failoverQuotaBody)
+		case "credit":
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, failoverCreditBody)
 		case "busy":
 			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprint(w, failoverBusyBody)
@@ -111,8 +116,8 @@ export function buildContentRequest(){return {};}
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, plugin.DefaultRegistry.Unregister(key)) })
 		setting := fmt.Sprintf(`{"task_plugin_key":%q}`, key)
-		priority, weight := spec.priority, spec.weight
-		ch := model.Channel{Id: 942001 + i, Name: key, Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Models: "failover-sale", Group: "default", Key: "fixture", BaseURL: &srv.URL, Setting: &setting, Priority: &priority, Weight: &weight}
+		priority, weight, autoBan := spec.priority, spec.weight, 1
+		ch := model.Channel{Id: 942001 + i, Name: key, Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Models: "failover-sale", Group: "default", Key: "fixture", BaseURL: &srv.URL, Setting: &setting, Priority: &priority, Weight: &weight, AutoBan: &autoBan}
 		require.NoError(t, ch.Insert())
 	}
 	model.InitChannelCache()
@@ -151,6 +156,9 @@ export function buildContentRequest(){return {};}
 	result.quota = updated.Quota
 	require.NoError(t, db.Model(&model.Task{}).Count(&result.tasks).Error)
 	require.NoError(t, db.Where("type = ?", model.LogTypeError).Find(&result.logs).Error)
+	// Automatic disabling runs asynchronously after the failed attempt.
+	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, db.Model(&model.Channel{}).Where("status <> ?", common.ChannelStatusEnabled).Pluck("id", &result.disabled).Error)
 	return result
 }
 
@@ -182,7 +190,7 @@ func assertPublicUnavailable(t *testing.T, r failoverResult, wantMessage string)
 	var response map[string]any
 	require.NoError(t, common.Unmarshal([]byte(r.body), &response))
 	assert.Equal(t, wantMessage, response["message"])
-	for _, private := range []string{"预扣费", "剩余额度", "insufficient", "fixture unavailable", "409"} {
+	for _, private := range []string{"预扣费", "剩余额度", "insufficient", "credit balance", "fixture unavailable", "409"} {
 		assert.NotContains(t, r.body, private)
 	}
 	assert.Zero(t, r.tasks)
@@ -191,6 +199,7 @@ func assertPublicUnavailable(t *testing.T, r failoverResult, wantMessage string)
 		assert.Contains(t, log.Content, wantMessage)
 		assert.NotContains(t, log.Content, "预扣费")
 		assert.NotContains(t, log.Content, "insufficient")
+		assert.NotContains(t, log.Content, "credit balance")
 	}
 }
 
@@ -200,6 +209,7 @@ func TestTaskSubmissionQuotaFailover(t *testing.T) {
 		assert.Equal(t, []string{"/a"}, r.paths())
 		assert.True(t, r.taskErr.UpstreamQuotaExhausted)
 		assertPublicUnavailable(t, r, "服务暂时不可用，请稍后再试。")
+		assert.Empty(t, r.disabled, "balance errors never disable the channel")
 	})
 
 	t.Run("multiple channels fail over to one with balance", func(t *testing.T) {
@@ -219,16 +229,18 @@ func TestTaskSubmissionQuotaFailover(t *testing.T) {
 		assertNoChannelReplay(t, r)
 		assert.Equal(t, r.initial-common.QuotaRound(0.5*common.QuotaPerUnit), r.quota)
 		assert.EqualValues(t, 1, r.tasks)
+		assert.Empty(t, r.disabled)
 	})
 
 	t.Run("every channel out of balance answers 503", func(t *testing.T) {
 		r := runTaskFailover(t, []failoverChannel{
 			{letter: "a", priority: 20, reply: "quota"},
-			{letter: "b", priority: 10, reply: "quota"},
+			{letter: "b", priority: 10, reply: "credit"},
 		})
 		assert.Equal(t, []string{"/a", "/b"}, r.paths(), "the third attempt has no channel left and is not sent")
 		assertNoChannelReplay(t, r)
 		assertPublicUnavailable(t, r, "服务暂时不可用，请稍后再试。")
+		assert.Empty(t, r.disabled, "balance errors never disable a channel, even with auto-ban keywords")
 	})
 
 	t.Run("a busy single channel is not replayed", func(t *testing.T) {

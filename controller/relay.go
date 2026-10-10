@@ -582,12 +582,11 @@ func executeTaskSubmissionWith(
 		}
 		service.RecordPolicyFailure(c, channel.Id, taskAPIError, decision)
 		if !taskErr.LocalError {
-			channelError := *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
-				common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan())
-			processChannelError(c, channelError, taskAPIError, relayInfo)
-			if taskErr.UpstreamQuotaExhausted {
-				service.ReportUpstreamQuotaExhausted(channelError, c.GetString(common.RequestIdKey))
-			}
+			processChannelError(c,
+				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
+					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
+				taskAPIError,
+				relayInfo)
 		}
 
 		willRetry := decision.Action == "retry"
