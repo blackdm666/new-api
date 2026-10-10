@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -656,6 +657,19 @@ export function buildQueryRequest(){throw new Error("completed submissions must 
 func TestAcceptedSubmitStreamNeverRetries(t *testing.T) {
 	c := taskSubmissionTestContext()
 	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "task_accepted", Source: "system"}, decideTaskRetry(c, &dto.TaskError{StatusCode: 502, LocalError: true, NoRetry: true}, 3))
+}
+
+// Another channel of the group may still have balance, whatever the retry
+// status rules say about 503.
+func TestExhaustedProviderAccountRetriesElsewhere(t *testing.T) {
+	oldRanges := operation_setting.AutomaticRetryStatusCodeRanges
+	t.Cleanup(func() { operation_setting.AutomaticRetryStatusCodeRanges = oldRanges })
+	require.NoError(t, operation_setting.AutomaticRetryStatusCodesFromString("429"))
+	c := taskSubmissionTestContext()
+	exhausted := &dto.TaskError{StatusCode: http.StatusServiceUnavailable, UpstreamQuotaExhausted: true}
+	assert.Equal(t, service.PolicyDecision{Action: "retry", Reason: "upstream_quota_exhausted", Source: "system"}, decideTaskRetry(c, exhausted, 2))
+	assert.Equal(t, "attempt_budget_exhausted", decideTaskRetry(c, exhausted, 0).Reason)
+	assert.Equal(t, "status_not_retryable", decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusServiceUnavailable}, 2).Reason)
 }
 
 // Local task rejections carry a message but no cause; the response and the

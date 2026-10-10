@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -47,6 +48,38 @@ func TestTaskPluginChannelSelectionFiltersBothCachePaths(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, selected)
 	assert.Contains(t, []string{"legacy-alpha", "legacy-beta"}, selected.Name)
+}
+
+func TestExcludedChannelsFilterBothCachePaths(t *testing.T) {
+	truncateTables(t)
+	weight := uint(1)
+	for i, priority := range []int64{20, 20, 10} {
+		priority := priority
+		ch := Channel{Id: 900101 + i, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Name: fmt.Sprintf("excluded-%d", i), Models: "failover", Group: "default", Priority: &priority, Weight: &weight}
+		require.NoError(t, ch.Insert())
+	}
+	excluding := func(ids ...int) []dto.ChannelFilter {
+		return []dto.ChannelFilter{{Kind: dto.FilterExcludedChannels, ExcludedChannelIDs: ids}}
+	}
+	oldMemory := common.MemoryCacheEnabled
+	t.Cleanup(func() { common.MemoryCacheEnabled = oldMemory })
+	for _, memory := range []bool{false, true} {
+		common.MemoryCacheEnabled = memory
+		InitChannelCache()
+		for range 10 {
+			selected, err := GetRandomSatisfiedChannel("default", "failover", 1, excluding(900101))
+			require.NoError(t, err)
+			require.NotNil(t, selected)
+			assert.NotEqual(t, 900101, selected.Id, "memory=%v", memory)
+		}
+		selected, err := GetRandomSatisfiedChannel("default", "failover", 2, excluding(900101, 900102))
+		require.NoError(t, err)
+		require.NotNil(t, selected)
+		assert.Equal(t, 900103, selected.Id, "memory=%v", memory)
+		selected, err = GetRandomSatisfiedChannel("default", "failover", 2, excluding(900101, 900102, 900103))
+		require.NoError(t, err)
+		assert.Nil(t, selected, "memory=%v", memory)
+	}
 }
 
 func identityFilters(key string, channelTypes []int) []dto.ChannelFilter {

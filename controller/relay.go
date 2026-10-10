@@ -532,7 +532,11 @@ func executeTaskSubmissionWith(
 			channel, channelErr = getChannel(c, relayInfo, retryParam)
 			if channelErr != nil {
 				logger.LogError(c, channelErr.Error())
-				taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "get_channel_failed", channelErr.StatusCode)
+				// Every remaining channel already failed this request: the
+				// customer gets that failure, not the empty channel pool.
+				if taskErr == nil {
+					taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "get_channel_failed", channelErr.StatusCode)
+				}
 				break
 			}
 		}
@@ -566,6 +570,16 @@ func executeTaskSubmissionWith(
 		taskAPIError := taskSubmissionAPIError(taskErr)
 		relayInfo.LastError = taskAPIError
 		decision := decideTaskRetry(c, taskErr, common.RetryTimes-retryParam.GetRetry())
+		// A task submission is never replayed on a channel that already failed
+		// it: the provider may hold the same Idempotency-Key (answering 409) or
+		// have started billable work. A multi-key channel still rotates keys.
+		if decision.Action == "retry" && !channel.ChannelInfo.IsMultiKey {
+			if relayInfo.LockedChannel != nil {
+				decision = service.PolicyDecision{Action: "stop", Reason: "locked_channel_failed", Source: "system"}
+			} else {
+				service.ExcludeChannelFromRetry(c, channel.Id)
+			}
+		}
 		service.RecordPolicyFailure(c, channel.Id, taskAPIError, decision)
 		if !taskErr.LocalError {
 			processChannelError(c,
@@ -839,6 +853,10 @@ func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int)
 		stop.Reason, stop.Source = "attempt_budget_exhausted", "global"
 	case service.GetChannelConstraints(c).SuppressesRetry():
 		stop.Reason, stop.Source = "pinned_channel", "channel_constraint"
+	case taskErr.UpstreamQuotaExhausted:
+		// Another channel of the group may still have balance.
+		retry.Reason = "upstream_quota_exhausted"
+		return retry
 	case taskErr.StatusCode/100 == 2:
 		stop.Reason = "system_retry_exclusion"
 	case taskErr.StatusCode < 100 || taskErr.StatusCode > 599:

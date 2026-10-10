@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -281,16 +282,16 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	if useTiered {
 		provider, supported := adaptor.(channel.TaskUsageFactsProvider)
 		if billingexpr.UsesFixedPricing(exprStr) {
-			return nil, service.TaskErrorWrapper(fmt.Errorf("fixed pricing is not supported for task usage expressions"), "model_price_error", http.StatusBadRequest)
+			return nil, modelPriceTaskError(c, fmt.Errorf("fixed pricing is not supported for task usage expressions"))
 		}
 		if !exists || !supported {
-			return nil, service.TaskErrorWrapper(fmt.Errorf("task model %s has no usage expression or meter", modelName), "model_price_error", http.StatusBadRequest)
+			return nil, modelPriceTaskError(c, fmt.Errorf("task model %s has no usage expression or meter", modelName))
 		}
 		sharedModel := len(model.TaskPluginsForModel(pinnedPlugin.Generation, modelName)) > 1 || pinnedPlugin.Generation.SharedModel(info.UpstreamModelName)
 		if sharedModel && pinnedPlugin.Plugin != nil {
 			schema, _ := pinnedPlugin.Plugin.Meta.UsageForModels(info.UpstreamModelName, modelName)
 			if !billing_setting.TaskExprCompatible(exprStr, schema) {
-				return nil, service.TaskErrorWrapper(fmt.Errorf("task model %s pricing is not configured for plugin %s", modelName, pluginKey), "model_price_error", http.StatusBadRequest)
+				return nil, modelPriceTaskError(c, fmt.Errorf("task model %s pricing is not configured for plugin %s", modelName, pluginKey))
 			}
 		}
 		var facts map[string]any
@@ -307,7 +308,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 			if runErr == nil {
 				runErr = fmt.Errorf("negative task expression result")
 			}
-			return nil, service.TaskErrorWrapper(runErr, "model_price_error", http.StatusBadRequest)
+			return nil, modelPriceTaskError(c, runErr)
 		}
 		groupRatioInfo := helper.HandleGroupRatio(c, info)
 		quota, clamp := common.QuotaRoundChecked(cost * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
@@ -317,7 +318,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	} else {
 		priceData, err = helper.ModelPriceHelperPerCall(c, info)
 		if err != nil {
-			return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
+			return nil, modelPriceTaskError(c, err)
 		}
 	}
 	info.PriceData = priceData
@@ -371,7 +372,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// 11. 发送请求
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
-		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
+		return nil, taskRequestFailedError(c, info.ChannelId, err)
 	}
 	if resp == nil {
 		return nil, service.TaskErrorWrapperLocal(errors.New("upstream returned an empty response"), "fail_to_fetch_task", http.StatusBadGateway)
@@ -385,7 +386,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		// envelope, codes and URLs can identify the upstream. Only its error
 		// message is public; the body stays in the server log for diagnosis.
 		logger.LogWarn(c, fmt.Sprintf("task upstream rejected submission (channel #%d, status %d): %s", info.ChannelId, resp.StatusCode, common.LocalLogPreview(string(responseBody))))
-		return nil, service.TaskErrorWrapper(errors.New(upstreamTaskErrorMessage(responseBody, resp.StatusCode)), "fail_to_fetch_task", resp.StatusCode)
+		return nil, upstreamTaskSubmitError(responseBody, resp.StatusCode)
 	}
 
 	// 10. Parse only. The controller presents the response after the durable
@@ -510,10 +511,64 @@ func noteTaskQuotaClamp(info *relaycommon.RelayInfo, clamp *common.QuotaClamp) {
 	}
 }
 
-// upstreamTaskErrorMessage is the public description of a rejected task
-// submission: the provider's error message without its response envelope.
-// Bodies without a recognizable message fall back to the status code.
-func upstreamTaskErrorMessage(body []byte, statusCode int) string {
+// Customer-facing texts for submission failures whose real cause is ours or
+// the provider's. The original error is written to the server log only.
+const (
+	taskUpstreamUnavailableMessage = "服务暂时不可用，请稍后再试。"
+	taskUpstreamBusyMessage        = "上游服务繁忙，请稍后重试。"
+	taskUpstreamConnectMessage     = "上游服务连接失败，请稍后重试。"
+	taskModelPriceErrorMessage     = "该模型计费配置异常，请联系客服。"
+)
+
+// Provider responses that mean our account there cannot pay for the task.
+var (
+	upstreamQuotaErrorCodes   = []string{"insufficient_user_quota", "insufficient_quota", "insufficient_balance", "insufficient_credit", "insufficient_credits"}
+	upstreamQuotaErrorPhrases = []string{"预扣费额度失败", "额度不足", "余额不足", "积分不足", "token quota is not enough", "credit balance is too low", "exceeded your current quota", "insufficient balance", "insufficient credit", "insufficient quota"}
+)
+
+// modelPriceTaskError hides pricing internals (model names, expressions and
+// plugin keys) from the customer and from the customer's error log.
+func modelPriceTaskError(c *gin.Context, err error) *dto.TaskError {
+	logger.LogError(c, "task model pricing error: "+err.Error())
+	return service.TaskErrorWrapper(errors.New(taskModelPriceErrorMessage), "model_price_error", http.StatusBadRequest)
+}
+
+// taskRequestFailedError hides transport details (proxies, credential
+// exchanges, hosts) of a submission that never reached the provider. A plugin
+// hook message is already written for customers and stays as it is.
+func taskRequestFailedError(c *gin.Context, channelID int, err error) *dto.TaskError {
+	var hookErr *jsplugin.HookError
+	if errors.As(err, &hookErr) {
+		return service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
+	}
+	logger.LogError(c, fmt.Sprintf("task upstream request failed (channel #%d): %s", channelID, common.LocalLogPreview(err.Error())))
+	return service.TaskErrorWrapper(errors.New(taskUpstreamConnectMessage), "do_request_failed", http.StatusInternalServerError)
+}
+
+// upstreamTaskSubmitError is the public form of a rejected task submission:
+// the provider's error message without its response envelope. Overload and
+// gateway failures carry provider internals (HTML pages, key-scoped rate
+// limits) and become a generic busy message. An exhausted provider account is
+// not the customer's balance: it reads as a temporary outage and is flagged
+// so the submission is retried on the group's other channels.
+func upstreamTaskSubmitError(body []byte, statusCode int) *dto.TaskError {
+	message := upstreamTaskErrorText(body)
+	if upstreamQuotaExhausted(body, statusCode, message) {
+		taskErr := service.TaskErrorWrapper(errors.New(taskUpstreamUnavailableMessage), "upstream_unavailable", http.StatusServiceUnavailable)
+		taskErr.UpstreamQuotaExhausted = true
+		return taskErr
+	}
+	switch {
+	case statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError:
+		message = taskUpstreamBusyMessage
+	case message == "":
+		message = fmt.Sprintf("上游任务提交失败（状态码 %d），请稍后重试。", statusCode)
+	}
+	return service.TaskErrorWrapper(errors.New(message), "fail_to_fetch_task", statusCode)
+}
+
+// upstreamTaskErrorText extracts the provider's error message, if any.
+func upstreamTaskErrorText(body []byte) string {
 	var envelope map[string]any
 	if common.Unmarshal(body, &envelope) == nil {
 		var candidates []any
@@ -527,7 +582,32 @@ func upstreamTaskErrorMessage(body []byte, statusCode int) string {
 			}
 		}
 	}
-	return fmt.Sprintf("upstream task submission failed with status %d", statusCode)
+	return ""
+}
+
+func upstreamQuotaExhausted(body []byte, statusCode int, message string) bool {
+	if statusCode == http.StatusPaymentRequired {
+		return true
+	}
+	var envelope map[string]any
+	if common.Unmarshal(body, &envelope) == nil {
+		fields := []any{envelope["code"], envelope["type"]}
+		if nested, ok := envelope["error"].(map[string]any); ok {
+			fields = append(fields, nested["code"], nested["type"])
+		}
+		for _, field := range fields {
+			if code, ok := field.(string); ok && slices.Contains(upstreamQuotaErrorCodes, strings.ToLower(strings.TrimSpace(code))) {
+				return true
+			}
+		}
+	}
+	lower := strings.ToLower(message)
+	for _, phrase := range upstreamQuotaErrorPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 var fetchRespBuilders = map[int]func(c *gin.Context) (respBody []byte, taskResp *dto.TaskError){
