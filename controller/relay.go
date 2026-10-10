@@ -568,11 +568,12 @@ func executeTaskSubmissionWith(
 		decision := decideTaskRetry(c, taskErr, common.RetryTimes-retryParam.GetRetry())
 		service.RecordPolicyFailure(c, channel.Id, taskAPIError, decision)
 		if !taskErr.LocalError {
-			processChannelError(c,
-				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
-					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				taskAPIError,
-				relayInfo)
+			channelError := *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
+				common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan())
+			processChannelError(c, channelError, taskAPIError, relayInfo)
+			if taskErr.UpstreamQuotaExhausted {
+				service.ReportUpstreamQuotaExhausted(channelError, c.GetString(common.RequestIdKey))
+			}
 		}
 
 		willRetry := decision.Action == "retry"
@@ -826,6 +827,8 @@ func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int)
 		stop.Reason = "request_completed"
 	case taskErr.NoRetry:
 		stop.Reason = "task_accepted"
+	case taskErr.UpstreamQuotaExhausted:
+		stop.Reason = "upstream_quota_exhausted"
 	case clientRequestDone(c):
 		stop.Reason = "request_cancelled"
 	case taskErr.LocalError:

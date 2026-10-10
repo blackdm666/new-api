@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -219,6 +220,7 @@ func TestRelayTaskSubmitMapsBeforeValidateWhenOriginSet(t *testing.T) {
 	_, taskErr := RelayTaskSubmit(c, info)
 	require.NotNil(t, taskErr)
 	assert.Equal(t, "model_price_error", taskErr.Code)
+	assert.Equal(t, taskModelPriceErrorMessage, taskErr.Message)
 	assert.Equal(t, "alias-model", info.OriginModelName)
 	assert.Equal(t, "declared-model", info.UpstreamModelName)
 	assert.True(t, info.IsModelMapped)
@@ -484,14 +486,15 @@ export function buildQueryRequest(ctx) { return {url: ctx.baseUrl+"/query"}; }
 export function parseTaskResult() { return {status:"SUCCESS"}; }
 `
 	for _, tc := range []struct {
-		status   int
-		wantCode string
+		status      int
+		wantCode    string
+		wantMessage string
 	}{
 		{status: http.StatusOK},
 		{status: http.StatusCreated},
 		{status: http.StatusAccepted},
-		{status: http.StatusBadRequest, wantCode: "fail_to_fetch_task"},
-		{status: http.StatusBadGateway, wantCode: "fail_to_fetch_task"},
+		{status: http.StatusBadRequest, wantCode: "fail_to_fetch_task", wantMessage: "upstream body"},
+		{status: http.StatusBadGateway, wantCode: "fail_to_fetch_task", wantMessage: taskUpstreamBusyMessage},
 	} {
 		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
 			saveBillingConfig(t)
@@ -521,8 +524,8 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 				assert.Equal(t, tc.wantCode, taskErr.Code)
 				assert.Equal(t, tc.status, taskErr.StatusCode)
 				// Both the client response and the user error log (taskErr.Error) omit the envelope.
-				assert.Equal(t, "upstream body", taskErr.Message)
-				assert.Equal(t, "upstream body", taskErr.Error.Error())
+				assert.Equal(t, tc.wantMessage, taskErr.Message)
+				assert.Equal(t, tc.wantMessage, taskErr.Error.Error())
 				assert.Nil(t, result)
 				return
 			}
@@ -534,7 +537,7 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 	}
 }
 
-func TestUpstreamTaskErrorMessageOmitsProviderEnvelope(t *testing.T) {
+func TestUpstreamTaskSubmitErrorOmitsProviderEnvelope(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, want string
 	}{
@@ -544,11 +547,87 @@ func TestUpstreamTaskErrorMessageOmitsProviderEnvelope(t *testing.T) {
 		{"msg field", `{"code":500,"msg":"busy"}`, "busy"},
 		{"detail field", `{"detail":"not found"}`, "not found"},
 		{"empty nested message falls through", `{"error":{"message":" "},"message":"fallback"}`, "fallback"},
-		{"no message", `{"error":{"code":"x"},"trace":"vendor"}`, "upstream task submission failed with status 400"},
-		{"not json", `<html>vendor gateway</html>`, "upstream task submission failed with status 400"},
+		{"no message", `{"error":{"code":"x"},"trace":"vendor"}`, "上游任务提交失败（状态码 400），请稍后重试。"},
+		{"not json", `<html>vendor gateway</html>`, "上游任务提交失败（状态码 400），请稍后重试。"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, upstreamTaskErrorMessage([]byte(tc.body), http.StatusBadRequest))
+			taskErr := upstreamTaskSubmitError([]byte(tc.body), http.StatusBadRequest)
+			assert.Equal(t, tc.want, taskErr.Message)
+			assert.Equal(t, tc.want, taskErr.Error.Error())
+			assert.Equal(t, "fail_to_fetch_task", taskErr.Code)
+			assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+			assert.False(t, taskErr.UpstreamQuotaExhausted)
 		})
 	}
+}
+
+func TestUpstreamTaskSubmitErrorHidesOverloadAndGatewayDetails(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"key scoped rate limit", http.StatusTooManyRequests, `{"error":{"message":"Request rate limit exceeded for this API key sk-vendor","type":"rate_limit_error"}}`},
+		{"gateway html", http.StatusBadGateway, "<html>\n<head><title>502 Bad Gateway</title></head>\n<body><center>nginx</center></body>\n</html>\n"},
+		{"internal error message", http.StatusInternalServerError, `{"error":{"message":"dial tcp 10.0.0.8:443: connect: connection refused"}}`},
+		{"unavailable", http.StatusServiceUnavailable, `{"message":"vendor pool vp-3 drained"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			taskErr := upstreamTaskSubmitError([]byte(tc.body), tc.status)
+			assert.Equal(t, taskUpstreamBusyMessage, taskErr.Message)
+			assert.Equal(t, taskUpstreamBusyMessage, taskErr.Error.Error())
+			assert.Equal(t, tc.status, taskErr.StatusCode, "the status still drives the retry rules")
+			assert.False(t, taskErr.UpstreamQuotaExhausted)
+		})
+	}
+}
+
+// The provider account behind a channel ran out of balance: the customer is
+// told about a temporary outage, never about a balance.
+func TestUpstreamTaskSubmitErrorReportsExhaustedProviderAccount(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"new-api pre-consume", http.StatusForbidden, `{"error":{"message":"预扣费额度失败, 用户剩余额度: ＄0.012, 需要预扣费额度: ＄0.500","type":"new_api_error"}}`},
+		{"quota code without message", http.StatusForbidden, `{"error":{"type":"insufficient_user_quota"}}`},
+		{"user quota message", http.StatusForbidden, `{"error":{"message":"用户额度不足，剩余额度: ＄0.000000"}}`},
+		{"payment required", http.StatusPaymentRequired, `{"code":402,"msg":"积分不足"}`},
+		{"payment required without body", http.StatusPaymentRequired, ``},
+		{"openai quota", http.StatusTooManyRequests, `{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}`},
+		{"credit balance", http.StatusBadRequest, `{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the API."}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			taskErr := upstreamTaskSubmitError([]byte(tc.body), tc.status)
+			assert.True(t, taskErr.UpstreamQuotaExhausted)
+			assert.Equal(t, "upstream_unavailable", taskErr.Code)
+			assert.Equal(t, http.StatusServiceUnavailable, taskErr.StatusCode)
+			assert.Equal(t, taskUpstreamUnavailableMessage, taskErr.Message)
+			assert.Equal(t, taskUpstreamUnavailableMessage, taskErr.Error.Error())
+			assert.False(t, taskErr.LocalError, "the channel is still processed as an upstream failure")
+		})
+	}
+	// Customer-side limits reported by the provider are not account exhaustion.
+	for _, body := range []string{`{"error":{"message":"The video duration exceeds the limit"}}`, `{"error":{"message":"prompt quota exceeded for this request"}}`} {
+		assert.False(t, upstreamTaskSubmitError([]byte(body), http.StatusBadRequest).UpstreamQuotaExhausted, body)
+	}
+}
+
+func TestModelPriceAndTransportErrorsKeepDetailsOutOfCustomerText(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	priceErr := modelPriceTaskError(c, errors.New("task model SD2.0 4K has no usage expression or meter"))
+	assert.Equal(t, "model_price_error", priceErr.Code)
+	assert.Equal(t, http.StatusBadRequest, priceErr.StatusCode)
+	assert.Equal(t, taskModelPriceErrorMessage, priceErr.Message)
+	assert.Equal(t, taskModelPriceErrorMessage, priceErr.Error.Error(), "the customer's error log gets the same text")
+
+	transportErr := taskRequestFailedError(c, 113, errors.New(`setup request header failed: get access token: Post "https://oauth2.vendor.example/token": socks connect tcp 10.1.2.3:1080->oauth2.vendor.example:443: unknown error`))
+	assert.Equal(t, "do_request_failed", transportErr.Code)
+	assert.Equal(t, http.StatusInternalServerError, transportErr.StatusCode)
+	assert.Equal(t, taskUpstreamConnectMessage, transportErr.Message)
+	assert.Equal(t, taskUpstreamConnectMessage, transportErr.Error.Error())
+
+	hookErr := taskRequestFailedError(c, 113, &pluginruntime.HookError{Message: "素材格式不正确，请提供素材链接或有效的上传文件。"})
+	assert.Equal(t, "素材格式不正确，请提供素材链接或有效的上传文件。", hookErr.Message, "plugin messages are already written for customers")
 }

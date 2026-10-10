@@ -9,6 +9,8 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+
+	"github.com/bytedance/gopkg/util/gopool"
 )
 
 func formatNotifyType(channelId int, status int) string {
@@ -43,6 +45,28 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 		content := fmt.Sprintf("通道「%s」（#%d）已被禁用，原因：%s", channelError.ChannelName, channelError.ChannelId, reason)
 		NotifyRootUser(formatNotifyType(channelError.ChannelId, common.ChannelStatusAutoDisabled), subject, content)
 	}
+}
+
+// ReportUpstreamQuotaExhausted tells the root user that a channel's provider
+// account cannot pay for submissions. The channel follows the automatic
+// disable switches (disabling notifies on its own); otherwise the alert is
+// rate limited per channel like other notifications.
+func ReportUpstreamQuotaExhausted(channelError types.ChannelError, requestID string) {
+	const reason = "上游账户余额或额度不足"
+	common.SysLog(fmt.Sprintf("通道「%s」（#%d）%s，request id: %s", channelError.ChannelName, channelError.ChannelId, reason, requestID))
+	if common.AutomaticDisableChannelEnabled && channelError.AutoBan {
+		gopool.Go(func() {
+			DisableChannel(channelError, reason)
+		})
+		return
+	}
+	subject := fmt.Sprintf("通道「%s」（#%d）%s", channelError.ChannelName, channelError.ChannelId, reason)
+	content := fmt.Sprintf("通道「%s」（#%d）提交任务时上游返回余额或额度不足，客户收到的是“服务暂时不可用”。该渠道未开启自动禁用，请充值或手动停用。请求 ID：%s",
+		channelError.ChannelName, channelError.ChannelId, requestID)
+	notifyType := fmt.Sprintf("%s_%d_upstream_quota", dto.NotifyTypeChannelUpdate, channelError.ChannelId)
+	gopool.Go(func() {
+		NotifyRootUser(notifyType, subject, content)
+	})
 }
 
 func EnableChannel(channelId int, usingKey string, channelName string) {

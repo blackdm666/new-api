@@ -658,6 +658,15 @@ func TestAcceptedSubmitStreamNeverRetries(t *testing.T) {
 	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "task_accepted", Source: "system"}, decideTaskRetry(c, &dto.TaskError{StatusCode: 502, LocalError: true, NoRetry: true}, 3))
 }
 
+// A retry may reach the same provider account and replay its idempotency key,
+// which turns the balance error into a misleading conflict.
+func TestExhaustedProviderAccountNeverRetries(t *testing.T) {
+	c := taskSubmissionTestContext()
+	assert.Equal(t, service.PolicyDecision{Action: "stop", Reason: "upstream_quota_exhausted", Source: "system"},
+		decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusServiceUnavailable, UpstreamQuotaExhausted: true}, 3))
+	assert.Equal(t, "retry", decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusServiceUnavailable}, 3).Action)
+}
+
 // Local task rejections carry a message but no cause; the response and the
 // decision record must still be produced.
 func TestRespondTaskSubmissionErrorWithoutCause(t *testing.T) {

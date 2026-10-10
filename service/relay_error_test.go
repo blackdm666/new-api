@@ -57,7 +57,10 @@ func TestShouldRetryRelayErrorHonorsChannelPinOnChannelError(t *testing.T) {
 	}
 }
 
-func TestProcessChannelErrorMasksDisableReasonAndNotification(t *testing.T) {
+// setupChannelNotificationFixture stores one enabled channel and a root user
+// whose notifications are delivered to the returned webhook channel.
+func setupChannelNotificationFixture(t *testing.T, notifyTypes ...func(channelID int) string) (*model.Channel, chan []byte) {
+	t.Helper()
 	previousDB, previousType := model.DB, common.MainDatabaseType()
 	previousCache, previousRedis := common.MemoryCacheEnabled, common.RedisEnabled
 	previousAutoDisable, previousErrorLog := common.AutomaticDisableChannelEnabled, constant.ErrorLogEnabled
@@ -101,19 +104,36 @@ func TestProcessChannelErrorMasksDisableReasonAndNotification(t *testing.T) {
 	require.NoError(t, err)
 	root := &model.User{Username: "notification-test-root", Role: common.RoleRootUser, Status: common.UserStatusEnabled, Setting: string(settings)}
 	require.NoError(t, database.Create(root).Error)
-	notifyKey := fmt.Sprintf("%d:%s:%s", root.Id, formatNotifyType(channel.Id, common.ChannelStatusAutoDisabled), time.Now().Format("2006010215"))
-	notifyLimitStore.Delete(notifyKey)
-	t.Cleanup(func() { notifyLimitStore.Delete(notifyKey) })
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	apiErr := types.NewErrorWithStatusCode(errors.New("upstream https://private.example.com/path?token=review-token api_key:review-secret"), types.ErrorCodeChannelNoAvailableKey, http.StatusUnauthorized)
-	ProcessChannelError(c, types.ChannelError{ChannelId: channel.Id, ChannelName: channel.Name, AutoBan: true}, apiErr, nil)
+	for _, notifyType := range notifyTypes {
+		notifyKey := fmt.Sprintf("%d:%s:%s", root.Id, notifyType(channel.Id), time.Now().Format("2006010215"))
+		notifyLimitStore.Delete(notifyKey)
+		t.Cleanup(func() { notifyLimitStore.Delete(notifyKey) })
+	}
+	return channel, notifications
+}
+
+func receiveNotification(t *testing.T, notifications chan []byte) WebhookPayload {
+	t.Helper()
 	var notification WebhookPayload
 	select {
 	case payload := <-notifications:
 		require.NoError(t, common.Unmarshal(payload, &notification))
 	case <-time.After(5 * time.Second):
-		t.Fatal("automatic channel-disable notification was not delivered")
+		t.Fatal("notification was not delivered")
 	}
+	return notification
+}
+
+func autoDisabledNotifyType(channelID int) string {
+	return formatNotifyType(channelID, common.ChannelStatusAutoDisabled)
+}
+
+func TestProcessChannelErrorMasksDisableReasonAndNotification(t *testing.T) {
+	channel, notifications := setupChannelNotificationFixture(t, autoDisabledNotifyType)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	apiErr := types.NewErrorWithStatusCode(errors.New("upstream https://private.example.com/path?token=review-token api_key:review-secret"), types.ErrorCodeChannelNoAvailableKey, http.StatusUnauthorized)
+	ProcessChannelError(c, types.ChannelError{ChannelId: channel.Id, ChannelName: channel.Name, AutoBan: true}, apiErr, nil)
+	notification := receiveNotification(t, notifications)
 	loaded, err := model.GetChannelById(channel.Id, true)
 	require.NoError(t, err)
 	assert.Equal(t, common.ChannelStatusAutoDisabled, loaded.Status)
@@ -123,6 +143,39 @@ func TestProcessChannelErrorMasksDisableReasonAndNotification(t *testing.T) {
 	assert.NotContains(t, notification.Content, "review-token")
 	assert.NotContains(t, notification.Content, "review-secret")
 	assert.Equal(t, http.StatusUnauthorized, apiErr.StatusCode)
+}
+
+func TestReportUpstreamQuotaExhaustedFollowsAutomaticDisable(t *testing.T) {
+	quotaNotifyType := func(channelID int) string {
+		return fmt.Sprintf("%s_%d_upstream_quota", kitdto.NotifyTypeChannelUpdate, channelID)
+	}
+
+	t.Run("auto ban disables the channel and notifies once", func(t *testing.T) {
+		channel, notifications := setupChannelNotificationFixture(t, autoDisabledNotifyType, quotaNotifyType)
+		ReportUpstreamQuotaExhausted(types.ChannelError{ChannelId: channel.Id, ChannelName: channel.Name, AutoBan: true}, "req-quota")
+		notification := receiveNotification(t, notifications)
+		assert.Contains(t, notification.Content, "上游账户余额或额度不足")
+		loaded, err := model.GetChannelById(channel.Id, true)
+		require.NoError(t, err)
+		assert.Equal(t, common.ChannelStatusAutoDisabled, loaded.Status)
+		assert.Equal(t, "上游账户余额或额度不足", loaded.GetOtherInfo()["status_reason"])
+		select {
+		case <-notifications:
+			t.Fatal("a disabled channel must not also send the quota alert")
+		case <-time.After(200 * time.Millisecond):
+		}
+	})
+
+	t.Run("without auto ban the channel stays enabled and the alert names the request", func(t *testing.T) {
+		channel, notifications := setupChannelNotificationFixture(t, autoDisabledNotifyType, quotaNotifyType)
+		ReportUpstreamQuotaExhausted(types.ChannelError{ChannelId: channel.Id, ChannelName: channel.Name, AutoBan: false}, "req-quota")
+		notification := receiveNotification(t, notifications)
+		assert.Contains(t, notification.Content, "上游返回余额或额度不足")
+		assert.Contains(t, notification.Content, "req-quota")
+		loaded, err := model.GetChannelById(channel.Id, true)
+		require.NoError(t, err)
+		assert.Equal(t, common.ChannelStatusEnabled, loaded.Status)
+	})
 }
 
 func TestDecideRelayRetryReasons(t *testing.T) {
