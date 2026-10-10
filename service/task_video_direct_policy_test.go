@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"net/url"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -53,8 +55,8 @@ func TestTaskVideoDirectPolicyIsSharedByArchiveQueryAndContent(t *testing.T) {
 		prepared, err := PrepareTaskVideoResult(context.Background(), &model.Task{TaskID: "task_shared_policy"}, resultURL)
 		require.NoError(t, err)
 		task := unarchived()
-		content, contentOK = TaskVideoDirectContentURL(task)
-		return prepared.Cached, TaskVideoDeliveryURL(context.Background(), task), content, contentOK
+		source, contentOK := TaskVideoDirectContent(task)
+		return prepared.Cached, TaskVideoDeliveryURL(context.Background(), task), source.URL, contentOK
 	}
 
 	archived, query, _, contentOK := decide()
@@ -101,10 +103,10 @@ func TestTaskVideoDirectContentURLRejectsUnsafeSources(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			task := &model.Task{TaskID: "task_direct_content", Status: model.TaskStatusSuccess, PrivateData: model.TaskPrivateData{ResultURL: tc.url}}
-			got, ok := TaskVideoDirectContentURL(task)
+			got, ok := TaskVideoDirectContent(task)
 			assert.Equal(t, tc.direct, ok)
 			if tc.direct {
-				assert.Equal(t, tc.url, got)
+				assert.Equal(t, tc.url, got.URL)
 			}
 		})
 	}
@@ -115,9 +117,88 @@ func TestTaskVideoDirectContentURLRejectsUnsafeSources(t *testing.T) {
 		"in-progress": {TaskID: "task_direct_content", Status: model.TaskStatusInProgress, PrivateData: model.TaskPrivateData{ResultURL: listed}},
 		"failed":      {TaskID: "task_direct_content", Status: model.TaskStatusFailure, FailReason: listed},
 	} {
-		_, ok := TaskVideoDirectContentURL(task)
+		_, ok := TaskVideoDirectContent(task)
 		assert.False(t, ok, name)
 	}
-	_, ok := TaskVideoDirectContentURL(nil)
+	_, ok := TaskVideoDirectContent(nil)
 	assert.False(t, ok)
+}
+
+func TestTaskVideoURLExpiryReadsSignedLinks(t *testing.T) {
+	signed := time.Date(2026, 10, 6, 1, 54, 19, 0, time.UTC)
+	for _, tc := range []struct {
+		name, rawURL string
+		want         time.Time
+		ok           bool
+	}{
+		{"volcengine-tos", "https://ark.tos-cn-beijing.volces.com/v.mp4?X-Tos-Algorithm=TOS4-HMAC-SHA256&X-Tos-Date=20261006T015419Z&X-Tos-Expires=86400&X-Tos-Signature=s", signed.Add(24 * time.Hour), true},
+		{"s3-sigv4", "https://bucket.s3.example/v.mp4?X-Amz-Date=20261006T015419Z&X-Amz-Expires=3600&X-Amz-Signature=s", signed.Add(time.Hour), true},
+		{"key-case", "https://bucket.example/v.mp4?x-tos-date=20261006T015419Z&x-tos-expires=60", signed.Add(time.Minute), true},
+		{"aliyun-oss-v1", "https://dashscope.oss.example/v.mp4?Expires=1791251659&OSSAccessKeyId=id&Signature=s", time.Unix(1791251659, 0), true},
+		{"tencent-cos", "https://b.cos.ap-guangzhou.myqcloud.com/v.mp4?q-sign-algorithm=sha1&q-sign-time=1791165259;1791251659&q-signature=s", time.Unix(1791251659, 0), true},
+		{"unsigned", "https://store.vod-qcloud.com/v.mp4", time.Time{}, false},
+		{"bare-expires", "https://cdn.example/v.mp4?Expires=1791251659", time.Time{}, false},
+		{"bad-date", "https://cdn.example/v.mp4?X-Tos-Date=yesterday&X-Tos-Expires=60", time.Time{}, false},
+		{"bad-seconds", "https://cdn.example/v.mp4?X-Amz-Date=20261006T015419Z&X-Amz-Expires=-5", time.Time{}, false},
+		{"bad-cos-window", "https://cdn.example/v.mp4?q-sign-time=1791251659", time.Time{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed, err := url.Parse(tc.rawURL)
+			require.NoError(t, err)
+			got, ok := taskVideoURLExpiry(parsed)
+			assert.Equal(t, tc.ok, ok)
+			if tc.ok {
+				assert.True(t, tc.want.Equal(got), "got %s", got)
+			}
+		})
+	}
+}
+
+func TestTaskVideoDirectSourceExpiry(t *testing.T) {
+	now := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	assert.False(t, TaskVideoDirectSource{URL: "https://cdn.example/v.mp4"}.Expired(now), "unknown expiry is never expired")
+	assert.False(t, TaskVideoDirectSource{ExpiresAt: now.Add(2 * time.Minute).Unix()}.Expired(now))
+	assert.True(t, TaskVideoDirectSource{ExpiresAt: now.Add(30 * time.Second).Unix()}.Expired(now), "too close to open in time")
+	assert.True(t, TaskVideoDirectSource{ExpiresAt: now.Add(-time.Hour).Unix()}.Expired(now))
+}
+
+func TestTaskVideoDeliverySkipsProbeForExpiredDirectLink(t *testing.T) {
+	t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "true")
+	t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "https://assets.88api.ai/media")
+	t.Setenv("TASK_VIDEO_DIRECT_HOSTS", "*.volces.example")
+	useTaskVideoDirectHostsOption(t, nil)
+	probes := 0
+	previousProbe := taskVideoDirectProbe
+	taskVideoDirectProbe = func(context.Context, string) (bool, error) { probes++; return true, nil }
+	t.Cleanup(func() { taskVideoDirectProbe = previousProbe })
+
+	signedAt := func(at time.Time) string {
+		return "https://ark.volces.example/v.mp4?X-Tos-Date=" + at.UTC().Format("20060102T150405Z") + "&X-Tos-Expires=86400&X-Tos-Signature=s"
+	}
+	expired := &model.Task{TaskID: "task_expired_direct", Status: model.TaskStatusSuccess,
+		PrivateData: model.TaskPrivateData{ResultURL: signedAt(time.Now().Add(-25 * time.Hour))}}
+	delivered := TaskVideoDeliveryURL(context.Background(), expired)
+	assert.Zero(t, probes, "an expired signature is decided locally")
+	assert.NotEqual(t, expired.PrivateData.ResultURL, delivered, "an expired link is never presented")
+
+	valid := &model.Task{TaskID: "task_valid_direct", Status: model.TaskStatusSuccess,
+		PrivateData: model.TaskPrivateData{ResultURL: signedAt(time.Now().Add(-time.Hour))}}
+	assert.Equal(t, valid.PrivateData.ResultURL, TaskVideoDeliveryURL(context.Background(), valid))
+	assert.Equal(t, 1, probes)
+
+	payload, err := PresentPublicTaskVideo([]byte(`{"id":"task_valid_direct","url":"old"}`), valid)
+	require.NoError(t, err)
+	var presented map[string]any
+	require.NoError(t, common.Unmarshal(payload, &presented))
+	source, ok := TaskVideoDirectContent(valid)
+	require.True(t, ok)
+	assert.EqualValues(t, source.ExpiresAt, presented["expires_at"])
+	assert.Greater(t, source.ExpiresAt, time.Now().Unix())
+
+	unsigned := &model.Task{TaskID: "task_unsigned_direct", Status: model.TaskStatusSuccess,
+		PrivateData: model.TaskPrivateData{ResultURL: "https://cdn.volces.example/v.mp4"}}
+	payload, err = PresentPublicTaskVideo([]byte(`{"id":"task_unsigned_direct","url":"old","expires_at":123}`), unsigned)
+	require.NoError(t, err)
+	require.NoError(t, common.Unmarshal(payload, &presented))
+	assert.EqualValues(t, 123, presented["expires_at"], "renderer value kept when the link states no expiry")
 }

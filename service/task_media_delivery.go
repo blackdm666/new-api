@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -23,11 +24,11 @@ func TaskVideoDeliveryURL(ctx context.Context, task *model.Task) string {
 	if publicURL, err := PublicTaskVideoURL(task); err == nil {
 		return publicURL
 	}
-	if source, ok := TaskVideoDirectContentURL(task); ok {
+	if source, ok := TaskVideoDirectContent(task); ok && !source.Expired(time.Now()) {
 		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
-		if direct, err := taskVideoDirectProbe(probeCtx, source); err == nil && direct {
-			return source
+		if direct, err := taskVideoDirectProbe(probeCtx, source.URL); err == nil && direct {
+			return source.URL
 		}
 	}
 	fallback, err := BuildTaskArtifactContentURL(task.TaskID, "video")
@@ -37,19 +38,39 @@ func TaskVideoDeliveryURL(ctx context.Context, task *model.Task) string {
 	return fallback
 }
 
-// TaskVideoDirectContentURL returns the upstream result of a successful,
+// TaskVideoDirectSource is an allow-listed upstream result. ExpiresAt is the
+// Unix time the URL's own signature states, or 0 when it states none.
+type TaskVideoDirectSource struct {
+	URL       string
+	ExpiresAt int64
+}
+
+// Expired reports whether a signed link can no longer be opened in time.
+// Links without a stated expiry are never treated as expired.
+func (s TaskVideoDirectSource) Expired(now time.Time) bool {
+	return s.ExpiresAt > 0 && !now.Add(taskVideoDirectExpirySkew).Before(time.Unix(s.ExpiresAt, 0))
+}
+
+// TaskVideoDirectContent returns the upstream result of a successful,
 // unarchived task when it passes the shared direct-delivery policy. It is the
 // same source TaskVideoDeliveryURL presents, without the liveness probe, so
-// anonymous content requests never trigger outbound traffic.
-func TaskVideoDirectContentURL(task *model.Task) (string, bool) {
+// anonymous content requests never trigger outbound traffic. Callers decide
+// what an expired source means.
+func TaskVideoDirectContent(task *model.Task) (TaskVideoDirectSource, bool) {
 	if task == nil || task.Status != model.TaskStatusSuccess || task.PrivateData.ResultStorageKey != "" {
-		return "", false
+		return TaskVideoDirectSource{}, false
 	}
-	source := ResolveTaskVideoResultURL(task, task.GetResultURL())
+	source := strings.TrimSpace(ResolveTaskVideoResultURL(task, task.GetResultURL()))
 	if !taskVideoURLDirectEligible(task, source) {
-		return "", false
+		return TaskVideoDirectSource{}, false
 	}
-	return strings.TrimSpace(source), true
+	direct := TaskVideoDirectSource{URL: source}
+	if parsed, err := url.Parse(source); err == nil {
+		if expiresAt, ok := taskVideoURLExpiry(parsed); ok {
+			direct.ExpiresAt = expiresAt.Unix()
+		}
+	}
+	return direct, true
 }
 
 // TaskArtifactDeliverySource is an already validated plugin content descriptor.
