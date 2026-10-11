@@ -220,3 +220,82 @@ func TestVertexTTSResponseDecodesPCMAndWrapsWAV(t *testing.T) {
 	assert.Equal(t, "WAVE", recorder.Body.String()[8:12])
 	assert.Equal(t, pcm, recorder.Body.Bytes()[44:])
 }
+
+func TestVertexGeminiImageModelsOnImagesAPI(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		model   string
+		wantURL string
+	}{
+		{model: "gemini-3-pro-image-preview", wantURL: "https://us-central1-aiplatform.googleapis.com/v1/publishers/google/models/gemini-3-pro-image-preview:generateContent?key=test-key"},
+		{model: "imagen-4.0-generate-001", wantURL: "https://us-central1-aiplatform.googleapis.com/v1/publishers/google/models/imagen-4.0-generate-001:predict?key=test-key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			adaptor := &Adaptor{}
+			info := &relaycommon.RelayInfo{
+				RelayMode:       relayconstant.RelayModeImagesEdits,
+				OriginModelName: tt.model,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ApiVersion:        "us-central1",
+					ApiKey:            "test-key",
+					UpstreamModelName: tt.model,
+					ChannelOtherSettings: dto.ChannelOtherSettings{
+						VertexKeyType: dto.VertexKeyTypeAPIKey,
+					},
+				},
+			}
+			adaptor.Init(info)
+			requestURL, err := adaptor.GetRequestURL(info)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantURL, requestURL)
+		})
+	}
+
+	adaptor := &Adaptor{}
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesEdits,
+		OriginModelName: "gemini-3-pro-image-preview",
+		Request:         &dto.ImageRequest{},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gemini-3-pro-image-preview",
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				VertexKeyType: dto.VertexKeyTypeAPIKey,
+			},
+		},
+	}
+	adaptor.Init(info)
+	converted, err := adaptor.ConvertImageRequest(nil, info, dto.ImageRequest{
+		Prompt: "make it blue",
+		Image:  json.RawMessage(`"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="`),
+		Size:   "16:9",
+	})
+	require.NoError(t, err)
+	geminiRequest, ok := converted.(*dto.GeminiChatRequest)
+	require.True(t, ok)
+	require.Len(t, geminiRequest.Contents[0].Parts, 2)
+	assert.JSONEq(t, `{"aspectRatio":"16:9"}`, string(geminiRequest.GenerationConfig.ImageConfig))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", nil)
+	context.Request.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+	headers := http.Header{}
+	require.NoError(t, adaptor.SetupRequestHeader(context, &headers, info))
+	assert.Equal(t, "application/json", headers.Get("Content-Type"))
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body: io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"aW1n"}}]},"finishReason":"STOP"}],
+			"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":1120,"totalTokenCount":1125,"candidatesTokensDetails":[{"modality":"IMAGE","tokenCount":1120}]}}`)),
+	}
+	usageValue, apiErr := adaptor.DoResponse(context, resp, info)
+	require.Nil(t, apiErr)
+	usage, ok := usageValue.(*dto.Usage)
+	require.True(t, ok)
+	assert.Equal(t, 1120, usage.CompletionTokenDetails.ImageTokens)
+	var imageResponse dto.ImageResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &imageResponse))
+	assert.Equal(t, []dto.ImageData{{B64Json: "aW1n"}}, imageResponse.Data)
+}

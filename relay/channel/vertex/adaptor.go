@@ -303,6 +303,10 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 		}
 		req.Set("Authorization", "Bearer "+accessToken)
 	}
+	if gemini.IsGeminiImageRelay(info) {
+		// Image edits arrive as multipart; the converted body is always JSON.
+		req.Set("Content-Type", "application/json")
+	}
 	if a.AccountCredentials.ProjectID != "" {
 		req.Set("x-goog-user-project", a.AccountCredentials.ProjectID)
 	}
@@ -418,6 +422,9 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
+	if a.RequestMode == RequestModeGemini && gemini.IsGeminiImageRelay(info) {
+		return gemini.DoGeminiImageRequest(a, c, info, requestBody)
+	}
 	return channel.DoApiRequest(a, c, info, requestBody)
 }
 
@@ -451,6 +458,9 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 			if info.RelayMode == constant.RelayModeGemini {
 				return gemini.GeminiTextGenerationHandler(c, info, resp)
 			} else {
+				if gemini.IsGeminiImageRelay(info) {
+					return gemini.GeminiImageGenerateContentHandler(c, info, resp)
+				}
 				if strings.HasPrefix(info.UpstreamModelName, "imagen") {
 					return gemini.GeminiImageHandler(c, info, resp)
 				}

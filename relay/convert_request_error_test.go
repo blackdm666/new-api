@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -120,6 +121,44 @@ func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGeminiImageRequestReservesCountAndFansOutPerImage(t *testing.T) {
+	service.InitHttpClient()
+	gin.SetMode(gin.TestMode)
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		body, _ := io.ReadAll(r.Body)
+		assert.Equal(t, "/v1beta/models/gemini-3-pro-image:generateContent", r.URL.Path)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		assert.False(t, gjson.GetBytes(body, "n").Exists())
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":{"code":429,"message":"quota","status":"RESOURCE_EXHAUSTED"}}`)
+	}))
+	t.Cleanup(upstream.Close)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gemini-3-pro-image","prompt":"a cat","n":3}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeGemini)
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, "gemini-3-pro-image")
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, upstream.URL)
+	request, err := helper.GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesGenerations)
+	require.NoError(t, err)
+	reservation := &imageReservation{limit: 500000}
+	info := &relaycommon.RelayInfo{Request: request, OriginModelName: "gemini-3-pro-image", RelayMode: relayconstant.RelayModeImagesGenerations,
+		RequestURLPath: c.Request.URL.Path, Billing: reservation,
+		PriceData: hosttypes.PriceData{UsePrice: true, ModelPrice: 0.04, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1}},
+	}
+
+	apiErr := ImageHelper(c, info)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusTooManyRequests, apiErr.StatusCode)
+	assert.Equal(t, int32(3), calls.Load(), "Gemini image models get one generateContent call per requested image")
+	assert.Equal(t, 3, info.ImageRequestCount)
+	assert.Equal(t, 3*20000, info.PriceData.QuotaToPreConsume)
+	assert.EqualValues(t, types.RelayFormatGemini, info.GetFinalRequestRelayFormat())
 }
 
 func TestOptInSafeToolLossRejectedAsBadRequestWithAdminDiagnostics(t *testing.T) {

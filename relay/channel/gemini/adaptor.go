@@ -64,8 +64,11 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	if IsGeminiImageRelay(info) {
+		return ConvertOpenAIImageRequestToGemini(c, info, request)
+	}
 	if !strings.HasPrefix(info.UpstreamModelName, "imagen") {
-		return nil, errors.New("not supported model for image generation, only imagen models are supported")
+		return nil, errors.New("not supported model for image generation, only imagen and Gemini image models are supported")
 	}
 
 	// convert size to aspect ratio but allow user to specify aspect ratio
@@ -163,6 +166,10 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, req)
+	if IsGeminiImageRelay(info) {
+		// Image edits arrive as multipart; the converted body is always JSON.
+		req.Set("Content-Type", "application/json")
+	}
 	req.Set("x-goog-api-key", info.ApiKey)
 	return nil
 }
@@ -239,6 +246,9 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
+	if IsGeminiImageRelay(info) {
+		return DoGeminiImageRequest(a, c, info, requestBody)
+	}
 	return channel.DoApiRequest(a, c, info, requestBody)
 }
 
@@ -260,6 +270,10 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		} else {
 			return GeminiTextGenerationHandler(c, info, resp)
 		}
+	}
+
+	if IsGeminiImageRelay(info) {
+		return GeminiImageGenerateContentHandler(c, info, resp)
 	}
 
 	if strings.HasPrefix(info.UpstreamModelName, "imagen") {
