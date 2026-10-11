@@ -2,12 +2,15 @@ package controller
 
 import (
 	"errors"
+	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service/invoicefile"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -116,4 +119,67 @@ func TestBuildInvoiceRequestDetailProtectsPendingFilesAndOperatorIdentity(t *tes
 	userDetail, err = buildInvoiceRequestDetail(request, false)
 	require.NoError(t, err)
 	require.Len(t, userDetail.Files, 1)
+}
+
+func TestDownloadInvoiceFileStreamsObjectStorageWithoutRedirect(t *testing.T) {
+	setupInvoiceControllerTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.InvoiceStorageProfile{}))
+
+	content := []byte("%PDF-1.7 issued invoice")
+	var objectPath string
+	objectStore := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		objectPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+		_, _ = w.Write(content)
+	}))
+	t.Cleanup(objectStore.Close)
+
+	profile, err := invoicefile.EnsureProfile(invoicefile.Config{
+		StorageType:  "s3",
+		Endpoint:     objectStore.URL,
+		Bucket:       "invoices",
+		Region:       "auto",
+		AccessKeyId:  "test-access-key",
+		AccessSecret: "test-secret-key",
+	})
+	require.NoError(t, err)
+	request := &model.InvoiceRequest{
+		UserId:          8,
+		Username:        "invoice-user",
+		TotalMoney:      600,
+		TotalMoneyCents: 60000,
+		Status:          model.InvoiceStatusIssued,
+	}
+	require.NoError(t, model.DB.Create(request).Error)
+	file := &model.InvoiceFile{
+		InvoiceRequestId: request.Id,
+		StorageProfileId: profile.Id,
+		StorageType:      "s3",
+		StorageKey:       "1/2026/10/invoice.pdf",
+		FileName:         "invoice.pdf",
+		StoredName:       "invoice.pdf",
+		MimeType:         "application/pdf",
+		Size:             int64(len(content)),
+	}
+	require.NoError(t, model.DB.Create(file).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/invoice/requests/1/files/1", nil)
+	context.Params = gin.Params{
+		{Key: "id", Value: strconv.Itoa(request.Id)},
+		{Key: "file_id", Value: strconv.Itoa(file.Id)},
+	}
+	context.Set("id", 8)
+	context.Set("role", common.RoleCommonUser)
+
+	DownloadInvoiceFile(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Empty(t, recorder.Header().Get("Location"))
+	assert.Equal(t, content, recorder.Body.Bytes())
+	assert.Equal(t, "application/pdf", recorder.Header().Get("Content-Type"))
+	assert.Equal(t, "attachment; filename*=UTF-8''invoice.pdf", recorder.Header().Get("Content-Disposition"))
+	assert.Equal(t, "/invoices/1/2026/10/invoice.pdf", objectPath)
 }
