@@ -1,11 +1,14 @@
 package gemini
 
 import (
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -173,4 +176,22 @@ func mustGeminiRawMessage(t *testing.T, value any) []byte {
 	raw, err := common.Marshal(value)
 	require.NoError(t, err)
 	return raw
+}
+
+func TestConvertImageRequestRejectsGeminiImageModelAsNonRetryableBadRequest(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gemini-3-pro-image",
+		ChannelMeta:     &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3-pro-image-preview"},
+	}
+
+	_, err := (&Adaptor{}).ConvertImageRequest(nil, info, dto.ImageRequest{Model: "gemini-3-pro-image", Prompt: "an apple"})
+
+	var apiErr *types.NewAPIError
+	require.True(t, errors.As(err, &apiErr))
+	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+	assert.Equal(t, types.ErrorCodeInvalidRequest, apiErr.GetErrorCode())
+	assert.True(t, types.IsSkipRetryError(apiErr))
+	assert.Contains(t, apiErr.Error(), "不支持 OpenAI 图片接口")
+	assert.Contains(t, apiErr.Error(), "is not supported on the OpenAI Images API")
+	assert.Contains(t, apiErr.Error(), "/v1beta/models/gemini-3-pro-image:generateContent")
 }
