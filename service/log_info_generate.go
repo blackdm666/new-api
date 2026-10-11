@@ -169,6 +169,12 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other *model.LogOther)
 	if outcome := ss.ResponseOutcome(); outcome != "" {
 		streamInfo["response_status"] = outcome
 	}
+	if snap := ss.OutcomeSnapshot(); snap.ErrorCode != "" {
+		streamInfo["error_code"] = snap.ErrorCode
+		if snap.ErrorType != "" {
+			streamInfo["error_type"] = snap.ErrorType
+		}
+	}
 	if ss.EndError != nil {
 		streamInfo["end_error"] = ss.EndError.Error()
 	}
