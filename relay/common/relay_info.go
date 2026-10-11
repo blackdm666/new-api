@@ -200,6 +200,9 @@ type RelayInfo struct {
 
 	// convOptions caches the converter settings snapshot (see ConvOptions).
 	convOptions *convmeta.Options
+	// claudeAdaptiveThinking is the current attempt's decision for native
+	// Claude manual thinking controls (see SetClaudeAdaptiveThinking).
+	claudeAdaptiveThinking ClaudeAdaptiveThinking
 
 	conversionDiagnostics          []types.ConversionDiagnostic
 	conversionDiagnosticKeys       map[conversionDiagnosticKey]struct{}
@@ -298,8 +301,9 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		if matched && route.PassThroughBodyEnabled {
 			channelMeta.ChannelSetting.PassThroughBodyEnabled = true
 		}
+		// The deprecated route-level opt-in is the most specific setting.
 		if matched && route.ClaudeAdaptiveThinkingCompatibility {
-			channelMeta.ChannelOtherSettings.ClaudeAdaptiveThinkingCompatibility = true
+			channelMeta.ChannelOtherSettings.ClaudeThinkingCompatMode = dto.ClaudeThinkingCompatModeAlways
 		}
 	}
 
@@ -312,6 +316,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	// Channel identity feeds the converter options snapshot (e.g.
 	// OpenRouterDialect); drop the cache so a cross-channel retry rebuilds it.
 	info.convOptions = nil
+	info.claudeAdaptiveThinking = ClaudeAdaptiveThinkingByChannelMode
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || channelMeta.ChannelSetting.PassThroughBodyEnabled {
 		info.ReasoningEffort = ""
 		info.ReasoningConversion = nil
@@ -931,7 +936,6 @@ func (info *RelayInfo) ConvOptions() *convmeta.Options {
 	options := &convmeta.Options{
 		Claude: convmeta.ClaudeOptions{
 			ThinkingAdapterEnabled:                claudeSettings.ThinkingAdapterEnabled,
-			AdaptiveThinkingCompatibilityEnabled:  info != nil && info.ChannelMeta != nil && info.ChannelOtherSettings.ClaudeAdaptiveThinkingCompatibility,
 			ThinkingAdapterBudgetTokensPercentage: claudeSettings.ThinkingAdapterBudgetTokensPercentage,
 			DefaultMaxTokens:                      claudeSettings.GetDefaultMaxTokens,
 		},
@@ -950,9 +954,52 @@ func (info *RelayInfo) ConvOptions() *convmeta.Options {
 		if info.ChannelMeta != nil {
 			options.ToolLossPolicy = types.ConversionLossPolicy(info.ChannelOtherSettings.ToolLossPolicy)
 		}
+		switch info.claudeAdaptiveThinking {
+		case ClaudeAdaptiveThinkingRewrite:
+			options.Claude.AdaptiveThinkingRequired = true
+		case ClaudeAdaptiveThinkingByChannelMode:
+			options.Claude.AdaptiveThinkingCompatibilityEnabled = info.ClaudeThinkingCompatMode() == dto.ClaudeThinkingCompatModeAlways
+		}
 		info.convOptions = options
 	}
 	return options
+}
+
+// ClaudeAdaptiveThinking is one attempt's decision for native Claude Messages
+// requests that carry manual (enabled/disabled) thinking controls.
+type ClaudeAdaptiveThinking int
+
+const (
+	// ClaudeAdaptiveThinkingByChannelMode rewrites known adaptive-only models
+	// only when the channel mode is "always".
+	ClaudeAdaptiveThinkingByChannelMode ClaudeAdaptiveThinking = iota
+	// ClaudeAdaptiveThinkingRewrite rewrites the controls to adaptive thinking
+	// because the upstream reported that the model requires it.
+	ClaudeAdaptiveThinkingRewrite
+	// ClaudeAdaptiveThinkingKeep sends the client's controls unchanged because
+	// the upstream rejected adaptive thinking for the model.
+	ClaudeAdaptiveThinkingKeep
+)
+
+// SetClaudeAdaptiveThinking overrides the current attempt's decision and
+// drops the cached converter options so the next conversion applies it.
+// InitChannelMeta resets the decision for every channel attempt.
+func (info *RelayInfo) SetClaudeAdaptiveThinking(decision ClaudeAdaptiveThinking) {
+	if info == nil {
+		return
+	}
+	info.claudeAdaptiveThinking = decision
+	info.convOptions = nil
+}
+
+// ClaudeThinkingCompatMode reports the selected channel's effective Claude
+// thinking compatibility mode, including a matched advanced custom route's
+// deprecated opt-in.
+func (info *RelayInfo) ClaudeThinkingCompatMode() string {
+	if info == nil || info.ChannelMeta == nil {
+		return dto.ClaudeThinkingCompatModeAuto
+	}
+	return info.ChannelOtherSettings.EffectiveClaudeThinkingCompatMode()
 }
 
 func (info *RelayInfo) SetFirstResponseTime() {

@@ -43,6 +43,11 @@ type ClaudeOptions struct {
 	// this per channel when the upstream is known to require the compatibility
 	// behavior.
 	AdaptiveThinkingCompatibilityEnabled bool
+	// AdaptiveThinkingRequired rewrites native enabled/disabled thinking
+	// controls for any model whose Claude capability profile renders them as
+	// adaptive thinking. The host sets it once the upstream has reported that
+	// the model requires adaptive thinking.
+	AdaptiveThinkingRequired bool
 	// ThinkingAdapterBudgetTokensPercentage sizes thinking budget_tokens as a
 	// fraction of max_tokens when the adapter fires.
 	ThinkingAdapterBudgetTokensPercentage float64

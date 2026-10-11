@@ -165,6 +165,44 @@ func TestConvertClaudeRequestKeepsOpus55NativeThinkingWithoutCompatibility(t *te
 	assert.Empty(t, info.ConversionDiagnostics())
 }
 
+// "always" is limited to the known adaptive-only list, while a model that the
+// upstream reported as adaptive-only is rewritten from its capability profile.
+func TestConvertClaudeRequestRewritesManualThinkingOnlyWhenRequired(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		decision relaycommon.ClaudeAdaptiveThinking
+		want     string
+	}{
+		{name: "always mode keeps models outside the adaptive-only list", decision: relaycommon.ClaudeAdaptiveThinkingByChannelMode, want: "enabled"},
+		{name: "reported requirement rewrites to adaptive", decision: relaycommon.ClaudeAdaptiveThinkingRewrite, want: "adaptive"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			budget := 4096
+			maxTokens := uint(8000)
+			req := &dto.ClaudeRequest{
+				Model:     "claude-fable-5",
+				MaxTokens: &maxTokens,
+				Thinking:  &dto.Thinking{Type: "enabled", BudgetTokens: &budget},
+				Messages:  []dto.ClaudeMessage{{Role: "user", Content: "hello"}},
+			}
+			info := &relaycommon.RelayInfo{
+				OriginModelName: req.Model,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					UpstreamModelName:    req.Model,
+					ChannelOtherSettings: dto.ChannelOtherSettings{ClaudeThinkingCompatMode: dto.ClaudeThinkingCompatModeAlways},
+				},
+			}
+			info.SetClaudeAdaptiveThinking(tt.decision)
+
+			out, err := (&Adaptor{}).ConvertClaudeRequest(nil, info, req)
+			require.NoError(t, err)
+			converted := out.(*dto.ClaudeRequest)
+			require.NotNil(t, converted.Thinking)
+			assert.Equal(t, tt.want, converted.Thinking.Type)
+		})
+	}
+}
+
 func TestConvertClaudeRequestPreservesMessageOutputConfig(t *testing.T) {
 	body := `{"model":"claude-opus-5-5","max_tokens":64,"output_config":{"effort":"medium"},"messages":[` +
 		`{"role":"user","content":"summary"},` +

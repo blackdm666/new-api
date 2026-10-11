@@ -311,6 +311,7 @@ func TestInitChannelMetaAppliesAdvancedCustomClaudeThinkingCompatibility(t *test
 	ctx.Set("original_model", "claude-opus-5-5")
 	common.SetContextKey(ctx, constant.ContextKeyChannelType, constant.ChannelTypeAdvancedCustom)
 	common.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+		ClaudeThinkingCompatMode: dto.ClaudeThinkingCompatModeAuto,
 		AdvancedCustom: &dto.AdvancedCustomConfig{
 			Routes: []dto.AdvancedCustomRoute{
 				{
@@ -330,7 +331,13 @@ func TestInitChannelMetaAppliesAdvancedCustomClaudeThinkingCompatibility(t *test
 
 	info.InitChannelMeta(ctx)
 
+	assert.Equal(t, dto.ClaudeThinkingCompatModeAlways, info.ClaudeThinkingCompatMode(), "the deprecated route opt-in behaves as always for its route")
 	assert.True(t, info.ConvOptions().Claude.AdaptiveThinkingCompatibilityEnabled)
+
+	info.SetClaudeAdaptiveThinking(ClaudeAdaptiveThinkingKeep)
+	assert.False(t, info.ConvOptions().Claude.AdaptiveThinkingCompatibilityEnabled, "a remembered adaptive rejection disables the up-front rewrite")
+	info.InitChannelMeta(ctx)
+	assert.True(t, info.ConvOptions().Claude.AdaptiveThinkingCompatibilityEnabled, "every channel attempt starts from the channel mode")
 }
 
 func TestInitChannelMetaResetsPerAttemptStreamStateAndPreservesRequestState(t *testing.T) {

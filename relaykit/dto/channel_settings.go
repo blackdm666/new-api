@@ -110,7 +110,7 @@ type ChannelOtherSettings struct {
 	AllowInferenceGeo                     bool                       `json:"allow_inference_geo,omitempty"`                    // 是否允许 inference_geo 透传（仅 Claude，默认过滤以满足数据驻留合规
 	AllowSpeed                            bool                       `json:"allow_speed,omitempty"`                            // 是否允许 speed 透传（仅 Claude，默认过滤以避免意外切换推理速度模式）
 	AllowSafetyIdentifier                 bool                       `json:"allow_safety_identifier,omitempty"`                // 是否允许 safety_identifier 透传（默认过滤以保护用户隐私）
-	ClaudeAdaptiveThinkingCompatibility   bool                       `json:"claude_adaptive_thinking_compatibility,omitempty"` // 是否为 Claude adaptive-only 模型兼容旧 thinking 参数
+	ClaudeAdaptiveThinkingCompatibility   bool                       `json:"claude_adaptive_thinking_compatibility,omitempty"` // 已弃用：由 ClaudeThinkingCompatMode 取代，未设置新字段时 true 等同 always
 	DisableStore                          bool                       `json:"disable_store,omitempty"`                          // 是否禁用 store 透传（默认允许透传，禁用后可能导致 Codex 无法使用）
 	AllowIncludeObfuscation               bool                       `json:"allow_include_obfuscation,omitempty"`              // 是否允许 stream_options.include_obfuscation 透传（默认过滤以避免关闭流混淆保护）
 	DisableTaskPollingSleep               bool                       `json:"disable_task_polling_sleep,omitempty"`             // 是否跳过异步任务轮询间隔
@@ -131,6 +131,13 @@ type ChannelOtherSettings struct {
 	// rejection. Empty follows the default allow policy. Accepted values:
 	// "", "allow", "safe", "strict".
 	ToolLossPolicy string `json:"tool_loss_policy,omitempty"`
+	// ClaudeThinkingCompatMode controls native Claude Messages requests that
+	// carry manual (enabled/disabled) thinking controls for models that only
+	// accept adaptive thinking: "auto" (default; rewrite and retry once when
+	// the upstream reports that adaptive thinking is required), "always"
+	// (rewrite known adaptive-only models up front) or "off" (never rewrite).
+	// Empty falls back to the deprecated ClaudeAdaptiveThinkingCompatibility.
+	ClaudeThinkingCompatMode string `json:"claude_thinking_compat_mode,omitempty"`
 }
 
 const (
@@ -453,6 +460,43 @@ func (s *ChannelOtherSettings) ValidateToolLossPolicy() error {
 }
 
 const (
+	ClaudeThinkingCompatModeAuto   = "auto"
+	ClaudeThinkingCompatModeAlways = "always"
+	ClaudeThinkingCompatModeOff    = "off"
+)
+
+// EffectiveClaudeThinkingCompatMode resolves the channel's Claude thinking
+// compatibility mode. An explicit mode wins; otherwise the deprecated boolean
+// opt-in maps to "always" and everything else defaults to "auto".
+func (s *ChannelOtherSettings) EffectiveClaudeThinkingCompatMode() string {
+	if s == nil {
+		return ClaudeThinkingCompatModeAuto
+	}
+	switch mode := strings.TrimSpace(s.ClaudeThinkingCompatMode); mode {
+	case ClaudeThinkingCompatModeAuto, ClaudeThinkingCompatModeAlways, ClaudeThinkingCompatModeOff:
+		return mode
+	}
+	if s.ClaudeAdaptiveThinkingCompatibility {
+		return ClaudeThinkingCompatModeAlways
+	}
+	return ClaudeThinkingCompatModeAuto
+}
+
+// ValidateClaudeThinkingCompatMode rejects unknown Claude thinking
+// compatibility modes. Empty keeps the default.
+func (s *ChannelOtherSettings) ValidateClaudeThinkingCompatMode() error {
+	if s == nil {
+		return nil
+	}
+	switch strings.TrimSpace(s.ClaudeThinkingCompatMode) {
+	case "", ClaudeThinkingCompatModeAuto, ClaudeThinkingCompatModeAlways, ClaudeThinkingCompatModeOff:
+		return nil
+	default:
+		return fmt.Errorf("invalid claude_thinking_compat_mode: %s", s.ClaudeThinkingCompatMode)
+	}
+}
+
+const (
 	AdvancedCustomConverterSGLangRerank                = "jina_rerank_to_sglang"
 	advancedCustomConverterNone                        = "none"
 	advancedCustomConverterClaudeMessagesToOpenAIChat  = "anthropic_messages_to_openai_chat_completions"
@@ -481,8 +525,9 @@ type AdvancedCustomRoute struct {
 	Models                 []string                 `json:"models,omitempty"`
 	Auth                   *AdvancedCustomRouteAuth `json:"auth,omitempty"`
 	PassThroughBodyEnabled bool                     `json:"pass_through_body_enabled,omitempty"`
-	// ClaudeAdaptiveThinkingCompatibility normalizes legacy native Claude
-	// thinking controls for this route when it targets an adaptive-only model.
+	// Deprecated: route-level opt-in kept for stored configurations; true
+	// applies the "always" Claude thinking compatibility mode to this route.
+	// New configurations use ChannelOtherSettings.ClaudeThinkingCompatMode.
 	ClaudeAdaptiveThinkingCompatibility bool `json:"claude_adaptive_thinking_compatibility,omitempty"`
 }
 
