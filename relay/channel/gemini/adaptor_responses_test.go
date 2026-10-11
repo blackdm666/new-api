@@ -191,7 +191,5 @@ func TestConvertImageRequestRejectsGeminiImageModelAsNonRetryableBadRequest(t *t
 	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
 	assert.Equal(t, types.ErrorCodeInvalidRequest, apiErr.GetErrorCode())
 	assert.True(t, types.IsSkipRetryError(apiErr))
-	assert.Contains(t, apiErr.Error(), "不支持 OpenAI 图片接口")
-	assert.Contains(t, apiErr.Error(), "is not supported on the OpenAI Images API")
-	assert.Contains(t, apiErr.Error(), "/v1beta/models/gemini-3-pro-image:generateContent")
+	assert.Equal(t, "请使用 Gemini 原生接口调用 / please use the Gemini native API", apiErr.Error())
 }

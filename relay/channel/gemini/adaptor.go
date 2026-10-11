@@ -69,8 +69,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		// This is a client routing mistake, so reject it as a non-retryable 400
 		// instead of a 500 that fails over across every channel of the group.
 		return nil, types.NewErrorWithStatusCode(
-			fmt.Errorf("模型 %[1]s 不支持 OpenAI 图片接口（/v1/images/generations、/v1/images/edits，仅支持 imagen 模型），请改用 Gemini 原生接口 POST /v1beta/models/%[1]s:generateContent，或 /v1/chat/completions。"+
-				"Model %[1]s is not supported on the OpenAI Images API (/v1/images/generations, /v1/images/edits; only imagen models are). Use the Gemini native endpoint POST /v1beta/models/%[1]s:generateContent, or /v1/chat/completions.", info.OriginModelName),
+			errors.New("请使用 Gemini 原生接口调用 / please use the Gemini native API"),
 			types.ErrorCodeInvalidRequest,
 			http.StatusBadRequest,
 			types.ErrOptionWithSkipRetry(),
