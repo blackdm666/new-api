@@ -84,3 +84,37 @@ func TestSub2APIDoRequestDropsOversizedRequestID(t *testing.T) {
 	c := doSub2APIRequest(t, http.Header{"X-Request-Id": {strings.Repeat("a", 129)}}, "")
 	assert.Equal(t, "", c.GetString(common.UpstreamRequestIdKey))
 }
+
+func TestSub2APIDoRequestDropsMalformedRequestID(t *testing.T) {
+	c := doSub2APIRequest(t, http.Header{"X-Request-Id": {"id with spaces;<script>"}}, "")
+	assert.Equal(t, "", c.GetString(common.UpstreamRequestIdKey))
+}
+
+func TestSub2APIDoRequestClearsEarlierIDWhenTransportFails(t *testing.T) {
+	service.InitHttpClient()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	baseURL := upstream.URL
+	upstream.Close()
+
+	apiType, ok := common.ChannelType2APIType(constant.ChannelTypeSub2API)
+	require.True(t, ok)
+	adaptor := relay.GetAdaptor(apiType)
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:    constant.ChannelTypeSub2API,
+			ChannelBaseUrl: baseURL,
+			ApiKey:         "test-key",
+		},
+		RequestURLPath: "/v1/responses",
+		RelayMode:      relayconstant.RelayModeResponses,
+		RelayFormat:    types.RelayFormatOpenAIResponses,
+	}
+	adaptor.Init(info)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(context.Background())
+	c.Set(common.UpstreamRequestIdKey, "id-from-earlier-attempt")
+
+	_, err := adaptor.DoRequest(c, info, bytes.NewReader([]byte(`{"model":"gpt-test"}`)))
+	require.Error(t, err)
+	assert.Equal(t, "", c.GetString(common.UpstreamRequestIdKey))
+}
