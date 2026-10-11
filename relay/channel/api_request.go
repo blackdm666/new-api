@@ -311,22 +311,6 @@ func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]s
 }
 
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
-	req, err := NewApiRequest(a, c, info, requestBody)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := doRequest(c, req, info)
-	if err != nil {
-		return nil, fmt.Errorf("do request failed: %w", err)
-	}
-	return resp, nil
-}
-
-// NewApiRequest builds the upstream request exactly as DoApiRequest sends it:
-// adaptor URL, adaptor headers, then channel header overrides. Callers that
-// fan one client request out to several upstream calls build every request on
-// the caller goroutine, because adaptors may mutate their own state here.
-func NewApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Request, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
@@ -349,7 +333,11 @@ func NewApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
-	return req, nil
+	resp, err := doRequest(c, req, info)
+	if err != nil {
+		return nil, fmt.Errorf("do request failed: %w", err)
+	}
+	return resp, nil
 }
 
 func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {

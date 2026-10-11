@@ -423,7 +423,10 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
 	if a.RequestMode == RequestModeGemini && gemini.IsGeminiImageRelay(info) {
-		return gemini.DoGeminiImageRequest(a, c, info, requestBody)
+		return gemini.DoGeminiImageRequest(func() channel.Adaptor {
+			copied := *a
+			return &copied
+		}, c, info, requestBody)
 	}
 	return channel.DoApiRequest(a, c, info, requestBody)
 }

@@ -451,31 +451,30 @@ type geminiImageCallResult struct {
 // sum of those calls only, so a partial failure bills just the images that
 // were delivered. When no call yields an image, the first failed upstream
 // response is returned unchanged so the normal error handling applies.
-func DoGeminiImageRequest(a channel.Adaptor, c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (*http.Response, error) {
+//
+// Every call goes through the unchanged channel.DoApiRequest with its own
+// adaptor from newAdaptor: adaptors may cache state while building the URL
+// and headers (Vertex stores credentials), so concurrent calls must not share
+// one instance.
+func DoGeminiImageRequest(newAdaptor func() channel.Adaptor, c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	calls := min(max(info.ImageRequestCount, 1), maxGeminiImageCalls)
 	if calls == 1 {
-		return channel.DoApiRequest(a, c, info, requestBody)
+		return channel.DoApiRequest(newAdaptor(), c, info, requestBody)
 	}
 	body, err := io.ReadAll(requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("read Gemini image request body failed: %w", err)
 	}
-	requests := make([]*http.Request, calls)
-	for i := range requests {
-		requests[i], err = channel.NewApiRequest(a, c, info, bytes.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	results := make([]geminiImageCallResult, calls)
 	slots := make(chan struct{}, geminiImageCallConcurrency)
 	var wg sync.WaitGroup
-	for i, req := range requests {
+	for i := range calls {
+		adaptor := newAdaptor()
 		wg.Go(func() {
 			slots <- struct{}{}
 			defer func() { <-slots }()
-			results[i] = doGeminiImageCall(c, info, req)
+			results[i] = doGeminiImageCall(adaptor, c, info, body)
 		})
 	}
 	wg.Wait()
@@ -524,10 +523,10 @@ func DoGeminiImageRequest(a channel.Adaptor, c *gin.Context, info *relaycommon.R
 	}, nil
 }
 
-func doGeminiImageCall(c *gin.Context, info *relaycommon.RelayInfo, req *http.Request) geminiImageCallResult {
-	resp, err := channel.DoRequest(c, req, info)
+func doGeminiImageCall(adaptor channel.Adaptor, c *gin.Context, info *relaycommon.RelayInfo, requestBody []byte) geminiImageCallResult {
+	resp, err := channel.DoApiRequest(adaptor, c, info, bytes.NewReader(requestBody))
 	if err != nil {
-		return geminiImageCallResult{err: fmt.Errorf("do request failed: %w", err)}
+		return geminiImageCallResult{err: err}
 	}
 	body, err := io.ReadAll(resp.Body)
 	service.CloseResponseBodyGracefully(resp)
