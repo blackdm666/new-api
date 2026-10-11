@@ -38,6 +38,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 
 	info.ObserveResponseModel(responsesResponse.Model)
 	responseBody = rewriteSGLangResponsesCreatedAt(info, responseBody, "created_at", responsesResponse.CreatedAt)
+	responseBody = normalizeResponsesIncompleteReason(responseBody, "incomplete_details.reason", responsesResponse.IncompleteDetails)
 
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
@@ -90,6 +91,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 		if streamResponse.Response != nil {
 			data = string(rewriteSGLangResponsesCreatedAt(info, []byte(data), "response.created_at", streamResponse.Response.CreatedAt))
+			data = string(normalizeResponsesIncompleteReason([]byte(data), "response.incomplete_details.reason", streamResponse.Response.IncompleteDetails))
 		}
 		sendResponsesStreamData(c, streamResponse, data)
 		accumulator.Observe(&streamResponse)
@@ -114,5 +116,20 @@ func rewriteSGLangResponsesCreatedAt(info *relaycommon.RelayInfo, payload []byte
 	if err != nil {
 		return payload
 	}
+	return patched
+}
+
+// normalizeResponsesIncompleteReason rewrites the chat-style "length" reason that some
+// upstreams (e.g. VolcEngine Ark /api/v3/responses) emit into the Responses API value
+// "max_output_tokens", so clients treat truncation as a normal incomplete response.
+func normalizeResponsesIncompleteReason(payload []byte, path string, details *dto.IncompleteDetails) []byte {
+	if details == nil || details.Reason != "length" {
+		return payload
+	}
+	patched, err := sjson.SetBytes(payload, path, "max_output_tokens")
+	if err != nil {
+		return payload
+	}
+	details.Reason = "max_output_tokens"
 	return patched
 }

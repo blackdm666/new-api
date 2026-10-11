@@ -354,3 +354,58 @@ func TestOaiResponsesStreamHandlerKeepsNonSGLangCreatedAt(t *testing.T) {
 	require.Nil(t, apiErr)
 	assert.Contains(t, w.Body.String(), `1786588600.0`)
 }
+
+func TestOaiResponsesHandlerNormalizesLengthIncompleteReason(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeVolcEngine},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_1","object":"response","status":"incomplete","incomplete_details":{"reason":"length"},"output":[]}`)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+
+	_, apiErr := OaiResponsesHandler(c, info, resp)
+	require.Nil(t, apiErr)
+	assert.Contains(t, w.Body.String(), `"incomplete_details":{"reason":"max_output_tokens"}`)
+}
+
+func TestOaiResponsesStreamHandlerNormalizesLengthIncompleteReason(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+	})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set(common.RequestIdKey, "volcengine-incomplete-reason-test")
+
+	info := &relaycommon.RelayInfo{
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeVolcEngine, UpstreamModelName: "deepseek-v4-1-flash"},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_1\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"length\"},\"output\":[]}}\n\n" +
+				"data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_2\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"output\":[]}}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+		Header: http.Header{"Content-Type": []string{"text/event-stream"}},
+	}
+
+	_, apiErr := OaiResponsesStreamHandler(c, info, resp)
+	require.Nil(t, apiErr)
+	assert.Contains(t, w.Body.String(), `"incomplete_details":{"reason":"max_output_tokens"}`)
+	assert.Contains(t, w.Body.String(), `"incomplete_details":{"reason":"content_filter"}`)
+	assert.NotContains(t, w.Body.String(), `"reason":"length"`)
+}
