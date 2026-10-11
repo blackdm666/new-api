@@ -24,6 +24,7 @@ const (
 	providerPricingTokenUnit             = "per_1m_tokens"
 	providerPricingCallUnit              = "per_call"
 	providerPricingClaudeCache1hMultiple = 6.0 / 3.75
+	providerPricingPerSecondNote         = "按秒计费：unit_price 为每秒价格"
 )
 
 type providerPricingResponse struct {
@@ -58,8 +59,9 @@ type providerPricingModel struct {
 
 // GetProviderPricing exposes NewAPI's live pricing in Hvoy Provider Pricing API
 // v1.1 format. Dynamic token expressions publish the current standard tier's
-// verified linear token rates; billing shapes that the schema cannot represent
-// (for example per-second or task-usage expressions) remain omitted.
+// verified linear token rates. Fixed-fee and task-usage expressions publish
+// their base usage price; the schema has no per-second unit, so per-second
+// prices use per_call with a note saying unit_price is the price per second.
 func GetProviderPricing(c *gin.Context) {
 	c.Header("Cache-Control", "private, no-store")
 	usdToCNY := operation_setting.USDExchangeRate
@@ -107,9 +109,6 @@ func buildProviderPricingModels(pricing []model.Pricing, groupRatios map[string]
 		if strings.TrimSpace(item.ModelName) == "" {
 			continue
 		}
-		if item.QuotaType == 1 && item.BillingUnit == billing_setting.BillingUnitSecond {
-			continue
-		}
 
 		for _, group := range providerPricingGroups(item.EnableGroup, groupRatios) {
 			groupRatio := groupRatios[group]
@@ -123,13 +122,11 @@ func buildProviderPricingModels(pricing []model.Pricing, groupRatios map[string]
 				Enabled:   true,
 			}
 
-			switch item.QuotaType {
-			case 0:
-				if item.BillingMode == billing_setting.BillingModeTieredExpr {
-					tiered, ok := providerTieredTokenPrices(item.BillingExpr, groupRatio, usdToCNY)
-					if !ok {
-						continue
-					}
+			// A tiered expression is what billing settles with, even when a
+			// legacy fixed model price is still configured for the model.
+			if item.BillingMode == billing_setting.BillingModeTieredExpr && strings.TrimSpace(item.BillingExpr) != "" {
+				tiered, ok := providerTieredTokenPrices(item.BillingExpr, groupRatio, usdToCNY)
+				if ok {
 					entry.InputPrice = tiered.InputPrice
 					entry.OutputPrice = tiered.OutputPrice
 					entry.CacheInputPrice = tiered.CacheInputPrice
@@ -140,7 +137,17 @@ func buildProviderPricingModels(pricing []model.Pricing, groupRatios map[string]
 						entry.Note += "：" + tiered.Tier
 					}
 					entry.Note += "；实际按请求时段/上下文结算"
-					break
+				} else if !providerUsagePrice(item, groupRatio, usdToCNY, &entry) {
+					continue
+				}
+				result = append(result, entry)
+				continue
+			}
+
+			switch item.QuotaType {
+			case 0:
+				if item.BillingMode == billing_setting.BillingModeTieredExpr {
+					continue
 				}
 				if !isFiniteNonNegative(item.ModelRatio) || !isFiniteNonNegative(item.CompletionRatio) {
 					continue
@@ -169,6 +176,9 @@ func buildProviderPricingModels(pricing []model.Pricing, groupRatios map[string]
 				}
 				entry.PriceUnit = providerPricingCallUnit
 				entry.UnitPrice = float64Pointer(unitPrice)
+				if item.BillingUnit == billing_setting.BillingUnitSecond {
+					entry.Note = providerPricingPerSecondNote
+				}
 			default:
 				continue
 			}
@@ -184,6 +194,87 @@ func buildProviderPricingModels(pricing []model.Pricing, groupRatios map[string]
 		return result[i].ModelName < result[j].ModelName
 	})
 	return result
+}
+
+// providerUsagePrice publishes a fixed-fee or task-usage expression at its base
+// usage: the first enum value of each usage selector, one image, one second or
+// 1M upstream tokens. fixed() returns its amount scaled by 1M, while task-usage
+// expressions return the charge directly, matching settlement conversion.
+func providerUsagePrice(item model.Pricing, groupRatio, usdToCNY float64, entry *providerPricingModel) bool {
+	used := billingexpr.UsedVars(item.BillingExpr)
+	for _, tokenVariable := range []string{"p", "c", "len", "cr", "cc", "cc1h", "img", "img_cr", "img_o", "ai", "ao"} {
+		if used[tokenVariable] {
+			return false
+		}
+	}
+
+	usage := make(map[string]any)
+	quantityUnit := ""
+	perImage := false
+	for key := range billingexpr.UsedUsageKeys(item.BillingExpr) {
+		field, ok := item.BillingUsageSchema[key]
+		switch {
+		case !ok:
+			return false
+		case len(field.Enum) > 0:
+			usage[key] = field.Enum[0]
+		case field.Type == "boolean":
+			usage[key] = false
+		case field.Type == "number" && field.Unit == "second" && quantityUnit == "":
+			quantityUnit = field.Unit
+			usage[key] = 1.0
+		case field.Type == "number" && field.Unit == "token" && quantityUnit == "":
+			quantityUnit = field.Unit
+			usage[key] = 1_000_000.0
+		case field.Type == "number" && field.Unit == "count" && quantityUnit == "":
+			quantityUnit = field.Unit
+			perImage = key == "image_count"
+			usage[key] = 1.0
+		default:
+			return false
+		}
+	}
+
+	cost, trace, err := billingexpr.RunExprWithRequest(item.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: usage})
+	if err != nil || !isFiniteNonNegative(cost) || cost == 0 {
+		return false
+	}
+	fixedFee := trace.BillingUnit == billingexpr.BillingUnitRequest
+	switch {
+	case fixedFee && quantityUnit != "":
+		return false
+	case fixedFee:
+		cost /= 1_000_000
+	case len(usage) == 0:
+		return false
+	}
+	price := providerRoundedPrice(cost * groupRatio * usdToCNY)
+	if !isFiniteNonNegative(price) || price == 0 {
+		return false
+	}
+
+	switch {
+	case quantityUnit == "token":
+		entry.InputPrice = float64Pointer(price)
+		entry.OutputPrice = float64Pointer(price)
+		entry.Note = "按上游视频 Token 计费"
+	case quantityUnit == "second":
+		entry.PriceUnit = providerPricingCallUnit
+		entry.UnitPrice = float64Pointer(price)
+		entry.Note = providerPricingPerSecondNote
+	case trace.ImageCount != nil || perImage:
+		entry.PriceUnit = providerPricingCallUnit
+		entry.UnitPrice = float64Pointer(price)
+		entry.Note = "按张计费：unit_price 为单张价格"
+	default:
+		entry.PriceUnit = providerPricingCallUnit
+		entry.UnitPrice = float64Pointer(price)
+		entry.Note = "按次计费"
+	}
+	if len(usage) > 0 && trace.MatchedTier != "" {
+		entry.Note += "；展示基础档：" + trace.MatchedTier
+	}
+	return true
 }
 
 type providerTieredPrices struct {

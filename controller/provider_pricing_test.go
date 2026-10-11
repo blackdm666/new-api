@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -133,7 +134,7 @@ func TestBuildProviderPricingModels(t *testing.T) {
 		"auto":     1,
 	}, 7)
 
-	require.Len(t, models, 5)
+	require.Len(t, models, 6)
 	assert.Equal(t, "claude-test", models[0].ModelName)
 	assert.Equal(t, "premium", models[0].GroupName)
 	assert.InDelta(t, 42, *models[0].InputPrice, 1e-9)
@@ -160,6 +161,128 @@ func TestBuildProviderPricingModels(t *testing.T) {
 	assert.Equal(t, "image-test", models[4].ModelName)
 	assert.Equal(t, providerPricingCallUnit, models[4].PriceUnit)
 	assert.InDelta(t, 0.7, *models[4].UnitPrice, 1e-9)
+
+	assert.Equal(t, "video-per-second", models[5].ModelName)
+	assert.Equal(t, providerPricingCallUnit, models[5].PriceUnit)
+	assert.InDelta(t, 6.3, *models[5].UnitPrice, 1e-9)
+	assert.Equal(t, providerPricingPerSecondNote, models[5].Note)
+}
+
+func TestBuildProviderPricingModelsPublishesUsageExpressionBasePrice(t *testing.T) {
+	resolution := jsplugin.UsageFieldSchema{Enum: []string{"480p", "720p", "1080p"}}
+	seconds := jsplugin.UsageFieldSchema{Type: "number", Unit: "second"}
+	tests := []struct {
+		name      string
+		pricing   model.Pricing
+		priceUnit string
+		price     float64
+		note      string
+	}{
+		{
+			name:      "fixed fee per image",
+			pricing:   model.Pricing{BillingExpr: `tier("image", fixed(0.2)) * image_count`},
+			priceUnit: providerPricingCallUnit,
+			price:     0.1,
+			note:      "按张计费：unit_price 为单张价格",
+		},
+		{
+			name:      "fixed fee per request",
+			pricing:   model.Pricing{BillingExpr: `tier("request", fixed(0.6))`},
+			priceUnit: providerPricingCallUnit,
+			price:     0.3,
+			note:      "按次计费",
+		},
+		{
+			name: "per second at the first resolution",
+			pricing: model.Pricing{
+				BillingExpr:        `u("resolution") == "480p" ? tier("480p", u("seconds") * 0.075) : u("resolution") == "720p" ? tier("720p", u("seconds") * 0.15) : tier("1080p", u("seconds") * 0.2)`,
+				BillingUsageSchema: map[string]jsplugin.UsageFieldSchema{"resolution": resolution, "seconds": seconds},
+			},
+			priceUnit: providerPricingCallUnit,
+			price:     0.0375,
+			note:      "按秒计费：unit_price 为每秒价格；展示基础档：480p",
+		},
+		{
+			name: "upstream video tokens per million",
+			pricing: model.Pricing{
+				BillingExpr: `u("upstreamUnits") != nil ? (u("video_input") == "present" ? tier("with_video", u("upstreamUnits") * 42 / 1000000) : tier("without_video", u("upstreamUnits") * 70 / 1000000)) : tier("estimate", 0)`,
+				BillingUsageSchema: map[string]jsplugin.UsageFieldSchema{
+					"video_input":   {Enum: []string{"none", "present"}},
+					"upstreamUnits": {Type: "number", Unit: "token"},
+				},
+			},
+			// Token rows inherit the feed-level per_1m_tokens unit.
+			priceUnit: "",
+			price:     35,
+			note:      "按上游视频 Token 计费；展示基础档：without_video",
+		},
+		{
+			name: "counted images at the first quality",
+			pricing: model.Pricing{
+				BillingExpr: `u("quality") == "2K" ? tier("2K", u("image_count") * 0.6) : tier("1K", u("image_count") * 0.3)`,
+				BillingUsageSchema: map[string]jsplugin.UsageFieldSchema{
+					"quality":     {Enum: []string{"1K", "2K"}},
+					"image_count": {Type: "number", Unit: "count"},
+				},
+			},
+			priceUnit: providerPricingCallUnit,
+			price:     0.15,
+			note:      "按张计费：unit_price 为单张价格；展示基础档：1K",
+		},
+		{
+			name: "tiered expression wins over a legacy fixed model price",
+			pricing: model.Pricing{
+				QuotaType:          1,
+				ModelPrice:         9,
+				BillingExpr:        `tier("720p", u("seconds") * 0.2)`,
+				BillingUsageSchema: map[string]jsplugin.UsageFieldSchema{"seconds": seconds},
+			},
+			priceUnit: providerPricingCallUnit,
+			price:     0.1,
+			note:      "按秒计费：unit_price 为每秒价格；展示基础档：720p",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.pricing.ModelName = "usage-model"
+			tt.pricing.BillingMode = billing_setting.BillingModeTieredExpr
+			tt.pricing.EnableGroup = []string{"standard"}
+			models := buildProviderPricingModels([]model.Pricing{tt.pricing}, map[string]float64{"standard": 0.5}, 1)
+
+			require.Len(t, models, 1)
+			assert.Equal(t, tt.priceUnit, models[0].PriceUnit)
+			assert.Equal(t, tt.note, models[0].Note)
+			if tt.priceUnit == "" {
+				assert.Nil(t, models[0].UnitPrice)
+				assert.InDelta(t, tt.price, *models[0].InputPrice, 1e-9)
+				assert.InDelta(t, tt.price, *models[0].OutputPrice, 1e-9)
+				return
+			}
+			assert.InDelta(t, tt.price, *models[0].UnitPrice, 1e-9)
+		})
+	}
+}
+
+func TestBuildProviderPricingModelsOmitsUnpriceableUsageExpressions(t *testing.T) {
+	seconds := jsplugin.UsageFieldSchema{Type: "number", Unit: "second"}
+	for name, pricing := range map[string]model.Pricing{
+		"selector missing from usage schema": {
+			BillingExpr:        `u("resolution") == "480p" ? tier("480p", u("seconds") * 0.1) : tier("1080p", u("seconds") * 0.3)`,
+			BillingUsageSchema: map[string]jsplugin.UsageFieldSchema{"seconds": seconds},
+		},
+		"token and usage dimensions mixed": {
+			BillingExpr:        `tier("base", p * 2 + u("seconds") * 0.1)`,
+			BillingUsageSchema: map[string]jsplugin.UsageFieldSchema{"seconds": seconds},
+		},
+		"constant without fixed fee or usage": {BillingExpr: `tier("base", 0.5)`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pricing.ModelName = "usage-model"
+			pricing.BillingMode = billing_setting.BillingModeTieredExpr
+			pricing.EnableGroup = []string{"standard"}
+			assert.Empty(t, buildProviderPricingModels([]model.Pricing{pricing}, map[string]float64{"standard": 1}, 1))
+		})
+	}
 }
 
 func TestProviderPricingGroupsExpandsAllAndRemovesDuplicates(t *testing.T) {
