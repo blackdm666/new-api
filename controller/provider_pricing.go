@@ -75,11 +75,18 @@ func GetProviderPricing(c *gin.Context) {
 	}
 
 	// This feed is public. Restrict both explicit groups and "all" expansion
-	// to the same usable groups as an anonymous model-square request.
-	publicGroups := service.GetUserUsableGroups("")
+	// to the same usable groups as an anonymous model-square request, plus the
+	// account-only groups the operator chooses to publish, such as the group
+	// granted to the account Hvoy probes with.
+	publishedGroups := service.GetUserUsableGroups("")
+	for group := range strings.SplitSeq(common.GetEnvOrDefaultString("HVOY_PROVIDER_PRICING_EXTRA_GROUPS", ""), ",") {
+		if group = strings.TrimSpace(group); group != "" {
+			publishedGroups[group] = ""
+		}
+	}
 	groupRatios := ratio_setting.GetGroupRatioCopy()
 	for group := range groupRatios {
-		if _, ok := publicGroups[group]; !ok || group == "auto" || group == "all" {
+		if _, ok := publishedGroups[group]; !ok || group == "auto" || group == "all" {
 			delete(groupRatios, group)
 		}
 	}
