@@ -805,9 +805,8 @@ function normalizeAdvancedCustomRoute(
   if (route.pass_through_body_enabled === true) {
     nextRoute.pass_through_body_enabled = true
   }
-  if (route.claude_adaptive_thinking_compatibility === true) {
-    nextRoute.claude_adaptive_thinking_compatibility = true
-  }
+  // The deprecated route-level Claude thinking opt-in is intentionally not
+  // carried over: it loads as the channel-level mode instead.
   if (route.auth) {
     nextRoute.auth = {
       type: route.auth.type,

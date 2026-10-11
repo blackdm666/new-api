@@ -26,6 +26,10 @@ import {
 } from '../constants'
 import { CHANNEL_TYPE_ADVANCED_CUSTOM } from './advanced-custom'
 import { channelFormSchema, type ChannelFormValues } from './channel-form'
+import {
+  DEFAULT_CLAUDE_THINKING_COMPAT_MODE,
+  supportsClaudeThinkingCompat,
+} from './claude-thinking-compat'
 import { supportsResponsesWebSocket } from './responses-websocket'
 
 export type ChannelProviderTarget =
@@ -62,6 +66,7 @@ const CONFIGURATION_BLOCKS = {
       'pass_through_body_enabled',
       'responses_websocket_enabled',
       'ollama_openai_chat',
+      'claude_thinking_compat_mode',
       'system_prompt',
       'system_prompt_override',
     ],
@@ -76,7 +81,6 @@ const CONFIGURATION_BLOCKS = {
       'allow_inference_geo',
       'allow_speed',
       'claude_beta_query',
-      'claude_adaptive_thinking_compatibility',
     ],
   },
   extraSettings: {
@@ -159,6 +163,10 @@ export function getChannelConfigurationState(
       (supportsResponsesWebSocket(values.type) &&
         values.responses_websocket_enabled) ||
       (values.type === CHANNEL_TYPE_OLLAMA && values.ollama_openai_chat) ||
+      (supportsClaudeThinkingCompat(values.type) &&
+        (values.claude_thinking_compat_mode ??
+          DEFAULT_CLAUDE_THINKING_COMPAT_MODE) !==
+          DEFAULT_CLAUDE_THINKING_COMPAT_MODE) ||
       values.system_prompt?.trim() ||
       values.system_prompt_override
     ),
@@ -171,9 +179,7 @@ export function getChannelConfigurationState(
           values.allow_include_obfuscation)) ||
       (claudePassthrough &&
         (values.allow_speed ||
-          (values.type === 14 &&
-            (values.claude_beta_query ||
-              values.claude_adaptive_thinking_compatibility))))
+          (values.type === 14 && values.claude_beta_query)))
     ),
     extraSettings: Boolean(
       values.proxy?.trim() ||

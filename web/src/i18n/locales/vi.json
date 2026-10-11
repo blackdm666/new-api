@@ -7865,6 +7865,17 @@
     "Username is required": "Username is required",
     "Verification and security email configuration": "Verification and security email configuration",
     "Waiting for receipt": "Waiting for receipt",
-    "Weight must be between 1 and 100": "Weight must be between 1 and 100"
+    "Weight must be between 1 and 100": "Weight must be between 1 and 100",
+    "Claude adaptive thinking compatibility": "Tương thích suy nghĩ thích ứng Claude",
+    "Auto (recommended)": "Tự động (khuyến nghị)",
+    "Always convert": "Luôn chuyển đổi",
+    "Off": "Tắt",
+    "Send thinking controls as-is. If the upstream reports that the model requires adaptive thinking, convert and retry once on this channel, then convert up front for that model for 6 hours.": "Gửi nguyên tham số suy nghĩ. Nếu upstream báo mô hình yêu cầu suy nghĩ thích ứng, chuyển đổi và thử lại một lần trên kênh này, sau đó chuyển đổi trước cho mô hình đó trong 6 giờ.",
+    "Convert enabled or disabled thinking to adaptive thinking before sending for Claude models that only support adaptive thinking.": "Chuyển suy nghĩ enabled hoặc disabled sang suy nghĩ thích ứng trước khi gửi cho các mô hình Claude chỉ hỗ trợ suy nghĩ thích ứng.",
+    "Always send thinking controls unchanged and never retry.": "Luôn gửi nguyên tham số suy nghĩ và không bao giờ thử lại.",
+    "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "Áp dụng cho yêu cầu Claude Messages gốc gửi suy nghĩ enabled hoặc disabled tới các mô hình chỉ chấp nhận suy nghĩ thích ứng.",
+    "Upstream requires adaptive thinking; retried with adaptive thinking": "Upstream yêu cầu suy nghĩ thích ứng; đã thử lại với suy nghĩ thích ứng",
+    "Upstream rejected adaptive thinking; retried with the original thinking controls": "Upstream từ chối suy nghĩ thích ứng; đã thử lại với tham số suy nghĩ ban đầu",
+    "Same channel retry": "Thử lại trên cùng kênh"
   }
 }

@@ -22,7 +22,7 @@ import type { AdvancedCustomConfig } from '../../types'
 import { normalizeAdvancedCustomConfig } from '../advanced-custom'
 
 describe('advanced custom Claude thinking compatibility', () => {
-  test('preserves route-level compatibility through normalization', () => {
+  test('normalization drops the deprecated route-level opt-in and keeps the route', () => {
     const config: AdvancedCustomConfig = {
       advanced_routes: [
         {
@@ -30,6 +30,7 @@ describe('advanced custom Claude thinking compatibility', () => {
           upstream_path: '/v1/messages',
           converter: 'none',
           models: ['claude-opus-5-5'],
+          pass_through_body_enabled: true,
           claude_adaptive_thinking_compatibility: true,
         },
       ],
@@ -37,24 +38,14 @@ describe('advanced custom Claude thinking compatibility', () => {
 
     const normalized = normalizeAdvancedCustomConfig(config)
 
-    expect(
-      normalized.advanced_routes?.[0].claude_adaptive_thinking_compatibility
-    ).toBe(true)
-  })
-
-  test('does not add compatibility to unrelated routes', () => {
-    const normalized = normalizeAdvancedCustomConfig({
-      advanced_routes: [
-        {
-          incoming_path: '/v1/chat/completions',
-          upstream_path: '/v1/chat/completions',
-          converter: 'none',
-        },
-      ],
-    })
-
-    expect(
-      normalized.advanced_routes?.[0].claude_adaptive_thinking_compatibility
-    ).toBeUndefined()
+    expect(normalized.advanced_routes).toEqual([
+      {
+        incoming_path: '/v1/messages',
+        upstream_path: '/v1/messages',
+        converter: 'none',
+        models: ['claude-opus-5-5'],
+        pass_through_body_enabled: true,
+      },
+    ])
   })
 })

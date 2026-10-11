@@ -7867,6 +7867,17 @@
     "Username is required": "請輸入使用者名稱",
     "Verification and security email configuration": "驗證碼與安全郵件設定",
     "Waiting for receipt": "等待回執",
-    "Weight must be between 1 and 100": "權重必須介於 1 到 100"
+    "Weight must be between 1 and 100": "權重必須介於 1 到 100",
+    "Claude adaptive thinking compatibility": "Claude 自適應思考相容",
+    "Auto (recommended)": "自動（推薦）",
+    "Always convert": "一律轉換",
+    "Off": "關閉",
+    "Send thinking controls as-is. If the upstream reports that the model requires adaptive thinking, convert and retry once on this channel, then convert up front for that model for 6 hours.": "按原樣傳送 thinking 參數；若上游提示該模型必須使用自適應思考，則轉換後在此渠道重試一次，並在 6 小時內對該模型直接轉換。",
+    "Convert enabled or disabled thinking to adaptive thinking before sending for Claude models that only support adaptive thinking.": "對僅支援自適應思考的 Claude 模型，傳送前將 enabled 或 disabled 思考參數轉換為自適應思考。",
+    "Always send thinking controls unchanged and never retry.": "一律原樣傳送 thinking 參數，不轉換也不重試。",
+    "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "適用於向僅接受自適應思考的模型傳送 enabled 或 disabled 思考參數的原生 Claude Messages 請求。",
+    "Upstream requires adaptive thinking; retried with adaptive thinking": "上游要求自適應思考，已改用自適應思考重試",
+    "Upstream rejected adaptive thinking; retried with the original thinking controls": "上游拒絕自適應思考，已用原始思考參數重試",
+    "Same channel retry": "同渠道重試"
   }
 }

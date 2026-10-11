@@ -7961,6 +7961,17 @@
     "Delivery record unavailable": "Delivery record unavailable",
     "Primary SMTP fallback": "Primary SMTP fallback",
     "Backup SMTP fallback": "Backup SMTP fallback",
-    "Not sent yet": "Not sent yet"
+    "Not sent yet": "Not sent yet",
+    "Claude adaptive thinking compatibility": "Claude adaptive thinking compatibility",
+    "Auto (recommended)": "Auto (recommended)",
+    "Always convert": "Always convert",
+    "Off": "Off",
+    "Send thinking controls as-is. If the upstream reports that the model requires adaptive thinking, convert and retry once on this channel, then convert up front for that model for 6 hours.": "Send thinking controls as-is. If the upstream reports that the model requires adaptive thinking, convert and retry once on this channel, then convert up front for that model for 6 hours.",
+    "Convert enabled or disabled thinking to adaptive thinking before sending for Claude models that only support adaptive thinking.": "Convert enabled or disabled thinking to adaptive thinking before sending for Claude models that only support adaptive thinking.",
+    "Always send thinking controls unchanged and never retry.": "Always send thinking controls unchanged and never retry.",
+    "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.",
+    "Upstream requires adaptive thinking; retried with adaptive thinking": "Upstream requires adaptive thinking; retried with adaptive thinking",
+    "Upstream rejected adaptive thinking; retried with the original thinking controls": "Upstream rejected adaptive thinking; retried with the original thinking controls",
+    "Same channel retry": "Same channel retry"
   }
 }

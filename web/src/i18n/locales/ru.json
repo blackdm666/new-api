@@ -7865,6 +7865,17 @@
     "Username is required": "Username is required",
     "Verification and security email configuration": "Verification and security email configuration",
     "Waiting for receipt": "Waiting for receipt",
-    "Weight must be between 1 and 100": "Weight must be between 1 and 100"
+    "Weight must be between 1 and 100": "Weight must be between 1 and 100",
+    "Claude adaptive thinking compatibility": "Совместимость адаптивного мышления Claude",
+    "Auto (recommended)": "Авто (рекомендуется)",
+    "Always convert": "Всегда преобразовывать",
+    "Off": "Выкл.",
+    "Send thinking controls as-is. If the upstream reports that the model requires adaptive thinking, convert and retry once on this channel, then convert up front for that model for 6 hours.": "Параметры мышления отправляются как есть. Если upstream сообщает, что модели требуется адаптивное мышление, они преобразуются и запрос повторяется один раз на этом канале, после чего для этой модели преобразование выполняется заранее в течение 6 часов.",
+    "Convert enabled or disabled thinking to adaptive thinking before sending for Claude models that only support adaptive thinking.": "Перед отправкой преобразует мышление enabled или disabled в адаптивное для моделей Claude, поддерживающих только адаптивное мышление.",
+    "Always send thinking controls unchanged and never retry.": "Всегда отправлять параметры мышления без изменений и никогда не повторять запрос.",
+    "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "Применяется к нативным запросам Claude Messages, которые отправляют мышление enabled или disabled моделям, принимающим только адаптивное мышление.",
+    "Upstream requires adaptive thinking; retried with adaptive thinking": "Upstream требует адаптивное мышление; повтор с адаптивным мышлением",
+    "Upstream rejected adaptive thinking; retried with the original thinking controls": "Upstream отклонил адаптивное мышление; повтор с исходными параметрами мышления",
+    "Same channel retry": "Повтор на том же канале"
   }
 }

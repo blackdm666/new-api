@@ -46,6 +46,12 @@ import {
   validateBalanceQueryConfig,
 } from './balance-query'
 import { readTaskExtendPluginKeys } from './channel-plugin-extensions'
+import {
+  CLAUDE_THINKING_COMPAT_MODES,
+  DEFAULT_CLAUDE_THINKING_COMPAT_MODE,
+  readClaudeThinkingCompatMode,
+  writeClaudeThinkingCompatMode,
+} from './claude-thinking-compat'
 import { supportsResponsesWebSocket } from './responses-websocket'
 
 // ============================================================================
@@ -292,7 +298,9 @@ export const channelFormSchema = z
     allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
     allow_speed: z.boolean().optional(), // Anthropic: speed mode control
     claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
-    claude_adaptive_thinking_compatibility: z.boolean().optional(), // Anthropic: adaptive-only Claude model compatibility
+    claude_thinking_compat_mode: z
+      .enum(CLAUDE_THINKING_COMPAT_MODES)
+      .optional(), // Native Claude Messages: adaptive thinking compatibility
     ollama_openai_chat: z.boolean().optional(), // Ollama: OpenAI-compatible /v1/chat/completions instead of native /api/chat
     disable_task_polling_sleep: z.boolean().optional(),
     // Upstream model update settings (stored in settings JSON)
@@ -490,7 +498,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
-  claude_adaptive_thinking_compatibility: false,
+  claude_thinking_compat_mode: DEFAULT_CLAUDE_THINKING_COMPAT_MODE,
   ollama_openai_chat: false,
   disable_task_polling_sleep: false,
   upstream_model_update_check_enabled: false,
@@ -564,7 +572,7 @@ export function transformChannelToFormDefaults(
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
-  let claudeAdaptiveThinkingCompatibility = false
+  let claudeThinkingCompatMode = DEFAULT_CLAUDE_THINKING_COMPAT_MODE
   let ollamaOpenAIChat = false
   let disableTaskPollingSleep = false
   let upstreamModelUpdateCheckEnabled = false
@@ -587,8 +595,7 @@ export function transformChannelToFormDefaults(
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
-      claudeAdaptiveThinkingCompatibility =
-        parsed.claude_adaptive_thinking_compatibility === true
+      claudeThinkingCompatMode = readClaudeThinkingCompatMode(parsed)
       ollamaOpenAIChat = parsed.ollama_openai_chat === true
       disableTaskPollingSleep = parsed.disable_task_polling_sleep === true
       upstreamModelUpdateCheckEnabled =
@@ -651,7 +658,7 @@ export function transformChannelToFormDefaults(
     allow_inference_geo: allowInferenceGeo,
     allow_speed: allowSpeed,
     claude_beta_query: claudeBetaQuery,
-    claude_adaptive_thinking_compatibility: claudeAdaptiveThinkingCompatibility,
+    claude_thinking_compat_mode: claudeThinkingCompatMode,
     ollama_openai_chat: ollamaOpenAIChat,
     disable_task_polling_sleep: disableTaskPollingSleep,
     allow_safety_identifier: allowSafetyIdentifier,
@@ -796,12 +803,15 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
   // Only the Anthropic adaptor supports forcing the Claude beta query.
   if (formData.type === 14) {
     settingsObj.claude_beta_query = formData.claude_beta_query === true
-    settingsObj.claude_adaptive_thinking_compatibility =
-      formData.claude_adaptive_thinking_compatibility === true
   } else if ('claude_beta_query' in settingsObj) {
     delete settingsObj.claude_beta_query
-    delete settingsObj.claude_adaptive_thinking_compatibility
   }
+
+  writeClaudeThinkingCompatMode(
+    settingsObj,
+    formData.type,
+    formData.claude_thinking_compat_mode
+  )
 
   // Only the Ollama adaptor can switch chat completions to the OpenAI-compatible endpoint.
   if (formData.type === CHANNEL_TYPE_OLLAMA) {
