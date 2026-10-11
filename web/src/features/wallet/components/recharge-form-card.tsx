@@ -54,6 +54,10 @@ import type {
   WaffoPayMethod,
 } from '../types'
 import { CreemProductsSection } from './creem-products-section'
+import {
+  paymentMethodGridClassName,
+  paymentMethodSectionClassName,
+} from './payment-method-layout'
 
 interface RechargeFormCardProps {
   topupInfo: TopupInfo | null
@@ -317,12 +321,12 @@ export function RechargeFormCard({
                 </div>
               </div>
 
-              <div className='space-y-2.5 sm:space-y-3'>
+              <div className={paymentMethodSectionClassName}>
                 <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
                   {t('Payment Method')}
                 </Label>
                 {hasStandardPaymentMethods ? (
-                  <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
+                  <div className={paymentMethodGridClassName}>
                     {topupInfo?.pay_methods?.map((method) => {
                       const methodName = getPaymentMethodDisplayName(method, t)
                       const minTopup = Math.max(
@@ -403,11 +407,11 @@ export function RechargeFormCard({
               {enableWaffoTopup &&
                 hasWaffoPaymentMethods &&
                 onWaffoMethodSelect && (
-                  <div className='space-y-2.5 sm:space-y-3'>
+                  <div className={paymentMethodSectionClassName}>
                     <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
                       {t('Waffo Payment')}
                     </Label>
-                    <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
+                    <div className={paymentMethodGridClassName}>
                       {waffoPayMethods?.map((method, index) => {
                         const loadingKey = `waffo-${index}`
                         const methodKey = `${method.payMethodType ?? 'unknown'}-${method.payMethodName ?? method.name}`
