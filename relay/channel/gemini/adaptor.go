@@ -65,7 +65,15 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
 	if !strings.HasPrefix(info.UpstreamModelName, "imagen") {
-		return nil, errors.New("not supported model for image generation, only imagen models are supported")
+		// Gemini image models (e.g. nano-banana) only work through generateContent.
+		// This is a client routing mistake, so reject it as a non-retryable 400
+		// instead of a 500 that fails over across every channel of the group.
+		return nil, types.NewErrorWithStatusCode(
+			errors.New("请使用 Gemini 原生接口调用 / please use the Gemini native API"),
+			types.ErrorCodeInvalidRequest,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
 	}
 
 	// convert size to aspect ratio but allow user to specify aspect ratio
