@@ -203,6 +203,10 @@ import {
 } from '../../lib/channel-plugin-extensions'
 import { getChannelTypeConfig } from '../../lib/channel-type-config'
 import {
+  DEFAULT_CLAUDE_THINKING_COMPAT_MODE,
+  supportsClaudeThinkingCompat,
+} from '../../lib/claude-thinking-compat'
+import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
@@ -1942,6 +1946,81 @@ export function ChannelMutateDrawer({
     />
   )
 
+  const claudeThinkingCompatOptions = [
+    {
+      value: 'auto',
+      label: t('Auto (recommended)'),
+      description: t(
+        'Send thinking controls as-is. If the upstream reports that the model requires adaptive thinking, convert and retry once on this channel, then convert up front for that model for 6 hours.'
+      ),
+    },
+    {
+      value: 'always',
+      label: t('Always convert'),
+      description: t(
+        'Convert enabled or disabled thinking to adaptive thinking before sending for Claude models that only support adaptive thinking.'
+      ),
+    },
+    {
+      value: 'off',
+      label: t('Off'),
+      description: t(
+        'Always send thinking controls unchanged and never retry.'
+      ),
+    },
+  ]
+
+  const claudeThinkingCompatFields = supportsClaudeThinkingCompat(
+    currentType
+  ) && (
+    <FormField
+      control={form.control}
+      name='claude_thinking_compat_mode'
+      render={({ field }) => (
+        <FormItem className='space-y-2 px-4 py-3'>
+          <FormLabel>{t('Claude adaptive thinking compatibility')}</FormLabel>
+          <Select
+            disabled={sensitiveLocked}
+            items={claudeThinkingCompatOptions}
+            value={field.value ?? DEFAULT_CLAUDE_THINKING_COMPAT_MODE}
+            onValueChange={field.onChange}
+          >
+            <FormControl>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+            </FormControl>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                {claudeThinkingCompatOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <FormDescription>
+            {t(
+              'Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.'
+            )}
+          </FormDescription>
+          <ul className='text-muted-foreground space-y-1 text-xs'>
+            {claudeThinkingCompatOptions.map((option) => (
+              <li key={option.value}>
+                <span className='text-foreground font-medium'>
+                  {option.label}
+                </span>
+                {`: ${option.description}`}
+              </li>
+            ))}
+          </ul>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  )
+
   const taskPollingFields = (
     <FormField
       control={form.control}
@@ -3085,34 +3164,6 @@ export function ChannelMutateDrawer({
                         <FormDescription>
                           {t(
                             'Pass through the anthropic-beta header for beta features'
-                          )}
-                        </FormDescription>
-                      </div>
-                      <FormControl>
-                        <Switch
-                          disabled={sensitiveLocked}
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-              )}
-
-              {currentType === 14 && (
-                <FormField
-                  control={form.control}
-                  name='claude_adaptive_thinking_compatibility'
-                  render={({ field }) => (
-                    <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
-                      <div className='space-y-0.5'>
-                        <FormLabel className='text-sm'>
-                          {t('Enable Claude adaptive thinking compatibility')}
-                        </FormLabel>
-                        <FormDescription>
-                          {t(
-                            'Convert legacy enabled or disabled thinking controls for Claude models that only support adaptive thinking'
                           )}
                         </FormDescription>
                       </div>
@@ -4706,6 +4757,7 @@ export function ChannelMutateDrawer({
                 {formatFields}
                 {ollamaOpenAIChatFields}
                 {thinkingFields}
+                {claudeThinkingCompatFields}
                 {currentType !== CHANNEL_TYPE_ADVANCED_CUSTOM &&
                   passthroughFields}
                 {systemPromptFields}

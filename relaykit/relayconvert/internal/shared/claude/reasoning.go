@@ -32,13 +32,19 @@ func ApplyReasoning(ctx context.Context, req *dto.ClaudeRequest, info convmeta.M
 	// A native Claude request without a host modifier is already in the target
 	// protocol, including Claude-compatible proxies that keep native controls
 	// instead of applying Anthropic model rules. Preserve those controls by
-	// default; the per-channel adaptive compatibility option is the explicit
-	// exception for known adaptive-only models.
+	// default. The host's adaptive compatibility options are the explicit
+	// exceptions: AdaptiveThinkingCompatibilityEnabled for known adaptive-only
+	// models, AdaptiveThinkingRequired once the upstream has reported that the
+	// model requires adaptive thinking.
 	if !crossProtocol && source.IsEmpty() && suffix.IsEmpty() {
-		if opts.Claude.AdaptiveThinkingCompatibilityEnabled &&
-			reasoning.IsClaudeAdaptiveOnlyModel(req.Model) &&
+		rewriteToAdaptive := opts.Claude.AdaptiveThinkingRequired ||
+			opts.Claude.AdaptiveThinkingCompatibilityEnabled && reasoning.IsClaudeAdaptiveOnlyModel(req.Model)
+		if rewriteToAdaptive &&
 			req.Thinking != nil &&
 			(req.Thinking.Type == "enabled" || req.Thinking.Type == "disabled") {
+			if info != nil && !reasoning.IsKnownClaudeModel(capabilityModel) && reasoning.IsKnownClaudeModel(info.GetOriginModelName()) {
+				capabilityModel = info.GetOriginModelName()
+			}
 			native, diagnostics, err := reasoning.FromClaude(req)
 			if err != nil {
 				return err
@@ -46,7 +52,7 @@ func ApplyReasoning(ctx context.Context, req *dto.ClaudeRequest, info convmeta.M
 			convdiag.Add(ctx, diagnostics...)
 
 			rendered, err := reasoning.RenderClaude(
-				req.Model,
+				capabilityModel,
 				native,
 				req.MaxTokens,
 				opts.Claude.ThinkingAdapterBudgetTokensPercentage,
@@ -55,7 +61,7 @@ func ApplyReasoning(ctx context.Context, req *dto.ClaudeRequest, info convmeta.M
 				return err
 			}
 			convdiag.Add(ctx, rendered.Diagnostics...)
-			if err := applyClaudeRender(ctx, req, info, req.Model, rendered); err != nil {
+			if err := applyClaudeRender(ctx, req, info, capabilityModel, rendered); err != nil {
 				return err
 			}
 		}

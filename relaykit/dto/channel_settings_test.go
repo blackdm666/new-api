@@ -103,6 +103,34 @@ func TestAdvancedCustomValidateClaudeAdaptiveThinkingCompatibility(t *testing.T)
 	}
 }
 
+func TestChannelOtherSettingsClaudeThinkingCompatMode(t *testing.T) {
+	tests := []struct {
+		name      string
+		settings  ChannelOtherSettings
+		want      string
+		wantError bool
+	}{
+		{name: "unset defaults to auto", want: ClaudeThinkingCompatModeAuto},
+		{name: "deprecated boolean opt-in maps to always", settings: ChannelOtherSettings{ClaudeAdaptiveThinkingCompatibility: true}, want: ClaudeThinkingCompatModeAlways},
+		{name: "explicit mode wins over the deprecated opt-in", settings: ChannelOtherSettings{ClaudeThinkingCompatMode: ClaudeThinkingCompatModeOff, ClaudeAdaptiveThinkingCompatibility: true}, want: ClaudeThinkingCompatModeOff},
+		{name: "explicit always", settings: ChannelOtherSettings{ClaudeThinkingCompatMode: ClaudeThinkingCompatModeAlways}, want: ClaudeThinkingCompatModeAlways},
+		{name: "unknown mode is rejected and treated as auto", settings: ChannelOtherSettings{ClaudeThinkingCompatMode: "sometimes"}, want: ClaudeThinkingCompatModeAuto, wantError: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.settings.EffectiveClaudeThinkingCompatMode())
+			err := tt.settings.ValidateClaudeThinkingCompatMode()
+			if tt.wantError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "invalid claude_thinking_compat_mode")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestAdvancedCustomValidateModelListRouteConstraints(t *testing.T) {
 	valid := &AdvancedCustomConfig{
 		Routes: []AdvancedCustomRoute{

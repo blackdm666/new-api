@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -85,73 +86,114 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		return nil
 	}
 
-	var requestBody io.Reader
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
-		storage, err := common.GetBodyStorage(c)
-		if err != nil {
-			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-		}
-		requestBody = common.NewReplayableBodyReader(storage)
-	} else {
-		convertedRequest, err := adaptor.ConvertClaudeRequest(c, info, request)
-		if err != nil {
-			return newConvertRequestFailedError(c, info, err)
-		}
-		relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
-		jsonData, err := common.Marshal(convertedRequest)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-
-		// remove disabled fields for Claude API
-		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-
-		// apply param override
-		if len(info.ParamOverride) > 0 {
-			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
-			if err != nil {
-				return newAPIErrorFromParamOverride(err)
-			}
-		}
-
-		logger.LogDebug(c, "requestBody: %s", jsonData)
-		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-		defer closer.Close()
-		jsonData = nil
-		requestBody = body
-	}
-
-	statusCodeMappingStr := c.GetString("status_code_mapping")
-	var httpResp *http.Response
-	resp, err := adaptor.DoRequest(c, info, requestBody)
-	if err != nil {
-		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
-	}
-
-	if resp != nil {
-		httpResp = resp.(*http.Response)
-		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
-		if httpResp.StatusCode != http.StatusOK {
-			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
-			// reset status code 重置状态码
-			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
-			return newAPIError
-		}
+	httpResp, closeRequestBodies, newAPIError := sendClaudeRequest(c, info, adaptor, request)
+	defer closeRequestBodies()
+	if newAPIError != nil {
+		return newAPIError
 	}
 
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
 	if newAPIError != nil {
 		// reset status code 重置状态码
-		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
+		service.ResetStatusCode(newAPIError, c.GetString("status_code_mapping"))
 		return newAPIError
 	}
 
 	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
 	return nil
+}
+
+// sendClaudeRequest sends a Claude Messages request upstream and returns the
+// successful upstream response (nil for adaptors that do not use HTTP
+// responses). Native Claude requests follow the channel's Claude thinking
+// compatibility mode, which may retry once on the same channel and key after
+// an upstream 400 (see claudeThinkingCompat). The returned function releases
+// the outgoing bodies and must run only after the response has been handled.
+func sendClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.ClaudeRequest) (*http.Response, func(), *types.NewAPIError) {
+	var bodies []io.Closer
+	closeBodies := func() {
+		for _, body := range bodies {
+			_ = body.Close()
+		}
+	}
+	statusCodeMappingStr := c.GetString("status_code_mapping")
+	passThrough := model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled
+	var thinkingCompat *claudeThinkingCompat
+	if !passThrough {
+		thinkingCompat = newClaudeThinkingCompat(info, request)
+	}
+
+	// retriedErr is the failed attempt that the thinking compatibility retry
+	// replaces; it is returned when the retry cannot change the request.
+	var retriedErr *types.NewAPIError
+	for {
+		var requestBody io.Reader
+		if passThrough {
+			storage, err := common.GetBodyStorage(c)
+			if err != nil {
+				return nil, closeBodies, types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			}
+			requestBody = common.NewReplayableBodyReader(storage)
+		} else {
+			convertedRequest, err := adaptor.ConvertClaudeRequest(c, info, request)
+			if err != nil {
+				return nil, closeBodies, newConvertRequestFailedError(c, info, err)
+			}
+			thinkingCompat.observe(convertedRequest)
+			if thinkingCompat.retryUnchanged() {
+				service.ResetStatusCode(retriedErr, statusCodeMappingStr)
+				return nil, closeBodies, retriedErr
+			}
+			relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
+			jsonData, err := common.Marshal(convertedRequest)
+			if err != nil {
+				return nil, closeBodies, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+
+			// remove disabled fields for Claude API
+			jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+			if err != nil {
+				return nil, closeBodies, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+
+			// apply param override
+			if len(info.ParamOverride) > 0 {
+				jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+				if err != nil {
+					return nil, closeBodies, newAPIErrorFromParamOverride(err)
+				}
+			}
+
+			logger.LogDebug(c, "requestBody: %s", jsonData)
+			body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+			if err != nil {
+				return nil, closeBodies, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			bodies = append(bodies, closer)
+			requestBody = body
+		}
+		if retriedErr != nil {
+			thinkingCompat.recordRetry(c, info)
+		}
+
+		resp, err := adaptor.DoRequest(c, info, requestBody)
+		if err != nil {
+			return nil, closeBodies, types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+		}
+		if resp == nil {
+			return nil, closeBodies, nil
+		}
+		httpResp := resp.(*http.Response)
+		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
+		if httpResp.StatusCode == http.StatusOK {
+			return httpResp, closeBodies, nil
+		}
+		newAPIError := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
+		if !thinkingCompat.prepareRetry(c, info, request, httpResp.StatusCode, newAPIError) {
+			// reset status code 重置状态码
+			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
+			return nil, closeBodies, newAPIError
+		}
+		retriedErr = newAPIError
+	}
 }

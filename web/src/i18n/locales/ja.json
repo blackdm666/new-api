@@ -7865,6 +7865,17 @@
     "Username is required": "Username is required",
     "Verification and security email configuration": "Verification and security email configuration",
     "Waiting for receipt": "Waiting for receipt",
-    "Weight must be between 1 and 100": "Weight must be between 1 and 100"
+    "Weight must be between 1 and 100": "Weight must be between 1 and 100",
+    "Claude adaptive thinking compatibility": "Claude アダプティブ思考の互換性",
+    "Auto (recommended)": "自動（推奨）",
+    "Always convert": "常に変換",
+    "Off": "オフ",
+    "Send thinking controls as-is. If the upstream reports that the model requires adaptive thinking, convert and retry once on this channel, then convert up front for that model for 6 hours.": "思考パラメータをそのまま送信します。上流がこのモデルにはアダプティブ思考が必要と返した場合、変換してこのチャネルで 1 回だけ再試行し、以後 6 時間はそのモデルについて事前に変換します。",
+    "Convert enabled or disabled thinking to adaptive thinking before sending for Claude models that only support adaptive thinking.": "アダプティブ思考のみ対応の Claude モデルでは、送信前に enabled または disabled の思考をアダプティブ思考に変換します。",
+    "Always send thinking controls unchanged and never retry.": "思考パラメータを常にそのまま送信し、再試行しません。",
+    "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "アダプティブ思考のみを受け付けるモデルに enabled または disabled の思考を送るネイティブ Claude Messages リクエストに適用されます。",
+    "Upstream requires adaptive thinking; retried with adaptive thinking": "上流がアダプティブ思考を要求したため、アダプティブ思考で再試行しました",
+    "Upstream rejected adaptive thinking; retried with the original thinking controls": "上流がアダプティブ思考を拒否したため、元の思考パラメータで再試行しました",
+    "Same channel retry": "同一チャネルで再試行"
   }
 }

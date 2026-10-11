@@ -126,6 +126,22 @@ func RecordPolicyFailure(c *gin.Context, channelID int, err *types.NewAPIError, 
 	state.AddEvent(event)
 }
 
+// RecordSameChannelRetry records a retry that the relay performs on the
+// already selected channel and key before the channel retry flow decides
+// anything, such as the Claude thinking compatibility retry after an upstream
+// 400. The failed attempt is not a channel failure and is not settled.
+func RecordSameChannelRetry(c *gin.Context, channelID, status int, reason string) {
+	if c == nil {
+		return
+	}
+	RequestPolicy(c).AddEvent(PolicyEvent{
+		ChannelID:   channelID,
+		Status:      status,
+		ErrorSource: "upstream",
+		Decision:    PolicyDecision{Action: "retry", Reason: reason, Source: "same_channel"},
+	})
+}
+
 func MarkRequestPolicySuccess(c *gin.Context, stream *relaycommon.StreamStatus) {
 	state := RequestPolicy(c)
 	if state.OutcomeRecorded {

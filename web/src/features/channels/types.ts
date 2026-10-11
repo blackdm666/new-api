@@ -123,6 +123,8 @@ export interface ChannelOtherSettings {
   allow_inference_geo?: boolean
   allow_speed?: boolean
   claude_beta_query?: boolean
+  claude_thinking_compat_mode?: ClaudeThinkingCompatMode
+  /** @deprecated Read for compatibility; `true` loads as `always` and is dropped on save. */
   claude_adaptive_thinking_compatibility?: boolean
   ollama_openai_chat?: boolean
   disable_task_polling_sleep?: boolean
@@ -134,6 +136,8 @@ export interface ChannelOtherSettings {
   advanced_custom?: AdvancedCustomConfig
   balance_query?: ChannelBalanceQueryConfig
 }
+
+export type ClaudeThinkingCompatMode = 'auto' | 'always' | 'off'
 
 export type ChannelBalanceQueryMode =
   | 'auto'
@@ -219,6 +223,7 @@ export interface AdvancedCustomRoute {
   models?: string[]
   auth?: AdvancedCustomRouteAuth
   pass_through_body_enabled?: boolean
+  /** @deprecated Read for compatibility; `true` loads as the channel's `always` mode and is dropped on save. */
   claude_adaptive_thinking_compatibility?: boolean
 }
 

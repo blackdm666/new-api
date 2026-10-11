@@ -7962,6 +7962,17 @@
     "Delivery record unavailable": "投递记录不可用",
     "Primary SMTP fallback": "主 SMTP（回退）",
     "Backup SMTP fallback": "备用 SMTP（回退）",
-    "Not sent yet": "尚未发送"
+    "Not sent yet": "尚未发送",
+    "Claude adaptive thinking compatibility": "Claude 自适应思考兼容",
+    "Auto (recommended)": "自动（推荐）",
+    "Always convert": "始终转换",
+    "Off": "关闭",
+    "Send thinking controls as-is. If the upstream reports that the model requires adaptive thinking, convert and retry once on this channel, then convert up front for that model for 6 hours.": "按原样发送 thinking 参数；若上游提示该模型必须使用自适应思考，则转换后在本渠道重试一次，并在 6 小时内对该模型直接转换。",
+    "Convert enabled or disabled thinking to adaptive thinking before sending for Claude models that only support adaptive thinking.": "对仅支持自适应思考的 Claude 模型，发送前将 enabled 或 disabled 思考参数转换为自适应思考。",
+    "Always send thinking controls unchanged and never retry.": "始终原样发送 thinking 参数，不转换也不重试。",
+    "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "适用于向仅接受自适应思考的模型发送 enabled 或 disabled 思考参数的原生 Claude Messages 请求。",
+    "Upstream requires adaptive thinking; retried with adaptive thinking": "上游要求自适应思考，已改用自适应思考重试",
+    "Upstream rejected adaptive thinking; retried with the original thinking controls": "上游拒绝自适应思考，已用原始思考参数重试",
+    "Same channel retry": "同渠道重试"
   }
 }

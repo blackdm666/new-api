@@ -7865,6 +7865,17 @@
     "Username is required": "Username is required",
     "Verification and security email configuration": "Verification and security email configuration",
     "Waiting for receipt": "Waiting for receipt",
-    "Weight must be between 1 and 100": "Weight must be between 1 and 100"
+    "Weight must be between 1 and 100": "Weight must be between 1 and 100",
+    "Claude adaptive thinking compatibility": "Compatibilité de la réflexion adaptative Claude",
+    "Auto (recommended)": "Auto (recommandé)",
+    "Always convert": "Toujours convertir",
+    "Off": "Désactivé",
+    "Send thinking controls as-is. If the upstream reports that the model requires adaptive thinking, convert and retry once on this channel, then convert up front for that model for 6 hours.": "Envoie les paramètres de réflexion tels quels. Si l'amont indique que le modèle exige la réflexion adaptative, convertit et réessaie une fois sur ce canal, puis convertit d'emblée pour ce modèle pendant 6 heures.",
+    "Convert enabled or disabled thinking to adaptive thinking before sending for Claude models that only support adaptive thinking.": "Convertit la réflexion enabled ou disabled en réflexion adaptative avant l'envoi pour les modèles Claude qui ne prennent en charge que la réflexion adaptative.",
+    "Always send thinking controls unchanged and never retry.": "Envoie toujours les paramètres de réflexion sans modification et ne réessaie jamais.",
+    "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "S'applique aux requêtes Claude Messages natives qui envoient une réflexion enabled ou disabled à des modèles n'acceptant que la réflexion adaptative.",
+    "Upstream requires adaptive thinking; retried with adaptive thinking": "L'amont exige la réflexion adaptative ; nouvel essai avec réflexion adaptative",
+    "Upstream rejected adaptive thinking; retried with the original thinking controls": "L'amont a refusé la réflexion adaptative ; nouvel essai avec les paramètres de réflexion d'origine",
+    "Same channel retry": "Nouvel essai sur le même canal"
   }
 }

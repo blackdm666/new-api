@@ -40,6 +40,16 @@ export function policyLabel(t: TFunction, value: string): string {
       return t('Request completed')
     case 'stream_not_successful':
       return t('Stream did not complete successfully')
+    case 'claude_adaptive_thinking_required':
+      return t(
+        'Upstream requires adaptive thinking; retried with adaptive thinking'
+      )
+    case 'claude_adaptive_thinking_unsupported':
+      return t(
+        'Upstream rejected adaptive thinking; retried with the original thinking controls'
+      )
+    case 'same_channel':
+      return t('Same channel retry')
     case 'channel':
       return t('Channel')
     case 'global':
