@@ -224,18 +224,10 @@ func DownloadInvoiceFile(c *gin.Context) {
 		disposition = "inline"
 	}
 	dispositionHeader := invoicefile.ResponseContentDisposition(file.FileName, disposition == "inline")
-	ttl := time.Duration(setting.InvoiceFileSignedURLTTL) * time.Second
-	if ttl <= 0 {
-		ttl = 15 * time.Minute
-	}
-	if file.StorageType != "local" {
-		signedURL, signErr := storage.SignedURL(c.Request.Context(), file.StorageKey, ttl, file.FileName, disposition == "inline")
-		if signErr == nil && signedURL != "" {
-			c.Redirect(http.StatusFound, signedURL)
-			return
-		}
-	}
 
+	// Stream every backend through this response instead of redirecting to a
+	// signed object-storage URL. The console downloads with an authenticated
+	// XHR, and a cross-origin redirect would require CORS on the bucket.
 	reader, err := storage.Get(c.Request.Context(), file.StorageKey)
 	if err != nil {
 		if errors.Is(err, invoicefile.ErrNotFound) {
