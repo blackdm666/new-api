@@ -39,6 +39,12 @@ const productNames = [
   'Grok Build',
 ]
 
+// zh-TW renders "app"/"application" as 應用程式 or 應用. 套用 means "apply"
+// there, so a Simplified→Traditional conversion that maps 应用 to 套用 is only
+// right for keys about applying something.
+const appTerm = /\bapp(?:s|lications?)?\b/i
+const applyTerm = /\bappl(?:y|ies|ied|ying)\b/i
+
 function readTranslations(locale: string): Record<string, string> {
   const resource = JSON.parse(
     readFileSync(join(localesDirectory, `${locale}.json`), 'utf8')
@@ -67,7 +73,22 @@ describe('locale terminology', () => {
     }
   )
 
-  test('translates Application in zh-TW as an app rather than 套用 (apply)', () => {
-    expect(readTranslations('zh-TW')['Application']).not.toContain('套用')
+  test('never uses the non-word 套用程式 in zh-TW', () => {
+    const misused = Object.entries(readTranslations('zh-TW'))
+      .filter(([, value]) => value.includes('套用程式'))
+      .map(([key, value]) => `${key} => ${value}`)
+
+    expect(misused).toEqual([])
+  })
+
+  test('translates app and application keys in zh-TW without 套用 (apply)', () => {
+    const misused = Object.entries(readTranslations('zh-TW'))
+      .filter(
+        ([key, value]) =>
+          appTerm.test(key) && !applyTerm.test(key) && value.includes('套用')
+      )
+      .map(([key, value]) => `${key} => ${value}`)
+
+    expect(misused).toEqual([])
   })
 })
