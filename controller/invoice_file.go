@@ -5,10 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -109,13 +107,7 @@ func UploadInvoiceFile(c *gin.Context) {
 	if validation.Ext != "" {
 		storedName += "." + validation.Ext
 	}
-	now := time.Now().UTC()
-	storageKey := path.Join(
-		strconv.Itoa(requestId),
-		fmt.Sprintf("%04d", now.Year()),
-		fmt.Sprintf("%02d", now.Month()),
-		storedName,
-	)
+	storageKey := model.InvoiceFileStorageKey(requestId, time.Now(), storedName)
 	uploadId := uuid.NewString()
 	staged := &model.InvoiceFileUpload{
 		Id:               uploadId,
@@ -242,7 +234,9 @@ func DownloadInvoiceFile(c *gin.Context) {
 	c.Writer.Header().Set("Content-Disposition", dispositionHeader)
 	c.Writer.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
 	c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
-	c.Writer.Header().Set("Cache-Control", "private, max-age=604800, immutable")
+	// Files are authorization-gated and may be replaced or purged, so no
+	// browser or intermediary may keep a copy.
+	c.Writer.Header().Set("Cache-Control", "private, no-store")
 	c.Status(http.StatusOK)
 	if _, err := io.Copy(c.Writer, reader); err != nil {
 		common.SysLog("invoice file download failed: " + err.Error())

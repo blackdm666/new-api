@@ -71,6 +71,9 @@ export const PAYMENT_METHOD_NAMES: Record<string, string> = {
   ALIPAY_CN: 'Alipay',
   ALIPAY_HK: 'AlipayHK',
   GCASH: 'GCash',
+  alipayglobal: 'Alipay',
+  '88fkstripe': 'Stripe',
+  'usdt.trc20': 'USDT (TRC20)',
 }
 
 /**

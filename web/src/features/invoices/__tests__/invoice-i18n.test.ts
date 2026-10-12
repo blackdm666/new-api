@@ -30,6 +30,19 @@ const sourceTargets = [
 ]
 const locales = ['zh', 'zh-TW', 'fr', 'ja', 'ru', 'vi'] as const
 
+function readTranslations(locale: string): Record<string, string> {
+  const resource = JSON.parse(
+    readFileSync(join(webSource, `i18n/locales/${locale}.json`), 'utf8')
+  ) as { translation: Record<string, string> }
+  return resource.translation
+}
+
+function placeholders(text: string): string[] {
+  return [...text.matchAll(/{{\s*([\w.]+)\s*}}/g)]
+    .map((match) => match[1])
+    .sort()
+}
+
 function listSourceFiles(target: string): string[] {
   if (statSync(target).isFile()) return [target]
   return readdirSync(target).flatMap((entry) =>
@@ -65,15 +78,37 @@ describe('invoice translations', () => {
     expect(keys.length).toBeGreaterThan(0)
 
     for (const locale of locales) {
-      const resource = JSON.parse(
-        readFileSync(join(webSource, `i18n/locales/${locale}.json`), 'utf8')
-      ) as { translation: Record<string, string> }
+      const translation = readTranslations(locale)
       const missing = keys.filter(
-        (key) =>
-          !Object.hasOwn(resource.translation, key) ||
-          resource.translation[key] === key
+        (key) => !Object.hasOwn(translation, key) || translation[key] === key
       )
       expect(missing, `${locale}: ${missing.join(', ')}`).toEqual([])
+    }
+  })
+
+  test('every locale interpolates exactly the placeholders of the English source', () => {
+    const keys = collectInvoiceKeys()
+
+    for (const locale of ['en', ...locales]) {
+      const translation = readTranslations(locale)
+      const mismatched = keys.filter(
+        (key) =>
+          Object.hasOwn(translation, key) &&
+          placeholders(translation[key]).join() !== placeholders(key).join()
+      )
+      expect(mismatched, `${locale}: ${mismatched.join(' | ')}`).toEqual([])
+    }
+  })
+
+  test('translations do not hard-code amounts that the English source interpolates', () => {
+    const keys = collectInvoiceKeys().filter((key) => !/¥\s*\d/.test(key))
+
+    for (const locale of locales) {
+      const translation = readTranslations(locale)
+      const hardCoded = keys.filter((key) =>
+        /¥\s*\d/.test(translation[key] ?? '')
+      )
+      expect(hardCoded, `${locale}: ${hardCoded.join(' | ')}`).toEqual([])
     }
   })
 })

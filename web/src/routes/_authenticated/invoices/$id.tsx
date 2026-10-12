@@ -16,13 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useLocation } from '@tanstack/react-router'
 
 import { InvoiceDetailPage } from '@/features/invoices/components/invoice-detail-page'
 
 function InvoiceDetailRoute() {
   const { id } = Route.useParams()
-  return <InvoiceDetailPage invoiceId={Number(id)} admin={false} />
+  const hash = useLocation({ select: (location) => location.hash })
+  const invoiceId = Number(id)
+  return (
+    <InvoiceDetailPage
+      invoiceId={Number.isInteger(invoiceId) && invoiceId > 0 ? invoiceId : 0}
+      admin={false}
+      scrollToFiles={hash === 'invoice-files'}
+    />
+  )
 }
 
 export const Route = createFileRoute('/_authenticated/invoices/$id')({

@@ -200,6 +200,9 @@ const (
 	MsgInvoiceFileTypeNotAllowed      = "invoice.file_type_not_allowed"
 	MsgInvoiceFileTypeMismatch        = "invoice.file_type_mismatch"
 	MsgInvoiceFileSVGForbidden        = "invoice.file_svg_forbidden"
+	MsgInvoiceOrphanKeyRejected       = "invoice.orphan_key_rejected"
+	MsgInvoiceWechatNotConfigured     = "invoice.wechat_not_configured"
+	MsgInvoiceWechatTestFailed        = "invoice.wechat_test_failed"
 )
 
 // Payment related messages

@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service/invoicefile"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -51,6 +53,7 @@ func setupInvoiceControllerTest(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
+		&model.User{},
 		&model.TopUp{},
 		&model.InvoiceRequest{},
 		&model.InvoiceFile{},
@@ -95,25 +98,35 @@ func TestBuildInvoiceRequestDetailProtectsPendingFilesAndOperatorIdentity(t *tes
 		StorageType:      "local",
 		StorageKey:       "invoice.pdf",
 	}).Error)
-	require.NoError(t, model.DB.Create(&model.InvoiceRequestEvent{
-		InvoiceRequestId: request.Id,
-		FromStatus:       0,
-		ToStatus:         model.InvoiceStatusPending,
-		OperatorId:       77,
-		CreatedTime:      1,
-	}).Error)
+	require.NoError(t, model.DB.Create(&model.User{Id: 8, Username: "invoice-user", AffCode: "invoice-user-code"}).Error)
+	require.NoError(t, model.DB.Create(&model.User{Id: 77, Username: "finance-admin", AffCode: "finance-admin-code"}).Error)
+	for _, event := range []*model.InvoiceRequestEvent{
+		{InvoiceRequestId: request.Id, FromStatus: 0, ToStatus: model.InvoiceStatusPending, OperatorId: 8, CreatedTime: 1},
+		{InvoiceRequestId: request.Id, FromStatus: model.InvoiceStatusPending, ToStatus: model.InvoiceStatusPending, OperatorId: 77, CreatedTime: 2},
+		{InvoiceRequestId: request.Id, FromStatus: model.InvoiceStatusPending, ToStatus: model.InvoiceStatusPending, OperatorId: 0, CreatedTime: 3},
+	} {
+		require.NoError(t, model.DB.Create(event).Error)
+	}
 
 	userDetail, err := buildInvoiceRequestDetail(request, false)
 	require.NoError(t, err)
 	assert.Empty(t, userDetail.Files)
-	require.Len(t, userDetail.Events, 1)
-	assert.Zero(t, userDetail.Events[0].OperatorId)
+	require.Len(t, userDetail.Events, 3)
+	for _, event := range userDetail.Events {
+		assert.Zero(t, event.OperatorId)
+	}
+	assert.Equal(t, "invoice-user", userDetail.Events[0].OperatorName)
+	assert.Empty(t, userDetail.Events[1].OperatorName, "applicants must not learn which staff account acted")
+	assert.Empty(t, userDetail.Events[2].OperatorName)
 
 	adminDetail, err := buildInvoiceRequestDetail(request, true)
 	require.NoError(t, err)
 	require.Len(t, adminDetail.Files, 1)
-	require.Len(t, adminDetail.Events, 1)
-	assert.Equal(t, 77, adminDetail.Events[0].OperatorId)
+	require.Len(t, adminDetail.Events, 3)
+	assert.Equal(t, 77, adminDetail.Events[1].OperatorId)
+	assert.Equal(t, "invoice-user", adminDetail.Events[0].OperatorName)
+	assert.Equal(t, "finance-admin", adminDetail.Events[1].OperatorName)
+	assert.Empty(t, adminDetail.Events[2].OperatorName)
 
 	request.Status = model.InvoiceStatusIssued
 	userDetail, err = buildInvoiceRequestDetail(request, false)
@@ -181,5 +194,87 @@ func TestDownloadInvoiceFileStreamsObjectStorageWithoutRedirect(t *testing.T) {
 	assert.Equal(t, content, recorder.Body.Bytes())
 	assert.Equal(t, "application/pdf", recorder.Header().Get("Content-Type"))
 	assert.Equal(t, "attachment; filename*=UTF-8''invoice.pdf", recorder.Header().Get("Content-Disposition"))
+	assert.Equal(t, "private, no-store", recorder.Header().Get("Cache-Control"))
 	assert.Equal(t, "/invoices/1/2026/10/invoice.pdf", objectPath)
+}
+
+func TestGetInvoiceConfigDescribesApplicantAndUploadLimits(t *testing.T) {
+	setupInvoiceControllerTest(t)
+	previousExpiryDays := setting.InvoicePendingExpiryDays
+	previousExts := setting.InvoiceFileAllowedExts
+	previousCount := setting.InvoiceFileMaxCount
+	previousSize := setting.InvoiceFileMaxSize
+	setting.InvoicePendingExpiryDays = 30
+	setting.InvoiceFileAllowedExts = "pdf,PNG, .jpg"
+	setting.InvoiceFileMaxCount = 3
+	setting.InvoiceFileMaxSize = 2 * 1024 * 1024
+	t.Cleanup(func() {
+		setting.InvoicePendingExpiryDays = previousExpiryDays
+		setting.InvoiceFileAllowedExts = previousExts
+		setting.InvoiceFileMaxCount = previousCount
+		setting.InvoiceFileMaxSize = previousSize
+	})
+	bound := &model.User{Username: "config-bound", Email: "billing@example.com", AffCode: "config-bound-code"}
+	unbound := &model.User{Username: "config-unbound", AffCode: "config-unbound-code"}
+	require.NoError(t, model.DB.Create(bound).Error)
+	require.NoError(t, model.DB.Create(unbound).Error)
+
+	type invoiceConfig struct {
+		Email             string   `json:"email"`
+		EmailBound        bool     `json:"email_bound"`
+		PendingExpiryDays int      `json:"pending_expiry_days"`
+		FileAllowedExts   []string `json:"file_allowed_exts"`
+		FileMaxCount      int      `json:"file_max_count"`
+		FileMaxSize       int64    `json:"file_max_size"`
+		MinimumAmount     int64    `json:"minimum_amount_cents"`
+	}
+	for _, test := range []struct {
+		user  *model.User
+		email string
+	}{
+		{user: bound, email: "billing@example.com"},
+		{user: unbound, email: ""},
+	} {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodGet, "/api/invoice/config", nil)
+		context.Set("id", test.user.Id)
+
+		GetInvoiceConfig(context)
+
+		var response struct {
+			Success bool          `json:"success"`
+			Data    invoiceConfig `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		require.True(t, response.Success)
+		assert.Equal(t, test.email, response.Data.Email)
+		assert.Equal(t, test.email != "", response.Data.EmailBound)
+		assert.Equal(t, 30, response.Data.PendingExpiryDays)
+		assert.Equal(t, []string{"pdf", "png", "jpg"}, response.Data.FileAllowedExts)
+		assert.Equal(t, 3, response.Data.FileMaxCount)
+		assert.Equal(t, int64(2*1024*1024), response.Data.FileMaxSize)
+		assert.Equal(t, setting.InvoiceMinimumAmountCents, response.Data.MinimumAmount)
+	}
+}
+
+func TestDestructiveInvoiceMaintenanceRequiresRoot(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	for name, handler := range map[string]gin.HandlerFunc{
+		"orphan cleanup": CleanupInvoiceOrphans,
+		"wechat test":    TestInvoiceWechatNotification,
+	} {
+		t.Run(name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(recorder)
+			context.Request = httptest.NewRequest(http.MethodPost, "/api/invoice/admin/maintenance",
+				strings.NewReader(`{"keys":[{"storage_profile_id":1,"storage_key":"avatars/1.png"}]}`))
+			context.Set("role", common.RoleAdminUser)
+
+			handler(context)
+
+			assert.Equal(t, http.StatusForbidden, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), "AUTH_INSUFFICIENT_PRIVILEGE")
+		})
+	}
 }

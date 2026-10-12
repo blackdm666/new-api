@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	appI18n "github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/model"
 )
 
 // GetEmailTemplate 读取保存的自定义主题/正文；若 OptionMap 中对应 key 为空，回落到 spec 默认值。
@@ -271,6 +272,26 @@ func applyInvoiceTemplatePreviewSamples(key string, lang string, vars map[string
 		vars["intro"] = invoiceEmailText(lang, "invoice.email.user.issued.intro")
 		vars["action_url"] = baseURL + "/invoices/1024"
 		vars["action_label"] = invoiceEmailText(lang, "invoice.email.user.issued.action")
+	case constant.EmailTemplateKeyInvoiceRejectedUser, constant.EmailTemplateKeyInvoiceExpiredUser:
+		mode, status := "user.rejected", model.InvoiceStatusRejected
+		if key == constant.EmailTemplateKeyInvoiceExpiredUser {
+			mode, status = "user.expired", model.InvoiceStatusExpired
+		}
+		rows[5].Value = invoiceRequestStatusLabel(status, lang)
+		if status == model.InvoiceStatusRejected {
+			reason := invoiceEmailText(lang, "invoice.email.preview.rejection_reason")
+			vars["rejection_reason"] = html.EscapeString(reason)
+			rows = append(rows, common.EmailTemplateRow{Label: invoiceEmailText(lang, "invoice.email.label.rejection_reason"), Value: html.EscapeString(reason)})
+		}
+		refundNote := invoiceEmailText(lang, "invoice.email.user.refund_note", map[string]any{"Amount": "21.04"})
+		rows = append(rows, common.EmailTemplateRow{Label: invoiceEmailText(lang, "invoice.email.label.tax_fee_refunded"), Value: "CNY 21.04"})
+		vars["tax_fee_refunded"] = "21.04"
+		vars["refund_note"] = html.EscapeString(refundNote)
+		vars["email_subject"] = invoiceEmailText(lang, "invoice.email."+mode+".subject", map[string]any{"ID": 1024})
+		vars["heading"] = invoiceEmailText(lang, "invoice.email."+mode+".heading")
+		vars["intro"] = html.EscapeString(invoiceEmailText(lang, "invoice.email."+mode+".intro") + " " + refundNote)
+		vars["action_url"] = baseURL + "/invoices/1024"
+		vars["action_label"] = invoiceEmailText(lang, "invoice.email."+mode+".action")
 	case constant.EmailTemplateKeyInvoiceExpiryAdmin:
 		rows = append(rows, common.EmailTemplateRow{Label: invoiceEmailText(lang, "invoice.email.label.expires_at"), Value: "2026-08-15 12:00:00"})
 		vars["email_subject"] = invoiceEmailText(lang, "invoice.email.admin.expiry.subject", map[string]any{"ID": 1024})

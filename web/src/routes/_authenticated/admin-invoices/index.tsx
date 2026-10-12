@@ -18,20 +18,18 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
-import { InvoiceListPage } from '@/features/invoices/components/invoice-list-page'
+import { AdminInvoices } from '@/features/invoices'
+import { invoiceListSearchSchema } from '@/features/invoices/lib/invoice-list-search'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
-function AdminInvoicesPage() {
-  return <InvoiceListPage admin />
-}
-
 export const Route = createFileRoute('/_authenticated/admin-invoices/')({
+  validateSearch: invoiceListSearchSchema,
   beforeLoad: () => {
     const { auth } = useAuthStore.getState()
     if (!auth.user || (auth.user.role ?? 0) < ROLE.ADMIN) {
       throw redirect({ to: '/403' })
     }
   },
-  component: AdminInvoicesPage,
+  component: AdminInvoices,
 })

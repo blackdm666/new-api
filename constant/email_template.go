@@ -3,6 +3,8 @@ package constant
 const (
 	EmailTemplateKeyInvoiceRequestAdmin     = "invoice_request_admin"
 	EmailTemplateKeyInvoiceIssuedUser       = "invoice_issued_user"
+	EmailTemplateKeyInvoiceRejectedUser     = "invoice_rejected_user"
+	EmailTemplateKeyInvoiceExpiredUser      = "invoice_expired_user"
 	EmailTemplateKeyInvoiceExpiryAdmin      = "invoice_expiry_admin"
 	EmailTemplateKeyAffiliateUpgradeAdmin   = "affiliate_upgrade_admin"
 	EmailTemplateKeyAffiliateUpgradeUser    = "affiliate_upgrade_user"
@@ -178,6 +180,53 @@ func EmailTemplateSpecs() []EmailTemplateSpec {
 				{Name: "total_money", Description: "申请金额", Sample: "701.25"},
 				{Name: "invoice_status", Description: "发票状态", Sample: "已开具"},
 				{Name: "previous_status", Description: "变更前状态", Sample: "待开具"},
+				{Name: "created_at", Description: "申请时间", Sample: "2026-08-14 12:00:00"},
+				{Name: "order_numbers", Description: "关联充值订单号", Sample: "INV-202608-001"},
+				varInfoTable, varActionURL, varActionLabel,
+			},
+			DefaultSubject: "{{email_subject}}",
+			DefaultBody:    defaultBody,
+		},
+		{
+			Key:         EmailTemplateKeyInvoiceRejectedUser,
+			Name:        "发票申请被驳回-通知用户",
+			Description: "管理员驳回发票申请后，发送给申请用户；已扣税费会退回账户余额。",
+			Variables: []EmailTemplateVariable{
+				varSystemName, varServerAddr, varEmailSubject, varHeading,
+				{Name: "intro", Description: "正文开头说明（含税费退还说明）", Sample: "你的发票申请未通过审核，关联的充值订单已释放，可修改资料后重新申请。已支付的税费 ¥21.04 已退回账户余额。"},
+				{Name: "invoice_id", Description: "发票申请编号", Sample: "1024"},
+				{Name: "username", Description: "申请用户名", Sample: "alice"},
+				{Name: "company_name", Description: "发票抬头", Sample: "示例科技有限公司"},
+				{Name: "tax_number", Description: "税号", Sample: "91310000EXAMPLE"},
+				{Name: "total_money", Description: "申请金额", Sample: "701.25"},
+				{Name: "invoice_status", Description: "发票状态", Sample: "已驳回"},
+				{Name: "previous_status", Description: "变更前状态", Sample: "待开具"},
+				{Name: "rejection_reason", Description: "驳回原因", Sample: "税号与公司名称不匹配"},
+				{Name: "tax_fee_refunded", Description: "已退还税费金额，未退还时为空", Sample: "21.04"},
+				{Name: "refund_note", Description: "税费退还说明，未退还时为空", Sample: "已支付的税费 ¥21.04 已退回账户余额。"},
+				{Name: "created_at", Description: "申请时间", Sample: "2026-08-14 12:00:00"},
+				{Name: "order_numbers", Description: "关联充值订单号", Sample: "INV-202608-001"},
+				varInfoTable, varActionURL, varActionLabel,
+			},
+			DefaultSubject: "{{email_subject}}",
+			DefaultBody:    defaultBody,
+		},
+		{
+			Key:         EmailTemplateKeyInvoiceExpiredUser,
+			Name:        "发票申请已过期-通知用户",
+			Description: "待处理发票申请超过处理期限自动关闭后，发送给申请用户；已扣税费会退回账户余额。",
+			Variables: []EmailTemplateVariable{
+				varSystemName, varServerAddr, varEmailSubject, varHeading,
+				{Name: "intro", Description: "正文开头说明（含税费退还说明）", Sample: "你的发票申请超过处理期限未开具，系统已自动关闭，关联的充值订单已释放，可重新提交申请。已支付的税费 ¥21.04 已退回账户余额。"},
+				{Name: "invoice_id", Description: "发票申请编号", Sample: "1024"},
+				{Name: "username", Description: "申请用户名", Sample: "alice"},
+				{Name: "company_name", Description: "发票抬头", Sample: "示例科技有限公司"},
+				{Name: "tax_number", Description: "税号", Sample: "91310000EXAMPLE"},
+				{Name: "total_money", Description: "申请金额", Sample: "701.25"},
+				{Name: "invoice_status", Description: "发票状态", Sample: "已过期"},
+				{Name: "previous_status", Description: "变更前状态", Sample: "待开具"},
+				{Name: "tax_fee_refunded", Description: "已退还税费金额，未退还时为空", Sample: "21.04"},
+				{Name: "refund_note", Description: "税费退还说明，未退还时为空", Sample: "已支付的税费 ¥21.04 已退回账户余额。"},
 				{Name: "created_at", Description: "申请时间", Sample: "2026-08-14 12:00:00"},
 				{Name: "order_numbers", Description: "关联充值订单号", Sample: "INV-202608-001"},
 				varInfoTable, varActionURL, varActionLabel,

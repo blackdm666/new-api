@@ -1,6 +1,14 @@
 package setting
 
-import "strings"
+import (
+	"errors"
+	"net/url"
+	"strings"
+)
+
+// DefaultInvoiceWechatApiBaseUrl is the hosted WeChat API used to push invoice
+// events to the finance group.
+const DefaultInvoiceWechatApiBaseUrl = "http://api.wechatapi.net/finder/v2/api"
 
 var (
 	InvoiceFileEnabled              = true
@@ -39,7 +47,38 @@ var (
 	InvoiceFileCOSCustomDomain = ""
 
 	InvoiceFileSignedURLTTL int64 = 900
+
+	InvoiceWechatNotifyEnabled = false
+	InvoiceWechatApiBaseUrl    = DefaultInvoiceWechatApiBaseUrl
+	InvoiceWechatApiToken      = ""
+	InvoiceWechatAppId         = ""
+	InvoiceWechatGroupId       = ""
 )
+
+// InvoiceWechatConfigured reports whether every value needed to post to the
+// finance WeChat group is present, independent of the enabled switch.
+func InvoiceWechatConfigured() bool {
+	return strings.TrimSpace(InvoiceWechatApiBaseUrl) != "" &&
+		strings.TrimSpace(InvoiceWechatApiToken) != "" &&
+		strings.TrimSpace(InvoiceWechatAppId) != "" &&
+		strings.TrimSpace(InvoiceWechatGroupId) != ""
+}
+
+func ValidateInvoiceWechatApiBaseUrl(value string) error {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return errors.New("WeChat API base URL must be a valid HTTP or HTTPS URL")
+	}
+	return nil
+}
+
+func ValidateInvoiceWechatGroupId(value string) error {
+	value = strings.TrimSpace(value)
+	if value != "" && !strings.HasSuffix(value, "@chatroom") {
+		return errors.New("WeChat group ID must end with @chatroom")
+	}
+	return nil
+}
 
 func InvoiceFileAllowedExtList() []string {
 	raw := strings.Split(InvoiceFileAllowedExts, ",")

@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -13,7 +15,7 @@ import (
 )
 
 type cleanupOrphanInvoiceFilesPayload struct {
-	Keys []service.InvoiceStorageKey `json:"keys"`
+	Keys []model.InvoiceStorageKey `json:"keys"`
 }
 
 func GetInvoiceMaintenance(c *gin.Context) {
@@ -88,13 +90,27 @@ func ReconcileInvoiceStorage(c *gin.Context) {
 	common.ApiSuccess(c, report)
 }
 
+// CleanupInvoiceOrphans permanently deletes storage objects, so it is limited
+// to root even though the rest of invoice maintenance is open to admins.
 func CleanupInvoiceOrphans(c *gin.Context) {
+	if c.GetInt("role") < common.RoleRootUser {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"code":    "AUTH_INSUFFICIENT_PRIVILEGE",
+			"message": common.TranslateMessage(c, i18n.MsgAuthInsufficientPrivilege),
+		})
+		return
+	}
 	var payload cleanupOrphanInvoiceFilesPayload
 	if err := common.DecodeJson(c.Request.Body, &payload); err != nil || len(payload.Keys) == 0 || len(payload.Keys) > 2000 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	cleanups, err := service.QueueInvoiceOrphanCleanups(payload.Keys)
+	cleanups, err := model.QueueInvoiceOrphanCleanups(payload.Keys)
+	if errors.Is(err, model.ErrInvoiceStorageKeyInvalid) || errors.Is(err, model.ErrInvoiceStorageKeyReferenced) {
+		common.ApiErrorI18n(c, i18n.MsgInvoiceOrphanKeyRejected)
+		return
+	}
 	if err != nil {
 		respondInvoiceInternalError(c, i18n.MsgInvoiceMaintenanceFailed, err)
 		return

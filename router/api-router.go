@@ -240,6 +240,7 @@ func SetApiRouter(router *gin.Engine) {
 			invoiceAdminRoute.POST("/maintenance/notifications/:delivery_id/retry", middleware.CriticalRateLimit(), controller.RetryInvoiceNotification)
 			invoiceAdminRoute.POST("/maintenance/reconcile", middleware.CriticalRateLimit(), controller.ReconcileInvoiceStorage)
 			invoiceAdminRoute.POST("/maintenance/orphans/cleanup", middleware.CriticalRateLimit(), controller.CleanupInvoiceOrphans)
+			invoiceAdminRoute.POST("/wechat/test", middleware.CriticalRateLimit(), controller.TestInvoiceWechatNotification)
 		}
 
 		// Subscription billing (plans, purchase, admin management)

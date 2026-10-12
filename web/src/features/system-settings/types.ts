@@ -143,6 +143,13 @@ export type EmailReceiptEndpoint = {
 export type InvoiceSettingsPayload = {
   InvoiceApplicationNotifyAdminEnabled: boolean
   InvoiceIssuedNotifyUserEnabled: boolean
+  InvoiceRejectedNotifyUserEnabled: boolean
+  InvoiceExpiredNotifyUserEnabled: boolean
+  InvoiceWechatNotifyEnabled: boolean
+  InvoiceWechatApiBaseUrl: string
+  InvoiceWechatApiToken: string
+  InvoiceWechatAppId: string
+  InvoiceWechatGroupId: string
   InvoiceAdminEmail: string
   InvoiceMinimumAmountCents: number
   InvoiceTaxRateBasisPoints: number
@@ -544,6 +551,14 @@ export type OperationsSettings = {
   SMTPMarketingForceAuthLogin: boolean
   InvoiceApplicationNotifyAdminEnabled: boolean
   InvoiceIssuedNotifyUserEnabled: boolean
+  InvoiceRejectedNotifyUserEnabled: boolean
+  InvoiceExpiredNotifyUserEnabled: boolean
+  InvoiceWechatNotifyEnabled: boolean
+  InvoiceWechatApiBaseUrl: string
+  InvoiceWechatApiToken: string
+  InvoiceWechatApiTokenConfigured: boolean
+  InvoiceWechatAppId: string
+  InvoiceWechatGroupId: string
   InvoiceAdminEmail: string
   InvoiceMinimumAmountCents: string
   InvoiceTaxRateBasisPoints: string

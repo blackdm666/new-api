@@ -16,8 +16,32 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { getRouteApi } from '@tanstack/react-router'
+
 import { InvoiceListPage } from './components/invoice-list-page'
 
+const userListRoute = getRouteApi('/_authenticated/invoices/')
+const adminListRoute = getRouteApi('/_authenticated/admin-invoices/')
+
 export function Invoices() {
-  return <InvoiceListPage />
+  const search = userListRoute.useSearch()
+  const navigate = userListRoute.useNavigate()
+  return (
+    <InvoiceListPage
+      search={search}
+      onSearchChange={(next) => void navigate({ search: next, replace: true })}
+    />
+  )
+}
+
+export function AdminInvoices() {
+  const search = adminListRoute.useSearch()
+  const navigate = adminListRoute.useNavigate()
+  return (
+    <InvoiceListPage
+      admin
+      search={search}
+      onSearchChange={(next) => void navigate({ search: next, replace: true })}
+    />
+  )
 }
