@@ -7979,7 +7979,7 @@
     "Enterprise": "企业合作",
     "Partner Program": "代理分销",
     "Hong Kong company contracts · Corporate bank transfer · Enterprise inquiries": "香港公司签约 · 对公转账 · 企业咨询",
-    "Referral commission {{range}} · Channel partner pricing": "推广佣金 {{range}} · 渠道代理价",
+    "Referral commission {{range}} · Downstream API sites": "推广返佣 {{range}} · 下游 API 站点对接",
     "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.": "链接到官网的商业合作页面（企业合作、代理分销）。请在这些页面上线后再开启。"
   }
 }

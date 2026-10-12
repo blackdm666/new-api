@@ -134,7 +134,7 @@ export function buildTopNavLinks(
         {
           title: options.t('Partner Program'),
           description: options.t(
-            'Referral commission {{range}} · Channel partner pricing',
+            'Referral commission {{range}} · Downstream API sites',
             { range: BUSINESS_PARTNER_COMMISSION_RANGE }
           ),
           href: getLocalizedSitePath(options.language, BUSINESS_PARTNER_PATH),

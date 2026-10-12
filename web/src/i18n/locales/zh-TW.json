@@ -7884,7 +7884,7 @@
     "Enterprise": "企業合作",
     "Partner Program": "代理分銷",
     "Hong Kong company contracts · Corporate bank transfer · Enterprise inquiries": "香港公司簽約 · 對公轉帳 · 企業諮詢",
-    "Referral commission {{range}} · Channel partner pricing": "推廣佣金 {{range}} · 渠道代理價",
+    "Referral commission {{range}} · Downstream API sites": "推廣返佣 {{range}} · 下游 API 站點對接",
     "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.": "連結到官網的商業合作頁面（企業合作、代理分銷）。請在這些頁面上線後再開啟。"
   }
 }

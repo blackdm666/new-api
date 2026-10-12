@@ -7882,7 +7882,7 @@
     "Enterprise": "法人向け",
     "Partner Program": "パートナー制度",
     "Hong Kong company contracts · Corporate bank transfer · Enterprise inquiries": "香港法人と契約 · 法人口座への振込 · 法人向けのご相談",
-    "Referral commission {{range}} · Channel partner pricing": "紹介報酬 {{range}} · 代理店価格",
+    "Referral commission {{range}} · Downstream API sites": "紹介報酬 {{range}} · 下流 API サイト連携",
     "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.": "公式サイトのビジネスページ（法人向け・パートナー制度）へのリンクです。これらのページの公開後に有効にしてください。"
   }
 }
