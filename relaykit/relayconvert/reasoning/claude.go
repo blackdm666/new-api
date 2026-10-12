@@ -26,22 +26,22 @@ type claudeCapabilities struct {
 	supportsManual  bool
 	defaultThinking bool
 	supportsDisable bool
-	supportsEffort  bool
-	supportsXHigh   bool
-	supportsMax     bool
-	strictSampling  bool
-	// defaultEffort is the model's default reasoning strength when the
-	// request does not provide one.
+	// disableAsBetweenTools marks models whose lowest thinking setting is
+	// {"type":"between_tools"} instead of {"type":"disabled"}.
+	disableAsBetweenTools bool
+	supportsEffort        bool
+	supportsXHigh         bool
+	supportsMax           bool
+	strictSampling        bool
+	// defaultEffort is the effort the model runs at when a request sets none:
+	// medium on Claude Opus 5.5 and high on every other model
+	// (https://platform.claude.com/docs/en/build-with-claude/effort).
 	defaultEffort Effort
 }
 
 func claudeCapabilitiesFor(model string) claudeCapabilities {
 	model = strings.ToLower(model)
-	capabilities := claudeCapabilities{
-		supportsManual:  true,
-		supportsDisable: true,
-		defaultEffort:   EffortHigh,
-	}
+	capabilities := claudeCapabilities{supportsManual: true, supportsDisable: true, defaultEffort: EffortHigh}
 
 	switch {
 	case strings.HasPrefix(model, "claude-fable-5"),
@@ -59,6 +59,22 @@ func claudeCapabilitiesFor(model string) claudeCapabilities {
 		capabilities.supportsDisable = false
 		capabilities.supportsMax = true
 		capabilities.strictSampling = true
+	case strings.HasPrefix(model, "claude-opus-5-5"),
+		strings.HasPrefix(model, "claude-sonnet-5-5"):
+		// Opus 5.5 cannot turn thinking off at all; Sonnet 5.5 turns it off
+		// with between_tools.
+		capabilities.adaptive = true
+		capabilities.supportsManual = false
+		capabilities.defaultThinking = true
+		capabilities.supportsDisable = false
+		capabilities.disableAsBetweenTools = strings.HasPrefix(model, "claude-sonnet-5-5")
+		if strings.HasPrefix(model, "claude-opus-5-5") {
+			capabilities.defaultEffort = EffortMedium
+		}
+		capabilities.supportsEffort = true
+		capabilities.supportsXHigh = true
+		capabilities.supportsMax = true
+		capabilities.strictSampling = true
 	case strings.HasPrefix(model, "claude-opus-5"),
 		strings.HasPrefix(model, "claude-sonnet-5"),
 		strings.HasPrefix(model, "claude-opus-4-8"),
@@ -67,10 +83,6 @@ func claudeCapabilitiesFor(model string) claudeCapabilities {
 		capabilities.supportsManual = false
 		if strings.HasPrefix(model, "claude-opus-5") || strings.HasPrefix(model, "claude-sonnet-5") {
 			capabilities.defaultThinking = true
-		}
-		if strings.HasPrefix(model, "claude-opus-5-5") {
-			capabilities.defaultEffort = EffortMedium
-			capabilities.supportsDisable = false
 		}
 		capabilities.supportsEffort = true
 		capabilities.supportsXHigh = true
@@ -135,6 +147,20 @@ func RenderClaude(model string, intent Intent, maxTokens *uint, adapterBudgetPer
 	}
 
 	if intent.Mode == ModeDisabled || intent.Effort == EffortNone {
+		if capabilities.disableAsBetweenTools {
+			// between_tools takes no other thinking field and runs at the
+			// default effort, which is within its "high or below" limit.
+			diagnostics = append(diagnostics, claudeReasoningDiagnostic(
+				"claude_thinking_disable_as_between_tools",
+				fmt.Sprintf("model %q rejects disabled thinking; using between_tools, its lowest thinking setting", model),
+			))
+			return ClaudeRender{
+				Thinking:        &dto.Thinking{Type: "between_tools"},
+				EffectiveEffort: EffortNone,
+				ClearSampling:   capabilities.strictSampling,
+				Diagnostics:     diagnostics,
+			}, nil
+		}
 		if !capabilities.supportsDisable {
 			diagnostics = append(diagnostics, claudeReasoningDiagnostic(
 				"claude_thinking_disable_unsupported",
@@ -351,18 +377,28 @@ func IsClaudeAdaptiveOnlyModel(model string) bool {
 	return strings.HasPrefix(strings.ToLower(model), "claude-opus-5-5")
 }
 
-// ClaudeDefaultEffort is the model's default reasoning strength when a
-// request does not provide one.
+// ClaudeDefaultEffort is the effort the model runs at when a request sets
+// none.
 func ClaudeDefaultEffort(model string) Effort {
 	return claudeCapabilitiesFor(model).defaultEffort
 }
 
+// ResolveClaudeDefault makes the Claude model's default thinking explicit for
+// a non-Claude target: no intent becomes adaptive thinking on models that
+// think by default, and thinking without a strength takes the model's
+// default effort.
 func ResolveClaudeDefault(model string, intent Intent) Intent {
-	if intent.HasStrength() || !claudeCapabilitiesFor(model).defaultThinking {
-		return intent
+	capabilities := claudeCapabilitiesFor(model)
+	switch {
+	case !intent.HasStrength():
+		if !capabilities.defaultThinking {
+			return intent
+		}
+		intent.Mode = ModeAdaptive
+		intent.Effort = capabilities.defaultEffort
+	case intent.Effort == "" && intent.BudgetTokens == nil && (intent.Mode == ModeAdaptive || intent.Mode == ModeEnabled):
+		intent.Effort = capabilities.defaultEffort
 	}
-	intent.Mode = ModeAdaptive
-	intent.Effort = ClaudeDefaultEffort(model)
 	return intent
 }
 

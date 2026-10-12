@@ -43,6 +43,7 @@ import {
   hasAnyCacheTokens,
   isViolationFeeLog,
   renderAuditContent,
+  renderLogContent,
 } from './format'
 
 export interface DetailSegment {
@@ -60,7 +61,7 @@ export function buildTypeDetailSegments(
 ): DetailSegment[] {
   // Top-up, audit, and login logs can carry a localized operation descriptor.
   if (log.type === 1 || log.type === 3 || log.type === 7) {
-    const text = renderAuditContent(other, t)
+    const text = renderAuditContent(other, t) ?? renderLogContent(other, t)
     return text ? [{ text }] : []
   }
 

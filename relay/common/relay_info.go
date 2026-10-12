@@ -47,9 +47,8 @@ type RerankerInfo struct {
 }
 
 type BuildInToolInfo struct {
-	ToolName          string
-	CallCount         int
-	SearchContextSize string
+	ToolName  string
+	CallCount int
 }
 
 type ResponsesUsageInfo struct {
@@ -193,6 +192,21 @@ type RelayInfo struct {
 	FinalRequestRelayFormat types.RelayFormat
 
 	StreamStatus *StreamStatus
+	// VendorToolUsage reads the upstream's own billed tool counts from a raw
+	// response body (non-stream) or the raw terminal stream frame. The channel
+	// adaptor's Init sets it for upstreams whose usage extension names a billed
+	// count; it stays nil for everyone else. Keys are tool-price keys. A zero
+	// value suppresses the protocol items counted under that key, so a vendor
+	// count can supersede web_search_call items billed under a different key.
+	VendorToolUsage func(raw []byte) map[string]int
+	// WebSearchBillingKey overrides the tool-price key the Claude handler uses
+	// for usage.server_tool_use.web_search_requests. Set by a channel adaptor
+	// whose Anthropic-compatible endpoint bills search under its own price
+	// list; empty keeps the protocol default web_search.
+	WebSearchBillingKey string
+	// requestInferredToolKey is the tool-price key RecordRequestInferredToolCall
+	// billed for the current channel attempt.
+	requestInferredToolKey string
 	// PerformanceOutputTokens is captured by settlement and sampled once at
 	// the request boundary, independently of billing success or failure.
 	PerformanceOutputTokens      int64
@@ -200,6 +214,9 @@ type RelayInfo struct {
 
 	// convOptions caches the converter settings snapshot (see ConvOptions).
 	convOptions *convmeta.Options
+	// responsesToolState is written by request conversion and read by the
+	// matching response conversion (see ResponsesToolState).
+	responsesToolState *convmeta.ResponsesToolState
 	// claudeAdaptiveThinking is the current attempt's decision for native
 	// Claude manual thinking controls (see SetClaudeAdaptiveThinking).
 	claudeAdaptiveThinking ClaudeAdaptiveThinking
@@ -317,6 +334,13 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	// OpenRouterDialect); drop the cache so a cross-channel retry rebuilds it.
 	info.convOptions = nil
 	info.claudeAdaptiveThinking = ClaudeAdaptiveThinkingByChannelMode
+	// The adaptor Init of this attempt sets the vendor billing hooks again.
+	info.VendorToolUsage = nil
+	info.WebSearchBillingKey = ""
+	if info.requestInferredToolKey != "" && info.ResponsesUsageInfo != nil {
+		delete(info.ResponsesUsageInfo.BuiltInTools, info.requestInferredToolKey)
+	}
+	info.requestInferredToolKey = ""
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || channelMeta.ChannelSetting.PassThroughBodyEnabled {
 		info.ReasoningEffort = ""
 		info.ReasoningConversion = nil
@@ -496,14 +520,6 @@ func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) 
 			info.ResponsesUsageInfo.BuiltInTools[toolType] = &BuildInToolInfo{
 				ToolName:  toolType,
 				CallCount: 0,
-			}
-			switch toolType {
-			case dto.BuildInToolWebSearchPreview:
-				searchContextSize := common.Interface2String(tool["search_context_size"])
-				if searchContextSize == "" {
-					searchContextSize = "medium"
-				}
-				info.ResponsesUsageInfo.BuiltInTools[toolType].SearchContextSize = searchContextSize
 			}
 		}
 	}
@@ -910,6 +926,19 @@ func (info *RelayInfo) EnsureClaudeConvertInfo() *convmeta.ClaudeConvertInfo {
 	return info.ClaudeConvertInfo
 }
 
+func (info *RelayInfo) ResponsesToolState() *convmeta.ResponsesToolState {
+	if info == nil {
+		return nil
+	}
+	return info.responsesToolState
+}
+
+func (info *RelayInfo) SetResponsesToolState(state *convmeta.ResponsesToolState) {
+	if info != nil {
+		info.responsesToolState = state
+	}
+}
+
 func (info *RelayInfo) GetSendResponseCount() int {
 	if info == nil {
 		return 0
@@ -954,12 +983,7 @@ func (info *RelayInfo) ConvOptions() *convmeta.Options {
 		if info.ChannelMeta != nil {
 			options.ToolLossPolicy = types.ConversionLossPolicy(info.ChannelOtherSettings.ToolLossPolicy)
 		}
-		switch info.claudeAdaptiveThinking {
-		case ClaudeAdaptiveThinkingRewrite:
-			options.Claude.AdaptiveThinkingRequired = true
-		case ClaudeAdaptiveThinkingByChannelMode:
-			options.Claude.AdaptiveThinkingCompatibilityEnabled = info.ClaudeThinkingCompatMode() == dto.ClaudeThinkingCompatModeAlways
-		}
+		info.applyClaudeAdaptiveThinking(options)
 		info.convOptions = options
 	}
 	return options
@@ -982,14 +1006,26 @@ const (
 )
 
 // SetClaudeAdaptiveThinking overrides the current attempt's decision and
-// drops the cached converter options so the next conversion applies it.
+// applies it to the cached converter options, so the next conversion uses it.
+// The cache is updated in place rather than dropped: the adaptor Init of this
+// attempt may already have set fields on it (e.g. the WebSearch encoder).
 // InitChannelMeta resets the decision for every channel attempt.
 func (info *RelayInfo) SetClaudeAdaptiveThinking(decision ClaudeAdaptiveThinking) {
 	if info == nil {
 		return
 	}
 	info.claudeAdaptiveThinking = decision
-	info.convOptions = nil
+	if info.convOptions != nil {
+		info.applyClaudeAdaptiveThinking(info.convOptions)
+	}
+}
+
+// applyClaudeAdaptiveThinking writes the attempt's adaptive thinking decision
+// onto the Claude converter options.
+func (info *RelayInfo) applyClaudeAdaptiveThinking(options *convmeta.Options) {
+	options.Claude.AdaptiveThinkingRequired = info.claudeAdaptiveThinking == ClaudeAdaptiveThinkingRewrite
+	options.Claude.AdaptiveThinkingCompatibilityEnabled = info.claudeAdaptiveThinking == ClaudeAdaptiveThinkingByChannelMode &&
+		info.ClaudeThinkingCompatMode() == dto.ClaudeThinkingCompatModeAlways
 }
 
 // ClaudeThinkingCompatMode reports the selected channel's effective Claude
@@ -1173,7 +1209,7 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 
 	var data map[string]any
 	if err := common.Unmarshal(jsonData, &data); err != nil {
-		common.SysError("RemoveDisabledFields Unmarshal error :" + err.Error())
+		common.SysError(common.LogText("RemoveDisabledFields Unmarshal error :%s", err.Error()))
 		return jsonData, nil
 	}
 
@@ -1230,7 +1266,7 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 
 	jsonDataAfter, err := common.Marshal(data)
 	if err != nil {
-		common.SysError("RemoveDisabledFields Marshal error :" + err.Error())
+		common.SysError(common.LogText("RemoveDisabledFields Marshal error :%s", err.Error()))
 		return jsonData, nil
 	}
 	return jsonDataAfter, nil
@@ -1264,7 +1300,7 @@ func RemoveGeminiDisabledFields(jsonData []byte) ([]byte, error) {
 
 	var data map[string]any
 	if err := common.Unmarshal(jsonData, &data); err != nil {
-		common.SysError("RemoveGeminiDisabledFields Unmarshal error: " + err.Error())
+		common.SysError(common.LogText("RemoveGeminiDisabledFields Unmarshal error: %s", err.Error()))
 		return jsonData, nil
 	}
 
@@ -1293,7 +1329,7 @@ func RemoveGeminiDisabledFields(jsonData []byte) ([]byte, error) {
 
 	jsonDataAfter, err := common.Marshal(data)
 	if err != nil {
-		common.SysError("RemoveGeminiDisabledFields Marshal error: " + err.Error())
+		common.SysError(common.LogText("RemoveGeminiDisabledFields Marshal error: %s", err.Error()))
 		return jsonData, nil
 	}
 	return jsonDataAfter, nil

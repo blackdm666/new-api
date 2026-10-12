@@ -159,7 +159,8 @@ func GetResponseBody(method, url string, channel *model.Channel, headers http.He
 	for k := range headers {
 		req.Header.Add(k, headers.Get(k))
 	}
-	client, err := service.GetHttpClientWithProxy(channel.GetSetting().Proxy)
+	setting := channel.GetSetting()
+	client, err := service.GetHttpClientWithProxySettings(setting.Proxy, setting)
 	if err != nil {
 		return nil, err
 	}
@@ -455,7 +456,8 @@ func fetchAdvancedCustomBalance(channel *model.Channel) (channelBalanceResult, e
 			request.Host = headers.Get(name)
 		}
 	}
-	client, err := service.GetHttpClientWithProxy(channel.GetSetting().Proxy)
+	setting := channel.GetSetting()
+	client, err := service.GetHttpClientWithProxySettings(setting.Proxy, setting)
 	if err != nil {
 		return channelBalanceResult{}, sanitizeFetchModelsError(err, key)
 	}
@@ -555,7 +557,7 @@ func updateStandardChannelBalance(channel *model.Channel) (float64, error) {
 			baseURL = channel.GetBaseURL()
 		}
 	case constant.ChannelTypeAzure:
-		return 0, errors.New("尚未实现")
+		return 0, common.NewMessage("Not implemented yet")
 	case constant.ChannelTypeCustom:
 		baseURL = channel.GetBaseURL()
 	//case common.ChannelTypeOpenAISB:
@@ -575,7 +577,7 @@ func updateStandardChannelBalance(channel *model.Channel) (float64, error) {
 	case constant.ChannelTypeMoonshot:
 		return updateChannelMoonshotBalance(channel)
 	default:
-		return 0, errors.New("尚未实现")
+		return 0, common.NewMessage("Not implemented yet")
 	}
 	url := fmt.Sprintf("%s/v1/dashboard/billing/subscription", baseURL)
 
@@ -625,10 +627,7 @@ func UpdateChannelBalance(c *gin.Context) {
 		return
 	}
 	if channel.ChannelInfo.IsMultiKey {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "多密钥渠道不支持余额查询",
-		})
+		common.ApiErrorT(c, "Multi-key channels do not support balance queries")
 		return
 	}
 	result, err := updateChannelBalance(channel)
@@ -699,7 +698,7 @@ func updateAllChannelsBalance() error {
 			continue
 		} else if result.RawResponse == "" {
 			if channelBalanceExhausted(result.Info) || (result.Info == nil && result.HasLegacyBalance && result.Balance <= 0) {
-				service.DisableChannel(*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, "", channel.GetAutoBan()), "余额不足")
+				service.DisableChannel(*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, "", channel.GetAutoBan()), "Insufficient balance")
 			}
 		}
 		time.Sleep(common.RequestInterval)
@@ -724,8 +723,8 @@ func UpdateAllChannelsBalance(c *gin.Context) {
 func AutomaticallyUpdateChannels(frequency int) {
 	for {
 		time.Sleep(time.Duration(frequency) * time.Minute)
-		common.SysLog("updating all channels")
+		common.SysLog(common.LogText("updating all channels"))
 		_ = updateAllChannelsBalance()
-		common.SysLog("channels update done")
+		common.SysLog(common.LogText("channels update done"))
 	}
 }

@@ -91,10 +91,7 @@ func TurnstileCheckFromBody() gin.HandlerFunc {
 }
 
 func rejectEmptyTurnstile(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"success": false,
-		"message": "Turnstile token 为空",
-	})
+	common.ApiErrorT(c, "Turnstile token is empty")
 	c.Abort()
 }
 
@@ -144,10 +141,7 @@ func verifyTurnstile(c *gin.Context, response string) bool {
 		return false
 	}
 	if !res.Success {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "Turnstile 校验失败，请刷新重试！",
-		})
+		common.ApiErrorT(c, "Turnstile verification failed, please refresh and try again!")
 		c.Abort()
 		return false
 	}

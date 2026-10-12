@@ -270,7 +270,7 @@ func TestRecordTaskBillingLogExportsSignedAdjustmentsWithoutCountingRequests(t *
 			RecordTaskBillingLog(RecordTaskBillingLogParams{
 				UserId:    1,
 				LogType:   tt.logType,
-				Content:   "task settlement",
+				Content:   []*common.Message{common.NewMessage("task settlement")},
 				ChannelId: 7,
 				ModelName: "video-model",
 				Quota:     tt.adjustment,

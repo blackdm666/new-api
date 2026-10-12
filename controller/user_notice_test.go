@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
@@ -62,7 +63,10 @@ func TestUserNoticeDatabaseMatrix(t *testing.T) {
 			require.NoError(t, db.Raw(query).Scan(&version).Error)
 			t.Log("database:", version)
 			// Existing RC38 table shapes first, then install the new models twice.
-			require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.AuditLog{}, &model.EmailDelivery{}, &model.MarketingSuppression{}, &model.EmailDeliveryMinuteQuota{}))
+			require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.AuditLog{}, &model.EmailDelivery{}, &model.MarketingSuppression{}, &model.EmailDeliveryMinuteQuota{}, &model.Option{}))
+			// The fixtures authenticate with legacy access tokens, which the
+			// server accepts only inside the recorded transition window.
+			require.NoError(t, model.EnsureLegacyAccessTokenRetireAt(time.Now().Unix()))
 			rootToken, userToken := "notice.root.fixture", "notice.user.fixture"
 			users := []model.User{
 				{Username: "notice-root", Password: "unused", Role: common.RoleRootUser, Status: common.UserStatusEnabled, AccessToken: &rootToken, AffCode: "notice-root"},
