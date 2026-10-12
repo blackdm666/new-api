@@ -17,9 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useNavigate, useRouter } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import {
+  isChunkLoadError,
+  reloadAfterChunkLoadError,
+} from '@/lib/chunk-load-recovery'
 import { cn } from '@/lib/utils'
 
 const FEEDBACK_URL = 'https://github.com/QuantumNous/new-api/issues'
@@ -53,6 +58,17 @@ export function GeneralError({
   const description = isRateLimited
     ? t('Please wait a moment before trying again.')
     : t('Please try again later.')
+  const chunkLoadFailed = isChunkLoadError(error)
+  const [reloadBlocked, setReloadBlocked] = useState(false)
+
+  // 发版后旧页面的路由分包已不存在：自动刷新一次换到新版本，不展示错误页
+  useEffect(() => {
+    if (chunkLoadFailed && !reloadAfterChunkLoadError(error)) {
+      setReloadBlocked(true)
+    }
+  }, [chunkLoadFailed, error])
+
+  if (chunkLoadFailed && !reloadBlocked) return null
 
   return (
     <div className={cn('h-svh w-full', className)}>
