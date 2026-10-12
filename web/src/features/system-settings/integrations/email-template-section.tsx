@@ -178,6 +178,22 @@ const TEMPLATE_META: Record<string, TemplateMeta> = {
     audience: 'user',
     icon: ReceiptText,
   },
+  invoice_rejected_user: {
+    name: 'Rejected invoice user notification',
+    description:
+      'Sent to the applicant when the invoice application is rejected, with the reason and the refunded tax fee.',
+    group: 'invoice',
+    audience: 'user',
+    icon: ReceiptText,
+  },
+  invoice_expired_user: {
+    name: 'Expired invoice user notification',
+    description:
+      'Sent to the applicant when a pending invoice application expires, with the refunded tax fee.',
+    group: 'invoice',
+    audience: 'user',
+    icon: BellRing,
+  },
   invoice_expiry_admin: {
     name: 'Expiring invoice application reminder',
     description:

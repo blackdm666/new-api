@@ -30,10 +30,27 @@ func StartInvoiceNotificationDelivery() {
 			bridgePendingInvoiceNotifications()
 		}
 	})
+	// WeChat messages bypass the email outbox. They are sent one at a time
+	// from this master-only loop, woken early after a request commits.
+	gopool.Go(func() {
+		ticker := time.NewTicker(invoiceNotificationInterval)
+		defer ticker.Stop()
+		for {
+			deliverPendingInvoiceWechatNotifications()
+			select {
+			case <-ticker.C:
+			case <-invoiceWechatWake:
+			}
+		}
+	})
 }
 
 func ScheduleInvoiceNotification(delivery *model.InvoiceNotificationDelivery) {
 	if delivery == nil || delivery.DeliveredTime != 0 {
+		return
+	}
+	if delivery.Kind == model.InvoiceNotificationKindWechatGroup {
+		WakeInvoiceWechatDelivery()
 		return
 	}
 	queued, err := model.EnsureInvoiceEmailDelivery(delivery)
@@ -54,6 +71,9 @@ func bridgePendingInvoiceNotifications() {
 		return
 	}
 	for _, delivery := range deliveries {
+		if delivery.Kind == model.InvoiceNotificationKindWechatGroup {
+			continue
+		}
 		if delivery.EmailDeliveryId != 0 {
 			queued, getErr := model.GetEmailDeliveryById(delivery.EmailDeliveryId)
 			if getErr == nil {
@@ -90,22 +110,38 @@ func sendInvoiceEmailDelivery(emailDelivery *model.EmailDelivery) error {
 		return common.SendEmail(delivery.Subject, delivery.Recipient, delivery.Body)
 	case model.InvoiceNotificationKindUserEmail, model.InvoiceNotificationKindUserLegacy:
 		return sendIssuedInvoiceEmail(delivery)
+	case model.InvoiceNotificationKindUserNotice:
+		recipient, err := invoiceApplicantRecipient(delivery)
+		if err != nil {
+			return err
+		}
+		return common.SendEmail(delivery.Subject, recipient, delivery.Body)
 	default:
 		return fmt.Errorf("unsupported invoice notification kind: %s", delivery.Kind)
 	}
 }
 
-func sendIssuedInvoiceEmail(delivery *model.InvoiceNotificationDelivery) error {
+// invoiceApplicantRecipient returns the queued recipient of an applicant
+// email, falling back to the account's current email.
+func invoiceApplicantRecipient(delivery *model.InvoiceNotificationDelivery) (string, error) {
 	recipient := strings.TrimSpace(delivery.Recipient)
 	if recipient == "" {
 		user, err := model.GetUserById(delivery.UserId, false)
 		if err != nil {
-			return err
+			return "", err
 		}
 		recipient = strings.TrimSpace(user.Email)
 	}
 	if recipient == "" {
-		return fmt.Errorf("invoice user %d has no registered email", delivery.UserId)
+		return "", fmt.Errorf("invoice user %d has no registered email", delivery.UserId)
+	}
+	return recipient, nil
+}
+
+func sendIssuedInvoiceEmail(delivery *model.InvoiceNotificationDelivery) error {
+	recipient, err := invoiceApplicantRecipient(delivery)
+	if err != nil {
+		return err
 	}
 	files, err := model.ListInvoiceFiles(delivery.InvoiceRequestId)
 	if err != nil {

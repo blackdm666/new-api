@@ -19,7 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute } from '@tanstack/react-router'
 
 import { Invoices } from '@/features/invoices'
+import { invoiceListSearchSchema } from '@/features/invoices/lib/invoice-list-search'
 
 export const Route = createFileRoute('/_authenticated/invoices/')({
+  validateSearch: invoiceListSearchSchema,
   component: Invoices,
 })

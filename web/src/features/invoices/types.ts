@@ -51,6 +51,8 @@ export type InvoiceRequest = {
   tax_rate_basis_points: number
   tax_fee_cents: number
   tax_fee_quota: number
+  /** Unix seconds when the tax fee was returned to the balance; 0 = not refunded. */
+  tax_fee_refunded_time: number
   status: InvoiceStatus
   rejection_reason: string
   issued_time: number
@@ -98,6 +100,7 @@ export type InvoiceRequestEvent = {
   from_status: number
   to_status: InvoiceStatus
   operator_id?: number
+  operator_name?: string
   reason: string
   created_time: number
 }
@@ -107,6 +110,15 @@ export type InvoiceConfig = {
   tax_rate_basis_points: number
   available_balance_cents: number
   issue_day: number
+  /** The current account email that receives invoice notifications. */
+  email: string
+  email_bound: boolean
+  pending_expiry_days: number
+  /** Lowercase extensions without dots, e.g. ["pdf", "png"]. */
+  file_allowed_exts: string[]
+  file_max_count: number
+  /** Maximum size of one invoice file in bytes. */
+  file_max_size: number
 }
 
 export type InvoiceListResponse = {
@@ -193,6 +205,8 @@ export type InvoiceNotificationDelivery = {
   id: number
   invoice_request_id: number
   kind: string
+  /** Delivery channel; deliveries created before WeChat support are email. */
+  channel?: 'email' | 'wechat'
   recipient: string
   attempts: number
   last_error: string

@@ -204,6 +204,20 @@ export async function updateInvoiceSettings(request: InvoiceSettingsPayload) {
   return res.data
 }
 
+export async function testInvoiceWechatNotification() {
+  const res = await api.post<{ success: boolean; message?: string }>(
+    '/api/invoice/admin/wechat/test',
+    undefined,
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  if (!res.data.success) {
+    throw new UserFacingError(
+      res.data.message?.trim() || t('Failed to send the WeChat test message')
+    )
+  }
+  return res.data
+}
+
 export async function testInvoiceStorage() {
   const res = await api.post<InvoiceSettingsResponse>(
     '/api/option/invoice/storage-test',

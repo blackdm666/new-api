@@ -27,7 +27,7 @@ function AdminInvoiceDetailRoute() {
   const invoiceId = Number(id)
   return (
     <InvoiceDetailPage
-      invoiceId={Number.isFinite(invoiceId) ? invoiceId : 0}
+      invoiceId={Number.isInteger(invoiceId) && invoiceId > 0 ? invoiceId : 0}
       admin
     />
   )

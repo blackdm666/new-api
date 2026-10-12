@@ -3,6 +3,7 @@ package controller
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -67,4 +68,38 @@ func TestValidateInvoiceSettingsTaxRateRange(t *testing.T) {
 
 	payload.InvoiceTaxRateBasisPoints = 10001
 	require.ErrorContains(t, validateInvoiceSettingsPayload(&payload), "tax rate")
+}
+
+func TestValidateInvoiceSettingsWechatGroup(t *testing.T) {
+	previousToken := setting.InvoiceWechatApiToken
+	setting.InvoiceWechatApiToken = "stored-token"
+	t.Cleanup(func() { setting.InvoiceWechatApiToken = previousToken })
+
+	payload := validInvoiceSettingsPayload()
+	require.NoError(t, validateInvoiceSettingsPayload(&payload))
+	assert.Equal(t, setting.DefaultInvoiceWechatApiBaseUrl, payload.InvoiceWechatApiBaseUrl)
+
+	payload = validInvoiceSettingsPayload()
+	payload.InvoiceWechatGroupId = "12345@im.wechat"
+	require.ErrorContains(t, validateInvoiceSettingsPayload(&payload), "@chatroom")
+
+	payload = validInvoiceSettingsPayload()
+	payload.InvoiceWechatApiBaseUrl = "ftp://api.wechatapi.net"
+	require.ErrorContains(t, validateInvoiceSettingsPayload(&payload), "HTTP or HTTPS")
+
+	payload = validInvoiceSettingsPayload()
+	payload.InvoiceWechatNotifyEnabled = true
+	payload.InvoiceWechatAppId = "wx_app"
+	payload.InvoiceWechatGroupId = "12345@chatroom"
+	require.Error(t, validateInvoiceSettingsPayload(&payload), "enabling requires a token")
+
+	for _, submitted := range []string{"", "  ", "********"} {
+		payload.InvoiceWechatApiToken = submitted
+		preserveInvoiceStorageSecrets(&payload)
+		require.NoError(t, validateInvoiceSettingsPayload(&payload))
+		assert.Equal(t, "stored-token", payload.optionValues()["InvoiceWechatApiToken"])
+	}
+	payload.InvoiceWechatApiToken = "new-token"
+	preserveInvoiceStorageSecrets(&payload)
+	assert.Equal(t, "new-token", payload.InvoiceWechatApiToken)
 }

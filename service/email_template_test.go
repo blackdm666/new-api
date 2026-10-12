@@ -25,6 +25,16 @@ func TestPreviewInvoiceEmailTemplatesUseScenarioSpecificSamples(t *testing.T) {
 			bodyContains:    []string{"发票已开具", "电子发票已随本邮件发送", "/invoices/1024", "前往控制台下载"},
 		},
 		{
+			key:             constant.EmailTemplateKeyInvoiceRejectedUser,
+			subjectContains: "发票申请 #1024 已被驳回",
+			bodyContains:    []string{"发票申请已驳回", "驳回原因", "税号与公司名称不匹配", "已退还税费", "已支付的税费 ¥21.04 已退回账户余额", "/invoices/1024", "查看申请详情"},
+		},
+		{
+			key:             constant.EmailTemplateKeyInvoiceExpiredUser,
+			subjectContains: "发票申请 #1024 已过期",
+			bodyContains:    []string{"发票申请已过期", "系统已自动关闭", "已退还税费", "已支付的税费 ¥21.04 已退回账户余额", "/invoices/1024", "查看申请详情"},
+		},
+		{
 			key:             constant.EmailTemplateKeyInvoiceExpiryAdmin,
 			subjectContains: "发票申请 #1024 将在 24 小时内过期",
 			bodyContains:    []string{"发票申请即将过期", "预计过期时间", "/admin-invoices/1024", "立即处理"},

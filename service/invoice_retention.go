@@ -79,7 +79,7 @@ func expirePendingInvoiceRequests() {
 	}
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 	for {
-		count, err := model.ExpirePendingInvoiceRequests(cutoff, 100)
+		count, err := model.ExpirePendingInvoiceRequests(cutoff, 100, BuildInvoiceClosedNotifications)
 		if err != nil {
 			common.SysError("failed to expire pending invoice applications: " + err.Error())
 			return

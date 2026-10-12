@@ -16,7 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { EligibleTopUpOrder, InvoiceRequest } from '../types'
+import type { InvoiceRequest } from '../types'
+import { formatInvoiceAmount } from './invoice-utils'
 
 export type InvoiceCopyLabels = {
   companyName: string
@@ -25,11 +26,8 @@ export type InvoiceCopyLabels = {
   bankAccount: string
   companyAddress: string
   companyPhone: string
+  remark: string
   totalAmount: string
-  includedOrders: string
-  tradeNumber: string
-  payment: string
-  amount: string
 }
 
 function addLine(lines: string[], label: string, value: string) {
@@ -37,9 +35,12 @@ function addLine(lines: string[], label: string, value: string) {
   if (normalized) lines.push(`${label}: ${normalized}`)
 }
 
+/**
+ * Text pasted into the invoicing system: billing details and the invoice
+ * amount only. Top-up orders are intentionally left out.
+ */
 export function formatInvoiceCopyText(
   invoice: InvoiceRequest,
-  orders: EligibleTopUpOrder[],
   labels: InvoiceCopyLabels
 ): string {
   const lines: string[] = []
@@ -49,21 +50,9 @@ export function formatInvoiceCopyText(
   addLine(lines, labels.bankAccount, invoice.bank_account)
   addLine(lines, labels.companyAddress, invoice.company_address)
   addLine(lines, labels.companyPhone, invoice.company_phone)
-  lines.push(`${labels.totalAmount}: ¥${(invoice.total_money ?? 0).toFixed(2)}`)
-  if (orders.length > 0) {
-    lines.push('', `${labels.includedOrders}:`)
-    orders.forEach((order, index) => {
-      const fields = [
-        order.trade_no?.trim()
-          ? `${labels.tradeNumber}: ${order.trade_no.trim()}`
-          : '',
-        order.payment_method?.trim()
-          ? `${labels.payment}: ${order.payment_method.trim()}`
-          : '',
-        `${labels.amount}: ¥${(order.money ?? 0).toFixed(2)}`,
-      ].filter(Boolean)
-      lines.push(`${index + 1}. ${fields.join(' | ')}`)
-    })
-  }
+  addLine(lines, labels.remark, invoice.remark ?? '')
+  lines.push(
+    `${labels.totalAmount}: ${formatInvoiceAmount(invoice.total_money ?? 0)}`
+  )
   return lines.join('\n')
 }

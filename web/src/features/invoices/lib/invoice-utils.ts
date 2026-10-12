@@ -16,11 +16,31 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { TFunction } from 'i18next'
+
 import {
   INVOICE_STATUS,
   type InvoiceRequest,
   type InvoiceStatus,
 } from '../types'
+
+/** Unified social credit codes are 18 characters; legacy tax numbers vary. */
+export const INVOICE_TAX_NUMBER_LENGTH = { min: 15, max: 20 } as const
+
+export function normalizeInvoiceTaxNumber(value: string): string {
+  return value.trim().toUpperCase()
+}
+
+// Invoice amounts are always CNY, so they use a fixed grouping format that
+// matches what is typed into the invoicing system, e.g. ¥2,979.00.
+const invoiceAmountFormat = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+export function formatInvoiceAmount(yuan: number): string {
+  return `¥${invoiceAmountFormat.format(Number(yuan) || 0)}`
+}
 
 export function getInvoiceAmountShortfall(
   amount: number,
@@ -41,7 +61,7 @@ export const INVOICE_STATUS_META: Record<
   { labelKey: string; badgeClass: string }
 > = {
   [INVOICE_STATUS.PENDING]: {
-    labelKey: 'Pending',
+    labelKey: 'Pending processing',
     badgeClass:
       'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400',
   },
@@ -67,9 +87,12 @@ export const INVOICE_STATUS_META: Record<
   },
 }
 
-export function formatInvoiceTimestamp(unixSec?: number): string {
+export function formatInvoiceTimestamp(
+  unixSec?: number,
+  locale?: string
+): string {
   if (!unixSec) return '—'
-  return new Date(unixSec * 1000).toLocaleString([], {
+  return new Date(unixSec * 1000).toLocaleString(locale ?? [], {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -90,4 +113,35 @@ export function isInvoiceRequestExpiring(invoice: InvoiceRequest): boolean {
   const expiresAt = Number(invoice.expires_at || 0)
   if (!expiresAt) return false
   return expiresAt * 1000 <= Date.now() + 24 * 60 * 60 * 1000
+}
+
+export function getInvoiceNotificationKindLabel(
+  kind: string,
+  t: TFunction
+): string {
+  if (kind === 'admin_email') return t('Admin email')
+  if (kind === 'user_email' || kind === 'user') return t('User email')
+  // Rejection and expiry notices to the applicant (no attachments).
+  if (kind === 'user_notice') return t('User notice email')
+  if (kind === 'wechat_group') return t('Finance WeChat group')
+  return kind
+}
+
+export function getInvoiceNotificationChannelLabel(
+  channel: string | undefined,
+  t: TFunction
+): string {
+  // Deliveries recorded before WeChat support carry no channel and are email.
+  return channel === 'wechat' ? t('WeChat group') : t('Email channel')
+}
+
+export function getInvoiceStorageTypeLabel(
+  storageType: string,
+  t: TFunction
+): string {
+  if (storageType === 'local') return t('Local disk')
+  if (storageType === 'oss') return t('Alibaba Cloud OSS')
+  if (storageType === 's3') return t('S3 compatible storage')
+  if (storageType === 'cos') return t('Tencent Cloud COS')
+  return storageType
 }

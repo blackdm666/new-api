@@ -41,12 +41,16 @@ func withInvoiceNotificationTestSettings(t *testing.T) {
 	previousAdminEnabled := common.InvoiceApplicationNotifyAdminEnabled
 	previousAdminEmail := common.InvoiceAdminEmail
 	previousIssuedEnabled := common.InvoiceIssuedNotifyUserEnabled
+	previousRejectedEnabled := common.InvoiceRejectedNotifyUserEnabled
+	previousExpiredEnabled := common.InvoiceExpiredNotifyUserEnabled
 	previousSystemName := common.SystemName
 	previousServerAddress := system_setting.ServerAddress
 	previousExpiryDays := setting.InvoicePendingExpiryDays
 	common.InvoiceApplicationNotifyAdminEnabled = true
 	common.InvoiceAdminEmail = "billing@example.com, finance@example.com"
 	common.InvoiceIssuedNotifyUserEnabled = true
+	common.InvoiceRejectedNotifyUserEnabled = true
+	common.InvoiceExpiredNotifyUserEnabled = true
 	common.SystemName = "88API"
 	system_setting.ServerAddress = "https://88api.ai/"
 	setting.InvoicePendingExpiryDays = 30
@@ -54,6 +58,8 @@ func withInvoiceNotificationTestSettings(t *testing.T) {
 		common.InvoiceApplicationNotifyAdminEnabled = previousAdminEnabled
 		common.InvoiceAdminEmail = previousAdminEmail
 		common.InvoiceIssuedNotifyUserEnabled = previousIssuedEnabled
+		common.InvoiceRejectedNotifyUserEnabled = previousRejectedEnabled
+		common.InvoiceExpiredNotifyUserEnabled = previousExpiredEnabled
 		common.SystemName = previousSystemName
 		system_setting.ServerAddress = previousServerAddress
 		setting.InvoicePendingExpiryDays = previousExpiryDays
@@ -145,4 +151,101 @@ func TestBuildInvoiceIssuedNotificationsCreatesOneUserDelivery(t *testing.T) {
 	assert.Contains(t, deliveries[0].Body, "https://88api.ai/invoices/42")
 	assert.NotContains(t, strings.ToLower(deliveries[0].Body), "admin-invoices")
 	assertRenderedInvoiceEmail(t, deliveries[0])
+}
+
+func TestBuildInvoiceClosedNotificationsExplainRejectionAndRefund(t *testing.T) {
+	withInvoiceNotificationTestSettings(t)
+	english := &model.User{Id: 7, Email: "account@example.com"}
+	english.SetSetting(dto.UserSetting{Language: appI18n.LangEn})
+	chinese := &model.User{Id: 7, Email: "account@example.com"}
+	chinese.SetSetting(dto.UserSetting{Language: appI18n.LangZhCN})
+
+	tests := []struct {
+		name         string
+		status       int
+		refunded     bool
+		user         *model.User
+		subject      string
+		bodyContains []string
+		bodyExcludes []string
+	}{
+		{
+			name:         "rejected with refund",
+			status:       model.InvoiceStatusRejected,
+			refunded:     true,
+			user:         english,
+			subject:      "Invoice application #42 was rejected",
+			bodyContains: []string{"Rejection reason", "Tax number &lt;mismatch&gt;", "refunded to your account balance", "CNY 15.00", "https://88api.ai/invoices/42"},
+		},
+		{
+			name:         "expired with refund",
+			status:       model.InvoiceStatusExpired,
+			refunded:     true,
+			user:         chinese,
+			subject:      "发票申请 #42 已过期",
+			bodyContains: []string{"系统已自动关闭", "已支付的税费 ¥15.00 已退回账户余额", "已退还税费", "https://88api.ai/invoices/42"},
+			bodyExcludes: []string{"驳回原因"},
+		},
+		{
+			name:         "expired without fee",
+			status:       model.InvoiceStatusExpired,
+			user:         chinese,
+			subject:      "发票申请 #42 已过期",
+			bodyContains: []string{"系统已自动关闭"},
+			bodyExcludes: []string{"已退还税费", "退回账户余额"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := testInvoiceNotificationRequest(test.status)
+			request.RejectionReason = "Tax number <mismatch>"
+			if test.refunded {
+				request.TaxFeeCents = 1500
+				request.TaxFeeRefundedTime = 1_787_000_100
+			}
+			deliveries, err := BuildInvoiceClosedNotifications(request, test.user)
+			require.NoError(t, err)
+			require.Len(t, deliveries, 1)
+			delivery := deliveries[0]
+			assert.Equal(t, model.InvoiceNotificationKindUserNotice, delivery.Kind)
+			assert.Equal(t, "account@example.com", delivery.Recipient)
+			assert.Equal(t, 7, delivery.UserId)
+			assert.Contains(t, delivery.Subject, test.subject)
+			for _, expected := range test.bodyContains {
+				assert.Contains(t, delivery.Body, expected)
+			}
+			for _, unexpected := range test.bodyExcludes {
+				assert.NotContains(t, delivery.Body, unexpected)
+			}
+			assert.NotContains(t, delivery.Body, "admin-invoices")
+			assertRenderedInvoiceEmail(t, delivery)
+		})
+	}
+}
+
+func TestBuildInvoiceClosedNotificationsSkipsDisabledOrUnreachableApplicants(t *testing.T) {
+	withInvoiceNotificationTestSettings(t)
+	user := &model.User{Id: 7, Email: "account@example.com"}
+
+	deliveries, err := BuildInvoiceClosedNotifications(testInvoiceNotificationRequest(model.InvoiceStatusWithdrawn), user)
+	require.NoError(t, err)
+	assert.Empty(t, deliveries, "withdrawals are initiated by the applicant")
+
+	deliveries, err = BuildInvoiceClosedNotifications(testInvoiceNotificationRequest(model.InvoiceStatusRejected), &model.User{Id: 7})
+	require.NoError(t, err)
+	assert.Empty(t, deliveries, "applicants without an account email are skipped")
+
+	deliveries, err = BuildInvoiceClosedNotifications(testInvoiceNotificationRequest(model.InvoiceStatusExpired), nil)
+	require.NoError(t, err)
+	assert.Empty(t, deliveries, "deleted applicants are skipped")
+
+	common.InvoiceRejectedNotifyUserEnabled = false
+	deliveries, err = BuildInvoiceClosedNotifications(testInvoiceNotificationRequest(model.InvoiceStatusRejected), user)
+	require.NoError(t, err)
+	assert.Empty(t, deliveries)
+
+	common.InvoiceExpiredNotifyUserEnabled = false
+	deliveries, err = BuildInvoiceClosedNotifications(testInvoiceNotificationRequest(model.InvoiceStatusExpired), user)
+	require.NoError(t, err)
+	assert.Empty(t, deliveries)
 }

@@ -1,0 +1,283 @@
+package service
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+const testInvoiceWechatToken = "wechat-secret-token-7f3a"
+
+type fakeWechatAPI struct {
+	server   *httptest.Server
+	mu       sync.Mutex
+	response string
+	delay    time.Duration
+	messages []map[string]string
+	tokens   []string
+}
+
+func newFakeWechatAPI(t *testing.T) *fakeWechatAPI {
+	t.Helper()
+	api := &fakeWechatAPI{response: `{"ret":200,"msg":"ok","data":{"toWxid":"finance@chatroom","msgId":1}}`}
+	api.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var message map[string]string
+		_ = common.Unmarshal(body, &message)
+		api.mu.Lock()
+		api.messages = append(api.messages, message)
+		api.tokens = append(api.tokens, r.Header.Get("wechat-token"))
+		response, delay := api.response, api.delay
+		api.mu.Unlock()
+		if r.URL.Path != "/finder/v2/api/message/postText" {
+			http.NotFound(w, r)
+			return
+		}
+		time.Sleep(delay)
+		_, _ = w.Write([]byte(response))
+	}))
+	t.Cleanup(api.server.Close)
+	return api
+}
+
+func (api *fakeWechatAPI) received() []map[string]string {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	return append([]map[string]string(nil), api.messages...)
+}
+
+func withInvoiceWechatSettings(t *testing.T, baseURL string) {
+	t.Helper()
+	previous := []any{
+		setting.InvoiceWechatNotifyEnabled, setting.InvoiceWechatApiBaseUrl, setting.InvoiceWechatApiToken,
+		setting.InvoiceWechatAppId, setting.InvoiceWechatGroupId, system_setting.ServerAddress,
+		common.InvoiceApplicationNotifyAdminEnabled, setting.InvoiceTaxRateBasisPoints,
+		invoiceWechatHTTPTimeout, invoiceWechatRetryBackoff,
+	}
+	setting.InvoiceWechatNotifyEnabled = true
+	setting.InvoiceWechatApiBaseUrl = baseURL
+	setting.InvoiceWechatApiToken = testInvoiceWechatToken
+	setting.InvoiceWechatAppId = "wx_app_1"
+	setting.InvoiceWechatGroupId = "finance@chatroom"
+	system_setting.ServerAddress = "https://88api.ai/"
+	common.InvoiceApplicationNotifyAdminEnabled = false
+	setting.InvoiceTaxRateBasisPoints = 0
+	invoiceWechatHTTPTimeout = 300 * time.Millisecond
+	invoiceWechatRetryBackoff = []time.Duration{0}
+	t.Cleanup(func() {
+		setting.InvoiceWechatNotifyEnabled = previous[0].(bool)
+		setting.InvoiceWechatApiBaseUrl = previous[1].(string)
+		setting.InvoiceWechatApiToken = previous[2].(string)
+		setting.InvoiceWechatAppId = previous[3].(string)
+		setting.InvoiceWechatGroupId = previous[4].(string)
+		system_setting.ServerAddress = previous[5].(string)
+		common.InvoiceApplicationNotifyAdminEnabled = previous[6].(bool)
+		setting.InvoiceTaxRateBasisPoints = previous[7].(int)
+		invoiceWechatHTTPTimeout = previous[8].(time.Duration)
+		invoiceWechatRetryBackoff = previous[9].([]time.Duration)
+	})
+}
+
+func TestInvoiceWechatMessagesOmitEmptyLines(t *testing.T) {
+	withInvoiceWechatSettings(t, "http://wechat.invalid/finder/v2/api")
+	createdAt := time.Date(2026, time.October, 12, 1, 5, 0, 0, time.UTC).Unix()
+	request := &model.InvoiceRequest{
+		Id: 42, UserId: 7, Username: "alice", CompanyName: "示例科技有限公司", TaxNumber: "91310000EXAMPLE",
+		CompanyPhone: "021-88888888", TotalMoneyCents: 123456780, CreatedTime: createdAt,
+		UpdatedTime: createdAt + 3600, Status: model.InvoiceStatusWithdrawn,
+	}
+
+	assert.Equal(t, "【新开票申请 #42】\n"+
+		"发票抬头：示例科技有限公司\n"+
+		"税号：91310000EXAMPLE\n"+
+		"电话：021-88888888\n"+
+		"开票金额：¥1,234,567.80\n"+
+		"申请人：alice（ID 7）\n"+
+		"申请时间：2026-10-12 09:05\n"+
+		"处理链接：https://88api.ai/admin-invoices/42", buildInvoiceWechatCreatedText(request))
+	assert.Equal(t, "【开票申请作废 #42】\n"+
+		"发票抬头：示例科技有限公司\n"+
+		"开票金额：¥1,234,567.80\n"+
+		"用户已于 2026-10-12 10:05 撤回该申请，请勿开票。", buildInvoiceWechatWithdrawnText(request))
+
+	for cents, expected := range map[int64]string{0: "0.00", 5: "0.05", 50000: "500.00", 100000: "1,000.00", 70125: "701.25"} {
+		assert.Equal(t, expected, formatInvoiceAmountCNY(cents))
+	}
+}
+
+func TestSendInvoiceWechatTextRetriesOnlyUnsentRequests(t *testing.T) {
+	api := newFakeWechatAPI(t)
+	withInvoiceWechatSettings(t, api.server.URL+"/finder/v2/api")
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closedURL := closed.URL
+	closed.Close()
+
+	tests := []struct {
+		name         string
+		baseURL      string
+		response     string
+		delay        time.Duration
+		wantAttempts int
+		wantHits     int
+		wantErr      string
+	}{
+		{name: "accepted", baseURL: api.server.URL + "/finder/v2/api", response: `{"ret":200,"msg":"ok"}`, wantAttempts: 1, wantHits: 1},
+		{name: "rejected by provider", baseURL: api.server.URL + "/finder/v2/api/", response: `{"ret":500,"msg":"wxid not in group, token ` + testInvoiceWechatToken + `"}`, wantAttempts: 1, wantHits: 1, wantErr: "wxid not in group"},
+		{name: "http error", baseURL: api.server.URL + "/wrong", response: `{"ret":200}`, wantAttempts: 1, wantHits: 1, wantErr: "HTTP 404"},
+		{name: "timeout after send", baseURL: api.server.URL + "/finder/v2/api", response: `{"ret":200}`, delay: time.Second, wantAttempts: 1, wantHits: 1, wantErr: "Timeout"},
+		{name: "connection refused", baseURL: closedURL + "/finder/v2/api", wantAttempts: invoiceWechatMaxAttempts, wantErr: "connect"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			api.mu.Lock()
+			api.messages, api.tokens = nil, nil
+			api.response, api.delay = test.response, test.delay
+			api.mu.Unlock()
+			config := invoiceWechatConfig{BaseURL: test.baseURL, Token: testInvoiceWechatToken, AppID: "wx_app_1", GroupID: "finance@chatroom"}
+
+			attempts, err := sendInvoiceWechatText(context.Background(), config, "finance@chatroom", "hello")
+
+			assert.Equal(t, test.wantAttempts, attempts)
+			assert.Len(t, api.received(), test.wantHits)
+			if test.wantErr == "" {
+				require.NoError(t, err)
+				require.Len(t, api.received(), 1)
+				assert.Equal(t, map[string]string{"appId": "wx_app_1", "toWxid": "finance@chatroom", "content": "hello"}, api.received()[0])
+				assert.Equal(t, []string{testInvoiceWechatToken}, api.tokens)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.wantErr)
+			assert.NotContains(t, err.Error(), testInvoiceWechatToken)
+		})
+	}
+}
+
+func TestSendInvoiceWechatTestMessageUsesSavedSettings(t *testing.T) {
+	api := newFakeWechatAPI(t)
+	withInvoiceWechatSettings(t, api.server.URL+"/finder/v2/api")
+	setting.InvoiceWechatNotifyEnabled = false
+
+	require.NoError(t, SendInvoiceWechatTestMessage(context.Background()))
+	require.Len(t, api.received(), 1)
+	assert.Equal(t, "finance@chatroom", api.received()[0]["toWxid"])
+	assert.Regexp(t, `^88API 开票通知测试（\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}）$`, api.received()[0]["content"])
+
+	api.mu.Lock()
+	api.response = `{"ret":401,"msg":"token expired"}`
+	api.mu.Unlock()
+	err := SendInvoiceWechatTestMessage(context.Background())
+	require.ErrorContains(t, err, "token expired")
+
+	setting.InvoiceWechatAppId = ""
+	require.ErrorIs(t, SendInvoiceWechatTestMessage(context.Background()), ErrInvoiceWechatNotConfigured)
+}
+
+func TestInvoiceWechatNotificationsQueueForCreateAndWithdrawOnly(t *testing.T) {
+	require.NoError(t, model.DB.AutoMigrate(
+		&model.InvoiceRequest{}, &model.InvoiceOrderClaim{}, &model.InvoiceSearchTerm{}, &model.InvoiceRequestEvent{},
+		&model.InvoiceNotificationDelivery{}, &model.InvoiceFile{}, &model.InvoiceFileUpload{}, &model.InvoiceFileCleanup{},
+	))
+	t.Cleanup(func() {
+		for _, table := range []string{
+			"invoice_notification_deliveries", "invoice_request_events", "invoice_search_terms", "invoice_order_claims",
+			"invoice_requests", "email_deliveries", "top_ups", "logs", "users",
+		} {
+			model.DB.Exec("DELETE FROM " + table)
+		}
+	})
+	api := newFakeWechatAPI(t)
+	withInvoiceWechatSettings(t, api.server.URL+"/finder/v2/api")
+
+	user := &model.User{Username: "wechat-applicant", Email: "applicant@example.com", AffCode: "wechat-applicant", Status: common.UserStatusEnabled, Quota: 1_000_000}
+	require.NoError(t, model.DB.Create(user).Error)
+	submit := func(tradeNo string) *model.InvoiceRequest {
+		order := &model.TopUp{UserId: user.Id, Money: 600, Amount: 100, TradeNo: tradeNo, Status: common.TopUpStatusSuccess}
+		require.NoError(t, model.DB.Create(order).Error)
+		request, _, err := model.CreateInvoiceRequestWithNotifications(model.CreateInvoiceRequestParams{
+			UserId: user.Id, Username: user.Username, CompanyName: "微信通知有限公司", TaxNumber: "91310000WECHAT",
+			BankName: "招商银行", Email: user.Email, TopUpOrderIds: []int{order.Id},
+		}, BuildInvoiceRequestCreatedNotifications)
+		require.NoError(t, err)
+		return request
+	}
+	wechatDeliveries := func() []*model.InvoiceNotificationDelivery {
+		var deliveries []*model.InvoiceNotificationDelivery
+		require.NoError(t, model.DB.Where("kind = ?", model.InvoiceNotificationKindWechatGroup).Order("id ASC").Find(&deliveries).Error)
+		return deliveries
+	}
+
+	setting.InvoiceWechatNotifyEnabled = false
+	submit("WECHAT-DISABLED")
+	setting.InvoiceWechatNotifyEnabled = true
+	setting.InvoiceWechatGroupId = ""
+	submit("WECHAT-UNCONFIGURED")
+	setting.InvoiceWechatGroupId = "finance@chatroom"
+	require.Empty(t, wechatDeliveries())
+
+	withdrawnRequest := submit("WECHAT-WITHDRAWN")
+	_, err := model.WithdrawInvoiceRequest(withdrawnRequest.Id, user.Id, BuildInvoiceWithdrawnNotifications)
+	require.NoError(t, err)
+	rejectedRequest := submit("WECHAT-REJECTED")
+	_, err = model.UpdateInvoiceRequestStatusWithNotifications(rejectedRequest.Id, model.InvoiceStatusRejected, 1, "资料错误", func(updated *model.InvoiceRequest) ([]*model.InvoiceNotificationDelivery, error) {
+		return BuildInvoiceClosedNotifications(updated, user)
+	})
+	require.NoError(t, err)
+	expiredRequest := submit("WECHAT-EXPIRED")
+	require.NoError(t, model.DB.Model(&model.InvoiceRequest{}).Where("id = ?", expiredRequest.Id).Update("created_time", 100).Error)
+	_, err = model.ExpirePendingInvoiceRequests(200, 100, BuildInvoiceClosedNotifications)
+	require.NoError(t, err)
+
+	queued := wechatDeliveries()
+	require.Len(t, queued, 4, "created x3 and one withdrawal")
+	subjects := make([]string, 0, len(queued))
+	for _, delivery := range queued {
+		subjects = append(subjects, delivery.Subject)
+		assert.Equal(t, model.InvoiceNotificationChannelWechat, delivery.Channel)
+		assert.Equal(t, "finance@chatroom", delivery.Recipient)
+		assert.Zero(t, delivery.EmailDeliveryId)
+	}
+	assert.Contains(t, subjects, "开票申请作废 #"+strconv.Itoa(withdrawnRequest.Id))
+	var emailCount int64
+	require.NoError(t, model.DB.Model(&model.EmailDelivery{}).Where("category = ?", "invoice_admin_email").Count(&emailCount).Error)
+	assert.Zero(t, emailCount)
+
+	deliverPendingInvoiceWechatNotifications()
+	require.Len(t, api.received(), 4)
+	assert.Contains(t, api.received()[0]["content"], "【新开票申请 #")
+	assert.Contains(t, api.received()[0]["content"], "开户银行：招商银行")
+	for _, delivery := range wechatDeliveries() {
+		assert.NotZero(t, delivery.DeliveredTime)
+		assert.Zero(t, delivery.FailedTime)
+		assert.Equal(t, 1, delivery.Attempts)
+		assert.Empty(t, delivery.Body, "billing details are dropped once delivered")
+		assert.Equal(t, "finance@chatroom", delivery.Recipient)
+	}
+
+	api.mu.Lock()
+	api.response = `{"ret":500,"msg":"group closed"}`
+	api.mu.Unlock()
+	failed := submit("WECHAT-FAILED")
+	deliverPendingInvoiceWechatNotifications()
+	deliverPendingInvoiceWechatNotifications()
+	require.Len(t, api.received(), 5, "a rejected message is not sent again automatically")
+	var failedDelivery model.InvoiceNotificationDelivery
+	require.NoError(t, model.DB.Where("invoice_request_id = ? AND kind = ?", failed.Id, model.InvoiceNotificationKindWechatGroup).First(&failedDelivery).Error)
+	assert.NotZero(t, failedDelivery.FailedTime)
+	assert.Zero(t, failedDelivery.DeliveredTime)
+	assert.Equal(t, 1, failedDelivery.Attempts)
+	assert.Contains(t, failedDelivery.LastError, "group closed")
+	assert.NotContains(t, failedDelivery.LastError, testInvoiceWechatToken)
+}
