@@ -284,6 +284,7 @@ func TestFinalizeVideoTaskResultDoesNotPublishSuccessWhenCacheFails(t *testing.T
 	previousFactory := taskVideoCacheStorageFactory
 	taskVideoCacheStorageFactory = func() (invoicefile.Storage, error) { return nil, errors.New("r2 unavailable") }
 	t.Cleanup(func() { taskVideoCacheStorageFactory = previousFactory })
+	t.Cleanup(func() { clearTaskVideoPrepareFailure("task_cache_failure") })
 	task := &model.Task{TaskID: "task_cache_failure", Status: model.TaskStatusInProgress}
 	require.NoError(t, model.DB.Create(task).Error)
 	resultURL := "data:video/mp4;base64," + base64.StdEncoding.EncodeToString([]byte("video"))

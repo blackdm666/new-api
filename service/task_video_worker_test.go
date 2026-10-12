@@ -46,13 +46,18 @@ func TestCacheTaskVideoRemoteSourceUsesWorkerBeforeVPS(t *testing.T) {
 	}
 	prefix := taskVideoCacheKeyPrefix(task)
 	key := prefix + ".mp4"
-	storage := &taskVideoWorkerStorage{existingKeys: map[string]bool{key: true}}
+	// The object appears only once the Worker has stored it, so the check for an
+	// earlier stored copy does not short-circuit the transfer.
+	storage := &taskVideoWorkerStorage{existingKeys: map[string]bool{}}
 	previousFactory := taskVideoCacheStorageFactory
 	taskVideoCacheStorageFactory = func() (invoicefile.Storage, error) { return storage, nil }
 	t.Cleanup(func() { taskVideoCacheStorageFactory = previousFactory })
 
 	previousDo := taskVideoWorkerDo
+	workerCalled := false
 	taskVideoWorkerDo = func(req *http.Request) (*http.Response, error) {
+		workerCalled = true
+		storage.existingKeys[key] = true
 		body, err := io.ReadAll(req.Body)
 		require.NoError(t, err)
 		timestamp := req.Header.Get("X-NewAPI-Timestamp")
@@ -92,6 +97,7 @@ func TestCacheTaskVideoRemoteSourceUsesWorkerBeforeVPS(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, cached)
+	assert.True(t, workerCalled)
 	assert.False(t, localOpened)
 	assert.Equal(t, key, task.PrivateData.ResultStorageKey)
 	assert.Equal(t, taskVideoCacheKind, task.PrivateData.ResultStorageKind)
