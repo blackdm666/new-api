@@ -8068,6 +8068,8 @@
     "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "适用于向仅接受自适应思考的模型发送 enabled 或 disabled 思考参数的原生 Claude Messages 请求。",
     "Upstream requires adaptive thinking; retried with adaptive thinking": "上游要求自适应思考，已改用自适应思考重试",
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "上游拒绝自适应思考，已用原始思考参数重试",
-    "Same channel retry": "同渠道重试"
+    "Same channel retry": "同渠道重试",
+    "Text to Image": "文生图",
+    "Image to Image": "图生图"
   }
 }

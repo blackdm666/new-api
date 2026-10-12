@@ -713,6 +713,8 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	// 通用 TaskDto 格式
 	publicTask := TaskModel2Dto(originTask)
 	publicTask.ResultURL = service.TaskVideoDeliveryURL(c.Request.Context(), originTask)
+	HideTaskRouting(publicTask, originTask)
+	publicTask.OfficialTaskID = PublicOfficialTaskID(originTask)
 	// The raw upstream snapshot identifies the provider; ResultURL is the public deliverable.
 	publicTask.Data = nil
 	respBody, err = common.Marshal(dto.TaskResponse[any]{
@@ -833,6 +835,38 @@ func mapTaskStatusToSimple(status model.TaskStatus) string {
 	default:
 		return "processing"
 	}
+}
+
+// PublicOfficialTaskID is the model platform's own task ID that the task's
+// plugin declares public, or "".
+func PublicOfficialTaskID(task *model.Task) string {
+	if task == nil {
+		return ""
+	}
+	provider, ok := GetTaskAdaptor(task.Platform).(channel.TaskOfficialIDProvider)
+	if !ok {
+		return ""
+	}
+	return provider.OfficialTaskID(task)
+}
+
+// HideTaskRouting removes what identifies the serving upstream from a task
+// shown to its owner: plugin keys name the provider, so only Suno keeps its
+// platform (the dashboard renders its audio clips from it); a channel-mapped
+// model name can be the provider's internal model, so the owner sees the model
+// they requested, as in their consume logs.
+func HideTaskRouting(item *dto.TaskDto, task *model.Task) {
+	if item.Platform != string(constant.TaskPlatformSuno) {
+		item.Platform = ""
+	}
+	item.ChannelId = 0
+	item.ChannelName = ""
+	properties := task.Properties
+	if properties.OriginModelName != "" {
+		properties.UpstreamModelName = properties.OriginModelName
+	}
+	properties.OriginModelName = ""
+	item.Properties = properties
 }
 
 func TaskModel2Dto(task *model.Task) *dto.TaskDto {

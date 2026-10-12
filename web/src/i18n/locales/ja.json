@@ -7971,6 +7971,8 @@
     "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "アダプティブ思考のみを受け付けるモデルに enabled または disabled の思考を送るネイティブ Claude Messages リクエストに適用されます。",
     "Upstream requires adaptive thinking; retried with adaptive thinking": "上流がアダプティブ思考を要求したため、アダプティブ思考で再試行しました",
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "上流がアダプティブ思考を拒否したため、元の思考パラメータで再試行しました",
-    "Same channel retry": "同一チャネルで再試行"
+    "Same channel retry": "同一チャネルで再試行",
+    "Text to Image": "テキストから画像",
+    "Image to Image": "画像から画像"
   }
 }

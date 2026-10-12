@@ -1210,6 +1210,9 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	rendered["progress"] = host.Progress
 	rendered["created_at"] = host.CreatedAt
 	rendered["model"] = host.Model
+	if officialID := a.OfficialTaskID(task); officialID != "" {
+		rendered["official_task_id"] = officialID
+	}
 	if host.CompletedAt != 0 {
 		rendered["completed_at"] = host.CompletedAt
 	} else {
@@ -1391,6 +1394,31 @@ func (a *TaskAdaptor) CancelTask(ctx context.Context, task *model.Task) (*channe
 		return nil, fmt.Errorf("plugin returned an invalid cancel result")
 	}
 	return &channel.TaskCancelResult{Cancelled: result.Cancelled, Message: strings.TrimSpace(result.Message)}, nil
+}
+
+var officialTaskIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+
+// OfficialTaskID calls the optional officialTaskId(task) hook. The plugin
+// decides which ID is the model platform's own; anything that is not a short
+// plain identifier is discarded.
+func (a *TaskAdaptor) OfficialTaskID(task *model.Task) string {
+	if task == nil || !a.hasHook(context.Background(), "officialTaskId") {
+		return ""
+	}
+	ctx, err := taskArtifactContext(task)
+	if err != nil {
+		return ""
+	}
+	value, err := a.plugin.Engine.Call(context.Background(), "officialTaskId", ctx)
+	if err != nil {
+		return ""
+	}
+	id, _ := value.(string)
+	id = strings.TrimSpace(id)
+	if !officialTaskIDPattern.MatchString(id) {
+		return ""
+	}
+	return id
 }
 
 func taskArtifactContext(task *model.Task) (map[string]any, error) {

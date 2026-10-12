@@ -131,6 +131,14 @@ type TaskContentRequestProvider interface {
 	BuildContentRequest(task *model.Task, artifactKey string, clientRequest TaskArtifactClientRequest) (*TaskContentRequest, error)
 }
 
+// TaskOfficialIDProvider exposes the task ID assigned by the model's own
+// platform (for example a Volcengine Ark cgt- ID) for display to the task
+// owner. It returns "" when the plugin declares none or the task has none yet;
+// it must never return a gateway's private ID.
+type TaskOfficialIDProvider interface {
+	OfficialTaskID(task *model.Task) string
+}
+
 // TaskCancelResult is the provider's answer to a cancellation request.
 // Cancelled is true only when the provider confirmed the task will not run;
 // Message explains a refusal to the client.

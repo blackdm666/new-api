@@ -7971,6 +7971,8 @@
     "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "Áp dụng cho yêu cầu Claude Messages gốc gửi suy nghĩ enabled hoặc disabled tới các mô hình chỉ chấp nhận suy nghĩ thích ứng.",
     "Upstream requires adaptive thinking; retried with adaptive thinking": "Upstream yêu cầu suy nghĩ thích ứng; đã thử lại với suy nghĩ thích ứng",
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "Upstream từ chối suy nghĩ thích ứng; đã thử lại với tham số suy nghĩ ban đầu",
-    "Same channel retry": "Thử lại trên cùng kênh"
+    "Same channel retry": "Thử lại trên cùng kênh",
+    "Text to Image": "Văn bản thành hình ảnh",
+    "Image to Image": "Hình ảnh thành hình ảnh"
   }
 }
