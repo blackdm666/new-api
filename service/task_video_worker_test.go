@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -34,7 +35,27 @@ func useTaskVideoWorkerConfig(t *testing.T) {
 	t.Setenv("TASK_VIDEO_WORKER_ENABLED", "true")
 	t.Setenv("TASK_VIDEO_WORKER_URL", "https://new-api-video-transfer.example.workers.dev/transfer")
 	t.Setenv("TASK_VIDEO_WORKER_SECRET", "worker-shared-test-secret")
-	t.Setenv("TASK_VIDEO_WORKER_TIMEOUT_SECONDS", "900")
+	t.Setenv("TASK_VIDEO_WORKER_TIMEOUT_SECONDS", "90")
+}
+
+func TestTaskVideoWorkerTimeoutLeavesTimeForVPSFallback(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want time.Duration
+	}{
+		{raw: "", want: 90 * time.Second},
+		{raw: "60", want: 60 * time.Second},
+		{raw: "90", want: 90 * time.Second},
+		{raw: "900", want: 90 * time.Second},
+		{raw: "5", want: 90 * time.Second},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			t.Setenv("TASK_VIDEO_WORKER_TIMEOUT_SECONDS", tc.raw)
+			assert.Equal(t, tc.want, TaskVideoWorkerTimeout())
+		})
+	}
+	t.Setenv("TASK_VIDEO_PREPARE_TIMEOUT_SECONDS", "")
+	assert.GreaterOrEqual(t, TaskVideoPrepareTimeout()-TaskVideoWorkerTimeout(), 90*time.Second)
 }
 
 func TestCacheTaskVideoRemoteSourceUsesWorkerBeforeVPS(t *testing.T) {
