@@ -259,10 +259,25 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
 
   const wechatTokenConfigured =
     defaultValues.InvoiceWechatApiTokenConfigured === true
+  // Mirrors the server rule: new-application notices and expiry reminders go
+  // to this address, so it is required whenever either is active.
+  const adminEmailRequired =
+    values.InvoiceApplicationNotifyAdminEnabled ||
+    Number(values.InvoicePendingExpiryDays) > 0
+  const adminEmailError =
+    adminEmailRequired && values.InvoiceAdminEmail.trim() === ''
+      ? t(
+          'Enter the invoice admin email. It is required while new-application notices are on or pending applications expire.'
+        )
+      : ''
 
   const save = () => {
     if (!dirty) {
       toast.info(t('No changes to save'))
+      return
+    }
+    if (adminEmailError) {
+      toast.error(adminEmailError)
       return
     }
     if (wechatGroupIdError) {
@@ -393,6 +408,7 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
             onChange={(value) => update('InvoiceAdminEmail', value)}
             type='email'
             placeholder='billing@example.com'
+            error={adminEmailError}
           />
           <p className='text-muted-foreground text-xs'>
             {t(

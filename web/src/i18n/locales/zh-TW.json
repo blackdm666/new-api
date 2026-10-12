@@ -7404,6 +7404,7 @@
     "Pending invoice expiry (days)": "待處理申請過期天數",
     "Pending applications expire automatically after this many days and release their orders. Set to 0 to disable automatic expiry.": "待處理申請超過此天數後自動過期並釋放訂單；設為 0 可停用自動過期。",
     "Leave blank to keep the saved secret": "留空將保留已儲存的密鑰",
+    "Enter the invoice admin email. It is required while new-application notices are on or pending applications expire.": "請填寫管理員通知信箱：開啟新申請通知或設定了待處理逾期天數時必填（用於逾期前提醒）。",
     "Enter the WeChat API token before enabling WeChat group notifications.": "開啟微信群通知前請先填寫微信介面 Token。",
     "This provider only supports HTTP, so the token and the invoice details are sent unencrypted.": "該介面只支援 HTTP，Token 和開票資訊會以明文傳輸。",
     "A token is saved.": "已儲存 Token。",

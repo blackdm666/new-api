@@ -7402,6 +7402,7 @@
     "Pending invoice expiry (days)": "Thời hạn yêu cầu chờ xử lý (ngày)",
     "Pending applications expire automatically after this many days and release their orders. Set to 0 to disable automatic expiry.": "Yêu cầu đang chờ sẽ tự hết hạn sau số ngày này và giải phóng đơn hàng. Đặt 0 để tắt tự động hết hạn.",
     "Leave blank to keep the saved secret": "Để trống để giữ bí mật đã lưu",
+    "Enter the invoice admin email. It is required while new-application notices are on or pending applications expire.": "Hãy nhập email quản trị hóa đơn: bắt buộc khi bật thông báo yêu cầu mới hoặc khi yêu cầu đang chờ có hạn hết hạn.",
     "Enter the WeChat API token before enabling WeChat group notifications.": "Hãy nhập token API WeChat trước khi bật thông báo nhóm WeChat.",
     "This provider only supports HTTP, so the token and the invoice details are sent unencrypted.": "Nhà cung cấp này chỉ hỗ trợ HTTP nên token và thông tin hóa đơn được gửi không mã hóa.",
     "A token is saved.": "Đã lưu token.",

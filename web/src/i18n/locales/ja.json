@@ -7402,6 +7402,7 @@
     "Pending invoice expiry (days)": "保留中申請の有効期限（日）",
     "Pending applications expire automatically after this many days and release their orders. Set to 0 to disable automatic expiry.": "保留中の申請は指定日数後に自動失効し、注文を解放します。0で自動失効を無効にできます。",
     "Leave blank to keep the saved secret": "保存済みシークレットを維持する場合は空欄にしてください",
+    "Enter the invoice admin email. It is required while new-application notices are on or pending applications expire.": "請求書管理者のメールアドレスを入力してください。新規申請の通知が有効、または保留中の申請に有効期限がある場合は必須です。",
     "Enter the WeChat API token before enabling WeChat group notifications.": "WeChat グループ通知を有効にする前に WeChat API トークンを入力してください。",
     "This provider only supports HTTP, so the token and the invoice details are sent unencrypted.": "このプロバイダーは HTTP のみ対応のため、トークンと請求情報は暗号化されずに送信されます。",
     "A token is saved.": "トークンは保存済みです。",

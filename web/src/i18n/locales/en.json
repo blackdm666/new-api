@@ -7404,6 +7404,7 @@
     "Pending invoice expiry (days)": "Pending invoice expiry (days)",
     "Pending applications expire automatically after this many days and release their orders. Set to 0 to disable automatic expiry.": "Pending applications expire automatically after this many days and release their orders. Set to 0 to disable automatic expiry.",
     "Leave blank to keep the saved secret": "Leave blank to keep the saved secret",
+    "Enter the invoice admin email. It is required while new-application notices are on or pending applications expire.": "Enter the invoice admin email. It is required while new-application notices are on or pending applications expire.",
     "Enter the WeChat API token before enabling WeChat group notifications.": "Enter the WeChat API token before enabling WeChat group notifications.",
     "This provider only supports HTTP, so the token and the invoice details are sent unencrypted.": "This provider only supports HTTP, so the token and the invoice details are sent unencrypted.",
     "A token is saved.": "A token is saved.",

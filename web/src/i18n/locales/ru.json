@@ -7402,6 +7402,7 @@
     "Pending invoice expiry (days)": "Срок ожидания заявки (дни)",
     "Pending applications expire automatically after this many days and release their orders. Set to 0 to disable automatic expiry.": "Ожидающие заявки автоматически истекают через указанное число дней и освобождают заказы. Укажите 0, чтобы отключить автоистечение.",
     "Leave blank to keep the saved secret": "Оставьте пустым, чтобы сохранить текущий секрет",
+    "Enter the invoice admin email. It is required while new-application notices are on or pending applications expire.": "Укажите email администратора счетов: он обязателен, если включены уведомления о новых заявках или заявки в ожидании истекают.",
     "Enter the WeChat API token before enabling WeChat group notifications.": "Укажите токен API WeChat перед включением уведомлений в группу WeChat.",
     "This provider only supports HTTP, so the token and the invoice details are sent unencrypted.": "Этот провайдер поддерживает только HTTP, поэтому токен и данные счёта передаются без шифрования.",
     "A token is saved.": "Токен сохранён.",

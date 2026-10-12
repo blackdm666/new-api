@@ -173,6 +173,34 @@ describe('invoice settings notifications', () => {
     expect(put).not.toHaveBeenCalled()
   })
 
+  test('an empty admin email is flagged on the field and blocks saving while pending applications expire', async () => {
+    const put = vi.spyOn(api, 'put')
+    const error = vi.spyOn(toast, 'error')
+    const user = userEvent.setup()
+    renderSection({
+      ...defaults,
+      InvoiceApplicationNotifyAdminEnabled: false,
+      InvoiceAdminEmail: '',
+      InvoicePendingExpiryDays: '45',
+    })
+
+    const message =
+      'Enter the invoice admin email. It is required while new-application notices are on or pending applications expire.'
+    expect(screen.getByLabelText('Invoice admin email')).toHaveAttribute(
+      'aria-invalid',
+      'true'
+    )
+    await user.click(
+      screen.getByRole('switch', { name: 'Enable WeChat group notifications' })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Save invoice settings' })
+    )
+
+    expect(error).toHaveBeenCalledWith(message)
+    expect(put).not.toHaveBeenCalled()
+  })
+
   test('a WeChat group ID without the @chatroom suffix blocks saving', async () => {
     const put = vi.spyOn(api, 'put')
     const user = userEvent.setup()
