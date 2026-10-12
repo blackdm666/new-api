@@ -30,11 +30,15 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 
 type CCSwitchApp = 'claude' | 'codex' | 'gemini' | 'grokbuild'
 
+// Claude Desktop keeps its own provider list in CC Switch but cannot be
+// imported by link, so the dialog walks users through the in-app preset.
+type DialogApp = CCSwitchApp | 'claude-desktop'
+
 type CCSwitchAppPreset = {
-  label: string
   // CC Switch uses the first endpoint as the base URL and saves the rest as
   // speed-test candidates, like its preset's endpointCandidates.
   endpoints: readonly string[]
@@ -59,30 +63,35 @@ const CC_SWITCH_PROVIDER = {
 
 const CC_SWITCH_APPS: Record<CCSwitchApp, CCSwitchAppPreset> = {
   claude: {
-    label: 'Claude Code',
     endpoints: ['https://api.88api.ai', 'https://88api.ai'],
     modelFamily: 'Claude',
   },
   codex: {
-    label: 'Codex',
     endpoints: ['https://api.88api.ai/v1', 'https://88api.ai/v1'],
     // Newer than the preset's default model (gpt-5.6-sol) by choice.
     model: 'gpt-6.1-sol',
     modelFamily: 'GPT',
   },
   gemini: {
-    label: 'Gemini CLI',
     endpoints: ['https://api.88api.ai', 'https://88api.ai'],
     model: 'gemini-3.8-flash',
     modelFamily: 'Gemini',
   },
   grokbuild: {
-    label: 'Grok Build',
     endpoints: ['https://api.88api.ai/v1', 'https://88api.ai/v1'],
     // Newer than the preset's default model (grok-4.5) by choice.
     model: 'grok-4.7',
     modelFamily: 'Grok',
   },
+}
+
+// Option order: the two Claude apps share the first row.
+const APP_LABELS: Record<DialogApp, string> = {
+  claude: 'Claude Code CLI',
+  'claude-desktop': 'Claude Desktop',
+  codex: 'Codex',
+  gemini: 'Gemini CLI',
+  grokbuild: 'Grok Build',
 }
 
 function buildCCSwitchURL(app: CCSwitchApp, apiKey: string): string {
@@ -109,7 +118,8 @@ interface Props {
 
 export function CCSwitchDialog(props: Props) {
   const { t } = useTranslation()
-  const [app, setApp] = useState<CCSwitchApp>('claude')
+  const { copyToClipboard } = useCopyToClipboard()
+  const [app, setApp] = useState<DialogApp>('claude')
 
   useEffect(() => {
     if (props.open) {
@@ -118,15 +128,19 @@ export function CCSwitchDialog(props: Props) {
     }
   }, [props.open])
 
-  const preset = CC_SWITCH_APPS[app]
+  const key = props.tokenKey.startsWith('sk-')
+    ? props.tokenKey
+    : `sk-${props.tokenKey}`
+  const preset = app === 'claude-desktop' ? null : CC_SWITCH_APPS[app]
   let groupLabel = props.group.trim()
   if (!groupLabel) groupLabel = t('Follow user group')
   if (groupLabel === 'auto') groupLabel = t('Cross-group')
 
-  const handleSubmit = () => {
-    const key = props.tokenKey.startsWith('sk-')
-      ? props.tokenKey
-      : `sk-${props.tokenKey}`
+  const handleSubmit = async () => {
+    if (app === 'claude-desktop') {
+      await copyToClipboard(key)
+      return
+    }
     window.open(buildCCSwitchURL(app, key), '_blank')
     props.onOpenChange(false)
   }
@@ -147,7 +161,9 @@ export function CCSwitchDialog(props: Props) {
           <Button variant='outline' onClick={() => props.onOpenChange(false)}>
             {t('Cancel')}
           </Button>
-          <Button onClick={handleSubmit}>{t('Open CC Switch')}</Button>
+          <Button onClick={handleSubmit}>
+            {preset ? t('Open CC Switch') : t('Copy Key')}
+          </Button>
         </>
       }
     >
@@ -170,7 +186,7 @@ export function CCSwitchDialog(props: Props) {
             </PopoverTrigger>
             <PopoverContent className='w-72 text-xs leading-relaxed'>
               {t(
-                "OpenCode, OpenClaw, Hermes, Claude Desktop, Pi and MiniMax Code can't be imported by link. In CC Switch, open that app, choose Add Provider, pick the built-in 88API preset and paste this API key."
+                "OpenCode, OpenClaw, Hermes, Pi and MiniMax Code can't be imported by link. In CC Switch, open that app, choose Add Provider, pick the built-in 88API preset and paste this API key."
               )}
             </PopoverContent>
           </Popover>
@@ -178,63 +194,83 @@ export function CCSwitchDialog(props: Props) {
         <RadioGroup
           aria-labelledby='cc-switch-app-label'
           value={app}
-          onValueChange={(value) => setApp(value as CCSwitchApp)}
+          onValueChange={(value) => setApp(value as DialogApp)}
           className='grid grid-cols-2 gap-x-4 gap-y-2'
         >
-          {(Object.keys(CC_SWITCH_APPS) as CCSwitchApp[]).map((key) => (
-            <div key={key} className='flex items-center gap-2'>
-              <RadioGroupItem value={key} id={`app-${key}`} />
-              <Label htmlFor={`app-${key}`} className='cursor-pointer'>
-                {CC_SWITCH_APPS[key].label}
+          {(Object.keys(APP_LABELS) as DialogApp[]).map((value) => (
+            <div key={value} className='flex items-center gap-2'>
+              <RadioGroupItem value={value} id={`app-${value}`} />
+              <Label htmlFor={`app-${value}`} className='cursor-pointer'>
+                {APP_LABELS[value]}
               </Label>
             </div>
           ))}
         </RadioGroup>
       </div>
 
-      <div className='space-y-1.5'>
-        <dl className='space-y-2 rounded-md border p-3 text-sm'>
-          <div className='flex justify-between gap-4'>
-            <dt className='text-muted-foreground'>{t('Name')}</dt>
-            <dd className='font-medium'>{CC_SWITCH_PROVIDER.name}</dd>
-          </div>
-          <div className='flex justify-between gap-4'>
-            <dt className='text-muted-foreground shrink-0'>{t('Base URL')}</dt>
-            <dd className='font-mono break-all'>{preset.endpoints[0]}</dd>
-          </div>
-          {preset.model && (
+      {preset ? (
+        <div className='space-y-1.5'>
+          <dl className='space-y-2 rounded-md border p-3 text-sm'>
             <div className='flex justify-between gap-4'>
-              <dt className='text-muted-foreground'>{t('Default model')}</dt>
-              <dd className='font-mono'>{preset.model}</dd>
+              <dt className='text-muted-foreground'>{t('Name')}</dt>
+              <dd className='font-medium'>{CC_SWITCH_PROVIDER.name}</dd>
             </div>
+            <div className='flex justify-between gap-4'>
+              <dt className='text-muted-foreground shrink-0'>
+                {t('Base URL')}
+              </dt>
+              <dd className='font-mono break-all'>{preset.endpoints[0]}</dd>
+            </div>
+            {preset.model && (
+              <div className='flex justify-between gap-4'>
+                <dt className='text-muted-foreground'>{t('Default model')}</dt>
+                <dd className='font-mono'>{preset.model}</dd>
+              </div>
+            )}
+            <div className='flex justify-between gap-4'>
+              <dt className='text-muted-foreground shrink-0'>{t('Group')}</dt>
+              <dd className='font-medium break-all'>{groupLabel}</dd>
+            </div>
+          </dl>
+          {preset.model && (
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                "The default model is only the initial choice. You can switch to any model in the key's group later."
+              )}
+            </p>
           )}
-          <div className='flex justify-between gap-4'>
+        </div>
+      ) : (
+        <div className='space-y-2 rounded-md border p-3 text-sm'>
+          <p className='font-medium'>
+            {t(
+              "Claude Desktop can't be imported by link. Add it in CC Switch:"
+            )}
+          </p>
+          <ol className='text-muted-foreground list-decimal space-y-1 pl-5'>
+            <li>
+              {t(
+                'In CC Switch, open Claude Desktop, choose Add Provider and pick the 88API preset'
+              )}
+            </li>
+            <li>{t('Click Copy Key below, paste it into API Key and save')}</li>
+          </ol>
+          <dl className='flex justify-between gap-4 border-t pt-2'>
             <dt className='text-muted-foreground shrink-0'>{t('Group')}</dt>
             <dd className='font-medium break-all'>{groupLabel}</dd>
-          </div>
-        </dl>
-        {preset.model && (
-          <p className='text-muted-foreground text-xs'>
-            {t(
-              "The default model is only the initial choice. You can switch to any model in the key's group later."
-            )}
-          </p>
-        )}
-        {app === 'claude' && (
-          <p className='text-muted-foreground text-xs'>
-            {t(
-              'Adds the provider to Claude Code (CLI) only. Claude Desktop does not see it; add the 88API preset there separately in CC Switch.'
-            )}
-          </p>
-        )}
-      </div>
+          </dl>
+        </div>
+      )}
 
       <Alert>
         <AlertTitle>{t('Check the key group')}</AlertTitle>
         <AlertDescription>
           {t(
             '{{app}} needs a key in a group that offers {{family}} models, otherwise requests fail. Edit the key to change its group.',
-            { app: preset.label, family: preset.modelFamily }
+            {
+              app: APP_LABELS[app],
+              family: preset ? preset.modelFamily : 'Claude',
+            }
           )}
         </AlertDescription>
       </Alert>

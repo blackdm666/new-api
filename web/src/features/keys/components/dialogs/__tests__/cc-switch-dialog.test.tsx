@@ -169,12 +169,18 @@ describe('CC Switch 88API preset import', () => {
     }
   )
 
-  it('offers only the apps CC Switch can import by link and explains the others behind the info button', async () => {
+  it('offers Claude Code CLI and Claude Desktop separately and explains the remaining apps behind the info button', async () => {
     renderDialog()
     const user = userEvent.setup()
 
-    expect(screen.getAllByRole('radio')).toHaveLength(4)
-    for (const name of ['Claude Code', 'Codex', 'Gemini CLI', 'Grok Build']) {
+    expect(screen.getAllByRole('radio')).toHaveLength(5)
+    for (const name of [
+      'Claude Code CLI',
+      'Claude Desktop',
+      'Codex',
+      'Gemini CLI',
+      'Grok Build',
+    ]) {
       expect(screen.getByRole('radio', { name })).toBeInTheDocument()
     }
 
@@ -185,17 +191,23 @@ describe('CC Switch 88API preset import', () => {
     ).toBeVisible()
   })
 
-  it('tells Claude Code users that Claude Desktop does not see the import only while Claude Code is selected', async () => {
+  it('shows the in-app preset steps and copies the key instead of opening CC Switch when Claude Desktop is selected', async () => {
     renderDialog()
     const user = userEvent.setup()
 
-    expect(screen.getByText(/Claude Code \(CLI\) only/)).toBeVisible()
-
-    await user.click(screen.getByRole('radio', { name: 'Codex' }))
+    await user.click(screen.getByRole('radio', { name: 'Claude Desktop' }))
 
     expect(
-      screen.queryByText(/Claude Code \(CLI\) only/)
-    ).not.toBeInTheDocument()
+      screen.getByText(/Claude Desktop can't be imported by link/)
+    ).toBeVisible()
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Claude Desktop needs a key in a group that offers Claude models'
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Copy Key' }))
+
+    await expect(navigator.clipboard.readText()).resolves.toBe('sk-test-only')
+    expect(window.open).not.toHaveBeenCalled()
   })
 
   it('keeps an existing sk- prefix when the key already has one', async () => {
