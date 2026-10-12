@@ -135,6 +135,8 @@ const OPERATIONS_SECTIONS = [
           InvoiceWechatNotifyEnabled: settings.InvoiceWechatNotifyEnabled,
           InvoiceWechatApiBaseUrl: settings.InvoiceWechatApiBaseUrl,
           InvoiceWechatApiToken: settings.InvoiceWechatApiToken,
+          InvoiceWechatApiTokenConfigured:
+            settings.InvoiceWechatApiTokenConfigured,
           InvoiceWechatAppId: settings.InvoiceWechatAppId,
           InvoiceWechatGroupId: settings.InvoiceWechatGroupId,
           InvoiceAdminEmail: settings.InvoiceAdminEmail,

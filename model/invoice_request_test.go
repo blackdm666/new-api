@@ -555,6 +555,58 @@ func TestStalePendingInvoiceExpiresAndReleasesOrder(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestPendingInvoiceExpirySkipsRequestThatCannotBeClosed(t *testing.T) {
+	truncateTables(t)
+	withInvoiceTaxFeeSettings(t, 300)
+	blockedUser, blockedOrder := seedInvoiceRequestUserAndOrder(t, "invoice-expiry-blocked", 500)
+	otherUser := &User{Username: "invoice-expiry-other", Email: "other@example.com", AffCode: "invoice-expiry-other", Status: common.UserStatusEnabled, Quota: 100_000_000}
+	require.NoError(t, DB.Create(otherUser).Error)
+	submit := func(user *User, order *TopUp) *InvoiceRequest {
+		request, _, err := CreateInvoiceRequest(CreateInvoiceRequestParams{
+			UserId: user.Id, Username: user.Username, CompanyName: "Expiry Batch Co.",
+			TaxNumber: "91310000EXPBATCH", Email: user.Email, TopUpOrderIds: []int{order.Id},
+		})
+		require.NoError(t, err)
+		return request
+	}
+	blocked := submit(blockedUser, blockedOrder)
+	later := make([]*InvoiceRequest, 0, 2)
+	for _, tradeNo := range []string{"invoice-expiry-later-1", "invoice-expiry-later-2"} {
+		order := &TopUp{UserId: otherUser.Id, Money: 500, Amount: 100, TradeNo: tradeNo,
+			PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe, Status: common.TopUpStatusSuccess}
+		require.NoError(t, DB.Create(order).Error)
+		later = append(later, submit(otherUser, order))
+	}
+	require.NoError(t, DB.Model(&InvoiceRequest{}).Where("id > 0").Update("created_time", 100).Error)
+	// Refunding the tax fee would push this wallet past the limit, so closing
+	// the oldest request fails on every run.
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", blockedUser.Id).Update("quota", common.MaxWalletQuota).Error)
+	status := func(id int) int {
+		stored, err := GetInvoiceRequestById(id)
+		require.NoError(t, err)
+		return stored.Status
+	}
+
+	// With a page size of one the failing request fills the first page; the
+	// run must move past it instead of stopping or reading it again.
+	count, err := ExpirePendingInvoiceRequests(200, 1, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+	assert.Equal(t, InvoiceStatusPending, status(blocked.Id))
+	for _, request := range later {
+		assert.Equal(t, InvoiceStatusExpired, status(request.Id))
+	}
+	var account User
+	require.NoError(t, DB.First(&account, blockedUser.Id).Error)
+	assert.Equal(t, int(common.MaxWalletQuota), account.Quota)
+
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", blockedUser.Id).Update("quota", 0).Error)
+	count, err = ExpirePendingInvoiceRequests(200, 1, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "the skipped request is retried on the next run")
+	assert.Equal(t, InvoiceStatusExpired, status(blocked.Id))
+}
+
 func TestPendingInvoiceExpiryWarningIsQueuedOnlyOnce(t *testing.T) {
 	truncateTables(t)
 	user, order := seedInvoiceRequestUserAndOrder(t, "invoice-expiry-warning-order", 730)
@@ -983,6 +1035,7 @@ func TestInvoiceRefundAndOrderRulesDatabaseMatrix(t *testing.T) {
 			require.NoError(t, db.AutoMigrate(tables...))
 			require.NoError(t, db.Migrator().DropColumn(&InvoiceRequest{}, "tax_fee_refunded_time"))
 			require.NoError(t, db.Migrator().DropColumn(&InvoiceNotificationDelivery{}, "failed_time"))
+			require.NoError(t, db.Migrator().DropColumn(&InvoiceNotificationDelivery{}, "send_started_time"))
 			withInvoiceTaxFeeSettings(t, 300)
 
 			user := &User{Username: "matrix-refund", AffCode: "matrix-refund-code", Status: common.UserStatusEnabled, Quota: 92_500_000}
@@ -1001,6 +1054,7 @@ func TestInvoiceRefundAndOrderRulesDatabaseMatrix(t *testing.T) {
 			}
 			require.True(t, db.Migrator().HasColumn(&InvoiceRequest{}, "tax_fee_refunded_time"))
 			require.True(t, db.Migrator().HasColumn(&InvoiceNotificationDelivery{}, "failed_time"))
+			require.True(t, db.Migrator().HasColumn(&InvoiceNotificationDelivery{}, "send_started_time"))
 
 			var legacy InvoiceRequest
 			require.NoError(t, db.Where("tax_number = ?", "91310000LEGACY").First(&legacy).Error)
@@ -1062,16 +1116,42 @@ func TestInvoiceRefundAndOrderRulesDatabaseMatrix(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, pending, 1)
 			assert.Equal(t, InvoiceNotificationChannelWechat, pending[0].Channel)
-			claimed, err := ClaimInvoiceWechatNotification(wechat.Id, common.GetTimestamp(), common.GetTimestamp()+60)
+			claimedAt := common.GetTimestamp()
+			claimed, err := ClaimInvoiceWechatNotification(wechat.Id, claimedAt, claimedAt+60)
 			require.NoError(t, err)
 			require.True(t, claimed)
-			claimed, err = ClaimInvoiceWechatNotification(wechat.Id, common.GetTimestamp(), common.GetTimestamp()+60)
+			// Even after the lock expires an in-flight message is not claimed again.
+			claimed, err = ClaimInvoiceWechatNotification(wechat.Id, claimedAt+120, claimedAt+180)
 			require.NoError(t, err)
 			assert.False(t, claimed)
-			require.NoError(t, RecordInvoiceWechatNotificationResult(wechat.Id, 1, "wechat api rejected the message: group closed"))
-			pending, err = ListPendingInvoiceWechatNotifications(10, common.GetTimestamp()+120)
+			require.Error(t, RecordInvoiceWechatNotificationResult(wechat.Id, claimedAt-1, 1, "result of another claim"))
+			require.NoError(t, RecordInvoiceWechatNotificationResult(wechat.Id, claimedAt, 1, "wechat api rejected the message: group closed"))
+			pending, err = ListPendingInvoiceWechatNotifications(10, claimedAt+120)
 			require.NoError(t, err)
 			assert.Empty(t, pending)
+
+			interrupted, _, err := EnqueueInvoiceNotification(&InvoiceNotificationDelivery{
+				DeliveryKey: "matrix-wechat-interrupted", InvoiceRequestId: request.Id, Kind: InvoiceNotificationKindWechatGroup,
+				Recipient: "finance@chatroom", Subject: "新开票申请", Body: "【新开票申请】",
+			})
+			require.NoError(t, err)
+			claimed, err = ClaimInvoiceWechatNotification(interrupted.Id, claimedAt-300, claimedAt-120)
+			require.NoError(t, err)
+			require.True(t, claimed)
+			failedCount, err := FailInterruptedInvoiceWechatNotifications(claimedAt)
+			require.NoError(t, err)
+			assert.Equal(t, int64(1), failedCount)
+			var unknown InvoiceNotificationDelivery
+			require.NoError(t, db.First(&unknown, interrupted.Id).Error)
+			assert.Equal(t, InvoiceWechatOutcomeUnknownError, unknown.LastError)
+			assert.NotZero(t, unknown.FailedTime)
+			retried, err := RetryInvoiceNotification(interrupted.Id)
+			require.NoError(t, err)
+			assert.Zero(t, retried.SendStartedTime)
+			pending, err = ListPendingInvoiceWechatNotifications(10, common.GetTimestamp())
+			require.NoError(t, err)
+			require.Len(t, pending, 1)
+			assert.Equal(t, interrupted.Id, pending[0].Id)
 		})
 	}
 }

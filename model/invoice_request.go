@@ -988,9 +988,13 @@ func recordInvoiceTaxFeeRefund(request *InvoiceRequest, refundedQuota int) {
 	))
 }
 
-// ExpirePendingInvoiceRequests closes requests left pending past cutoff,
-// refunding their tax fee. notificationFactory, when set, receives the
-// applicant's account (nil once the account was deleted).
+// ExpirePendingInvoiceRequests closes every request left pending past cutoff,
+// refunding its tax fee, reading candidates in pages of limit ids.
+// notificationFactory, when set, receives the applicant's account (nil once
+// the account was deleted). A request that cannot be closed (for example
+// because the refund would exceed the wallet limit) is logged and skipped so
+// it never blocks the requests after it; the next run tries it again. Only a
+// failure to list candidates is returned.
 func ExpirePendingInvoiceRequests(cutoff int64, limit int, notificationFactory InvoiceUserNotificationFactory) (int, error) {
 	if cutoff <= 0 {
 		return 0, nil
@@ -998,62 +1002,71 @@ func ExpirePendingInvoiceRequests(cutoff int64, limit int, notificationFactory I
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	var ids []int
-	if err := DB.Model(&InvoiceRequest{}).
-		Where("status = ? AND created_time > 0 AND created_time <= ?", InvoiceStatusPending, cutoff).
-		Order("id ASC").Limit(limit).Pluck("id", &ids).Error; err != nil {
-		return 0, err
-	}
 	expired := 0
-	for _, id := range ids {
-		var request InvoiceRequest
-		closed := false
-		refundedQuota := 0
-		err := DB.Transaction(func(tx *gorm.DB) error {
-			closed, refundedQuota = false, 0
-			if err := lockForUpdate(tx).First(&request, "id = ?", id).Error; err != nil {
-				return err
-			}
-			if request.Status != InvoiceStatusPending || request.CreatedTime > cutoff {
-				return nil
-			}
-			refunded, err := closePendingInvoiceRequestTx(tx, &request, InvoiceStatusExpired, 0, "")
-			if err != nil {
-				return err
-			}
-			if notificationFactory != nil {
-				var user *User
-				var account User
-				result := tx.Select("id", "username", "email", "setting").
-					Where("id = ?", request.UserId).Limit(1).Find(&account)
-				if result.Error != nil {
-					return result.Error
+	// Paging by id past the last examined request keeps a skipped request
+	// from being picked up again within this run.
+	lastId := 0
+	for {
+		var ids []int
+		if err := DB.Model(&InvoiceRequest{}).
+			Where("status = ? AND created_time > 0 AND created_time <= ? AND id > ?", InvoiceStatusPending, cutoff, lastId).
+			Order("id ASC").Limit(limit).Pluck("id", &ids).Error; err != nil {
+			return expired, err
+		}
+		for _, id := range ids {
+			lastId = id
+			var request InvoiceRequest
+			closed := false
+			refundedQuota := 0
+			err := DB.Transaction(func(tx *gorm.DB) error {
+				closed, refundedQuota = false, 0
+				if err := lockForUpdate(tx).First(&request, "id = ?", id).Error; err != nil {
+					return err
 				}
-				if result.RowsAffected == 1 {
-					user = &account
+				if request.Status != InvoiceStatusPending || request.CreatedTime > cutoff {
+					return nil
 				}
-				deliveries, err := notificationFactory(&request, user)
+				refunded, err := closePendingInvoiceRequestTx(tx, &request, InvoiceStatusExpired, 0, "")
 				if err != nil {
 					return err
 				}
-				for _, delivery := range deliveries {
-					if _, _, err := EnqueueInvoiceNotificationTx(tx, delivery); err != nil {
+				if notificationFactory != nil {
+					var user *User
+					var account User
+					result := tx.Select("id", "username", "email", "setting").
+						Where("id = ?", request.UserId).Limit(1).Find(&account)
+					if result.Error != nil {
+						return result.Error
+					}
+					if result.RowsAffected == 1 {
+						user = &account
+					}
+					deliveries, err := notificationFactory(&request, user)
+					if err != nil {
 						return err
 					}
+					for _, delivery := range deliveries {
+						if _, _, err := EnqueueInvoiceNotificationTx(tx, delivery); err != nil {
+							return err
+						}
+					}
 				}
+				closed, refundedQuota = true, refunded
+				return nil
+			})
+			if err != nil {
+				common.SysError(fmt.Sprintf("failed to expire invoice request %d, skipping it until the next run: %v", id, err))
+				continue
 			}
-			closed, refundedQuota = true, refunded
-			return nil
-		})
-		if err != nil {
-			return expired, err
+			if closed {
+				expired++
+				recordInvoiceTaxFeeRefund(&request, refundedQuota)
+			}
 		}
-		if closed {
-			expired++
-			recordInvoiceTaxFeeRefund(&request, refundedQuota)
+		if len(ids) < limit {
+			return expired, nil
 		}
 	}
-	return expired, nil
 }
 
 func QueuePendingInvoiceExpiryWarnings(warningCutoff int64, expiryCutoff int64, limit int, notificationFactory InvoiceNotificationFactory) (int, error) {

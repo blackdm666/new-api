@@ -78,17 +78,13 @@ func expirePendingInvoiceRequests() {
 		return
 	}
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
-	for {
-		count, err := model.ExpirePendingInvoiceRequests(cutoff, 100, BuildInvoiceClosedNotifications)
-		if err != nil {
-			common.SysError("failed to expire pending invoice applications: " + err.Error())
-			return
-		}
-		if count > 0 {
-			common.SysLog(fmt.Sprintf("expired %d stale invoice applications", count))
-		}
-		if count < 100 {
-			return
-		}
+	// One call walks every stale request once; requests it could not close are
+	// logged there and retried on the next run.
+	count, err := model.ExpirePendingInvoiceRequests(cutoff, 100, BuildInvoiceClosedNotifications)
+	if count > 0 {
+		common.SysLog(fmt.Sprintf("expired %d stale invoice applications", count))
+	}
+	if err != nil {
+		common.SysError("failed to expire pending invoice applications: " + err.Error())
 	}
 }

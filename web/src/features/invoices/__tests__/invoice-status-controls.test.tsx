@@ -49,21 +49,12 @@ function renderControls(fileCount: number) {
   return { onUpdated }
 }
 
-async function chooseStatus(
-  user: ReturnType<typeof userEvent.setup>,
-  name: string
-) {
-  await user.click(screen.getByRole('combobox', { name: 'Application status' }))
-  await user.click(await screen.findByRole('option', { name }))
-}
-
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
 describe('invoice status controls', () => {
-  test('without uploaded files the issued status cannot be chosen and a hint explains why', async () => {
-    const user = userEvent.setup()
+  test('without uploaded files the issue button is disabled and a hint explains why', () => {
     renderControls(0)
 
     expect(
@@ -71,25 +62,23 @@ describe('invoice status controls', () => {
         'Upload at least one invoice file before marking the application as issued.'
       )
     ).toBeVisible()
-    await user.click(
-      screen.getByRole('combobox', { name: 'Application status' })
-    )
-
     expect(
-      await screen.findByRole('option', { name: 'Issued' })
-    ).toHaveAttribute('aria-disabled', 'true')
-    expect(screen.getByRole('button', { name: 'Update status' })).toBeDisabled()
+      screen.getByRole('button', { name: 'Mark as issued' })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: 'Reject application' })
+    ).toBeEnabled()
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
   })
 
-  test('marking as issued asks for confirmation before updating the status', async () => {
+  test('clicking mark as issued asks for confirmation before updating the status', async () => {
     const put = vi
       .spyOn(api, 'put')
       .mockResolvedValue({ data: { success: true, data: null } })
     const user = userEvent.setup()
     const { onUpdated } = renderControls(2)
 
-    await chooseStatus(user, 'Issued')
-    await user.click(screen.getByRole('button', { name: 'Update status' }))
+    await user.click(screen.getByRole('button', { name: 'Mark as issued' }))
 
     const dialog = await screen.findByRole('alertdialog')
     expect(
@@ -110,31 +99,30 @@ describe('invoice status controls', () => {
     expect(onUpdated).toHaveBeenCalledOnce()
   })
 
-  test('rejecting shows the reason and the tax fee refund before confirming', async () => {
+  test('rejecting asks for the reason in the dialog and shows the tax fee refund before confirming', async () => {
     const put = vi
       .spyOn(api, 'put')
       .mockResolvedValue({ data: { success: true, data: null } })
     const user = userEvent.setup()
     renderControls(0)
 
-    await chooseStatus(user, 'Rejected')
-    expect(screen.getByRole('button', { name: 'Update status' })).toBeDisabled()
-    await user.type(
-      screen.getByLabelText('Rejection reason'),
-      'Tax number does not match the company'
-    )
-    await user.click(screen.getByRole('button', { name: 'Update status' }))
+    await user.click(screen.getByRole('button', { name: 'Reject application' }))
 
     const dialog = await screen.findByRole('alertdialog')
-    expect(
-      within(dialog).getByText('Tax number does not match the company')
-    ).toBeVisible()
     expect(within(dialog).getByText(/¥26\.64/)).toBeVisible()
+    const confirmButton = within(dialog).getByRole('button', {
+      name: 'Confirm rejection',
+    })
+    expect(confirmButton).toBeDisabled()
+
+    await user.type(
+      within(dialog).getByLabelText('Rejection reason'),
+      'Tax number does not match the company'
+    )
+    expect(confirmButton).toBeEnabled()
     expect(put).not.toHaveBeenCalled()
 
-    await user.click(
-      within(dialog).getByRole('button', { name: 'Confirm rejection' })
-    )
+    await user.click(confirmButton)
 
     expect(put).toHaveBeenCalledWith(
       '/api/invoice/admin/requests/42/status',

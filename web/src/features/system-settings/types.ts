@@ -556,6 +556,7 @@ export type OperationsSettings = {
   InvoiceWechatNotifyEnabled: boolean
   InvoiceWechatApiBaseUrl: string
   InvoiceWechatApiToken: string
+  InvoiceWechatApiTokenConfigured: boolean
   InvoiceWechatAppId: string
   InvoiceWechatGroupId: string
   InvoiceAdminEmail: string

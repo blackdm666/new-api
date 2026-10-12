@@ -24,7 +24,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
@@ -233,6 +233,33 @@ describe('admin invoice list URL state', () => {
     expect(
       screen.getByRole('combobox', { name: 'Filter by application status' })
     ).toHaveTextContent('Rejected')
+  })
+
+  test('opening the list without a keyword clears the search box instead of restoring the old keyword', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const { router } = await renderInvoiceRoutes(
+        '/admin-invoices/?keyword=Example',
+        { items: [invoice(1, INVOICE_STATUS.PENDING)] }
+      )
+      const searchBox = await screen.findByRole('textbox', {
+        name: 'Search by order number, username, invoice title, or tax number',
+      })
+      expect(searchBox).toHaveValue('Example')
+
+      await act(async () => {
+        router.history.push('/admin-invoices/')
+      })
+      await waitFor(() => expect(searchBox).toHaveValue(''))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000)
+      })
+
+      expect(router.state.location.search).toEqual({})
+      expect(searchBox).toHaveValue('')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

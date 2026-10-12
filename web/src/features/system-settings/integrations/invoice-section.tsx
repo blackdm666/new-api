@@ -94,6 +94,8 @@ type Props = {
     InvoiceWechatNotifyEnabled: boolean
     InvoiceWechatApiBaseUrl: string
     InvoiceWechatApiToken: string
+    // Reported by the server; the token itself is never sent back.
+    InvoiceWechatApiTokenConfigured?: boolean
     InvoiceWechatAppId: string
     InvoiceWechatGroupId: string
     InvoiceAdminEmail: string
@@ -255,6 +257,9 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
       ? t('The WeChat group ID must end with @chatroom.')
       : ''
 
+  const wechatTokenConfigured =
+    defaultValues.InvoiceWechatApiTokenConfigured === true
+
   const save = () => {
     if (!dirty) {
       toast.info(t('No changes to save'))
@@ -262,6 +267,18 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
     }
     if (wechatGroupIdError) {
       toast.error(wechatGroupIdError)
+      return
+    }
+    if (
+      values.InvoiceWechatNotifyEnabled &&
+      !wechatTokenConfigured &&
+      values.InvoiceWechatApiToken.trim() === ''
+    ) {
+      toast.error(
+        t(
+          'Enter the WeChat API token before enabling WeChat group notifications.'
+        )
+      )
       return
     }
     if (
@@ -440,13 +457,25 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
               onChange={(value) => update('InvoiceWechatApiBaseUrl', value)}
               placeholder={DEFAULT_WECHAT_API_BASE_URL}
               className='sm:col-span-2'
+              description={t(
+                'This provider only supports HTTP, so the token and the invoice details are sent unencrypted.'
+              )}
             />
             <TextField
               label={t('WeChat API token')}
               value={values.InvoiceWechatApiToken}
               onChange={(value) => update('InvoiceWechatApiToken', value)}
               type='password'
-              placeholder={t('Leave blank to keep the saved secret')}
+              placeholder={
+                wechatTokenConfigured
+                  ? t('Leave blank to keep the saved secret')
+                  : t('No token saved yet')
+              }
+              description={
+                wechatTokenConfigured
+                  ? t('A token is saved.')
+                  : t('No token saved yet')
+              }
             />
             <TextField
               label={t('WeChat App ID')}
@@ -633,6 +662,7 @@ function TextField({
   max,
   step,
   error,
+  description,
 }: {
   label: string
   value: string
@@ -644,6 +674,7 @@ function TextField({
   max?: string
   step?: string
   error?: string
+  description?: string
 }) {
   const id = useId()
   return (
@@ -665,6 +696,9 @@ function TextField({
         <p id={`${id}-error`} className='text-destructive text-xs' role='alert'>
           {error}
         </p>
+      )}
+      {description && (
+        <p className='text-muted-foreground text-xs'>{description}</p>
       )}
     </div>
   )

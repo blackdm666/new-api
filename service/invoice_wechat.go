@@ -179,22 +179,44 @@ func WakeInvoiceWechatDelivery() {
 	}
 }
 
+// deliverPendingInvoiceWechatNotifications sends queued messages while the
+// finance group notification is enabled and fully configured. Otherwise it
+// leaves every message untouched, so messages queued before the switch was
+// turned off are sent once it is turned on again.
 func deliverPendingInvoiceWechatNotifications() {
-	deliveries, err := model.ListPendingInvoiceWechatNotifications(50, common.GetTimestamp())
+	if !invoiceWechatNotifyReady() {
+		return
+	}
+	now := common.GetTimestamp()
+	interrupted, err := model.FailInterruptedInvoiceWechatNotifications(now)
+	if err != nil {
+		common.SysError("failed to fail interrupted invoice wechat notifications: " + err.Error())
+	} else if interrupted > 0 {
+		common.SysError(fmt.Sprintf("%d invoice wechat notification(s) were interrupted while sending and need a manual retry", interrupted))
+	}
+	deliveries, err := model.ListPendingInvoiceWechatNotifications(50, now)
 	if err != nil {
 		common.SysError("failed to list pending invoice wechat notifications: " + err.Error())
 		return
 	}
 	for _, delivery := range deliveries {
-		deliverInvoiceWechatNotification(delivery)
+		// Re-read the settings for every message so turning the switch off
+		// stops the batch.
+		config, err := currentInvoiceWechatConfig()
+		if err != nil || !setting.InvoiceWechatNotifyEnabled {
+			return
+		}
+		deliverInvoiceWechatNotification(delivery, config)
 	}
 }
 
 // deliverInvoiceWechatNotification sends one queued message and records the
-// final outcome. A message that was not accepted is marked failed and is only
+// final outcome. The claim marks the message in flight before anything is
+// posted, so it is never sent twice automatically: a message that was not
+// accepted, or whose result was never recorded, is marked failed and is only
 // sent again when an administrator retries it, because the provider may still
 // have delivered it.
-func deliverInvoiceWechatNotification(delivery *model.InvoiceNotificationDelivery) {
+func deliverInvoiceWechatNotification(delivery *model.InvoiceNotificationDelivery, config invoiceWechatConfig) {
 	now := common.GetTimestamp()
 	claimed, err := model.ClaimInvoiceWechatNotification(delivery.Id, now, now+int64((invoiceWechatSendBudget+time.Minute)/time.Second))
 	if err != nil || !claimed {
@@ -203,22 +225,15 @@ func deliverInvoiceWechatNotification(delivery *model.InvoiceNotificationDeliver
 		}
 		return
 	}
-	attempts := 0
-	config, err := currentInvoiceWechatConfig()
-	if err == nil && !setting.InvoiceWechatNotifyEnabled {
-		err = errors.New("invoice wechat notification is disabled")
-	}
-	if err == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), invoiceWechatSendBudget)
-		attempts, err = sendInvoiceWechatText(ctx, config, delivery.Recipient, delivery.Body)
-		cancel()
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), invoiceWechatSendBudget)
+	attempts, err := sendInvoiceWechatText(ctx, config, delivery.Recipient, delivery.Body)
+	cancel()
 	failure := ""
 	if err != nil {
 		failure = err.Error()
 		common.SysError(fmt.Sprintf("invoice wechat notification %d failed after %d attempt(s): %s", delivery.Id, attempts, failure))
 	}
-	if recordErr := model.RecordInvoiceWechatNotificationResult(delivery.Id, delivery.Attempts+attempts, failure); recordErr != nil {
+	if recordErr := model.RecordInvoiceWechatNotificationResult(delivery.Id, now, delivery.Attempts+attempts, failure); recordErr != nil {
 		common.SysError(fmt.Sprintf("failed to record invoice wechat notification %d: %s", delivery.Id, recordErr.Error()))
 	}
 }

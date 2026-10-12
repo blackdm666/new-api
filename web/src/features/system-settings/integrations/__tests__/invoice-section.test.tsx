@@ -130,11 +130,12 @@ describe('invoice settings notifications', () => {
       .spyOn(api, 'put')
       .mockResolvedValue({ data: { success: true, message: '' } })
     const user = userEvent.setup()
-    renderSection()
+    renderSection({ ...defaults, InvoiceWechatApiTokenConfigured: true })
 
     const token = screen.getByLabelText('WeChat API token')
     expect(token).toHaveValue('')
     expect(token).toHaveAttribute('type', 'password')
+    expect(screen.getByText('A token is saved.')).toBeVisible()
 
     await user.click(
       screen.getByRole('switch', { name: 'Enable WeChat group notifications' })
@@ -150,6 +151,26 @@ describe('invoice settings notifications', () => {
       InvoiceWechatAppId: 'wx-app',
       InvoiceWechatGroupId: '12345678901@chatroom',
     })
+  })
+
+  test('enabling WeChat notifications without a saved or entered token blocks saving', async () => {
+    const put = vi.spyOn(api, 'put')
+    const error = vi.spyOn(toast, 'error')
+    const user = userEvent.setup()
+    renderSection({ ...defaults, InvoiceWechatApiTokenConfigured: false })
+
+    expect(screen.getAllByText('No token saved yet').length).toBeGreaterThan(0)
+    await user.click(
+      screen.getByRole('switch', { name: 'Enable WeChat group notifications' })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Save invoice settings' })
+    )
+
+    expect(error).toHaveBeenCalledWith(
+      'Enter the WeChat API token before enabling WeChat group notifications.'
+    )
+    expect(put).not.toHaveBeenCalled()
   })
 
   test('a WeChat group ID without the @chatroom suffix blocks saving', async () => {

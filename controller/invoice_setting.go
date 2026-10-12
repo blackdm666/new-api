@@ -31,8 +31,6 @@ const (
 type InvoiceSettingsPayload struct {
 	InvoiceApplicationNotifyAdminEnabled bool   `json:"InvoiceApplicationNotifyAdminEnabled"`
 	InvoiceIssuedNotifyUserEnabled       bool   `json:"InvoiceIssuedNotifyUserEnabled"`
-	InvoiceRejectedNotifyUserEnabled     bool   `json:"InvoiceRejectedNotifyUserEnabled"`
-	InvoiceExpiredNotifyUserEnabled      bool   `json:"InvoiceExpiredNotifyUserEnabled"`
 	InvoiceAdminEmail                    string `json:"InvoiceAdminEmail"`
 	InvoiceMinimumAmountCents            int64  `json:"InvoiceMinimumAmountCents"`
 	InvoiceTaxRateBasisPoints            int    `json:"InvoiceTaxRateBasisPoints"`
@@ -68,16 +66,26 @@ type InvoiceSettingsPayload struct {
 	InvoiceFileCOSSecretKey    string `json:"InvoiceFileCOSSecretKey"`
 	InvoiceFileCOSCustomDomain string `json:"InvoiceFileCOSCustomDomain"`
 
-	InvoiceWechatNotifyEnabled bool   `json:"InvoiceWechatNotifyEnabled"`
-	InvoiceWechatApiBaseUrl    string `json:"InvoiceWechatApiBaseUrl"`
-	InvoiceWechatApiToken      string `json:"InvoiceWechatApiToken"`
-	InvoiceWechatAppId         string `json:"InvoiceWechatAppId"`
-	InvoiceWechatGroupId       string `json:"InvoiceWechatGroupId"`
+	// Settings added after the first console release. Console bundles built
+	// before them omit these fields, so nil keeps the stored value;
+	// preserveStoredInvoiceSettings fills them in before validation.
+	InvoiceRejectedNotifyUserEnabled *bool   `json:"InvoiceRejectedNotifyUserEnabled,omitempty"`
+	InvoiceExpiredNotifyUserEnabled  *bool   `json:"InvoiceExpiredNotifyUserEnabled,omitempty"`
+	InvoiceWechatNotifyEnabled       *bool   `json:"InvoiceWechatNotifyEnabled,omitempty"`
+	InvoiceWechatApiBaseUrl          *string `json:"InvoiceWechatApiBaseUrl,omitempty"`
+	InvoiceWechatApiToken            *string `json:"InvoiceWechatApiToken,omitempty"`
+	InvoiceWechatAppId               *string `json:"InvoiceWechatAppId,omitempty"`
+	InvoiceWechatGroupId             *string `json:"InvoiceWechatGroupId,omitempty"`
 }
 
 func validateInvoiceSettingsPayload(payload *InvoiceSettingsPayload) error {
 	if payload == nil {
 		return errors.New("invoice settings are required")
+	}
+	if payload.InvoiceRejectedNotifyUserEnabled == nil || payload.InvoiceExpiredNotifyUserEnabled == nil ||
+		payload.InvoiceWechatNotifyEnabled == nil || payload.InvoiceWechatApiBaseUrl == nil ||
+		payload.InvoiceWechatApiToken == nil || payload.InvoiceWechatAppId == nil || payload.InvoiceWechatGroupId == nil {
+		return errors.New("invoice settings must be merged with the stored values before validation")
 	}
 	payload.InvoiceAdminEmail = strings.TrimSpace(payload.InvoiceAdminEmail)
 	if payload.InvoiceApplicationNotifyAdminEnabled || payload.InvoicePendingExpiryDays > 0 {
@@ -154,37 +162,61 @@ func validateInvoiceSettingsPayload(payload *InvoiceSettingsPayload) error {
 	return errors.New("unsupported invoice file storage")
 }
 
-// validateInvoiceWechatSettings normalizes the finance group settings. The
-// switch can only be turned on once every value needed to post is present.
+// validateInvoiceWechatSettings normalizes the merged finance group settings.
+// The switch can only be turned on once every value needed to post is present.
 func validateInvoiceWechatSettings(payload *InvoiceSettingsPayload) error {
-	payload.InvoiceWechatApiBaseUrl = strings.TrimRight(strings.TrimSpace(payload.InvoiceWechatApiBaseUrl), "/")
-	if payload.InvoiceWechatApiBaseUrl == "" {
-		payload.InvoiceWechatApiBaseUrl = setting.DefaultInvoiceWechatApiBaseUrl
+	baseURL := strings.TrimRight(strings.TrimSpace(*payload.InvoiceWechatApiBaseUrl), "/")
+	if baseURL == "" {
+		baseURL = setting.DefaultInvoiceWechatApiBaseUrl
 	}
-	payload.InvoiceWechatApiToken = strings.TrimSpace(payload.InvoiceWechatApiToken)
-	payload.InvoiceWechatAppId = strings.TrimSpace(payload.InvoiceWechatAppId)
-	payload.InvoiceWechatGroupId = strings.TrimSpace(payload.InvoiceWechatGroupId)
-	if err := setting.ValidateInvoiceWechatApiBaseUrl(payload.InvoiceWechatApiBaseUrl); err != nil {
+	token := strings.TrimSpace(*payload.InvoiceWechatApiToken)
+	appID := strings.TrimSpace(*payload.InvoiceWechatAppId)
+	groupID := strings.TrimSpace(*payload.InvoiceWechatGroupId)
+	payload.InvoiceWechatApiBaseUrl = &baseURL
+	payload.InvoiceWechatApiToken = &token
+	payload.InvoiceWechatAppId = &appID
+	payload.InvoiceWechatGroupId = &groupID
+	if err := setting.ValidateInvoiceWechatApiBaseUrl(baseURL); err != nil {
 		return err
 	}
-	if err := setting.ValidateInvoiceWechatGroupId(payload.InvoiceWechatGroupId); err != nil {
+	if err := setting.ValidateInvoiceWechatGroupId(groupID); err != nil {
 		return err
 	}
-	if payload.InvoiceWechatNotifyEnabled &&
-		(payload.InvoiceWechatApiToken == "" || payload.InvoiceWechatAppId == "" || payload.InvoiceWechatGroupId == "") {
+	if *payload.InvoiceWechatNotifyEnabled && (token == "" || appID == "" || groupID == "") {
 		return errors.New("WeChat notifications require an API token, app ID and group ID")
 	}
 	return nil
 }
 
-func preserveInvoiceStorageSecrets(payload *InvoiceSettingsPayload) {
+// preserveStoredInvoiceSettings merges a submitted payload with the stored
+// settings: fields an older console omits keep their stored value, and
+// secrets the console never receives keep theirs when left blank.
+func preserveStoredInvoiceSettings(payload *InvoiceSettingsPayload) {
 	if payload == nil {
 		return
 	}
-	// The token is never sent to the console; an empty or masked ("****")
-	// value keeps the stored one.
-	if strings.Trim(strings.TrimSpace(payload.InvoiceWechatApiToken), "*") == "" {
-		payload.InvoiceWechatApiToken = setting.InvoiceWechatApiToken
+	if payload.InvoiceRejectedNotifyUserEnabled == nil {
+		payload.InvoiceRejectedNotifyUserEnabled = common.GetPointer(common.InvoiceRejectedNotifyUserEnabled)
+	}
+	if payload.InvoiceExpiredNotifyUserEnabled == nil {
+		payload.InvoiceExpiredNotifyUserEnabled = common.GetPointer(common.InvoiceExpiredNotifyUserEnabled)
+	}
+	if payload.InvoiceWechatNotifyEnabled == nil {
+		payload.InvoiceWechatNotifyEnabled = common.GetPointer(setting.InvoiceWechatNotifyEnabled)
+	}
+	if payload.InvoiceWechatApiBaseUrl == nil {
+		payload.InvoiceWechatApiBaseUrl = common.GetPointer(setting.InvoiceWechatApiBaseUrl)
+	}
+	// The token is never sent to the console; an omitted, empty or masked
+	// ("****") value keeps the stored one.
+	if payload.InvoiceWechatApiToken == nil || strings.Trim(strings.TrimSpace(*payload.InvoiceWechatApiToken), "*") == "" {
+		payload.InvoiceWechatApiToken = common.GetPointer(setting.InvoiceWechatApiToken)
+	}
+	if payload.InvoiceWechatAppId == nil {
+		payload.InvoiceWechatAppId = common.GetPointer(setting.InvoiceWechatAppId)
+	}
+	if payload.InvoiceWechatGroupId == nil {
+		payload.InvoiceWechatGroupId = common.GetPointer(setting.InvoiceWechatGroupId)
 	}
 	if strings.TrimSpace(payload.InvoiceFileOSSAccessKeySecret) == "" {
 		payload.InvoiceFileOSSAccessKeySecret = setting.InvoiceFileOSSAccessKeySecret
@@ -300,8 +332,8 @@ func (payload *InvoiceSettingsPayload) optionValues() map[string]string {
 	return map[string]string{
 		"InvoiceApplicationNotifyAdminEnabled": strconv.FormatBool(payload.InvoiceApplicationNotifyAdminEnabled),
 		"InvoiceIssuedNotifyUserEnabled":       strconv.FormatBool(payload.InvoiceIssuedNotifyUserEnabled),
-		"InvoiceRejectedNotifyUserEnabled":     strconv.FormatBool(payload.InvoiceRejectedNotifyUserEnabled),
-		"InvoiceExpiredNotifyUserEnabled":      strconv.FormatBool(payload.InvoiceExpiredNotifyUserEnabled),
+		"InvoiceRejectedNotifyUserEnabled":     strconv.FormatBool(*payload.InvoiceRejectedNotifyUserEnabled),
+		"InvoiceExpiredNotifyUserEnabled":      strconv.FormatBool(*payload.InvoiceExpiredNotifyUserEnabled),
 		"InvoiceAdminEmail":                    payload.InvoiceAdminEmail,
 		"InvoiceMinimumAmountCents":            strconv.FormatInt(payload.InvoiceMinimumAmountCents, 10),
 		"InvoiceTaxRateBasisPoints":            strconv.Itoa(payload.InvoiceTaxRateBasisPoints),
@@ -333,11 +365,11 @@ func (payload *InvoiceSettingsPayload) optionValues() map[string]string {
 		"InvoiceFileCOSSecretId":               strings.TrimSpace(payload.InvoiceFileCOSSecretId),
 		"InvoiceFileCOSSecretKey":              strings.TrimSpace(payload.InvoiceFileCOSSecretKey),
 		"InvoiceFileCOSCustomDomain":           strings.TrimRight(strings.TrimSpace(payload.InvoiceFileCOSCustomDomain), "/"),
-		"InvoiceWechatNotifyEnabled":           strconv.FormatBool(payload.InvoiceWechatNotifyEnabled),
-		"InvoiceWechatApiBaseUrl":              payload.InvoiceWechatApiBaseUrl,
-		"InvoiceWechatApiToken":                payload.InvoiceWechatApiToken,
-		"InvoiceWechatAppId":                   payload.InvoiceWechatAppId,
-		"InvoiceWechatGroupId":                 payload.InvoiceWechatGroupId,
+		"InvoiceWechatNotifyEnabled":           strconv.FormatBool(*payload.InvoiceWechatNotifyEnabled),
+		"InvoiceWechatApiBaseUrl":              *payload.InvoiceWechatApiBaseUrl,
+		"InvoiceWechatApiToken":                *payload.InvoiceWechatApiToken,
+		"InvoiceWechatAppId":                   *payload.InvoiceWechatAppId,
+		"InvoiceWechatGroupId":                 *payload.InvoiceWechatGroupId,
 	}
 }
 
@@ -347,7 +379,7 @@ func UpdateInvoiceSettings(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvoiceSettingsInvalid)
 		return
 	}
-	preserveInvoiceStorageSecrets(&payload)
+	preserveStoredInvoiceSettings(&payload)
 	if err := validateInvoiceSettingsPayload(&payload); err != nil {
 		common.SysLog("invalid invoice settings: " + err.Error())
 		common.ApiErrorI18n(c, i18n.MsgInvoiceSettingsInvalid)

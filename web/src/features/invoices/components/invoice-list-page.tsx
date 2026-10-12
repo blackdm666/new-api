@@ -111,6 +111,13 @@ export function InvoiceListPage(props: InvoiceListPageProps) {
   const debouncedKeyword = useDebounce(keywordInput, 300)
   const onSearchChange = props.onSearchChange
   const currentSearch = props.search
+  // Follow keyword changes made outside the input (e.g. opening the list from
+  // the sidebar without a keyword) instead of writing the old input back.
+  const [syncedKeyword, setSyncedKeyword] = useState(state.keyword)
+  if (state.keyword !== syncedKeyword) {
+    setSyncedKeyword(state.keyword)
+    if (state.keyword !== keywordInput.trim()) setKeywordInput(state.keyword)
+  }
 
   const params: InvoiceListParams = {
     page: state.page,
@@ -137,13 +144,16 @@ export function InvoiceListPage(props: InvoiceListPageProps) {
 
   useEffect(() => {
     const keyword = debouncedKeyword.trim()
-    if (!admin || keyword === (currentSearch.keyword ?? '')) return
+    // Wait until the debounce caught up with the input, so an outside reset
+    // is not undone by a keyword that is still pending in the debounce.
+    if (!admin || keyword !== keywordInput.trim()) return
+    if (keyword === (currentSearch.keyword ?? '')) return
     onSearchChange({
       ...currentSearch,
       page: undefined,
       keyword: keyword || undefined,
     })
-  }, [admin, currentSearch, debouncedKeyword, onSearchChange])
+  }, [admin, currentSearch, debouncedKeyword, keywordInput, onSearchChange])
 
   const updateList = (patch: Partial<InvoiceListState>) =>
     onSearchChange(

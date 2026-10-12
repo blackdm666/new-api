@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Loader2 } from 'lucide-react'
+import { CheckCircle2, Loader2, XCircle } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -24,23 +24,12 @@ import { toast } from 'sonner'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error'
 
 import { updateInvoiceStatus } from '../api'
-import { formatInvoiceAmount, INVOICE_STATUS_META } from '../lib/invoice-utils'
-import {
-  INVOICE_STATUS,
-  type InvoiceRequest,
-  type InvoiceStatus,
-} from '../types'
+import { formatInvoiceAmount } from '../lib/invoice-utils'
+import { INVOICE_STATUS, type InvoiceRequest } from '../types'
 
 type InvoiceStatusControlsProps = {
   invoice: InvoiceRequest
@@ -48,22 +37,22 @@ type InvoiceStatusControlsProps = {
   onUpdated: () => Promise<void>
 }
 
+type FinalAction = 'issue' | 'reject'
+
 /**
- * Administrator controls that move a pending application to a final status.
- * Every final transition is summarised in a confirmation dialog first because
- * it notifies the applicant and cannot be reverted.
+ * Administrator actions that move a pending application to a final status.
+ * Each action opens a confirmation dialog first because it notifies the
+ * applicant and cannot be reverted; rejecting asks for the reason there.
  */
 export function InvoiceStatusControls(props: InvoiceStatusControlsProps) {
   const { t } = useTranslation()
-  const [status, setStatus] = useState<InvoiceStatus>(props.invoice.status)
+  const [action, setAction] = useState<FinalAction | null>(null)
   const [rejectionReason, setRejectionReason] = useState('')
-  const [confirmOpen, setConfirmOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const hasFiles = props.fileCount > 0
   const reason = rejectionReason.trim()
-  const issuing = status === INVOICE_STATUS.ISSUED
-  const rejecting = status === INVOICE_STATUS.REJECTED
-  const ready = (issuing && hasFiles) || (rejecting && reason !== '')
+  const rejecting = action === 'reject'
+  const ready = rejecting ? reason !== '' : hasFiles
 
   if (props.invoice.status !== INVOICE_STATUS.PENDING) {
     return (
@@ -74,16 +63,17 @@ export function InvoiceStatusControls(props: InvoiceStatusControlsProps) {
   }
 
   const confirm = async () => {
-    if (saving || !ready) return
+    if (saving || !action || !ready) return
     setSaving(true)
     try {
       await updateInvoiceStatus(
         props.invoice.id,
-        status,
+        rejecting ? INVOICE_STATUS.REJECTED : INVOICE_STATUS.ISSUED,
         rejecting ? reason : ''
       )
       toast.success(t('Invoice status updated'))
-      setConfirmOpen(false)
+      setAction(null)
+      setRejectionReason('')
       await props.onUpdated()
     } catch (error) {
       toast.error(getUserFacingErrorMessage(error))
@@ -99,15 +89,10 @@ export function InvoiceStatusControls(props: InvoiceStatusControlsProps) {
       <dd className='break-all'>{props.invoice.company_name || '—'}</dd>
       <dt className='text-muted-foreground'>{t('Total amount')}</dt>
       <dd>{formatInvoiceAmount(props.invoice.total_money)}</dd>
-      {issuing ? (
+      {!rejecting && (
         <>
           <dt className='text-muted-foreground'>{t('Invoice files')}</dt>
           <dd>{props.fileCount}</dd>
-        </>
-      ) : (
-        <>
-          <dt className='text-muted-foreground'>{t('Rejection reason')}</dt>
-          <dd className='break-all whitespace-pre-wrap'>{reason}</dd>
         </>
       )}
     </dl>
@@ -130,47 +115,25 @@ export function InvoiceStatusControls(props: InvoiceStatusControlsProps) {
   return (
     <div className='space-y-2'>
       <div className='flex flex-wrap items-center gap-2'>
-        <Label
-          htmlFor='invoice-application-status'
-          className='whitespace-nowrap'
-        >
-          {t('Application status')}
-        </Label>
-        <Select
-          value={String(status)}
-          onValueChange={(value) => {
-            if (value !== null) setStatus(Number(value) as InvoiceStatus)
-          }}
-        >
-          <SelectTrigger id='invoice-application-status' className='w-36'>
-            <SelectValue>{t(INVOICE_STATUS_META[status].labelKey)}</SelectValue>
-          </SelectTrigger>
-          <SelectContent
-            side='bottom'
-            align='start'
-            sideOffset={6}
-            alignItemWithTrigger={false}
-          >
-            <SelectItem value={String(INVOICE_STATUS.PENDING)} disabled>
-              {t(INVOICE_STATUS_META[INVOICE_STATUS.PENDING].labelKey)}
-            </SelectItem>
-            <SelectItem
-              value={String(INVOICE_STATUS.ISSUED)}
-              disabled={!hasFiles}
-            >
-              {t(INVOICE_STATUS_META[INVOICE_STATUS.ISSUED].labelKey)}
-            </SelectItem>
-            <SelectItem value={String(INVOICE_STATUS.REJECTED)}>
-              {t(INVOICE_STATUS_META[INVOICE_STATUS.REJECTED].labelKey)}
-            </SelectItem>
-          </SelectContent>
-        </Select>
         <Button
-          onClick={() => setConfirmOpen(true)}
-          disabled={saving || !ready}
+          onClick={() => setAction('issue')}
+          disabled={saving || !hasFiles}
         >
-          {saving && <Loader2 className='size-4 animate-spin' />}
-          {t('Update status')}
+          {saving && !rejecting ? (
+            <Loader2 className='size-4 animate-spin' aria-hidden='true' />
+          ) : (
+            <CheckCircle2 className='size-4' aria-hidden='true' />
+          )}
+          {t('Mark as issued')}
+        </Button>
+        <Button
+          variant='outline'
+          className='text-destructive hover:text-destructive'
+          onClick={() => setAction('reject')}
+          disabled={saving}
+        >
+          <XCircle className='size-4' aria-hidden='true' />
+          {t('Reject application')}
         </Button>
       </div>
       {!hasFiles && (
@@ -180,25 +143,10 @@ export function InvoiceStatusControls(props: InvoiceStatusControlsProps) {
           )}
         </p>
       )}
-      {rejecting && (
-        <div className='space-y-1.5 sm:w-[420px]'>
-          <Label htmlFor='invoice-rejection-reason'>
-            {t('Rejection reason')}
-          </Label>
-          <Textarea
-            id='invoice-rejection-reason'
-            value={rejectionReason}
-            onChange={(event) => setRejectionReason(event.target.value)}
-            maxLength={500}
-            rows={3}
-            aria-required='true'
-          />
-        </div>
-      )}
       <ConfirmDialog
-        open={confirmOpen}
+        open={action !== null}
         onOpenChange={(open) => {
-          if (!saving) setConfirmOpen(open)
+          if (!open && !saving) setAction(null)
         }}
         title={
           rejecting
@@ -216,7 +164,24 @@ export function InvoiceStatusControls(props: InvoiceStatusControlsProps) {
         disabled={!ready}
         isLoading={saving}
         handleConfirm={() => void confirm()}
-      />
+      >
+        {rejecting && (
+          <div className='space-y-1.5'>
+            <Label htmlFor='invoice-rejection-reason'>
+              {t('Rejection reason')}
+            </Label>
+            <Textarea
+              id='invoice-rejection-reason'
+              value={rejectionReason}
+              onChange={(event) => setRejectionReason(event.target.value)}
+              maxLength={500}
+              rows={3}
+              aria-required='true'
+              autoFocus
+            />
+          </div>
+        )}
+      </ConfirmDialog>
     </div>
   )
 }

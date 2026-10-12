@@ -77,6 +77,7 @@ const defaultOperationsSettings: OperationsSettings = {
   InvoiceWechatNotifyEnabled: false,
   InvoiceWechatApiBaseUrl: 'http://api.wechatapi.net/finder/v2/api',
   InvoiceWechatApiToken: '',
+  InvoiceWechatApiTokenConfigured: false,
   InvoiceWechatAppId: '',
   InvoiceWechatGroupId: '',
   InvoiceAdminEmail: '',

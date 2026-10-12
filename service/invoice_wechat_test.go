@@ -281,3 +281,74 @@ func TestInvoiceWechatNotificationsQueueForCreateAndWithdrawOnly(t *testing.T) {
 	assert.Contains(t, failedDelivery.LastError, "group closed")
 	assert.NotContains(t, failedDelivery.LastError, testInvoiceWechatToken)
 }
+
+func TestInvoiceWechatDeliveryWaitsWhileDisabledAndNeverResendsAnInterruptedSend(t *testing.T) {
+	require.NoError(t, model.DB.AutoMigrate(&model.InvoiceNotificationDelivery{}))
+	t.Cleanup(func() { model.DB.Exec("DELETE FROM invoice_notification_deliveries") })
+	api := newFakeWechatAPI(t)
+	withInvoiceWechatSettings(t, api.server.URL+"/finder/v2/api")
+	enqueue := func(key string) *model.InvoiceNotificationDelivery {
+		delivery, created, err := model.EnqueueInvoiceNotification(&model.InvoiceNotificationDelivery{
+			DeliveryKey: key, InvoiceRequestId: 1, Kind: model.InvoiceNotificationKindWechatGroup,
+			Recipient: "finance@chatroom", Subject: key, Body: "body " + key,
+		})
+		require.NoError(t, err)
+		require.True(t, created)
+		return delivery
+	}
+	reload := func(id int) model.InvoiceNotificationDelivery {
+		var delivery model.InvoiceNotificationDelivery
+		require.NoError(t, model.DB.First(&delivery, id).Error)
+		return delivery
+	}
+
+	// Switched off, or switched on without a token: nothing is claimed,
+	// failed or sent, and the message stays queued.
+	queued := enqueue("wechat-queued")
+	setting.InvoiceWechatNotifyEnabled = false
+	deliverPendingInvoiceWechatNotifications()
+	setting.InvoiceWechatNotifyEnabled = true
+	setting.InvoiceWechatApiToken = ""
+	deliverPendingInvoiceWechatNotifications()
+	assert.Empty(t, api.received())
+	waiting := reload(queued.Id)
+	assert.Zero(t, waiting.FailedTime)
+	assert.Zero(t, waiting.SendStartedTime)
+	assert.Zero(t, waiting.LockedUntil)
+	assert.Zero(t, waiting.Attempts)
+	assert.Empty(t, waiting.LastError)
+
+	// One sender stopped after claiming a message and its claim expired;
+	// another sender is still posting a second message.
+	now := common.GetTimestamp()
+	interrupted := enqueue("wechat-interrupted")
+	claimed, err := model.ClaimInvoiceWechatNotification(interrupted.Id, now-300, now-120)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	inFlight := enqueue("wechat-in-flight")
+	claimed, err = model.ClaimInvoiceWechatNotification(inFlight.Id, now, now+600)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	setting.InvoiceWechatApiToken = testInvoiceWechatToken
+	deliverPendingInvoiceWechatNotifications()
+	require.Len(t, api.received(), 1, "only the message that was never claimed is posted")
+	assert.Equal(t, "body wechat-queued", api.received()[0]["content"])
+	assert.NotZero(t, reload(queued.Id).DeliveredTime)
+	unknown := reload(interrupted.Id)
+	assert.NotZero(t, unknown.FailedTime)
+	assert.Zero(t, unknown.DeliveredTime)
+	assert.Equal(t, model.InvoiceWechatOutcomeUnknownError, unknown.LastError)
+	sending := reload(inFlight.Id)
+	assert.Zero(t, sending.FailedTime)
+	assert.Zero(t, sending.DeliveredTime)
+
+	_, err = model.RetryInvoiceNotification(inFlight.Id)
+	require.ErrorIs(t, err, model.ErrInvoiceNotificationSending)
+	_, err = model.RetryInvoiceNotification(interrupted.Id)
+	require.NoError(t, err)
+	deliverPendingInvoiceWechatNotifications()
+	require.Len(t, api.received(), 2, "an administrator retry posts it once more")
+	assert.Equal(t, "body wechat-interrupted", api.received()[1]["content"])
+	assert.NotZero(t, reload(interrupted.Id).DeliveredTime)
+}
