@@ -150,6 +150,8 @@ export type InvoiceSettingsPayload = {
   InvoiceWechatApiToken: string
   InvoiceWechatAppId: string
   InvoiceWechatGroupId: string
+  InvoiceWechatAutoIssueEnabled: boolean
+  InvoiceWechatInboundToken: string
   InvoiceAdminEmail: string
   InvoiceMinimumAmountCents: number
   InvoiceTaxRateBasisPoints: number
@@ -559,6 +561,8 @@ export type OperationsSettings = {
   InvoiceWechatApiTokenConfigured: boolean
   InvoiceWechatAppId: string
   InvoiceWechatGroupId: string
+  InvoiceWechatAutoIssueEnabled: boolean
+  InvoiceWechatInboundTokenConfigured: boolean
   InvoiceAdminEmail: string
   InvoiceMinimumAmountCents: string
   InvoiceTaxRateBasisPoints: string

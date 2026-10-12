@@ -3,21 +3,29 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptrace"
+	"path"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service/invoicefile"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/shopspring/decimal"
+	"golang.org/x/text/width"
+	"gorm.io/gorm"
 )
 
 const (
@@ -127,6 +135,16 @@ func buildInvoiceWechatWithdrawnText(request *model.InvoiceRequest) string {
 		{"开票金额", "¥" + formatInvoiceAmountCNY(invoiceTotalCents(request))},
 	})
 	return text + fmt.Sprintf("\n用户已于 %s 撤回该申请，请勿开票。", formatInvoiceWechatTime(request.UpdatedTime))
+}
+
+// buildInvoiceWechatIssuedText confirms in the finance group that an invoice
+// PDF posted there completed its request.
+func buildInvoiceWechatIssuedText(request *model.InvoiceRequest, fileName string) string {
+	return invoiceWechatLines(fmt.Sprintf("【开票工单已完成 #%d】", request.Id), [][2]string{
+		{"发票抬头", request.CompanyName},
+		{"开票金额", "¥" + formatInvoiceAmountCNY(invoiceTotalCents(request))},
+		{"发票文件", fileName},
+	})
 }
 
 func newInvoiceWechatDelivery(request *model.InvoiceRequest, event string, subject string, body string) *model.InvoiceNotificationDelivery {
@@ -329,4 +347,191 @@ func postInvoiceWechatText(ctx context.Context, client *http.Client, endpoint st
 		return true, fmt.Errorf("wechat api rejected the message: %s", message)
 	}
 	return true, nil
+}
+
+// Outcomes of an invoice PDF posted in the finance group.
+const (
+	InvoiceWechatFileIssued    = "issued"
+	InvoiceWechatFileNoMatch   = "no_match"
+	InvoiceWechatFileAmbiguous = "ambiguous"
+	InvoiceWechatFileNotPDF    = "not_pdf"
+)
+
+// InvoiceWechatFileResult reports what an invoice PDF posted in the finance
+// group did. RequestId is set when a request was issued.
+type InvoiceWechatFileResult struct {
+	Outcome   string `json:"outcome"`
+	RequestId int    `json:"request_id,omitempty"`
+}
+
+var invoiceWechatFileRequestID = regexp.MustCompile(`#(\d+)`)
+
+// invoiceShortCompanyNameLength is the length below which a company name, such
+// as a person's name, must be the whole file name instead of part of it.
+const invoiceShortCompanyNameLength = 4
+
+// invoiceWechatFileName is an invoice PDF's file name prepared for matching
+// company names: folded like invoiceCompanyMatchKey, with boundary[i] telling
+// whether rune i starts the name or follows a space or a non-letter.
+type invoiceWechatFileName struct {
+	runes     []rune
+	boundary  []bool
+	requestId int
+}
+
+// parseInvoiceWechatFileName prepares a ".pdf" file name for matching and
+// reads an optional "#<request id>" that picks one of several pending
+// requests for the same company. ok is false for other file types.
+func parseInvoiceWechatFileName(fileName string) (name invoiceWechatFileName, ok bool) {
+	base := width.Fold.String(strings.TrimSpace(path.Base(strings.ReplaceAll(fileName, "\\", "/"))))
+	ext := path.Ext(base)
+	if !strings.EqualFold(ext, ".pdf") {
+		return name, false
+	}
+	stem := strings.TrimSuffix(base, ext)
+	if match := invoiceWechatFileRequestID.FindStringSubmatchIndex(stem); match != nil {
+		name.requestId, _ = strconv.Atoi(stem[match[2]:match[3]])
+		stem = stem[:match[0]] + " " + stem[match[1]:]
+	}
+	atBoundary := true
+	for _, r := range stem {
+		if unicode.IsSpace(r) {
+			atBoundary = true
+			continue
+		}
+		name.runes = append(name.runes, unicode.ToLower(r))
+		name.boundary = append(name.boundary, atBoundary)
+		atBoundary = !unicode.IsLetter(r)
+	}
+	return name, len(name.runes) > 0
+}
+
+// namesCompany reports whether the file name contains the company name right
+// after its start, a space or a non-letter, so "云帆科技有限公司" is not found
+// in a file named for "上海云帆科技有限公司". Anything may follow the name,
+// such as "发票" or a date. Short names must be the whole file name.
+func (name invoiceWechatFileName) namesCompany(companyName string) bool {
+	company := []rune(invoiceCompanyMatchKey(companyName))
+	if len(company) == 0 {
+		return false
+	}
+	if len(company) < invoiceShortCompanyNameLength {
+		return slices.Equal(name.runes, company)
+	}
+	for start := 0; start+len(company) <= len(name.runes); start++ {
+		if name.boundary[start] && slices.Equal(name.runes[start:start+len(company)], company) {
+			return true
+		}
+	}
+	return false
+}
+
+// invoiceCompanyMatchKey folds the differences between a company name typed
+// by an applicant and the same name in a file name: full-width characters,
+// spaces and letter case.
+func invoiceCompanyMatchKey(name string) string {
+	var builder strings.Builder
+	for _, r := range width.Fold.String(name) {
+		if unicode.IsSpace(r) {
+			continue
+		}
+		builder.WriteRune(unicode.ToLower(r))
+	}
+	return builder.String()
+}
+
+// InvoiceWechatAutoIssueReady reports whether invoice PDFs from the finance
+// group can be issued: the switch is on, invoice files are enabled, and the
+// group notification that announces the result is enabled and configured.
+func InvoiceWechatAutoIssueReady() bool {
+	return setting.InvoiceWechatAutoIssueEnabled && setting.InvoiceFileEnabled && invoiceWechatNotifyReady()
+}
+
+// IssueInvoiceFromWechatFile handles an invoice PDF posted in the finance
+// group. When the file name contains the company name of exactly one pending
+// request, the file is attached to it, the request is marked issued, the
+// applicant is emailed as for a manual issue, and the group is told the order
+// is complete. A company name found only inside a longer matching one (a head
+// office inside its branch) does not count. A file that matches no request,
+// or several, changes nothing. Sending the same file again never attaches it
+// twice.
+func IssueInvoiceFromWechatFile(ctx context.Context, fileName string, content []byte) (*InvoiceWechatFileResult, error) {
+	name, ok := parseInvoiceWechatFileName(fileName)
+	if !ok || invoicefile.DetectMime(content) != "application/pdf" {
+		return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileNotPDF}, nil
+	}
+	pending, err := model.ListPendingInvoiceRequests()
+	if err != nil {
+		return nil, err
+	}
+	var named []*model.InvoiceRequest
+	for _, request := range pending {
+		if name.requestId != 0 && request.Id != name.requestId {
+			continue
+		}
+		if name.namesCompany(request.CompanyName) {
+			named = append(named, request)
+		}
+	}
+	var matched []*model.InvoiceRequest
+	for _, request := range named {
+		key := invoiceCompanyMatchKey(request.CompanyName)
+		insideLonger := slices.ContainsFunc(named, func(other *model.InvoiceRequest) bool {
+			otherKey := invoiceCompanyMatchKey(other.CompanyName)
+			return len(otherKey) > len(key) && strings.Contains(otherKey, key)
+		})
+		if !insideLonger {
+			matched = append(matched, request)
+		}
+	}
+	if len(matched) == 0 {
+		return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileNoMatch}, nil
+	}
+	if len(matched) > 1 {
+		return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileAmbiguous}, nil
+	}
+	request := matched[0]
+
+	digest := sha256.Sum256(content)
+	attached, err := model.InvoiceFileExists(request.Id, hex.EncodeToString(digest[:]))
+	if err != nil {
+		return nil, err
+	}
+	if !attached {
+		_, err := StoreInvoiceFile(ctx, InvoiceFileContent{
+			RequestId:    request.Id,
+			FileName:     fileName,
+			DeclaredMime: "application/pdf",
+			Size:         int64(len(content)),
+			Body:         bytes.NewReader(content),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// An applicant whose account is gone cannot be emailed, but the invoice
+	// is still issued.
+	var user *model.User
+	if common.InvoiceIssuedNotifyUserEnabled {
+		user, err = model.GetUserById(request.UserId, false)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	issued, err := model.UpdateInvoiceRequestStatusWithNotifications(request.Id, model.InvoiceStatusIssued, 0, "",
+		func(updated *model.InvoiceRequest) ([]*model.InvoiceNotificationDelivery, error) {
+			deliveries, err := BuildInvoiceIssuedNotifications(updated, model.InvoiceStatusPending, user)
+			if err != nil {
+				return nil, err
+			}
+			return append(deliveries, newInvoiceWechatDelivery(
+				updated, "issued", fmt.Sprintf("开票工单已完成 #%d", updated.Id), buildInvoiceWechatIssuedText(updated, fileName),
+			)), nil
+		})
+	if err != nil {
+		return nil, err
+	}
+	WakeInvoiceWechatDelivery()
+	return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: issued.Id}, nil
 }

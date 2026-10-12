@@ -47,6 +47,8 @@ invoice.file_svg_forbidden: "セキュリティ上の理由により SVG 請求�
 invoice.orphan_key_rejected: "どの請求書レコードからも参照されていない請求書ファイルのみクリーンアップできます"
 invoice.wechat_not_configured: "WeChat 請求書通知の設定が完了していません。API URL、トークン、App ID、グループ ID を入力してください"
 invoice.wechat_test_failed: "WeChat テストメッセージの送信に失敗しました：{{.Reason}}"
+invoice.wechat_auto_issue_disabled: "財務 WeChat グループからの自動発行はオフになっています"
+invoice.wechat_group_mismatch: "このファイルは設定された財務 WeChat グループから送信されたものではありません"
 invoice.email.status.pending: "発行待ち"
 invoice.email.status.issued: "発行済み"
 invoice.email.status.rejected: "却下済み"

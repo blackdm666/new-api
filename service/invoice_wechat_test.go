@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -348,4 +350,156 @@ func TestInvoiceWechatDeliveryWaitsWhileDisabledAndNeverResendsAnInterruptedSend
 	require.Len(t, api.received(), 2, "an administrator retry posts it once more")
 	assert.Equal(t, "body wechat-interrupted", api.received()[1]["content"])
 	assert.NotZero(t, reload(interrupted.Id).DeliveredTime)
+}
+
+func TestInvoiceWechatFileNameNamesCompany(t *testing.T) {
+	const yunfan = "上海云帆网络信息技术有限公司"
+	tests := []struct {
+		fileName  string
+		company   string
+		names     bool
+		requestId int
+	}{
+		{"上海云帆网络信息技术有限公司.pdf", yunfan, true, 0},
+		{"上海云帆网络信息技术有限公司发票（1）.PDF", yunfan, true, 0},
+		{"dzfp_26442000000012345678_上海云帆网络信息技术有限公司_20261012153012.pdf", yunfan, true, 0},
+		{"电子发票 上海云帆网络信息技术有限公司.pdf", yunfan, true, 0},
+		{"上海云帆网络信息技术有限公司＃63.pdf", yunfan, true, 63},
+		{"发票#63上海云帆网络信息技术有限公司.pdf", yunfan, true, 63},
+		{"上海云帆网络信息技术有限公司.pdf", "云帆网络信息技术有限公司", false, 0},
+		{"Ａｃｍｅ Trading（Shanghai） Co_invoice.pdf", "Acme Trading (Shanghai) Co", true, 0},
+		{"张三.pdf", "张三", true, 0},
+		{"张三丰工作室.pdf", "张三", false, 0},
+		{"上海云帆网络信息技术有限公司.ofd", yunfan, false, 0},
+	}
+	for _, test := range tests {
+		t.Run(test.fileName+"/"+test.company, func(t *testing.T) {
+			name, ok := parseInvoiceWechatFileName(test.fileName)
+			assert.Equal(t, test.names, ok && name.namesCompany(test.company))
+			assert.Equal(t, test.requestId, name.requestId)
+		})
+	}
+}
+
+func TestIssueInvoiceFromWechatFile(t *testing.T) {
+	require.NoError(t, model.DB.AutoMigrate(
+		&model.InvoiceRequest{}, &model.InvoiceRequestEvent{}, &model.InvoiceNotificationDelivery{},
+		&model.InvoiceFile{}, &model.InvoiceFileUpload{}, &model.InvoiceFileCleanup{}, &model.InvoiceStorageProfile{},
+	))
+	t.Cleanup(func() {
+		for _, table := range []string{
+			"invoice_notification_deliveries", "invoice_request_events", "invoice_files", "invoice_file_uploads",
+			"invoice_requests", "invoice_storage_profiles", "email_deliveries", "users",
+		} {
+			model.DB.Exec("DELETE FROM " + table)
+		}
+	})
+	api := newFakeWechatAPI(t)
+	withInvoiceWechatSettings(t, api.server.URL+"/finder/v2/api")
+	previous := []any{
+		setting.InvoiceFileEnabled, setting.InvoiceFileStorage, setting.InvoiceFileLocalPath, setting.InvoiceFileAllowedExts,
+		setting.InvoiceFileAllowedMimes, setting.InvoiceFileMaxSize, setting.InvoiceFileMaxCount, common.InvoiceIssuedNotifyUserEnabled,
+	}
+	t.Cleanup(func() {
+		setting.InvoiceFileEnabled = previous[0].(bool)
+		setting.InvoiceFileStorage = previous[1].(string)
+		setting.InvoiceFileLocalPath = previous[2].(string)
+		setting.InvoiceFileAllowedExts = previous[3].(string)
+		setting.InvoiceFileAllowedMimes = previous[4].(string)
+		setting.InvoiceFileMaxSize = previous[5].(int64)
+		setting.InvoiceFileMaxCount = previous[6].(int)
+		common.InvoiceIssuedNotifyUserEnabled = previous[7].(bool)
+	})
+	setting.InvoiceFileEnabled = true
+	setting.InvoiceFileStorage = "local"
+	setting.InvoiceFileLocalPath = t.TempDir()
+	setting.InvoiceFileAllowedExts = "pdf,png"
+	setting.InvoiceFileAllowedMimes = "application/pdf,image/png"
+	setting.InvoiceFileMaxSize = 5 * 1024 * 1024
+	setting.InvoiceFileMaxCount = 5
+	common.InvoiceIssuedNotifyUserEnabled = true
+
+	applicant := &model.User{Username: "yunfan", Email: "finance@yunfan.example", AffCode: "yunfan", Status: common.UserStatusEnabled}
+	other := &model.User{Username: "acme", AffCode: "acme", Status: common.UserStatusEnabled}
+	require.NoError(t, model.DB.Create(applicant).Error)
+	require.NoError(t, model.DB.Create(other).Error)
+	pendingRequest := func(user *model.User, company string) *model.InvoiceRequest {
+		request := &model.InvoiceRequest{
+			UserId: user.Id, Username: user.Username, CompanyName: company, TaxNumber: "91310000TEST",
+			TotalMoney: 1200, TotalMoneyCents: 120000, Status: model.InvoiceStatusPending,
+		}
+		require.NoError(t, model.DB.Create(request).Error)
+		return request
+	}
+	yunfan := pendingRequest(applicant, "上海云帆网络信息技术有限公司")
+	acmeFirst := pendingRequest(other, "Acme Trading Co")
+	acmeSecond := pendingRequest(other, "Acme Trading Co")
+	retried := pendingRequest(other, "重试科技有限公司")
+	yunfanSuffix := pendingRequest(other, "云帆网络信息技术有限公司")
+	headOffice := pendingRequest(other, "成都蜀道智能科技有限公司")
+	branch := pendingRequest(other, "成都蜀道智能科技有限公司北京分公司")
+	pdf := []byte("%PDF-1.7\n% issued invoice")
+	digest := sha256.Sum256(pdf)
+	require.NoError(t, model.DB.Create(&model.InvoiceFile{
+		InvoiceRequestId: retried.Id, FileName: "重试科技有限公司.pdf", StoredName: "attached.pdf", MimeType: "application/pdf",
+		Size: int64(len(pdf)), StorageType: "local", StorageKey: "attached.pdf", Sha256: hex.EncodeToString(digest[:]),
+	}).Error)
+
+	issue := func(fileName string, content []byte) *InvoiceWechatFileResult {
+		result, err := IssueInvoiceFromWechatFile(context.Background(), fileName, content)
+		require.NoError(t, err)
+		return result
+	}
+	assert.Equal(t, InvoiceWechatFileNoMatch, issue("未知公司.pdf", pdf).Outcome)
+	assert.Equal(t, InvoiceWechatFileAmbiguous, issue("acme trading co.pdf", pdf).Outcome)
+	assert.Equal(t, InvoiceWechatFileNotPDF, issue("Acme Trading Co.pdf", []byte("plain text")).Outcome)
+	assert.Equal(t, InvoiceWechatFileNotPDF, issue("Acme Trading Co.png", pdf).Outcome)
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: acmeSecond.Id},
+		issue("Acme Trading Co#"+strconv.Itoa(acmeSecond.Id)+".pdf", pdf))
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: yunfan.Id},
+		issue("上海云帆网络信息技术有限公司(1).pdf", pdf))
+	assert.Equal(t, InvoiceWechatFileNoMatch, issue("上海云帆网络信息技术有限公司.pdf", pdf).Outcome, "an issued request takes no more files")
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: retried.Id},
+		issue("重试科技有限公司.pdf", pdf), "a file attached before a failed issue is reused")
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: branch.Id},
+		issue("dzfp_26442000000012345678_成都蜀道智能科技有限公司北京分公司_20261012.pdf", pdf),
+		"the head office name inside the branch name does not count")
+
+	statuses := map[int]int{}
+	var requests []*model.InvoiceRequest
+	require.NoError(t, model.DB.Find(&requests).Error)
+	for _, request := range requests {
+		statuses[request.Id] = request.Status
+	}
+	assert.Equal(t, map[int]int{
+		yunfan.Id: model.InvoiceStatusIssued, acmeFirst.Id: model.InvoiceStatusPending,
+		acmeSecond.Id: model.InvoiceStatusIssued, retried.Id: model.InvoiceStatusIssued,
+		yunfanSuffix.Id: model.InvoiceStatusPending, headOffice.Id: model.InvoiceStatusPending, branch.Id: model.InvoiceStatusIssued,
+	}, statuses)
+	for _, request := range []*model.InvoiceRequest{yunfan, retried} {
+		files, err := model.ListInvoiceFiles(request.Id)
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+		assert.Equal(t, hex.EncodeToString(digest[:]), files[0].Sha256)
+	}
+
+	var deliveries []*model.InvoiceNotificationDelivery
+	require.NoError(t, model.DB.Where("invoice_request_id = ?", yunfan.Id).Order("id ASC").Find(&deliveries).Error)
+	require.Len(t, deliveries, 2)
+	assert.Equal(t, model.InvoiceNotificationKindUserEmail, deliveries[0].Kind)
+	assert.Equal(t, "finance@yunfan.example", deliveries[0].Recipient)
+	assert.Equal(t, model.InvoiceNotificationKindWechatGroup, deliveries[1].Kind)
+	assert.Equal(t, "finance@chatroom", deliveries[1].Recipient)
+
+	deliverPendingInvoiceWechatNotifications()
+	contents := make([]string, 0)
+	for _, message := range api.received() {
+		assert.Equal(t, "finance@chatroom", message["toWxid"])
+		contents = append(contents, message["content"])
+	}
+	assert.Len(t, contents, 4, "one completion message per issued request")
+	assert.Contains(t, contents, "【开票工单已完成 #"+strconv.Itoa(yunfan.Id)+"】\n"+
+		"发票抬头：上海云帆网络信息技术有限公司\n"+
+		"开票金额：¥1,200.00\n"+
+		"发票文件：上海云帆网络信息技术有限公司(1).pdf")
 }

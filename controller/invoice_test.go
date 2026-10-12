@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"bytes"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -277,4 +279,54 @@ func TestDestructiveInvoiceMaintenanceRequiresRoot(t *testing.T) {
 			assert.Contains(t, recorder.Body.String(), "AUTH_INSUFFICIENT_PRIVILEGE")
 		})
 	}
+}
+
+func TestReceiveInvoiceWechatFileRequiresTheBotTokenAndGroup(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	setupInvoiceControllerTest(t)
+	restoreAfterTest(t, &setting.InvoiceWechatAutoIssueEnabled, &setting.InvoiceWechatNotifyEnabled, &setting.InvoiceFileEnabled)
+	restoreAfterTest(t, &setting.InvoiceWechatInboundToken, &setting.InvoiceWechatApiBaseUrl, &setting.InvoiceWechatApiToken,
+		&setting.InvoiceWechatAppId, &setting.InvoiceWechatGroupId)
+	restoreAfterTest(t, &setting.InvoiceFileMaxSize)
+	botToken := strings.Repeat("cd", 16)
+	setting.InvoiceWechatAutoIssueEnabled = true
+	setting.InvoiceWechatNotifyEnabled = true
+	setting.InvoiceFileEnabled = true
+	setting.InvoiceWechatInboundToken = setting.InvoiceWechatInboundTokenDigest(botToken)
+	setting.InvoiceWechatApiBaseUrl = "http://wechat.invalid/finder/v2/api"
+	setting.InvoiceWechatApiToken = "wechat-api-token"
+	setting.InvoiceWechatAppId = "wx_app"
+	setting.InvoiceWechatGroupId = "finance@chatroom"
+	setting.InvoiceFileMaxSize = 5 * 1024 * 1024
+
+	post := func(authorization string, groupID string) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		require.NoError(t, writer.WriteField("group_id", groupID))
+		require.NoError(t, writer.WriteField("file_name", "未知公司.pdf"))
+		part, err := writer.CreateFormFile("file", "invoice.pdf")
+		require.NoError(t, err)
+		_, err = part.Write([]byte("%PDF-1.7 invoice"))
+		require.NoError(t, err)
+		require.NoError(t, writer.Close())
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodPost, "/api/invoice/wechat/files", &body)
+		context.Request.Header.Set("Content-Type", writer.FormDataContentType())
+		if authorization != "" {
+			context.Request.Header.Set("Authorization", authorization)
+		}
+		ReceiveInvoiceWechatFile(context)
+		return recorder
+	}
+
+	for _, authorization := range []string{"", "Bearer ", "Bearer " + strings.Repeat("ef", 16), "Bearer " + setting.InvoiceWechatInboundToken, botToken} {
+		assert.Equal(t, http.StatusUnauthorized, post(authorization, "finance@chatroom").Code, authorization)
+	}
+	assert.Contains(t, post("Bearer "+botToken, "other@chatroom").Body.String(), `"success":false`)
+	assert.Contains(t, post("Bearer "+botToken, "finance@chatroom").Body.String(), `"outcome":"no_match"`)
+
+	setting.InvoiceWechatNotifyEnabled = false
+	assert.Contains(t, post("Bearer "+botToken, "finance@chatroom").Body.String(), `"success":false`,
+		"the completed order could not be announced")
 }

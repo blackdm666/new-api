@@ -985,8 +985,8 @@ func TestInvoiceOrphanCleanupOnlyAcceptsUnreferencedInvoiceKeys(t *testing.T) {
 }
 
 // TestInvoiceRefundAndOrderRulesDatabaseMatrix upgrades a schema without the
-// refund marker, then exercises the refund, currency and orphan queries on
-// every supported database.
+// refund marker, then exercises the refund, currency, orphan and finance group
+// auto-issue queries on every supported database.
 func TestInvoiceRefundAndOrderRulesDatabaseMatrix(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
@@ -1082,6 +1082,10 @@ func TestInvoiceRefundAndOrderRulesDatabaseMatrix(t *testing.T) {
 				TaxNumber: "91310000MATRIX", Email: "matrix@example.com", TopUpOrderIds: []int{cny.Id},
 			})
 			require.NoError(t, err)
+			pendingRequests, err := ListPendingInvoiceRequests()
+			require.NoError(t, err)
+			require.Len(t, pendingRequests, 1, "the withdrawn legacy request is no longer pending")
+			assert.Equal(t, request.Id, pendingRequests[0].Id)
 			_, err = UpdateInvoiceRequestStatus(request.Id, InvoiceStatusRejected, user.Id, "matrix rejection")
 			require.NoError(t, err)
 			_, err = UpdateInvoiceRequestStatus(request.Id, InvoiceStatusRejected, user.Id, "matrix rejection")
@@ -1100,7 +1104,14 @@ func TestInvoiceRefundAndOrderRulesDatabaseMatrix(t *testing.T) {
 			require.NoError(t, db.Create(&InvoiceFile{
 				InvoiceRequestId: request.Id, UploaderId: user.Id, FileName: "invoice.pdf", StoredName: "invoice.pdf",
 				MimeType: "application/pdf", Size: 1, StorageProfileId: profile.Id, StorageType: "s3", StorageKey: key,
+				Sha256: "matrix-digest",
 			}).Error)
+			attached, err := InvoiceFileExists(request.Id, "matrix-digest")
+			require.NoError(t, err)
+			assert.True(t, attached)
+			attached, err = InvoiceFileExists(legacy.Id, "matrix-digest")
+			require.NoError(t, err)
+			assert.False(t, attached)
 			require.NoError(t, db.Where("storage_key = ?", key).Delete(&InvoiceFile{}).Error)
 			_, err = QueueInvoiceOrphanCleanups([]InvoiceStorageKey{{StorageProfileId: profile.Id, StorageKey: key}})
 			require.ErrorIs(t, err, ErrInvoiceStorageKeyReferenced)

@@ -47,6 +47,8 @@ invoice.file_svg_forbidden: "Không hỗ trợ tệp hóa đơn SVG vì lý do b
 invoice.orphan_key_rejected: "Chỉ có thể dọn dẹp các tệp hóa đơn không được bản ghi hóa đơn nào tham chiếu"
 invoice.wechat_not_configured: "Thông báo hóa đơn qua WeChat chưa được cấu hình đầy đủ. Hãy nhập URL API, token, App ID và ID nhóm"
 invoice.wechat_test_failed: "Gửi tin nhắn thử WeChat thất bại: {{.Reason}}"
+invoice.wechat_auto_issue_disabled: "Tự động xuất hóa đơn từ nhóm WeChat tài chính đang tắt"
+invoice.wechat_group_mismatch: "Tệp không đến từ nhóm WeChat tài chính đã cấu hình"
 invoice.email.status.pending: "Chờ xuất"
 invoice.email.status.issued: "Đã xuất"
 invoice.email.status.rejected: "Đã từ chối"

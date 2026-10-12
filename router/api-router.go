@@ -224,6 +224,10 @@ func SetApiRouter(router *gin.Engine) {
 			invoiceRoute.GET("/requests/:id/files/:file_id", controller.DownloadInvoiceFile)
 		}
 
+		// The finance group bot authenticates with its own token instead of a
+		// user session.
+		apiRouter.POST("/invoice/wechat/files", middleware.DisableCache(), controller.ReceiveInvoiceWechatFile)
+
 		invoiceAdminRoute := apiRouter.Group("/invoice/admin")
 		invoiceAdminRoute.Use(middleware.DisableCache(), middleware.AdminAuth())
 		{

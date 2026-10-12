@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -44,6 +45,7 @@ func validInvoiceSettingsPayload() InvoiceSettingsPayload {
 	payload.InvoiceWechatApiToken = common.GetPointer("")
 	payload.InvoiceWechatAppId = common.GetPointer("")
 	payload.InvoiceWechatGroupId = common.GetPointer("")
+	payload.InvoiceWechatAutoIssueEnabled = common.GetPointer(false)
 	return payload
 }
 
@@ -138,6 +140,48 @@ func TestValidateInvoiceSettingsWechatGroup(t *testing.T) {
 	assert.Equal(t, "new-token", *payload.InvoiceWechatApiToken)
 }
 
+func TestValidateInvoiceSettingsWechatAutoIssue(t *testing.T) {
+	restoreAfterTest(t, &setting.InvoiceWechatApiToken, &setting.InvoiceWechatInboundToken)
+	setting.InvoiceWechatApiToken = "stored-token"
+	setting.InvoiceWechatInboundToken = ""
+	botToken := strings.Repeat("ab", 16)
+
+	payload := validInvoiceSettingsPayload()
+	payload.InvoiceWechatAutoIssueEnabled = common.GetPointer(true)
+	payload.InvoiceWechatInboundToken = common.GetPointer(botToken)
+	require.ErrorContains(t, validateInvoiceSettingsPayload(&payload), "auto-issue", "the completed order is posted to the group")
+
+	payload.InvoiceWechatNotifyEnabled = common.GetPointer(true)
+	payload.InvoiceWechatAppId = common.GetPointer("wx_app")
+	payload.InvoiceWechatGroupId = common.GetPointer("12345@chatroom")
+	payload.InvoiceWechatInboundToken = nil
+	preserveStoredInvoiceSettings(&payload)
+	require.ErrorContains(t, validateInvoiceSettingsPayload(&payload), "auto-issue", "a bot token is required")
+
+	payload.InvoiceWechatInboundToken = common.GetPointer("short-token")
+	require.ErrorContains(t, validateInvoiceSettingsPayload(&payload), "bot token")
+
+	payload.InvoiceWechatInboundToken = common.GetPointer(" " + botToken + " ")
+	payload.InvoiceFileEnabled = false
+	require.ErrorContains(t, validateInvoiceSettingsPayload(&payload), "auto-issue", "the PDF is stored as an invoice file")
+
+	payload.InvoiceFileEnabled = true
+	require.NoError(t, validateInvoiceSettingsPayload(&payload))
+	digest := payload.optionValues()["InvoiceWechatInboundToken"]
+	assert.Equal(t, setting.InvoiceWechatInboundTokenDigest(botToken), digest)
+	assert.NotContains(t, digest, botToken, "only the digest is stored")
+
+	setting.InvoiceWechatInboundToken = digest
+	assert.True(t, setting.MatchInvoiceWechatInboundToken(botToken))
+	assert.False(t, setting.MatchInvoiceWechatInboundToken(digest), "the stored digest is not a token")
+	for _, submitted := range []string{"", "  ", "********"} {
+		payload.InvoiceWechatInboundToken = common.GetPointer(submitted)
+		preserveStoredInvoiceSettings(&payload)
+		require.NoError(t, validateInvoiceSettingsPayload(&payload))
+		assert.Equal(t, digest, payload.optionValues()["InvoiceWechatInboundToken"])
+	}
+}
+
 func TestUpdateInvoiceSettingsKeepsSettingsAnOlderConsoleOmits(t *testing.T) {
 	require.NoError(t, i18n.Init())
 	setupInvoiceControllerTest(t)
@@ -147,7 +191,7 @@ func TestUpdateInvoiceSettingsKeepsSettingsAnOlderConsoleOmits(t *testing.T) {
 	// Every global an invoice settings PUT writes.
 	restoreAfterTest(t, &common.InvoiceApplicationNotifyAdminEnabled, &common.InvoiceIssuedNotifyUserEnabled,
 		&common.InvoiceRejectedNotifyUserEnabled, &common.InvoiceExpiredNotifyUserEnabled,
-		&setting.InvoiceFileEnabled, &setting.InvoiceWechatNotifyEnabled)
+		&setting.InvoiceFileEnabled, &setting.InvoiceWechatNotifyEnabled, &setting.InvoiceWechatAutoIssueEnabled)
 	restoreAfterTest(t, &setting.InvoiceTaxRateBasisPoints, &setting.InvoiceDataRetentionDays,
 		&setting.InvoicePendingExpiryDays, &setting.InvoiceFileMaxCount)
 	restoreAfterTest(t, &setting.InvoiceMinimumAmountCents, &setting.InvoiceFileMaxSize, &setting.InvoiceFileSignedURLTTL)
@@ -159,7 +203,8 @@ func TestUpdateInvoiceSettingsKeepsSettingsAnOlderConsoleOmits(t *testing.T) {
 		&setting.InvoiceFileS3AccessKeyId, &setting.InvoiceFileS3AccessKeySecret, &setting.InvoiceFileS3CustomDomain,
 		&setting.InvoiceFileCOSEndpoint, &setting.InvoiceFileCOSBucket, &setting.InvoiceFileCOSRegion,
 		&setting.InvoiceFileCOSSecretId, &setting.InvoiceFileCOSSecretKey, &setting.InvoiceFileCOSCustomDomain,
-		&setting.InvoiceWechatApiBaseUrl, &setting.InvoiceWechatApiToken, &setting.InvoiceWechatAppId, &setting.InvoiceWechatGroupId)
+		&setting.InvoiceWechatApiBaseUrl, &setting.InvoiceWechatApiToken, &setting.InvoiceWechatAppId, &setting.InvoiceWechatGroupId,
+		&setting.InvoiceWechatInboundToken)
 	common.OptionMapRWMutex.Lock()
 	previousOptions := common.OptionMap
 	common.OptionMap = map[string]string{}

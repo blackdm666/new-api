@@ -47,6 +47,8 @@ invoice.file_svg_forbidden: "Файлы счетов SVG не поддержив
 invoice.orphan_key_rejected: "Очистить можно только файлы счетов, на которые не ссылается ни одна запись"
 invoice.wechat_not_configured: "Уведомления WeChat о счетах настроены не полностью. Укажите URL API, токен, ID приложения и ID группы"
 invoice.wechat_test_failed: "Не удалось отправить тестовое сообщение WeChat: {{.Reason}}"
+invoice.wechat_auto_issue_disabled: "Автоматическое оформление счетов из финансовой группы WeChat отключено"
+invoice.wechat_group_mismatch: "Файл получен не из настроенной финансовой группы WeChat"
 invoice.email.status.pending: "Ожидает"
 invoice.email.status.issued: "Выставлен"
 invoice.email.status.rejected: "Отклонён"

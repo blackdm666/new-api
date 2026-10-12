@@ -76,6 +76,12 @@ type InvoiceSettingsPayload struct {
 	InvoiceWechatApiToken            *string `json:"InvoiceWechatApiToken,omitempty"`
 	InvoiceWechatAppId               *string `json:"InvoiceWechatAppId,omitempty"`
 	InvoiceWechatGroupId             *string `json:"InvoiceWechatGroupId,omitempty"`
+	InvoiceWechatAutoIssueEnabled    *bool   `json:"InvoiceWechatAutoIssueEnabled,omitempty"`
+	// InvoiceWechatInboundToken carries a new bot token in plain text. Only
+	// its digest is stored, and nil keeps the stored digest.
+	InvoiceWechatInboundToken *string `json:"InvoiceWechatInboundToken,omitempty"`
+
+	inboundTokenDigest string
 }
 
 func validateInvoiceSettingsPayload(payload *InvoiceSettingsPayload) error {
@@ -84,7 +90,8 @@ func validateInvoiceSettingsPayload(payload *InvoiceSettingsPayload) error {
 	}
 	if payload.InvoiceRejectedNotifyUserEnabled == nil || payload.InvoiceExpiredNotifyUserEnabled == nil ||
 		payload.InvoiceWechatNotifyEnabled == nil || payload.InvoiceWechatApiBaseUrl == nil ||
-		payload.InvoiceWechatApiToken == nil || payload.InvoiceWechatAppId == nil || payload.InvoiceWechatGroupId == nil {
+		payload.InvoiceWechatApiToken == nil || payload.InvoiceWechatAppId == nil || payload.InvoiceWechatGroupId == nil ||
+		payload.InvoiceWechatAutoIssueEnabled == nil {
 		return errors.New("invoice settings must be merged with the stored values before validation")
 	}
 	payload.InvoiceAdminEmail = strings.TrimSpace(payload.InvoiceAdminEmail)
@@ -185,6 +192,19 @@ func validateInvoiceWechatSettings(payload *InvoiceSettingsPayload) error {
 	if *payload.InvoiceWechatNotifyEnabled && (token == "" || appID == "" || groupID == "") {
 		return errors.New("WeChat notifications require an API token, app ID and group ID")
 	}
+	if payload.InvoiceWechatInboundToken != nil {
+		inboundToken := strings.TrimSpace(*payload.InvoiceWechatInboundToken)
+		if len(inboundToken) < setting.InvoiceWechatInboundTokenMinLength || len(inboundToken) > 256 {
+			return fmt.Errorf("WeChat bot token must be %d to 256 characters", setting.InvoiceWechatInboundTokenMinLength)
+		}
+		payload.inboundTokenDigest = setting.InvoiceWechatInboundTokenDigest(inboundToken)
+	}
+	// The bot's PDF is attached as an invoice file, and the completed order is
+	// announced through the finance group notification.
+	if *payload.InvoiceWechatAutoIssueEnabled &&
+		(!*payload.InvoiceWechatNotifyEnabled || payload.inboundTokenDigest == "" || !payload.InvoiceFileEnabled) {
+		return errors.New("WeChat auto-issue requires WeChat notifications, a bot token and invoice files")
+	}
 	return nil
 }
 
@@ -217,6 +237,15 @@ func preserveStoredInvoiceSettings(payload *InvoiceSettingsPayload) {
 	}
 	if payload.InvoiceWechatGroupId == nil {
 		payload.InvoiceWechatGroupId = common.GetPointer(setting.InvoiceWechatGroupId)
+	}
+	if payload.InvoiceWechatAutoIssueEnabled == nil {
+		payload.InvoiceWechatAutoIssueEnabled = common.GetPointer(setting.InvoiceWechatAutoIssueEnabled)
+	}
+	// Like the API token, an omitted, empty or masked bot token keeps the
+	// stored digest.
+	if payload.InvoiceWechatInboundToken == nil || strings.Trim(strings.TrimSpace(*payload.InvoiceWechatInboundToken), "*") == "" {
+		payload.InvoiceWechatInboundToken = nil
+		payload.inboundTokenDigest = strings.TrimSpace(setting.InvoiceWechatInboundToken)
 	}
 	if strings.TrimSpace(payload.InvoiceFileOSSAccessKeySecret) == "" {
 		payload.InvoiceFileOSSAccessKeySecret = setting.InvoiceFileOSSAccessKeySecret
@@ -370,6 +399,8 @@ func (payload *InvoiceSettingsPayload) optionValues() map[string]string {
 		"InvoiceWechatApiToken":                *payload.InvoiceWechatApiToken,
 		"InvoiceWechatAppId":                   *payload.InvoiceWechatAppId,
 		"InvoiceWechatGroupId":                 *payload.InvoiceWechatGroupId,
+		"InvoiceWechatAutoIssueEnabled":        strconv.FormatBool(*payload.InvoiceWechatAutoIssueEnabled),
+		"InvoiceWechatInboundToken":            payload.inboundTokenDigest,
 	}
 }
 
