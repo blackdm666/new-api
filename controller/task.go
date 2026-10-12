@@ -603,6 +603,12 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 			}
 		}
 	}
+	// Lists are fetched without snapshots; official-ID plugins read theirs.
+	if err := model.HydrateTaskData(tasks, func(task *model.Task) bool {
+		return relay.TaskDeclaresOfficialID(task.Platform)
+	}); err != nil {
+		common.SysError("load task snapshots for official IDs: " + err.Error())
+	}
 	result := make([]*dto.TaskDto, len(tasks))
 	for i, task := range tasks {
 		if fillUser {

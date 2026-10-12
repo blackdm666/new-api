@@ -1401,6 +1401,10 @@ var officialTaskIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,12
 // OfficialTaskID calls the optional officialTaskId(task) hook. The plugin
 // decides which ID is the model platform's own; anything that is not a short
 // plain identifier is discarded.
+func (a *TaskAdaptor) DeclaresOfficialTaskID() bool {
+	return a.hasHook(context.Background(), "officialTaskId")
+}
+
 func (a *TaskAdaptor) OfficialTaskID(task *model.Task) string {
 	if task == nil || !a.hasHook(context.Background(), "officialTaskId") {
 		return ""

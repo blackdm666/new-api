@@ -137,6 +137,9 @@ type TaskContentRequestProvider interface {
 // it must never return a gateway's private ID.
 type TaskOfficialIDProvider interface {
 	OfficialTaskID(task *model.Task) string
+	// DeclaresOfficialTaskID reports whether the plugin publishes official IDs,
+	// so task lists load the snapshot only for those tasks.
+	DeclaresOfficialTaskID() bool
 }
 
 // TaskCancelResult is the provider's answer to a cancellation request.
