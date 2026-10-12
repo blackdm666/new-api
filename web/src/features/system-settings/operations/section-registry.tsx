@@ -139,6 +139,9 @@ const OPERATIONS_SECTIONS = [
             settings.InvoiceWechatApiTokenConfigured,
           InvoiceWechatAppId: settings.InvoiceWechatAppId,
           InvoiceWechatGroupId: settings.InvoiceWechatGroupId,
+          InvoiceWechatAutoIssueEnabled: settings.InvoiceWechatAutoIssueEnabled,
+          InvoiceWechatInboundTokenConfigured:
+            settings.InvoiceWechatInboundTokenConfigured,
           InvoiceAdminEmail: settings.InvoiceAdminEmail,
           InvoiceMinimumAmountCents: settings.InvoiceMinimumAmountCents,
           InvoiceTaxRateBasisPoints: settings.InvoiceTaxRateBasisPoints,

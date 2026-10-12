@@ -203,6 +203,8 @@ const (
 	MsgInvoiceOrphanKeyRejected       = "invoice.orphan_key_rejected"
 	MsgInvoiceWechatNotConfigured     = "invoice.wechat_not_configured"
 	MsgInvoiceWechatTestFailed        = "invoice.wechat_test_failed"
+	MsgInvoiceWechatAutoIssueOff      = "invoice.wechat_auto_issue_disabled"
+	MsgInvoiceWechatGroupMismatch     = "invoice.wechat_group_mismatch"
 )
 
 // Payment related messages

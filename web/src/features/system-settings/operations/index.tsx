@@ -80,6 +80,8 @@ const defaultOperationsSettings: OperationsSettings = {
   InvoiceWechatApiTokenConfigured: false,
   InvoiceWechatAppId: '',
   InvoiceWechatGroupId: '',
+  InvoiceWechatAutoIssueEnabled: false,
+  InvoiceWechatInboundTokenConfigured: false,
   InvoiceAdminEmail: '',
   InvoiceMinimumAmountCents: '50000',
   InvoiceTaxRateBasisPoints: '300',

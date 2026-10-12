@@ -1,15 +1,12 @@
 package controller
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -18,7 +15,6 @@ import (
 	"github.com/QuantumNous/new-api/service/invoicefile"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 type invoiceFileUploadResponse struct {
@@ -77,73 +73,16 @@ func UploadInvoiceFile(c *gin.Context) {
 		return
 	}
 	defer source.Close()
-	head, combined, err := invoicefile.ReadSniff(source)
-	if err != nil {
-		respondInvoiceInternalError(c, i18n.MsgInvoiceUploadFailed, err)
-		return
-	}
-	validation, err := invoicefile.Validate(
-		fileHeader.Filename,
-		fileHeader.Header.Get("Content-Type"),
-		fileHeader.Size,
-		head,
-	)
+	record, err := service.StoreInvoiceFile(c.Request.Context(), service.InvoiceFileContent{
+		RequestId:    requestId,
+		UploaderId:   c.GetInt("id"),
+		FileName:     fileHeader.Filename,
+		DeclaredMime: fileHeader.Header.Get("Content-Type"),
+		Size:         fileHeader.Size,
+		Body:         source,
+	})
 	if err != nil {
 		handleInvoiceFileValidationError(c, err)
-		return
-	}
-	profile, err := invoicefile.EnsureCurrentProfile()
-	if err != nil {
-		respondInvoiceInternalError(c, i18n.MsgInvoiceUploadFailed, err)
-		return
-	}
-	storage, err := invoicefile.ForProfile(profile.Id, profile.StorageType)
-	if err != nil {
-		respondInvoiceInternalError(c, i18n.MsgInvoiceUploadFailed, err)
-		return
-	}
-
-	storedName := uuid.NewString()
-	if validation.Ext != "" {
-		storedName += "." + validation.Ext
-	}
-	storageKey := model.InvoiceFileStorageKey(requestId, time.Now(), storedName)
-	uploadId := uuid.NewString()
-	staged := &model.InvoiceFileUpload{
-		Id:               uploadId,
-		InvoiceRequestId: requestId,
-		UploaderId:       c.GetInt("id"),
-		StorageProfileId: profile.Id,
-		StorageType:      storage.Kind(),
-		StorageKey:       storageKey,
-		FileName:         validation.SafeName,
-		StoredName:       storedName,
-		MimeType:         validation.DetectedMime,
-		Size:             fileHeader.Size,
-	}
-	if err := model.CreateInvoiceFileUpload(staged, setting.InvoiceFileMaxCount); err != nil {
-		handleInvoiceFileMutationError(c, err, i18n.MsgInvoiceUploadFailed)
-		return
-	}
-	hasher := sha256.New()
-	reader := io.TeeReader(combined, hasher)
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute)
-	defer cancel()
-	if err := storage.Put(ctx, storageKey, reader, fileHeader.Size, validation.DetectedMime); err != nil {
-		cleanup, abandonErr := model.AbandonInvoiceFileUpload(uploadId, err.Error())
-		if abandonErr == nil {
-			service.ScheduleInvoiceFileCleanup(cleanup)
-		}
-		respondInvoiceInternalError(c, i18n.MsgInvoiceUploadFailed, err)
-		return
-	}
-	record, err := model.FinalizeInvoiceFileUpload(uploadId, hex.EncodeToString(hasher.Sum(nil)))
-	if err != nil {
-		cleanup, abandonErr := model.AbandonInvoiceFileUpload(uploadId, err.Error())
-		if abandonErr == nil {
-			service.ScheduleInvoiceFileCleanup(cleanup)
-		}
-		handleInvoiceFileMutationError(c, err, i18n.MsgInvoiceUploadFailed)
 		return
 	}
 	common.ApiSuccess(c, invoiceFileUploadResponse{
@@ -156,6 +95,65 @@ func UploadInvoiceFile(c *gin.Context) {
 		Previewable: isInvoiceFilePreviewable(record.MimeType),
 		CreatedTime: record.CreatedTime,
 	})
+}
+
+// ReceiveInvoiceWechatFile takes an invoice PDF that the finance group bot saw
+// in the configured WeChat group and issues the matching pending request. The
+// bot authenticates with its own token, which grants nothing else.
+func ReceiveInvoiceWechatFile(c *gin.Context) {
+	token, bearer := strings.CutPrefix(c.GetHeader("Authorization"), "Bearer ")
+	if !bearer || !setting.MatchInvoiceWechatInboundToken(token) {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": common.TranslateMessage(c, i18n.MsgTokenInvalid)})
+		return
+	}
+	if !service.InvoiceWechatAutoIssueReady() {
+		common.ApiErrorI18n(c, i18n.MsgInvoiceWechatAutoIssueOff)
+		return
+	}
+	maxBody := setting.InvoiceFileMaxSize + setting.InvoiceFileMaxSize/10
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvoiceFileMissing)
+		return
+	}
+	if strings.TrimSpace(c.PostForm("group_id")) != strings.TrimSpace(setting.InvoiceWechatGroupId) {
+		common.ApiErrorI18n(c, i18n.MsgInvoiceWechatGroupMismatch)
+		return
+	}
+	if fileHeader.Size <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvoiceFileEmpty)
+		return
+	}
+	if fileHeader.Size > setting.InvoiceFileMaxSize {
+		common.ApiErrorI18n(c, i18n.MsgInvoiceFileTooLarge)
+		return
+	}
+	source, err := fileHeader.Open()
+	if err != nil {
+		respondInvoiceInternalError(c, i18n.MsgInvoiceUploadFailed, err)
+		return
+	}
+	defer source.Close()
+	content, err := io.ReadAll(io.LimitReader(source, setting.InvoiceFileMaxSize))
+	if err != nil {
+		respondInvoiceInternalError(c, i18n.MsgInvoiceUploadFailed, err)
+		return
+	}
+	// The multipart file name can lose non-ASCII characters on the way, so
+	// the bot also sends the WeChat file name as a plain field.
+	fileName := strings.TrimSpace(c.PostForm("file_name"))
+	if fileName == "" {
+		fileName = fileHeader.Filename
+	}
+	result, err := service.IssueInvoiceFromWechatFile(c.Request.Context(), fileName, content)
+	if err != nil {
+		handleInvoiceFileValidationError(c, err)
+		return
+	}
+	common.SysLog(fmt.Sprintf("invoice wechat file %q (message %q): %s request=%d",
+		fileName, c.PostForm("message_id"), result.Outcome, result.RequestId))
+	common.ApiSuccess(c, result)
 }
 
 func DeleteInvoiceFile(c *gin.Context) {
@@ -260,7 +258,7 @@ func handleInvoiceFileValidationError(c *gin.Context, err error) {
 	case errors.Is(err, invoicefile.ErrFileMimeMismatch):
 		common.ApiErrorI18n(c, i18n.MsgInvoiceFileTypeMismatch)
 	default:
-		respondInvoiceInternalError(c, i18n.MsgInvoiceUploadFailed, err)
+		handleInvoiceFileMutationError(c, err, i18n.MsgInvoiceUploadFailed)
 	}
 }
 

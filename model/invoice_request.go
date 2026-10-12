@@ -634,6 +634,14 @@ func enrichInvoiceRequestExpiry(requests []*InvoiceRequest) {
 	}
 }
 
+// ListPendingInvoiceRequests returns every pending request that still holds
+// its applicant details, oldest first.
+func ListPendingInvoiceRequests() ([]*InvoiceRequest, error) {
+	var requests []*InvoiceRequest
+	err := DB.Where("status = ? AND redacted_time = ?", InvoiceStatusPending, 0).Order("id ASC").Find(&requests).Error
+	return requests, err
+}
+
 func GetInvoiceRequestById(id int) (*InvoiceRequest, error) {
 	var request InvoiceRequest
 	if err := DB.First(&request, "id = ?", id).Error; err != nil {

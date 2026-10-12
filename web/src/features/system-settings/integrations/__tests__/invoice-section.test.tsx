@@ -42,6 +42,7 @@ const defaults: DefaultValues = {
   InvoiceWechatApiToken: 'stored-token-must-not-render',
   InvoiceWechatAppId: 'wx-app',
   InvoiceWechatGroupId: '12345678901@chatroom',
+  InvoiceWechatAutoIssueEnabled: false,
   InvoiceAdminEmail: 'billing@example.com',
   InvoiceMinimumAmountCents: '50000',
   InvoiceTaxRateBasisPoints: '300',
@@ -239,5 +240,109 @@ describe('invoice settings notifications', () => {
       undefined,
       expect.anything()
     )
+  })
+
+  test('generating a bot token shows it for copying and sends it with the auto-issue switch', async () => {
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true, message: '' } })
+    const user = userEvent.setup()
+    renderSection({
+      ...defaults,
+      InvoiceWechatNotifyEnabled: true,
+      InvoiceWechatApiTokenConfigured: true,
+    })
+
+    expect(screen.getByLabelText('Bot token')).toHaveValue('')
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    const token = (screen.getByLabelText('Bot token') as HTMLInputElement).value
+    expect(token).toMatch(/^[0-9a-f]{64}$/)
+    expect(screen.getByRole('button', { name: 'Copy bot token' })).toBeVisible()
+    await user.click(
+      screen.getByRole('switch', { name: 'Auto-issue from group PDFs' })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Save invoice settings' })
+    )
+
+    await waitFor(() => expect(put).toHaveBeenCalledOnce())
+    expect(put.mock.calls[0][1]).toMatchObject({
+      InvoiceWechatAutoIssueEnabled: true,
+      InvoiceWechatInboundToken: token,
+    })
+  })
+
+  test('a saved bot token is never shown and a blank token is sent to keep it', async () => {
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true, message: '' } })
+    const user = userEvent.setup()
+    renderSection({
+      ...defaults,
+      InvoiceWechatNotifyEnabled: true,
+      InvoiceWechatApiTokenConfigured: true,
+      InvoiceWechatInboundTokenConfigured: true,
+    })
+
+    expect(screen.getByLabelText('Bot token')).toHaveValue('')
+    expect(screen.getByLabelText('Bot token')).toHaveAttribute(
+      'placeholder',
+      'A bot token is saved.'
+    )
+    expect(screen.getByRole('button', { name: 'Regenerate' })).toBeVisible()
+    await user.click(
+      screen.getByRole('switch', { name: 'Auto-issue from group PDFs' })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Save invoice settings' })
+    )
+
+    await waitFor(() => expect(put).toHaveBeenCalledOnce())
+    expect(put.mock.calls[0][1]).toMatchObject({
+      InvoiceWechatAutoIssueEnabled: true,
+      InvoiceWechatInboundToken: '',
+    })
+  })
+
+  test('turning on auto-issue without a bot token blocks saving', async () => {
+    const put = vi.spyOn(api, 'put')
+    const error = vi.spyOn(toast, 'error')
+    const user = userEvent.setup()
+    renderSection({
+      ...defaults,
+      InvoiceWechatNotifyEnabled: true,
+      InvoiceWechatApiTokenConfigured: true,
+    })
+
+    await user.click(
+      screen.getByRole('switch', { name: 'Auto-issue from group PDFs' })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Save invoice settings' })
+    )
+
+    expect(error).toHaveBeenCalledWith(
+      'Generate a bot token before auto-issuing from group PDFs.'
+    )
+    expect(put).not.toHaveBeenCalled()
+  })
+
+  test('turning on auto-issue while WeChat notifications are off blocks saving', async () => {
+    const put = vi.spyOn(api, 'put')
+    const error = vi.spyOn(toast, 'error')
+    const user = userEvent.setup()
+    renderSection({ ...defaults, InvoiceWechatInboundTokenConfigured: true })
+
+    await user.click(
+      screen.getByRole('switch', { name: 'Auto-issue from group PDFs' })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Save invoice settings' })
+    )
+
+    expect(error).toHaveBeenCalledWith(
+      'Turn on WeChat group notifications and invoice file delivery before auto-issuing from group PDFs.'
+    )
+    expect(put).not.toHaveBeenCalled()
   })
 })

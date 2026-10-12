@@ -1,6 +1,9 @@
 package setting
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"net/url"
 	"strings"
@@ -53,7 +56,35 @@ var (
 	InvoiceWechatApiToken      = ""
 	InvoiceWechatAppId         = ""
 	InvoiceWechatGroupId       = ""
+
+	// InvoiceWechatAutoIssueEnabled lets the finance group bot hand over an
+	// invoice PDF posted in the group: it is attached to the pending request
+	// whose company name matches the file name, which is then marked issued.
+	InvoiceWechatAutoIssueEnabled = false
+	// InvoiceWechatInboundToken holds the SHA-256 hex digest of the token the
+	// bot presents. The token itself is never stored.
+	InvoiceWechatInboundToken = ""
 )
+
+// InvoiceWechatInboundTokenMinLength keeps bot tokens at 128 bits or more
+// when they are hex encoded.
+const InvoiceWechatInboundTokenMinLength = 32
+
+// InvoiceWechatInboundTokenDigest is the stored form of a bot token.
+func InvoiceWechatInboundTokenDigest(token string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(token)))
+	return hex.EncodeToString(sum[:])
+}
+
+// MatchInvoiceWechatInboundToken reports whether token is the configured bot
+// token, comparing digests in constant time.
+func MatchInvoiceWechatInboundToken(token string) bool {
+	stored := strings.TrimSpace(InvoiceWechatInboundToken)
+	if stored == "" || strings.TrimSpace(token) == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(InvoiceWechatInboundTokenDigest(token)), []byte(stored)) == 1
+}
 
 // InvoiceWechatConfigured reports whether every value needed to post to the
 // finance WeChat group is present, independent of the enabled switch.

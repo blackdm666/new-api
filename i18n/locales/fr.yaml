@@ -47,6 +47,8 @@ invoice.file_svg_forbidden: "Les factures SVG ne sont pas prises en charge pour 
 invoice.orphan_key_rejected: "Seuls les fichiers de facture qu’aucune demande ne référence peuvent être nettoyés"
 invoice.wechat_not_configured: "Les notifications WeChat des factures ne sont pas entièrement configurées. Renseignez l’URL de l’API, le jeton, l’ID d’application et l’ID du groupe"
 invoice.wechat_test_failed: "Échec de l’envoi du message de test WeChat : {{.Reason}}"
+invoice.wechat_auto_issue_disabled: "L’émission automatique depuis le groupe WeChat financier est désactivée"
+invoice.wechat_group_mismatch: "Le fichier ne provient pas du groupe WeChat financier configuré"
 invoice.email.status.pending: "En attente"
 invoice.email.status.issued: "Émise"
 invoice.email.status.rejected: "Rejetée"

@@ -188,6 +188,8 @@ invoice.file_svg_forbidden: "SVG invoice files are not supported for security re
 invoice.orphan_key_rejected: "Only invoice file objects that no invoice record references can be cleaned up"
 invoice.wechat_not_configured: "WeChat invoice notifications are not fully configured. Fill in the API URL, token, app ID and group ID"
 invoice.wechat_test_failed: "Failed to send the WeChat test message: {{.Reason}}"
+invoice.wechat_auto_issue_disabled: "Auto-issue from the finance WeChat group is turned off"
+invoice.wechat_group_mismatch: "The file did not come from the configured finance WeChat group"
 invoice.email.status.pending: "Pending"
 invoice.email.status.issued: "Issued"
 invoice.email.status.rejected: "Rejected"
