@@ -710,6 +710,62 @@ func TestUpdateVideoTasksSlowChannelDoesNotBlockOtherChannels(t *testing.T) {
 	}, adaptor.fetchedTaskIDs())
 }
 
+func TestRunTaskPollingOncePollsPlatformsConcurrently(t *testing.T) {
+	truncate(t)
+
+	const klingChannelID = 261
+	const viduChannelID = 262
+	seedTaskPollingChannel(t, klingChannelID, true)
+	seedTaskPollingChannel(t, viduChannelID, true)
+	klingTask := seedPollingTask(t, klingChannelID, "task_public_platform_kling", "upstream_platform_kling")
+	viduTask := seedPollingTask(t, viduChannelID, "task_public_platform_vidu", "upstream_platform_vidu")
+	require.NoError(t, model.DB.Model(viduTask).Update("platform", "vidu").Error)
+	previousQueryLimit := constant.TaskQueryLimit
+	constant.TaskQueryLimit = 100
+	t.Cleanup(func() { constant.TaskQueryLimit = previousQueryLimit })
+
+	newBlockingAdaptor := func(blockTaskID string, release chan struct{}) *taskPollingFetchAdaptor {
+		return &taskPollingFetchAdaptor{
+			blockTaskID:  blockTaskID,
+			blockStarted: make(chan struct{}),
+			releaseBlock: release,
+		}
+	}
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	adaptors := map[constant.TaskPlatform]*taskPollingFetchAdaptor{
+		"kling": newBlockingAdaptor(klingTask.GetUpstreamTaskID(), release),
+		"vidu":  newBlockingAdaptor(viduTask.GetUpstreamTaskID(), release),
+	}
+	previousFactory := GetTaskAdaptorFunc
+	GetTaskAdaptorFunc = func(platform constant.TaskPlatform) TaskPollingAdaptor { return adaptors[platform] }
+	t.Cleanup(func() { GetTaskAdaptorFunc = previousFactory })
+
+	done := make(chan TaskPollSummary, 1)
+	gopool.Go(func() { done <- RunTaskPollingOnce(context.Background(), nil) })
+
+	// Both platforms must be in flight at the same time: a platform stuck on its
+	// upstream may not hold back polling of any other platform.
+	for platform, adaptor := range adaptors {
+		select {
+		case <-adaptor.blockStarted:
+		case <-time.After(time.Second):
+			t.Fatalf("platform %s was not polled while another platform was blocked", platform)
+		}
+	}
+
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case summary := <-done:
+		assert.Equal(t, 2, summary.PlatformsScanned)
+	case <-time.After(time.Second):
+		t.Fatal("polling pass did not finish after upstreams were released")
+	}
+	assert.Equal(t, []string{klingTask.GetUpstreamTaskID()}, adaptors["kling"].fetchedTaskIDs())
+	assert.Equal(t, []string{viduTask.GetUpstreamTaskID()}, adaptors["vidu"].fetchedTaskIDs())
+}
+
 func TestUpdateVideoTasksMixedChannelSleepSettings(t *testing.T) {
 	truncate(t)
 

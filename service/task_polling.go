@@ -167,15 +167,27 @@ func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) 
 
 	totalPlatforms := len(platformTask)
 	processedPlatforms := 0
+	var reportMu sync.Mutex
+	markPlatformProcessed := func() {
+		reportMu.Lock()
+		defer reportMu.Unlock()
+		processedPlatforms++
+		if report != nil && ctx.Err() == nil {
+			report(processedPlatforms, totalPlatforms)
+		}
+	}
+	if report != nil {
+		report(0, totalPlatforms)
+	}
+	// Platforms are polled concurrently so a slow upstream or result transfer
+	// on one platform cannot hold back status updates on every other platform.
+	var wg sync.WaitGroup
 	for platform, tasks := range platformTask {
 		if ctx.Err() != nil {
 			break
 		}
-		if report != nil {
-			report(processedPlatforms, totalPlatforms)
-		}
-		processedPlatforms++
 		if len(tasks) == 0 {
+			markPlatformProcessed()
 			continue
 		}
 		summary.PlatformsScanned++
@@ -205,11 +217,18 @@ func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) 
 			}
 		}
 		if len(taskChannelM) == 0 {
+			markPlatformProcessed()
 			continue
 		}
 
-		DispatchPlatformUpdate(ctx, platform, taskChannelM, taskM)
+		wg.Add(1)
+		gopool.Go(func() {
+			defer wg.Done()
+			defer markPlatformProcessed()
+			DispatchPlatformUpdate(ctx, platform, taskChannelM, taskM)
+		})
 	}
+	wg.Wait()
 	if report != nil && ctx.Err() == nil {
 		report(totalPlatforms, totalPlatforms)
 	}
@@ -584,11 +603,20 @@ func FinalizeVideoTaskResult(ctx context.Context, adaptor TaskPollingAdaptor, ta
 	shouldFinalizeBilling := false
 	videoPreparation := TaskVideoPreparation{}
 	if taskResult.Status == model.TaskStatusSuccess {
-		var prepareErr error
-		videoPreparation, prepareErr = PrepareTaskVideoResult(ctx, task, taskResult.Url)
-		if prepareErr != nil {
-			return fmt.Errorf("prepare video result for task %s: %w", task.TaskID, prepareErr)
+		if retryAt, deferred := taskVideoPrepareRetryAt(task.TaskID, time.Now()); deferred {
+			logger.LogDebug(ctx, "video result for task %s is backing off until %s", task.TaskID, retryAt.Format(time.RFC3339))
+			return nil
 		}
+		prepareCtx, cancel := context.WithTimeout(ctx, taskVideoPrepareTimeout())
+		var prepareErr error
+		videoPreparation, prepareErr = PrepareTaskVideoResult(prepareCtx, task, taskResult.Url)
+		cancel()
+		if prepareErr != nil {
+			retry := recordTaskVideoPrepareFailure(task.TaskID, time.Now())
+			return fmt.Errorf("prepare video result for task %s (attempt %d, next retry %s): %w",
+				task.TaskID, retry.failures, retry.retryAt.Format(time.DateTime), prepareErr)
+		}
+		clearTaskVideoPrepareFailure(task.TaskID)
 	}
 
 	task.Status = parsedStatus

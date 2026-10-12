@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -38,6 +40,85 @@ type TaskVideoPreparation struct {
 }
 
 var taskVideoDirectProbe = probeTaskVideoDirectAccess
+
+const (
+	defaultTaskVideoPrepareTimeout = 3 * time.Minute
+	minTaskVideoPrepareTimeout     = 30 * time.Second
+	maxTaskVideoPrepareTimeout     = 30 * time.Minute
+
+	initialTaskVideoPrepareBackoff = 5 * time.Minute
+	maxTaskVideoPrepareBackoff     = 30 * time.Minute
+	taskVideoPrepareBackoffExpiry  = 48 * time.Hour
+)
+
+// TaskVideoPrepareTimeout bounds one attempt to make a finished video
+// deliverable (direct probe, Worker transfer and VPS fallback together). The
+// poller runs these attempts inline, so an unbounded slow source would stall
+// status updates for every pending task.
+func TaskVideoPrepareTimeout() time.Duration {
+	raw := strings.TrimSpace(common.GetEnvOrDefaultString("TASK_VIDEO_PREPARE_TIMEOUT_SECONDS", ""))
+	seconds, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return defaultTaskVideoPrepareTimeout
+	}
+	timeout := time.Duration(seconds) * time.Second
+	if timeout < minTaskVideoPrepareTimeout || timeout > maxTaskVideoPrepareTimeout {
+		return defaultTaskVideoPrepareTimeout
+	}
+	return timeout
+}
+
+var taskVideoPrepareTimeout = TaskVideoPrepareTimeout
+
+// taskVideoPrepareBackoff remembers finished tasks whose video could not be
+// made deliverable, so the poller retries them with growing intervals instead
+// of paying the full transfer timeout on every pass. It is per node: after a
+// failover the new node retries once and then backs off the same way. Tasks
+// that never succeed are eventually failed and refunded by the timeout sweep.
+var taskVideoPrepareBackoff = struct {
+	sync.Mutex
+	entries map[string]taskVideoPrepareRetry
+}{entries: make(map[string]taskVideoPrepareRetry)}
+
+type taskVideoPrepareRetry struct {
+	failures int
+	retryAt  time.Time
+}
+
+func taskVideoPrepareRetryAt(taskID string, now time.Time) (time.Time, bool) {
+	taskVideoPrepareBackoff.Lock()
+	defer taskVideoPrepareBackoff.Unlock()
+	entry, ok := taskVideoPrepareBackoff.entries[taskID]
+	if !ok || !now.Before(entry.retryAt) {
+		return time.Time{}, false
+	}
+	return entry.retryAt, true
+}
+
+func recordTaskVideoPrepareFailure(taskID string, now time.Time) taskVideoPrepareRetry {
+	taskVideoPrepareBackoff.Lock()
+	defer taskVideoPrepareBackoff.Unlock()
+	for id, entry := range taskVideoPrepareBackoff.entries {
+		if now.Sub(entry.retryAt) > taskVideoPrepareBackoffExpiry {
+			delete(taskVideoPrepareBackoff.entries, id)
+		}
+	}
+	entry := taskVideoPrepareBackoff.entries[taskID]
+	backoff := initialTaskVideoPrepareBackoff
+	for range entry.failures {
+		backoff = min(backoff*2, maxTaskVideoPrepareBackoff)
+	}
+	entry.failures++
+	entry.retryAt = now.Add(backoff)
+	taskVideoPrepareBackoff.entries[taskID] = entry
+	return entry
+}
+
+func clearTaskVideoPrepareFailure(taskID string) {
+	taskVideoPrepareBackoff.Lock()
+	defer taskVideoPrepareBackoff.Unlock()
+	delete(taskVideoPrepareBackoff.entries, taskID)
+}
 
 // PrepareTaskVideoResult applies one policy for every video channel: upstream
 // R2 URLs and explicitly trusted official media hosts may stay direct, while
