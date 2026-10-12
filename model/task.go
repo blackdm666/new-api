@@ -382,9 +382,15 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 // hydrateTaskListData restores the response data required by Suno audio
 // previews without loading large video-provider payloads into list responses.
 func hydrateTaskListData(tasks []*Task) error {
+	return HydrateTaskData(tasks, func(task *Task) bool { return task.Platform == constant.TaskPlatformSuno })
+}
+
+// HydrateTaskData loads the persisted snapshot, in one query, for the listed
+// tasks that need it and were fetched without it.
+func HydrateTaskData(tasks []*Task, needs func(*Task) bool) error {
 	ids := make([]int64, 0)
 	for _, task := range tasks {
-		if task != nil && task.Platform == constant.TaskPlatformSuno {
+		if task != nil && len(task.Data) == 0 && needs(task) {
 			ids = append(ids, task.ID)
 		}
 	}

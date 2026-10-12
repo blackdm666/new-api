@@ -200,3 +200,30 @@ export function officialTaskId(task) { return /^cgt-/.test(task.data && task.dat
 		})
 	}
 }
+
+func TestUserTaskListLoadsSnapshotsForOfficialTaskIDs(t *testing.T) {
+	source := `
+export const meta = {apiVersion: 1, key: "official-list", name: "Official List", version: "1.0.0", author: {name: "Test"}, models: ["m"], fetchMode: "per_task"};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+export function officialTaskId(task) { return /^cgt-/.test(task.data && task.data.id) ? task.data.id : ""; }
+`
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = jsplugin.DefaultRegistry.Unregister("official-list") })
+
+	task := setupGenericTaskTest(t)
+	task.Platform = "official-list"
+	task.Data = []byte(`{"id":"cgt-list-1","status":"succeeded"}`)
+	require.NoError(t, model.DB.Save(task).Error)
+
+	// The list query omits snapshots; the official ID must still be resolved.
+	listed := model.TaskGetAllUserTask(task.UserId, 0, 10, model.SyncTaskQueryParams{})
+	require.Len(t, listed, 1)
+	view := tasksToDto(listed, false, common.RoleCommonUser)[0]
+	assert.Equal(t, "cgt-list-1", view.OfficialTaskID)
+	assert.Nil(t, view.Data)
+	assert.Empty(t, view.Platform)
+}

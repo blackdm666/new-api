@@ -850,6 +850,13 @@ func PublicOfficialTaskID(task *model.Task) string {
 	return provider.OfficialTaskID(task)
 }
 
+// TaskDeclaresOfficialID reports whether the platform's plugin publishes the
+// model platform's own task ID.
+func TaskDeclaresOfficialID(platform constant.TaskPlatform) bool {
+	provider, ok := GetTaskAdaptor(platform).(channel.TaskOfficialIDProvider)
+	return ok && provider.DeclaresOfficialTaskID()
+}
+
 // HideTaskRouting removes what identifies the serving upstream from a task
 // shown to its owner: plugin keys name the provider, so only Suno keeps its
 // platform (the dashboard renders its audio clips from it); a channel-mapped
