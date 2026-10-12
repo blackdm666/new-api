@@ -117,18 +117,23 @@ func TestRegistryRequiresValidPluginAuthor(t *testing.T) {
 	require.NoError(t, ValidateV1Meta(meta))
 }
 
-func TestRegistryRequiresArtifactHooksAsPair(t *testing.T) {
-	for _, hook := range []string{"listArtifacts", "buildContentRequest"} {
+func TestRegistryRequiresPairedOptionalHooks(t *testing.T) {
+	for hook, message := range map[string]string{
+		"listArtifacts":       "must export listArtifacts and buildContentRequest together",
+		"buildContentRequest": "must export listArtifacts and buildContentRequest together",
+		"buildCancelRequest":  "must export buildCancelRequest and parseCancelResponse together",
+		"parseCancelResponse": "must export buildCancelRequest and parseCancelResponse together",
+	} {
 		t.Run(hook, func(t *testing.T) {
 			source := routingTestPluginSource(
-				"artifact-hook-pair",
+				"optional-hook-pair",
 				0,
 				`["model"]`,
 				"",
 				"export function "+hook+"() { return []; }",
 			)
 			_, err := CompilePlugin(source, Options{})
-			require.ErrorContains(t, err, "must export listArtifacts and buildContentRequest together")
+			require.ErrorContains(t, err, message)
 		})
 	}
 }

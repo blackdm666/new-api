@@ -757,7 +757,12 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		}
 		bc.TieredSnapshot.UsageFacts = usageFacts
 		bc.TieredSnapshot.EstimatedTier = result.MatchedTier
-		RecalculateTaskQuota(ctx, task, result.ActualQuotaAfterGroup, "任务用量表达式结算", result.Clamp)
+		bc.TieredSnapshot.ToolSurcharges = result.ToolSurcharges
+		reason := "任务用量表达式结算"
+		for _, item := range result.ToolSurcharges {
+			reason += fmt.Sprintf("，%s 调用 %d 次", item.Name, item.Count)
+		}
+		RecalculateTaskQuota(ctx, task, result.ActualQuotaAfterGroup, reason, result.Clamp)
 		return true
 	}
 	// 按次计费的成功任务保持预扣；失败任务由调用方全额退款。
@@ -880,6 +885,15 @@ func recordPollFailureForTasks(ctx context.Context, adaptor TaskPollingAdaptor, 
 }
 
 func failTaskFromPoll(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, fromStatus model.TaskStatus, reason string) error {
+	_, err := FailTask(ctx, adaptor, task, fromStatus, reason)
+	return err
+}
+
+// FailTask moves a task from fromStatus to FAILURE and, only for the caller
+// that wins that transition, settles it like any failed task: full refund,
+// metrics and callback. It reports whether this caller won; a loser's task
+// fields are stale and must be reloaded.
+func FailTask(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, fromStatus model.TaskStatus, reason string) (bool, error) {
 	now := time.Now().Unix()
 	task.Status = model.TaskStatusFailure
 	task.Progress = taskcommon.ProgressComplete
@@ -888,14 +902,11 @@ func failTaskFromPoll(ctx context.Context, adaptor TaskPollingAdaptor, task *mod
 	}
 	task.FailReason = reason
 	won, err := task.UpdateWithStatus(fromStatus)
-	if err != nil {
-		return err
-	}
-	if !won {
-		return nil
+	if err != nil || !won {
+		return false, err
 	}
 	finalizeTerminalTask(ctx, adaptor, task, relaycommon.FailTaskInfo(reason))
-	return nil
+	return true, nil
 }
 
 func failTasksFromPoll(ctx context.Context, adaptor TaskPollingAdaptor, tasks []*model.Task, reason string) error {

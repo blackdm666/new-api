@@ -17,17 +17,21 @@ const (
 	CapabilitySubmitSSEDelta = "submit-sse-delta@1"
 	CapabilityQuerySSEDelta  = "query-sse-delta@1"
 	CapabilityTaskPreflight  = "task-preflight@1"
-	MaxJSONToolBytes         = 1 << 20
-	MaxQueryJSONBytes        = 128 << 20
-	maxJSONToolDepth         = 32
-	maxJSONToolNodes         = 32768
-	maxJSONChanges           = 256
+	// CapabilityTaskPreflightRounds repeats preflight and upload, one round per
+	// provider-side upload, until buildPreflightRequest returns null.
+	CapabilityTaskPreflightRounds = "task-preflight@2"
+	MaxJSONToolBytes              = 1 << 20
+	MaxQueryJSONBytes             = 128 << 20
+	maxJSONToolDepth              = 32
+	maxJSONToolNodes              = 32768
+	maxJSONChanges                = 256
 )
 
 // HasCapability describes host APIs independently of a plugin's mutable globals.
 func HasCapability(name string) bool {
 	return name == CapabilityJSONClone || name == CapabilitySubmitSSEDelta ||
-		name == CapabilityQuerySSEDelta || name == CapabilityTaskPreflight
+		name == CapabilityQuerySSEDelta || name == CapabilityTaskPreflight ||
+		name == CapabilityTaskPreflightRounds
 }
 
 // JSONState owns a request-local JSON result. Appended strings stay in Go and

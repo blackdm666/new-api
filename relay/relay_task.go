@@ -421,6 +421,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 				finalQuota = settlement.ActualQuotaAfterGroup
 				snap.UsageFacts = facts
 				snap.EstimatedTier = settlement.MatchedTier
+				snap.ToolSurcharges = settlement.ToolSurcharges
 				noteTaskQuotaClamp(info, settlement.Clamp)
 			}
 		}

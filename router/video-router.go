@@ -33,4 +33,12 @@ func SetVideoRouter(router *gin.Engine) {
 		videoV1Router.GET("/video/generations/:task_id", controller.RelayTaskFetch)
 		videoV1Router.POST("/videos/:video_id/remix", controller.RelayTask)
 	}
+
+	// Cancellation acts on the caller's own task; it selects no channel.
+	videoCancelRouter := router.Group("/v1")
+	videoCancelRouter.Use(middleware.RouteTag("relay"), middleware.TokenAuth())
+	{
+		videoCancelRouter.DELETE("/videos/:task_id", controller.CancelVideoTask)
+		videoCancelRouter.DELETE("/video/generations/:task_id", controller.CancelVideoTask)
+	}
 }
