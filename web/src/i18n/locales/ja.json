@@ -7292,7 +7292,7 @@
     "WeChat group notifications": "WeChat グループ通知",
     "Only new invoice applications and user withdrawals are pushed to the finance WeChat group, with the invoice details and amount.": "財務 WeChat グループには新しい請求書申請とユーザーの取り下げのみを、請求書情報と金額付きで送信します。",
     "Auto-issue from group PDFs": "グループの PDF から自動発行",
-    "When the finance group posts a PDF named after the company name of a pending application, the bot attaches it, marks the application issued, emails the applicant and tells the group the order is complete. If several pending applications share the company name, add #<application ID> to the file name.": "財務グループに、保留中の申請の会社名と同じ名前の PDF が投稿されると、ボットがそれを申請に添付して発行済みにし、申請者にメールで通知し、グループに完了を返信します。同じ会社名の保留中の申請が複数ある場合は、ファイル名に #<申請 ID> を付けてください。",
+    "When the finance group posts a PDF whose file name contains the company name of a pending application, the bot attaches it, marks the application issued, emails the applicant and tells the group the order is complete. If several pending applications share the company name, add #<application ID> to the file name.": "財務グループに、ファイル名に保留中の申請の会社名を含む PDF が投稿されると、ボットがそれを申請に添付して発行済みにし、申請者にメールで通知し、グループに完了を返信します。同じ会社名の保留中の申請が複数ある場合は、ファイル名に #<申請 ID> を付けてください。",
     "Bot token": "ボットトークン",
     "A bot token is saved.": "ボットトークンは保存済みです。",
     "No bot token saved yet": "ボットトークンはまだ保存されていません",

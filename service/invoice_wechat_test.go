@@ -352,26 +352,31 @@ func TestInvoiceWechatDeliveryWaitsWhileDisabledAndNeverResendsAnInterruptedSend
 	assert.NotZero(t, reload(interrupted.Id).DeliveredTime)
 }
 
-func TestParseInvoiceWechatFileName(t *testing.T) {
+func TestInvoiceWechatFileNameNamesCompany(t *testing.T) {
+	const yunfan = "上海云帆网络信息技术有限公司"
 	tests := []struct {
-		fileName   string
-		companyKey string
-		requestId  int
+		fileName  string
+		company   string
+		names     bool
+		requestId int
 	}{
-		{"上海云帆网络信息技术有限公司.pdf", "上海云帆网络信息技术有限公司", 0},
-		{"上海云帆网络信息技术有限公司（1）.PDF", "上海云帆网络信息技术有限公司", 0},
-		{"上海云帆网络信息技术有限公司＃63.pdf", "上海云帆网络信息技术有限公司", 63},
-		{"#63 上海云帆网络信息技术有限公司.pdf", "上海云帆网络信息技术有限公司", 63},
-		{"上海云帆网络信息技术有限公司_#63(2).pdf", "上海云帆网络信息技术有限公司", 63},
-		{"Ａｃｍｅ Trading（Shanghai） Co.pdf", "acmetrading(shanghai)co", 0},
-		{"云帆科技（北京）有限公司.pdf", "云帆科技(北京)有限公司", 0},
-		{"上海云帆网络信息技术有限公司.ofd", "", 0},
+		{"上海云帆网络信息技术有限公司.pdf", yunfan, true, 0},
+		{"上海云帆网络信息技术有限公司发票（1）.PDF", yunfan, true, 0},
+		{"dzfp_26442000000012345678_上海云帆网络信息技术有限公司_20261012153012.pdf", yunfan, true, 0},
+		{"电子发票 上海云帆网络信息技术有限公司.pdf", yunfan, true, 0},
+		{"上海云帆网络信息技术有限公司＃63.pdf", yunfan, true, 63},
+		{"发票#63上海云帆网络信息技术有限公司.pdf", yunfan, true, 63},
+		{"上海云帆网络信息技术有限公司.pdf", "云帆网络信息技术有限公司", false, 0},
+		{"Ａｃｍｅ Trading（Shanghai） Co_invoice.pdf", "Acme Trading (Shanghai) Co", true, 0},
+		{"张三.pdf", "张三", true, 0},
+		{"张三丰工作室.pdf", "张三", false, 0},
+		{"上海云帆网络信息技术有限公司.ofd", yunfan, false, 0},
 	}
 	for _, test := range tests {
-		t.Run(test.fileName, func(t *testing.T) {
-			companyKey, requestId := parseInvoiceWechatFileName(test.fileName)
-			assert.Equal(t, test.companyKey, companyKey)
-			assert.Equal(t, test.requestId, requestId)
+		t.Run(test.fileName+"/"+test.company, func(t *testing.T) {
+			name, ok := parseInvoiceWechatFileName(test.fileName)
+			assert.Equal(t, test.names, ok && name.namesCompany(test.company))
+			assert.Equal(t, test.requestId, name.requestId)
 		})
 	}
 }
@@ -430,6 +435,9 @@ func TestIssueInvoiceFromWechatFile(t *testing.T) {
 	acmeFirst := pendingRequest(other, "Acme Trading Co")
 	acmeSecond := pendingRequest(other, "Acme Trading Co")
 	retried := pendingRequest(other, "重试科技有限公司")
+	yunfanSuffix := pendingRequest(other, "云帆网络信息技术有限公司")
+	headOffice := pendingRequest(other, "成都蜀道智能科技有限公司")
+	branch := pendingRequest(other, "成都蜀道智能科技有限公司北京分公司")
 	pdf := []byte("%PDF-1.7\n% issued invoice")
 	digest := sha256.Sum256(pdf)
 	require.NoError(t, model.DB.Create(&model.InvoiceFile{
@@ -453,6 +461,9 @@ func TestIssueInvoiceFromWechatFile(t *testing.T) {
 	assert.Equal(t, InvoiceWechatFileNoMatch, issue("上海云帆网络信息技术有限公司.pdf", pdf).Outcome, "an issued request takes no more files")
 	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: retried.Id},
 		issue("重试科技有限公司.pdf", pdf), "a file attached before a failed issue is reused")
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: branch.Id},
+		issue("dzfp_26442000000012345678_成都蜀道智能科技有限公司北京分公司_20261012.pdf", pdf),
+		"the head office name inside the branch name does not count")
 
 	statuses := map[int]int{}
 	var requests []*model.InvoiceRequest
@@ -463,6 +474,7 @@ func TestIssueInvoiceFromWechatFile(t *testing.T) {
 	assert.Equal(t, map[int]int{
 		yunfan.Id: model.InvoiceStatusIssued, acmeFirst.Id: model.InvoiceStatusPending,
 		acmeSecond.Id: model.InvoiceStatusIssued, retried.Id: model.InvoiceStatusIssued,
+		yunfanSuffix.Id: model.InvoiceStatusPending, headOffice.Id: model.InvoiceStatusPending, branch.Id: model.InvoiceStatusIssued,
 	}, statuses)
 	for _, request := range []*model.InvoiceRequest{yunfan, retried} {
 		files, err := model.ListInvoiceFiles(request.Id)
@@ -485,7 +497,7 @@ func TestIssueInvoiceFromWechatFile(t *testing.T) {
 		assert.Equal(t, "finance@chatroom", message["toWxid"])
 		contents = append(contents, message["content"])
 	}
-	assert.Len(t, contents, 3, "one completion message per issued request")
+	assert.Len(t, contents, 4, "one completion message per issued request")
 	assert.Contains(t, contents, "【开票工单已完成 #"+strconv.Itoa(yunfan.Id)+"】\n"+
 		"发票抬头：上海云帆网络信息技术有限公司\n"+
 		"开票金额：¥1,200.00\n"+

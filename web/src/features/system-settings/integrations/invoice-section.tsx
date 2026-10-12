@@ -569,7 +569,7 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
           <SettingSwitch
             label={t('Auto-issue from group PDFs')}
             description={t(
-              'When the finance group posts a PDF named after the company name of a pending application, the bot attaches it, marks the application issued, emails the applicant and tells the group the order is complete. If several pending applications share the company name, add #<application ID> to the file name.'
+              'When the finance group posts a PDF whose file name contains the company name of a pending application, the bot attaches it, marks the application issued, emails the applicant and tells the group the order is complete. If several pending applications share the company name, add #<application ID> to the file name.'
             )}
             checked={values.InvoiceWechatAutoIssueEnabled}
             onCheckedChange={(value) =>

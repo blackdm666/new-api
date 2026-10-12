@@ -7294,7 +7294,7 @@
     "WeChat group notifications": "微信群組通知",
     "Only new invoice applications and user withdrawals are pushed to the finance WeChat group, with the invoice details and amount.": "只把新開票申請和使用者撤回推送到財務微信群組，內容包括開票資訊和金額。",
     "Auto-issue from group PDFs": "群組內 PDF 自動開票",
-    "When the finance group posts a PDF named after the company name of a pending application, the bot attaches it, marks the application issued, emails the applicant and tells the group the order is complete. If several pending applications share the company name, add #<application ID> to the file name.": "財務群組裡發出的 PDF，檔名與某個待處理申請的發票抬頭一致時，機器人會把它加入該申請、標記為已開票、寄信通知使用者，並在群組裡回覆工單已完成。若有多個待處理申請抬頭相同，請在檔名裡加上 #申請編號。",
+    "When the finance group posts a PDF whose file name contains the company name of a pending application, the bot attaches it, marks the application issued, emails the applicant and tells the group the order is complete. If several pending applications share the company name, add #<application ID> to the file name.": "財務群組裡發出的 PDF，檔名包含某個待處理申請的發票抬頭時，機器人會把它加入該申請、標記為已開票、寄信通知使用者，並在群組裡回覆工單已完成。若有多個待處理申請抬頭相同，請在檔名裡加上 #申請編號。",
     "Bot token": "機器人金鑰",
     "A bot token is saved.": "已儲存機器人金鑰。",
     "No bot token saved yet": "尚未儲存機器人金鑰",

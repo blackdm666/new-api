@@ -12,6 +12,7 @@ import (
 	"net/http/httptrace"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -363,28 +364,66 @@ type InvoiceWechatFileResult struct {
 	RequestId int    `json:"request_id,omitempty"`
 }
 
-var (
-	invoiceWechatFileRequestID  = regexp.MustCompile(`#(\d+)`)
-	invoiceWechatFileCopySuffix = regexp.MustCompile(`\(\d+\)$`)
-)
+var invoiceWechatFileRequestID = regexp.MustCompile(`#(\d+)`)
 
-// parseInvoiceWechatFileName reads the company name finance staff give an
-// invoice PDF, as a match key, plus an optional "#<request id>" that picks
-// one of several pending requests for the same company. The ".pdf" extension
-// is required, and the "(1)" WeChat adds to repeated file names is ignored.
-func parseInvoiceWechatFileName(fileName string) (companyKey string, requestId int) {
-	name := width.Fold.String(strings.TrimSpace(path.Base(strings.ReplaceAll(fileName, "\\", "/"))))
-	ext := path.Ext(name)
+// invoiceShortCompanyNameLength is the length below which a company name, such
+// as a person's name, must be the whole file name instead of part of it.
+const invoiceShortCompanyNameLength = 4
+
+// invoiceWechatFileName is an invoice PDF's file name prepared for matching
+// company names: folded like invoiceCompanyMatchKey, with boundary[i] telling
+// whether rune i starts the name or follows a space or a non-letter.
+type invoiceWechatFileName struct {
+	runes     []rune
+	boundary  []bool
+	requestId int
+}
+
+// parseInvoiceWechatFileName prepares a ".pdf" file name for matching and
+// reads an optional "#<request id>" that picks one of several pending
+// requests for the same company. ok is false for other file types.
+func parseInvoiceWechatFileName(fileName string) (name invoiceWechatFileName, ok bool) {
+	base := width.Fold.String(strings.TrimSpace(path.Base(strings.ReplaceAll(fileName, "\\", "/"))))
+	ext := path.Ext(base)
 	if !strings.EqualFold(ext, ".pdf") {
-		return "", 0
+		return name, false
 	}
-	name = strings.TrimSuffix(name, ext)
-	if match := invoiceWechatFileRequestID.FindStringSubmatchIndex(name); match != nil {
-		requestId, _ = strconv.Atoi(name[match[2]:match[3]])
-		name = name[:match[0]] + name[match[1]:]
+	stem := strings.TrimSuffix(base, ext)
+	if match := invoiceWechatFileRequestID.FindStringSubmatchIndex(stem); match != nil {
+		name.requestId, _ = strconv.Atoi(stem[match[2]:match[3]])
+		stem = stem[:match[0]] + " " + stem[match[1]:]
 	}
-	name = invoiceWechatFileCopySuffix.ReplaceAllString(strings.Trim(name, " _-"), "")
-	return invoiceCompanyMatchKey(strings.Trim(name, " _-")), requestId
+	atBoundary := true
+	for _, r := range stem {
+		if unicode.IsSpace(r) {
+			atBoundary = true
+			continue
+		}
+		name.runes = append(name.runes, unicode.ToLower(r))
+		name.boundary = append(name.boundary, atBoundary)
+		atBoundary = !unicode.IsLetter(r)
+	}
+	return name, len(name.runes) > 0
+}
+
+// namesCompany reports whether the file name contains the company name right
+// after its start, a space or a non-letter, so "云帆科技有限公司" is not found
+// in a file named for "上海云帆科技有限公司". Anything may follow the name,
+// such as "发票" or a date. Short names must be the whole file name.
+func (name invoiceWechatFileName) namesCompany(companyName string) bool {
+	company := []rune(invoiceCompanyMatchKey(companyName))
+	if len(company) == 0 {
+		return false
+	}
+	if len(company) < invoiceShortCompanyNameLength {
+		return slices.Equal(name.runes, company)
+	}
+	for start := 0; start+len(company) <= len(name.runes); start++ {
+		if name.boundary[start] && slices.Equal(name.runes[start:start+len(company)], company) {
+			return true
+		}
+	}
+	return false
 }
 
 // invoiceCompanyMatchKey folds the differences between a company name typed
@@ -409,26 +448,39 @@ func InvoiceWechatAutoIssueReady() bool {
 }
 
 // IssueInvoiceFromWechatFile handles an invoice PDF posted in the finance
-// group. When exactly one pending request matches the file name, the file is
-// attached to it, the request is marked issued, the applicant is emailed as
-// for a manual issue, and the group is told the order is complete. A file
-// that matches no request, or several, changes nothing. Sending the same file
-// again never attaches it twice.
+// group. When the file name contains the company name of exactly one pending
+// request, the file is attached to it, the request is marked issued, the
+// applicant is emailed as for a manual issue, and the group is told the order
+// is complete. A company name found only inside a longer matching one (a head
+// office inside its branch) does not count. A file that matches no request,
+// or several, changes nothing. Sending the same file again never attaches it
+// twice.
 func IssueInvoiceFromWechatFile(ctx context.Context, fileName string, content []byte) (*InvoiceWechatFileResult, error) {
-	companyKey, requestId := parseInvoiceWechatFileName(fileName)
-	if companyKey == "" || invoicefile.DetectMime(content) != "application/pdf" {
+	name, ok := parseInvoiceWechatFileName(fileName)
+	if !ok || invoicefile.DetectMime(content) != "application/pdf" {
 		return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileNotPDF}, nil
 	}
 	pending, err := model.ListPendingInvoiceRequests()
 	if err != nil {
 		return nil, err
 	}
-	var matched []*model.InvoiceRequest
+	var named []*model.InvoiceRequest
 	for _, request := range pending {
-		if requestId != 0 && request.Id != requestId {
+		if name.requestId != 0 && request.Id != name.requestId {
 			continue
 		}
-		if invoiceCompanyMatchKey(request.CompanyName) == companyKey {
+		if name.namesCompany(request.CompanyName) {
+			named = append(named, request)
+		}
+	}
+	var matched []*model.InvoiceRequest
+	for _, request := range named {
+		key := invoiceCompanyMatchKey(request.CompanyName)
+		insideLonger := slices.ContainsFunc(named, func(other *model.InvoiceRequest) bool {
+			otherKey := invoiceCompanyMatchKey(other.CompanyName)
+			return len(otherKey) > len(key) && strings.Contains(otherKey, key)
+		})
+		if !insideLonger {
 			matched = append(matched, request)
 		}
 	}
