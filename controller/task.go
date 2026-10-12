@@ -613,13 +613,9 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 		}
 		item := relay.TaskModel2Dto(task)
 		if viewerRole < common.RoleAdminUser {
-			// The requested model can be a private sales alias. Keep it for
-			// internal/admin workflows, but do not expose it in the user task
-			// list or task details response.
-			userProperties := task.Properties
-			userProperties.OriginModelName = ""
-			item.Properties = userProperties
-			relay.HideTaskRouting(item)
+			// Users see the model they requested, never the plugin key, channel
+			// or channel-mapped upstream model that would name the provider.
+			relay.HideTaskRouting(item, task)
 			// Data is the raw upstream snapshot (provider task IDs, storage URLs)
 			// and would identify the upstream. Users only need the Suno preview clips.
 			item.Data = nil

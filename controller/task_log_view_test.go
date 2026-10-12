@@ -47,8 +47,14 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	assert.Nil(t, userView.RootInfo)
 	require.IsType(t, model.Properties{}, userView.Properties)
 	userProperties := userView.Properties.(model.Properties)
+	// The owner sees the model they requested, as in their consume logs; the
+	// channel-mapped upstream model can name the provider's internal model.
 	assert.Empty(t, userProperties.OriginModelName)
-	assert.Equal(t, "provider-model", userProperties.UpstreamModelName)
+	assert.Equal(t, "private-sales-alias", userProperties.UpstreamModelName)
+	userJSON, err := common.Marshal(userView)
+	require.NoError(t, err)
+	assert.NotContains(t, string(userJSON), "provider-model")
+	assert.NotContains(t, string(userJSON), "document-parser")
 
 	adminView := tasksToDto([]*model.Task{task}, false, common.RoleAdminUser)[0]
 	require.IsType(t, model.Properties{}, adminView.Properties)

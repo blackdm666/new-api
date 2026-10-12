@@ -8067,6 +8067,8 @@
     "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.",
     "Upstream requires adaptive thinking; retried with adaptive thinking": "Upstream requires adaptive thinking; retried with adaptive thinking",
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "Upstream rejected adaptive thinking; retried with the original thinking controls",
-    "Same channel retry": "Same channel retry"
+    "Same channel retry": "Same channel retry",
+    "Text to Image": "Text to Image",
+    "Image to Image": "Image to Image"
   }
 }

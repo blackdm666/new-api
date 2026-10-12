@@ -7971,6 +7971,8 @@
     "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "S'applique aux requêtes Claude Messages natives qui envoient une réflexion enabled ou disabled à des modèles n'acceptant que la réflexion adaptative.",
     "Upstream requires adaptive thinking; retried with adaptive thinking": "L'amont exige la réflexion adaptative ; nouvel essai avec réflexion adaptative",
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "L'amont a refusé la réflexion adaptative ; nouvel essai avec les paramètres de réflexion d'origine",
-    "Same channel retry": "Nouvel essai sur le même canal"
+    "Same channel retry": "Nouvel essai sur le même canal",
+    "Text to Image": "Texte vers image",
+    "Image to Image": "Image vers image"
   }
 }
