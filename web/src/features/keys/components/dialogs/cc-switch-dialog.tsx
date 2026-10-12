@@ -250,10 +250,12 @@ export function CCSwitchDialog(props: Props) {
           <ol className='text-muted-foreground list-decimal space-y-1 pl-5'>
             <li>
               {t(
-                'In CC Switch, open Claude Desktop, choose Add Provider and pick the 88API preset'
+                'In CC Switch, open Claude Desktop and choose Add Provider. Under third-party providers, 88API is the first preset.'
               )}
             </li>
-            <li>{t('Click Copy Key below, paste it into API Key and save')}</li>
+            <li>
+              {t('Click Copy Key below, paste it into API Key and save.')}
+            </li>
           </ol>
           <dl className='flex justify-between gap-4 border-t pt-2'>
             <dt className='text-muted-foreground shrink-0'>{t('Group')}</dt>
