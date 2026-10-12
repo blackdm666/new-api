@@ -103,11 +103,8 @@ func TestInvoiceWechatMessagesOmitEmptyLines(t *testing.T) {
 		"发票抬头：示例科技有限公司\n"+
 		"税号：91310000EXAMPLE\n"+
 		"电话：021-88888888\n"+
-		"开票金额：¥1,234,567.80\n"+
-		"申请人：alice（ID 7）\n"+
-		"申请时间：2026-10-12 09:05\n"+
-		"处理链接：https://88api.ai/admin-invoices/42", buildInvoiceWechatCreatedText(request))
-	assert.Equal(t, "【开票申请作废 #42】\n"+
+		"开票金额：¥1,234,567.80", buildInvoiceWechatCreatedText(request))
+	assert.Equal(t, "【开票请求作废 #42】\n"+
 		"发票抬头：示例科技有限公司\n"+
 		"开票金额：¥1,234,567.80\n"+
 		"用户已于 2026-10-12 10:05 撤回该申请，请勿开票。", buildInvoiceWechatWithdrawnText(request))
@@ -249,7 +246,7 @@ func TestInvoiceWechatNotificationsQueueForCreateAndWithdrawOnly(t *testing.T) {
 		assert.Equal(t, "finance@chatroom", delivery.Recipient)
 		assert.Zero(t, delivery.EmailDeliveryId)
 	}
-	assert.Contains(t, subjects, "开票申请作废 #"+strconv.Itoa(withdrawnRequest.Id))
+	assert.Contains(t, subjects, "开票请求作废 #"+strconv.Itoa(withdrawnRequest.Id))
 	var emailCount int64
 	require.NoError(t, model.DB.Model(&model.EmailDelivery{}).Where("category = ?", "invoice_admin_email").Count(&emailCount).Error)
 	assert.Zero(t, emailCount)

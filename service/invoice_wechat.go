@@ -17,7 +17,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
-	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/shopspring/decimal"
 )
 
@@ -110,14 +109,6 @@ func invoiceWechatLines(header string, fields [][2]string) string {
 }
 
 func buildInvoiceWechatCreatedText(request *model.InvoiceRequest) string {
-	applicant := fmt.Sprintf("ID %d", request.UserId)
-	if username := strings.TrimSpace(request.Username); username != "" {
-		applicant = fmt.Sprintf("%s（ID %d）", username, request.UserId)
-	}
-	link := ""
-	if base := strings.TrimRight(strings.TrimSpace(system_setting.ServerAddress), "/"); base != "" {
-		link = fmt.Sprintf("%s/admin-invoices/%d", base, request.Id)
-	}
 	return invoiceWechatLines(fmt.Sprintf("【新开票申请 #%d】", request.Id), [][2]string{
 		{"发票抬头", request.CompanyName},
 		{"税号", request.TaxNumber},
@@ -127,14 +118,11 @@ func buildInvoiceWechatCreatedText(request *model.InvoiceRequest) string {
 		{"电话", request.CompanyPhone},
 		{"备注", request.Remark},
 		{"开票金额", "¥" + formatInvoiceAmountCNY(invoiceTotalCents(request))},
-		{"申请人", applicant},
-		{"申请时间", formatInvoiceWechatTime(request.CreatedTime)},
-		{"处理链接", link},
 	})
 }
 
 func buildInvoiceWechatWithdrawnText(request *model.InvoiceRequest) string {
-	text := invoiceWechatLines(fmt.Sprintf("【开票申请作废 #%d】", request.Id), [][2]string{
+	text := invoiceWechatLines(fmt.Sprintf("【开票请求作废 #%d】", request.Id), [][2]string{
 		{"发票抬头", request.CompanyName},
 		{"开票金额", "¥" + formatInvoiceAmountCNY(invoiceTotalCents(request))},
 	})
@@ -166,7 +154,7 @@ func BuildInvoiceWithdrawnNotifications(request *model.InvoiceRequest) ([]*model
 		return nil, nil
 	}
 	return []*model.InvoiceNotificationDelivery{newInvoiceWechatDelivery(
-		request, "withdrawn", fmt.Sprintf("开票申请作废 #%d", request.Id), buildInvoiceWechatWithdrawnText(request),
+		request, "withdrawn", fmt.Sprintf("开票请求作废 #%d", request.Id), buildInvoiceWechatWithdrawnText(request),
 	)}, nil
 }
 
