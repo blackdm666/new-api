@@ -24,7 +24,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 
-type CCSwitchApp = 'claude' | 'codex' | 'gemini'
+type CCSwitchApp = 'claude' | 'codex' | 'gemini' | 'grokbuild'
 
 type CCSwitchAppPreset = {
   label: string
@@ -34,9 +34,13 @@ type CCSwitchAppPreset = {
   model?: string
 }
 
-// Mirrors the built-in 88API presets of CC Switch v4.0+ (claude/codex/gemini
-// ProviderPresets.ts). ccswitch:// links cannot reference a preset, so every
-// preset field is sent explicitly. Codex imports always use the Responses API.
+// Mirrors the built-in 88API presets of CC Switch v4.0+ (src/config/
+// *ProviderPresets.ts). ccswitch:// links cannot reference a preset, so every
+// preset field is sent explicitly. Codex and Grok Build imports always use
+// the Responses API. CC Switch rejects provider links for Claude Desktop, Pi
+// and MiniMax Code, and links for OpenCode, OpenClaw and Hermes are forced
+// onto an OpenAI-compatible protocol with one model, unlike their presets, so
+// those apps are pointed at the in-app preset instead.
 const CC_SWITCH_PROVIDER = {
   name: '88API',
   homepage: 'https://88api.ai',
@@ -45,7 +49,7 @@ const CC_SWITCH_PROVIDER = {
 
 const CC_SWITCH_APPS: Record<CCSwitchApp, CCSwitchAppPreset> = {
   claude: {
-    label: 'Claude',
+    label: 'Claude Code',
     endpoints: ['https://api.88api.ai', 'https://88api.ai'],
   },
   codex: {
@@ -55,9 +59,14 @@ const CC_SWITCH_APPS: Record<CCSwitchApp, CCSwitchAppPreset> = {
     model: 'gpt-6.1-sol',
   },
   gemini: {
-    label: 'Gemini',
+    label: 'Gemini CLI',
     endpoints: ['https://api.88api.ai', 'https://88api.ai'],
     model: 'gemini-3.8-flash',
+  },
+  grokbuild: {
+    label: 'Grok Build',
+    endpoints: ['https://api.88api.ai/v1', 'https://88api.ai/v1'],
+    model: 'grok-4.5',
   },
 }
 
@@ -129,7 +138,7 @@ export function CCSwitchDialog(props: Props) {
           aria-labelledby='cc-switch-app-label'
           value={app}
           onValueChange={(value) => setApp(value as CCSwitchApp)}
-          className='flex gap-4'
+          className='grid grid-cols-2 gap-x-4 gap-y-2'
         >
           {(Object.keys(CC_SWITCH_APPS) as CCSwitchApp[]).map((key) => (
             <div key={key} className='flex items-center gap-2'>
@@ -158,6 +167,12 @@ export function CCSwitchDialog(props: Props) {
           </div>
         )}
       </dl>
+
+      <p className='text-muted-foreground text-xs'>
+        {t(
+          'For OpenCode, OpenClaw, Hermes, Claude Desktop, Pi and MiniMax Code, add the built-in 88API preset under Add Provider in CC Switch.'
+        )}
+      </p>
     </Dialog>
   )
 }

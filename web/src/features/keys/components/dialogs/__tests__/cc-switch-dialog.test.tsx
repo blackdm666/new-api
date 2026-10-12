@@ -85,26 +85,34 @@ describe('CC Switch 88API preset import', () => {
 
   it.each([
     {
-      app: 'Codex',
+      label: 'Codex',
+      app: 'codex',
       endpoint: 'https://api.88api.ai/v1,https://88api.ai/v1',
       model: 'gpt-6.1-sol',
     },
     {
-      app: 'Gemini',
+      label: 'Gemini CLI',
+      app: 'gemini',
       endpoint: 'https://api.88api.ai,https://88api.ai',
       model: 'gemini-3.8-flash',
     },
+    {
+      label: 'Grok Build',
+      app: 'grokbuild',
+      endpoint: 'https://api.88api.ai/v1,https://88api.ai/v1',
+      model: 'grok-4.5',
+    },
   ])(
-    'imports $app with the preset endpoint and model when $app is selected',
-    async ({ app, endpoint, model }) => {
+    'imports $label with the preset endpoint and model when $label is selected',
+    async ({ label, app, endpoint, model }) => {
       renderDialog()
       const user = userEvent.setup()
 
-      await user.click(screen.getByRole('radio', { name: app }))
+      await user.click(screen.getByRole('radio', { name: label }))
       await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))
 
       expect(openedImportParams()).toMatchObject({
-        app: app.toLowerCase(),
+        app,
         name: '88API',
         endpoint,
         model,
@@ -126,6 +134,16 @@ describe('CC Switch 88API preset import', () => {
 
     expect(screen.getByText('https://api.88api.ai/v1')).toBeVisible()
     expect(screen.getByText('gpt-6.1-sol')).toBeVisible()
+  })
+
+  it('offers only the apps CC Switch can import by link and points the others to the in-app preset', () => {
+    renderDialog()
+
+    expect(screen.getAllByRole('radio')).toHaveLength(4)
+    for (const name of ['Claude Code', 'Codex', 'Gemini CLI', 'Grok Build']) {
+      expect(screen.getByRole('radio', { name })).toBeInTheDocument()
+    }
+    expect(screen.getByText(/Claude Desktop/)).toBeVisible()
   })
 
   it('keeps an existing sk- prefix when the key already has one', async () => {

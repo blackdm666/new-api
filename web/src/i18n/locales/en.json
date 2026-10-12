@@ -2622,6 +2622,7 @@
     "footer.newapi.projectAttributionSuffix": "All rights reserved. Designed and developed by the project contributors.",
     "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment",
+    "For OpenCode, OpenClaw, Hermes, Claude Desktop, Pi and MiniMax Code, add the built-in 88API preset under Add Provider in CC Switch.": "For OpenCode, OpenClaw, Hermes, Claude Desktop, Pi and MiniMax Code, add the built-in 88API preset under Add Provider in CC Switch.",
     "For private deployments, format: https://fastgpt.run/api/openapi": "For private deployments, format: https://fastgpt.run/api/openapi",
     "For security, existing access tokens cannot be displayed. Regenerate only when you need a new token.": "For security, existing access tokens cannot be displayed. Regenerate only when you need a new token.",
     "For this channel, map the model name in client requests to the model name sent upstream.": "For this channel, map the model name in client requests to the model name sent upstream.",
