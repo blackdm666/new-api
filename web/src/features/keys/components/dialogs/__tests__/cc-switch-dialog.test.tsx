@@ -44,11 +44,16 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function renderDialog(tokenKey = 'test-only') {
+function renderDialog({ tokenKey = 'test-only', group = 'Claude Kiro' } = {}) {
   const onOpenChange = vi.fn()
   render(
     <QueryClientProvider client={queryClient}>
-      <CCSwitchDialog open onOpenChange={onOpenChange} tokenKey={tokenKey} />
+      <CCSwitchDialog
+        open
+        onOpenChange={onOpenChange}
+        tokenKey={tokenKey}
+        group={group}
+      />
     </QueryClientProvider>
   )
   return { onOpenChange }
@@ -100,7 +105,7 @@ describe('CC Switch 88API preset import', () => {
       label: 'Grok Build',
       app: 'grokbuild',
       endpoint: 'https://api.88api.ai/v1,https://88api.ai/v1',
-      model: 'grok-4.5',
+      model: 'grok-4.7',
     },
   ])(
     'imports $label with the preset endpoint and model when $label is selected',
@@ -120,21 +125,49 @@ describe('CC Switch 88API preset import', () => {
     }
   )
 
-  it('shows the preset name, API address and model for the selected app without editable fields', async () => {
+  it('shows the preset name, API address and default model for the selected app without editable fields', async () => {
     renderDialog()
     const user = userEvent.setup()
 
     expect(screen.getByText('88API')).toBeVisible()
     expect(screen.getByText('https://api.88api.ai')).toBeVisible()
-    expect(screen.queryByText('Model')).not.toBeInTheDocument()
+    expect(screen.queryByText('Default model')).not.toBeInTheDocument()
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('radio', { name: 'Codex' }))
 
     expect(screen.getByText('https://api.88api.ai/v1')).toBeVisible()
+    expect(screen.getByText('Default model')).toBeVisible()
     expect(screen.getByText('gpt-6.1-sol')).toBeVisible()
+    expect(
+      screen.getByText(/only the initial choice.+any model in the key's group/)
+    ).toBeVisible()
   })
+
+  it('shows the key group and asks for a group with the models of the selected app', async () => {
+    renderDialog({ group: 'Grok' })
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('radio', { name: 'Grok Build' }))
+
+    expect(screen.getByText('Grok', { exact: true })).toBeVisible()
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Grok Build needs a key in a group that offers Grok models'
+    )
+  })
+
+  it.each([
+    { group: '', label: 'Follow user group' },
+    { group: 'auto', label: 'Cross-group' },
+  ])(
+    'labels the key group as $label when the key group is "$group"',
+    ({ group, label }) => {
+      renderDialog({ group })
+
+      expect(screen.getByText(label)).toBeVisible()
+    }
+  )
 
   it('offers only the apps CC Switch can import by link and points the others to the in-app preset', () => {
     renderDialog()
@@ -147,7 +180,7 @@ describe('CC Switch 88API preset import', () => {
   })
 
   it('keeps an existing sk- prefix when the key already has one', async () => {
-    renderDialog('sk-test-only')
+    renderDialog({ tokenKey: 'sk-test-only' })
     const user = userEvent.setup()
 
     await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))

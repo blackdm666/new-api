@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -31,7 +32,10 @@ type CCSwitchAppPreset = {
   // CC Switch uses the first endpoint as the base URL and saves the rest as
   // speed-test candidates, like its preset's endpointCandidates.
   endpoints: readonly string[]
+  // Default model only; any model in the key's group stays usable.
   model?: string
+  // Models the key's group must offer for this app to work.
+  modelFamily: string
 }
 
 // Mirrors the built-in 88API presets of CC Switch v4.0+ (src/config/
@@ -51,22 +55,27 @@ const CC_SWITCH_APPS: Record<CCSwitchApp, CCSwitchAppPreset> = {
   claude: {
     label: 'Claude Code',
     endpoints: ['https://api.88api.ai', 'https://88api.ai'],
+    modelFamily: 'Claude',
   },
   codex: {
     label: 'Codex',
     endpoints: ['https://api.88api.ai/v1', 'https://88api.ai/v1'],
     // Newer than the preset's default model (gpt-5.6-sol) by choice.
     model: 'gpt-6.1-sol',
+    modelFamily: 'GPT',
   },
   gemini: {
     label: 'Gemini CLI',
     endpoints: ['https://api.88api.ai', 'https://88api.ai'],
     model: 'gemini-3.8-flash',
+    modelFamily: 'Gemini',
   },
   grokbuild: {
     label: 'Grok Build',
     endpoints: ['https://api.88api.ai/v1', 'https://88api.ai/v1'],
-    model: 'grok-4.5',
+    // Newer than the preset's default model (grok-4.5) by choice.
+    model: 'grok-4.7',
+    modelFamily: 'Grok',
   },
 }
 
@@ -89,6 +98,7 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   tokenKey: string
+  group: string
 }
 
 export function CCSwitchDialog(props: Props) {
@@ -103,6 +113,9 @@ export function CCSwitchDialog(props: Props) {
   }, [props.open])
 
   const preset = CC_SWITCH_APPS[app]
+  let groupLabel = props.group.trim()
+  if (!groupLabel) groupLabel = t('Follow user group')
+  if (groupLabel === 'auto') groupLabel = t('Cross-group')
 
   const handleSubmit = () => {
     const key = props.tokenKey.startsWith('sk-')
@@ -151,22 +164,45 @@ export function CCSwitchDialog(props: Props) {
         </RadioGroup>
       </div>
 
-      <dl className='space-y-2 rounded-md border p-3 text-sm'>
-        <div className='flex justify-between gap-4'>
-          <dt className='text-muted-foreground'>{t('Name')}</dt>
-          <dd className='font-medium'>{CC_SWITCH_PROVIDER.name}</dd>
-        </div>
-        <div className='flex justify-between gap-4'>
-          <dt className='text-muted-foreground shrink-0'>{t('Base URL')}</dt>
-          <dd className='font-mono break-all'>{preset.endpoints[0]}</dd>
-        </div>
-        {preset.model && (
+      <div className='space-y-1.5'>
+        <dl className='space-y-2 rounded-md border p-3 text-sm'>
           <div className='flex justify-between gap-4'>
-            <dt className='text-muted-foreground'>{t('Model')}</dt>
-            <dd className='font-mono'>{preset.model}</dd>
+            <dt className='text-muted-foreground'>{t('Name')}</dt>
+            <dd className='font-medium'>{CC_SWITCH_PROVIDER.name}</dd>
           </div>
+          <div className='flex justify-between gap-4'>
+            <dt className='text-muted-foreground shrink-0'>{t('Base URL')}</dt>
+            <dd className='font-mono break-all'>{preset.endpoints[0]}</dd>
+          </div>
+          {preset.model && (
+            <div className='flex justify-between gap-4'>
+              <dt className='text-muted-foreground'>{t('Default model')}</dt>
+              <dd className='font-mono'>{preset.model}</dd>
+            </div>
+          )}
+          <div className='flex justify-between gap-4'>
+            <dt className='text-muted-foreground shrink-0'>{t('Group')}</dt>
+            <dd className='font-medium break-all'>{groupLabel}</dd>
+          </div>
+        </dl>
+        {preset.model && (
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              "The default model is only the initial choice. You can switch to any model in the key's group later."
+            )}
+          </p>
         )}
-      </dl>
+      </div>
+
+      <Alert>
+        <AlertTitle>{t('Check the key group')}</AlertTitle>
+        <AlertDescription>
+          {t(
+            '{{app}} needs a key in a group that offers {{family}} models, otherwise requests fail. Edit the key to change its group.',
+            { app: preset.label, family: preset.modelFamily }
+          )}
+        </AlertDescription>
+      </Alert>
 
       <p className='text-muted-foreground text-xs'>
         {t(
