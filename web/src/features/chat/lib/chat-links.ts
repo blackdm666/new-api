@@ -130,6 +130,12 @@ export function parseChatConfig(raw: RawChatConfig): ChatPreset[] {
         return null
       }
 
+      // The legacy `ccswitch` marker is not a link; CC Switch imports use the
+      // per-key "CC Switch" action on the API keys page instead.
+      if (url.toLowerCase() === 'ccswitch') {
+        return null
+      }
+
       return {
         id: String(index),
         name,

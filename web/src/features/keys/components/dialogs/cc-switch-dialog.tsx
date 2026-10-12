@@ -16,76 +16,62 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery } from '@tanstack/react-query'
-import { useState, useEffect, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
-import { Combobox } from '@/components/ui/combobox'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { getUserModels } from '@/lib/api'
-import { requireServerSuccess } from '@/lib/server-error-message'
 
-const APP_CONFIGS = {
+type CCSwitchApp = 'claude' | 'codex' | 'gemini'
+
+type CCSwitchAppPreset = {
+  label: string
+  // CC Switch uses the first endpoint as the base URL and saves the rest as
+  // speed-test candidates, like its preset's endpointCandidates.
+  endpoints: readonly string[]
+  model?: string
+}
+
+// Mirrors the built-in 88API presets of CC Switch v4.0+ (claude/codex/gemini
+// ProviderPresets.ts). ccswitch:// links cannot reference a preset, so every
+// preset field is sent explicitly. Codex imports always use the Responses API.
+const CC_SWITCH_PROVIDER = {
+  name: '88API',
+  homepage: 'https://88api.ai',
+  icon: '88api',
+} as const
+
+const CC_SWITCH_APPS: Record<CCSwitchApp, CCSwitchAppPreset> = {
   claude: {
     label: 'Claude',
-    defaultName: 'My Claude',
-    modelFields: [
-      { key: 'model', labelKey: 'Primary Model', required: true },
-      { key: 'haikuModel', labelKey: 'Haiku Model', required: false },
-      { key: 'sonnetModel', labelKey: 'Sonnet Model', required: false },
-      { key: 'opusModel', labelKey: 'Opus Model', required: false },
-    ],
+    endpoints: ['https://api.88api.ai', 'https://88api.ai'],
   },
   codex: {
     label: 'Codex',
-    defaultName: 'My Codex',
-    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
+    endpoints: ['https://api.88api.ai/v1', 'https://88api.ai/v1'],
+    // Newer than the preset's default model (gpt-5.6-sol) by choice.
+    model: 'gpt-6.1-sol',
   },
   gemini: {
     label: 'Gemini',
-    defaultName: 'My Gemini',
-    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
+    endpoints: ['https://api.88api.ai', 'https://88api.ai'],
+    model: 'gemini-3.8-flash',
   },
-} as const
-
-type AppType = keyof typeof APP_CONFIGS
-
-function getServerAddress(): string {
-  try {
-    const raw = localStorage.getItem('status')
-    if (raw) {
-      const status = JSON.parse(raw)
-      if (status.server_address) return status.server_address
-    }
-  } catch {
-    /* empty */
-  }
-  return window.location.origin
 }
 
-function buildCCSwitchURL(
-  app: string,
-  name: string,
-  models: Record<string, string>,
-  apiKey: string
-): string {
-  const serverAddress = getServerAddress()
-  const endpoint = app === 'codex' ? `${serverAddress}/v1` : serverAddress
+function buildCCSwitchURL(app: CCSwitchApp, apiKey: string): string {
+  const preset = CC_SWITCH_APPS[app]
   const params = new URLSearchParams()
   params.set('resource', 'provider')
   params.set('app', app)
-  params.set('name', name)
-  params.set('endpoint', endpoint)
+  params.set('name', CC_SWITCH_PROVIDER.name)
+  params.set('icon', CC_SWITCH_PROVIDER.icon)
+  params.set('homepage', CC_SWITCH_PROVIDER.homepage)
+  params.set('endpoint', preset.endpoints.join(','))
   params.set('apiKey', apiKey)
-  for (const [k, v] of Object.entries(models)) {
-    if (v) params.set(k, v)
-  }
-  params.set('homepage', serverAddress)
+  if (preset.model) params.set('model', preset.model)
   params.set('enabled', 'true')
   return `ccswitch://v1/import?${params.toString()}`
 }
@@ -98,52 +84,22 @@ interface Props {
 
 export function CCSwitchDialog(props: Props) {
   const { t } = useTranslation()
-  const [app, setApp] = useState<AppType>('claude')
-  const [name, setName] = useState<string>(APP_CONFIGS.claude.defaultName)
-  const [models, setModels] = useState<Record<string, string>>({})
-
-  const { data: modelsData } = useQuery({
-    queryKey: ['user-models-ccswitch'],
-    queryFn: async () => requireServerSuccess(await getUserModels()),
-    enabled: props.open,
-    staleTime: 5 * 60 * 1000,
-  })
-
-  const modelOptions = useMemo(() => {
-    const items = modelsData?.data ?? []
-    return items.map((m) => ({ value: m, label: m }))
-  }, [modelsData?.data])
+  const [app, setApp] = useState<CCSwitchApp>('claude')
 
   useEffect(() => {
     if (props.open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setModels({})
-
       setApp('claude')
-
-      setName(APP_CONFIGS.claude.defaultName)
     }
   }, [props.open])
 
-  const currentConfig = APP_CONFIGS[app]
-
-  const handleAppChange = (val: string) => {
-    const appVal = val as AppType
-    setApp(appVal)
-    setName(APP_CONFIGS[appVal].defaultName)
-    setModels({})
-  }
+  const preset = CC_SWITCH_APPS[app]
 
   const handleSubmit = () => {
-    if (!models.model) {
-      toast.warning(t('Please select a primary model'))
-      return
-    }
     const key = props.tokenKey.startsWith('sk-')
       ? props.tokenKey
       : `sk-${props.tokenKey}`
-    const url = buildCCSwitchURL(app, name, models, key)
-    window.open(url, '_blank')
+    window.open(buildCCSwitchURL(app, key), '_blank')
     props.onOpenChange(false)
   }
 
@@ -152,6 +108,9 @@ export function CCSwitchDialog(props: Props) {
       open={props.open}
       onOpenChange={props.onOpenChange}
       title={t('Import to CC Switch')}
+      description={t(
+        "Imports this API key with the same settings as CC Switch's built-in 88API preset."
+      )}
       contentClassName='sm:max-w-md'
       contentHeight='auto'
       bodyClassName='space-y-4'
@@ -164,59 +123,41 @@ export function CCSwitchDialog(props: Props) {
         </>
       }
     >
-      <div className='space-y-4'>
-        <div className='space-y-2'>
-          <Label>{t('Application')}</Label>
-          <RadioGroup
-            value={app}
-            onValueChange={handleAppChange}
-            className='flex gap-4'
-          >
-            {(
-              Object.entries(APP_CONFIGS) as [
-                AppType,
-                (typeof APP_CONFIGS)[AppType],
-              ][]
-            ).map(([key, cfg]) => (
-              <div key={key} className='flex items-center gap-2'>
-                <RadioGroupItem value={key} id={`app-${key}`} />
-                <Label htmlFor={`app-${key}`} className='cursor-pointer'>
-                  {cfg.label}
-                </Label>
-              </div>
-            ))}
-          </RadioGroup>
-        </div>
-
-        <div className='space-y-2'>
-          <Label htmlFor='cc-switch-name'>{t('Name')}</Label>
-          <Input
-            id='cc-switch-name'
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder={currentConfig.defaultName}
-          />
-        </div>
-
-        {currentConfig.modelFields.map((field) => (
-          <div key={field.key} className='space-y-2'>
-            <Label htmlFor={`cc-switch-${field.key}`} required={field.required}>
-              {t(field.labelKey)}
-            </Label>
-            <Combobox
-              id={`cc-switch-${field.key}`}
-              aria-label={t(field.labelKey)}
-              options={modelOptions}
-              value={models[field.key] || ''}
-              onValueChange={(v) =>
-                setModels((prev) => ({ ...prev, [field.key]: v ?? '' }))
-              }
-              placeholder={t('Select or enter model name')}
-              emptyText={t('No models found')}
-            />
-          </div>
-        ))}
+      <div className='space-y-2'>
+        <Label id='cc-switch-app-label'>{t('Application')}</Label>
+        <RadioGroup
+          aria-labelledby='cc-switch-app-label'
+          value={app}
+          onValueChange={(value) => setApp(value as CCSwitchApp)}
+          className='flex gap-4'
+        >
+          {(Object.keys(CC_SWITCH_APPS) as CCSwitchApp[]).map((key) => (
+            <div key={key} className='flex items-center gap-2'>
+              <RadioGroupItem value={key} id={`app-${key}`} />
+              <Label htmlFor={`app-${key}`} className='cursor-pointer'>
+                {CC_SWITCH_APPS[key].label}
+              </Label>
+            </div>
+          ))}
+        </RadioGroup>
       </div>
+
+      <dl className='space-y-2 rounded-md border p-3 text-sm'>
+        <div className='flex justify-between gap-4'>
+          <dt className='text-muted-foreground'>{t('Name')}</dt>
+          <dd className='font-medium'>{CC_SWITCH_PROVIDER.name}</dd>
+        </div>
+        <div className='flex justify-between gap-4'>
+          <dt className='text-muted-foreground shrink-0'>{t('Base URL')}</dt>
+          <dd className='font-mono break-all'>{preset.endpoints[0]}</dd>
+        </div>
+        {preset.model && (
+          <div className='flex justify-between gap-4'>
+            <dt className='text-muted-foreground'>{t('Model')}</dt>
+            <dd className='font-mono'>{preset.model}</dd>
+          </div>
+        )}
+      </dl>
     </Dialog>
   )
 }

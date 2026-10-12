@@ -2931,6 +2931,7 @@
     "Import to CC Switch": "CC Switch にインポート",
     "Important": "重要",
     "Importing metadata does not add channels, enable model access, or configure prices.": "メタデータのインポートでは、チャネルの追加、モデルへのアクセス許可、料金設定は行いません。",
+    "Imports this API key with the same settings as CC Switch's built-in 88API preset.": "CC Switch に内蔵された 88API プリセットと同じ設定で、この API キーをインポートします。",
     "In BotFather, open Login Widget, register this callback URL, and copy the Client ID and Client Secret. Existing Telegram bindings will continue to work after configuration.": "BotFather で Login Widget を開き、このコールバック URL を登録して Client ID と Client Secret をコピーしてください。設定後は既存の Telegram 連携を引き続き利用できます。",
     "In JSON, the user group is the outer key and the billing group is the inner key. The example below means: vip users pay 0.8 when billed as standard, and 0.3 when billed as premium.": "JSONでは外側のキーがユーザーグループ、内側のキーが課金グループです。以下の例は、vip ユーザーが standard として課金されると 0.8、premium として課金されると 0.3 を意味します。",
     "In Progress": "処理中",

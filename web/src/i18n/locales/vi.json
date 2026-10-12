@@ -2931,6 +2931,7 @@
     "Import to CC Switch": "Nhập vào CC Switch",
     "Important": "Quan trọng",
     "Importing metadata does not add channels, enable model access, or configure prices.": "Nhập siêu dữ liệu không thêm kênh, mở quyền truy cập mô hình hay cấu hình giá.",
+    "Imports this API key with the same settings as CC Switch's built-in 88API preset.": "Nhập khóa API này với cùng cấu hình như mẫu 88API tích hợp sẵn trong CC Switch.",
     "In BotFather, open Login Widget, register this callback URL, and copy the Client ID and Client Secret. Existing Telegram bindings will continue to work after configuration.": "Trong BotFather, mở Login Widget, đăng ký URL gọi lại này và sao chép Client ID cùng Client Secret. Các liên kết Telegram hiện có sẽ tiếp tục hoạt động sau khi cấu hình.",
     "In JSON, the user group is the outer key and the billing group is the inner key. The example below means: vip users pay 0.8 when billed as standard, and 0.3 when billed as premium.": "Trong JSON, khóa ngoài là nhóm người dùng, khóa trong là nhóm tính phí. Ví dụ dưới đây nghĩa là: người dùng vip trả 0.8 khi tính phí theo standard và 0.3 khi theo premium.",
     "In Progress": "Đang xử lý",
