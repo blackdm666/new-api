@@ -93,6 +93,10 @@ type BillingSnapshot struct {
 	// ToolSurcharges records the tool calls a task settlement charged on top of
 	// the expression, with the prices used, so later logs show the same lines.
 	ToolSurcharges []ToolSurcharge `json:"tool_surcharges,omitempty"`
+	// EstimatedFacts names submission facts the plugin could only estimate
+	// (for example seconds of a provider-chosen duration); completion facts
+	// replace them and remove them from this list.
+	EstimatedFacts []string `json:"estimated_facts,omitempty"`
 }
 
 // TieredResult holds everything needed after running tiered settlement.
