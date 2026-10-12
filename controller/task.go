@@ -58,15 +58,22 @@ func GetTask(c *gin.Context) {
 	if task.Status == model.TaskStatusSuccess && taskFailReasonIsLegacyResultURL(task.FailReason) {
 		failReason = ""
 	}
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"task_id":     task.TaskID,
-		"platform":    task.Platform,
 		"status":      task.Status,
 		"progress":    task.Progress,
 		"fail_reason": failReason,
 		"created_at":  createdAt,
 		"finished_at": task.FinishTime,
-	})
+	}
+	// Plugin keys name the serving provider; only Suno clients use the platform.
+	if task.Platform == constant.TaskPlatformSuno {
+		response["platform"] = task.Platform
+	}
+	if officialID := relay.PublicOfficialTaskID(task); officialID != "" {
+		response["official_task_id"] = officialID
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func GetTaskArtifacts(c *gin.Context) {
@@ -612,6 +619,7 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 			userProperties := task.Properties
 			userProperties.OriginModelName = ""
 			item.Properties = userProperties
+			relay.HideTaskRouting(item)
 			// Data is the raw upstream snapshot (provider task IDs, storage URLs)
 			// and would identify the upstream. Users only need the Suno preview clips.
 			item.Data = nil
@@ -621,6 +629,9 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 				}
 			}
 		}
+		// Plugins of official-relay channels declare the model platform's own
+		// task ID public; root also sees the best-effort ID for every task.
+		item.OfficialTaskID = relay.PublicOfficialTaskID(task)
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)
 		item.ResultDiscarded = task.PrivateData.ResultDiscarded
 		if task.Status == model.TaskStatusSuccess {
@@ -657,7 +668,9 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 				UpstreamTaskID: task.PrivateData.UpstreamTaskID,
 				NodeName:       task.PrivateData.NodeName,
 			}
-			item.OfficialTaskID = officialTaskID(task)
+			if item.OfficialTaskID == "" {
+				item.OfficialTaskID = officialTaskID(task)
+			}
 			if execution := task.PrivateData.Execution; execution != nil {
 				if snapshot := execution.TaskPlugin; snapshot != nil {
 					rootInfo.TaskPlugin = &dto.TaskPluginRuntimeInfo{

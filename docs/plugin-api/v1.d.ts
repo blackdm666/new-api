@@ -93,6 +93,8 @@ export declare function extractUsage(ctx: DriverContext & {usagePurpose?: "facts
 export declare function extractUsageOnSubmit(ctx: DriverContext, taskData: unknown): Readonly<Record<string, string | number | boolean>> | null;
 export declare function extractUsageOnComplete(task: TaskQueryContext, result: NormalizedTaskResult, data: unknown): Readonly<Record<string, string | number | boolean>> | null;
 export declare function listArtifacts(task: {taskId: string; status: string; action: string; data: unknown; producerVersion: string}): readonly TaskArtifact[];
+/** Optional: the model platform's own task ID shown to the task owner; "" until it exists. */
+export declare function officialTaskId(task: {taskId: string; status: string; action: string; data: unknown; state?: unknown; producerVersion: string}): string;
 /** Optional pair with parseCancelResponse: cancels an unfinished task at the provider. */
 export declare function buildCancelRequest(ctx: TaskQueryContext): RequestDescriptor;
 export declare function parseCancelResponse(ctx: TaskQueryContext, body: unknown, response: HookHTTPResponse): {cancelled: boolean; message?: string};

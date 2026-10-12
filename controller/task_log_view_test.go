@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -149,4 +150,47 @@ func TestTaskLogDTOKeepsFailureReasonAndDoesNotMarkPluginTaskLegacy(t *testing.T
 	assert.False(t, pluginView.LegacyVideoAvailable)
 	assert.Empty(t, pluginView.ResultURL)
 	assert.Empty(t, pluginView.FailReason)
+}
+
+func TestTaskLogDTOPublishesPluginOfficialTaskIDAndHidesRouting(t *testing.T) {
+	source := `
+export const meta = {apiVersion: 1, key: "official-relay", name: "Official Relay", version: "1.0.0", author: {name: "Test"}, models: ["m"], fetchMode: "per_task"};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+export function officialTaskId(task) { return /^cgt-/.test(task.data && task.data.id) ? task.data.id : ""; }
+`
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = jsplugin.DefaultRegistry.Unregister("official-relay") })
+
+	tests := []struct {
+		name       string
+		data       string
+		officialID string
+	}{
+		{name: "provider task id is published", data: `{"id":"cgt-20261012-abc"}`, officialID: "cgt-20261012-abc"},
+		{name: "gateway private id stays hidden while queued", data: `{"id":"task_gateway_private"}`},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			task := &model.Task{
+				TaskID: "task_public", Platform: "official-relay", ChannelId: 162, Data: []byte(testCase.data),
+				PrivateData: model.TaskPrivateData{UpstreamTaskID: "task_gateway_private"},
+			}
+			userView := tasksToDto([]*model.Task{task}, false, common.RoleCommonUser)[0]
+			assert.Equal(t, testCase.officialID, userView.OfficialTaskID)
+			assert.Empty(t, userView.Platform)
+			assert.Zero(t, userView.ChannelId)
+			encoded, err := common.Marshal(userView)
+			require.NoError(t, err)
+			assert.NotContains(t, string(encoded), "official-relay")
+			assert.NotContains(t, string(encoded), "task_gateway_private")
+
+			adminView := tasksToDto([]*model.Task{task}, false, common.RoleAdminUser)[0]
+			assert.Equal(t, "official-relay", adminView.Platform)
+			assert.Equal(t, testCase.officialID, adminView.OfficialTaskID)
+		})
+	}
 }
