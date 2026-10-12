@@ -360,10 +360,14 @@ func TestLogTaskConsumptionIncludesTieredSnapshotUsageFacts(t *testing.T) {
 				"seconds":       5,
 				"upstreamUnits": 40594,
 			},
+			EstimatedFacts: []string{"seconds"},
 		},
 	}
 
 	log := callLogTaskConsumption(t, info, task)
+	assert.Contains(t, log.Content, "seconds: 5（预估）")
+	assert.Contains(t, log.Content, "resolution: 720P")
+	assert.NotContains(t, log.Content, "720P（预估）")
 
 	var other map[string]any
 	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
@@ -1853,6 +1857,47 @@ func TestSettle_TieredToolCallFactsChargeFromToolPriceTable(t *testing.T) {
 			assert.Equal(t, "web_search", surcharges[0].(map[string]any)["name"])
 		})
 	}
+}
+
+func TestSplitTaskEstimatedFacts(t *testing.T) {
+	facts := map[string]any{"seconds": float64(30), "resolution": "1080p", TaskEstimatedFactsKey: "seconds, missing,seconds"}
+	assert.Equal(t, []string{"seconds"}, SplitTaskEstimatedFacts(facts))
+	assert.NotContains(t, facts, TaskEstimatedFactsKey)
+	assert.Nil(t, SplitTaskEstimatedFacts(map[string]any{"seconds": float64(5)}))
+	assert.Equal(t, []string{"resolution"}, RemainingTaskEstimates([]string{"seconds", "resolution"}, map[string]any{"seconds": float64(4)}))
+}
+
+func TestSettle_TieredPersistsMeasuredUsageOnStoredTask(t *testing.T) {
+	truncate(t)
+	const userID = 37
+	seedUser(t, userID, 10_000)
+
+	expression := `tier("base", u("seconds"))`
+	task := makeTask(userID, 0, 30, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.TieredSnapshot = &billingexpr.BillingSnapshot{
+		ExprString:       expression,
+		ExprHash:         billingexpr.ExprHashString(expression),
+		GroupRatio:       1,
+		QuotaPerUnit:     1,
+		ExprVersion:      1,
+		TaskUsageBilling: true,
+		UsageFacts:       map[string]any{"seconds": float64(30)},
+		EstimatedFacts:   []string{"seconds"},
+		EstimatedTier:    "base",
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+
+	settled := settleTaskBillingOnComplete(context.Background(), &mockAdaptor{}, task,
+		&relaycommon.TaskInfo{Status: model.TaskStatusSuccess, UsageFacts: map[string]any{"seconds": float64(4)}})
+	require.True(t, settled)
+
+	var stored model.Task
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	assert.Equal(t, 4, stored.Quota)
+	snap := stored.PrivateData.BillingContext.TieredSnapshot
+	require.NotNil(t, snap)
+	assert.Equal(t, float64(4), snap.UsageFacts["seconds"])
+	assert.Empty(t, snap.EstimatedFacts)
 }
 
 func TestSettle_TieredSnapshotWriteBackUsesSettledFactsAndMatchedTier(t *testing.T) {

@@ -631,6 +631,14 @@ func (t *Task) UpdateQuota() error {
 	return DB.Model(t).Update("quota", t.Quota).Error
 }
 
+// UpdateBillingSnapshot persists private data after completion settlement has
+// written measured usage, tier and tool charges back into the billing
+// snapshot. Settlement runs right after the terminal transition, before later
+// private-data writers such as result caching load the task.
+func (t *Task) UpdateBillingSnapshot() error {
+	return DB.Model(t).Select("private_data").Updates(t).Error
+}
+
 // UpdateResultLocation persists only video-result metadata for an already
 // completed task. It is used when a historical result is normalized or cached
 // on first preview without risking unrelated task or billing fields.

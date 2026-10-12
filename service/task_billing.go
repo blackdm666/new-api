@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -26,6 +27,42 @@ import (
 // calls, e.g. "tool_calls.web_search": 2. Task settlement prices them from the
 // tool price table ($ per 1K calls) like text relays, on top of the expression.
 const TaskToolCallFactPrefix = "tool_calls."
+
+// TaskEstimatedFactsKey is the reserved submission fact in which a plugin
+// lists, comma separated, the facts it could only estimate. The host removes
+// it from the facts, records the names on the billing snapshot and labels
+// those facts as estimates in the submission log.
+const TaskEstimatedFactsKey = "estimatedFacts"
+
+// SplitTaskEstimatedFacts removes the reserved estimatedFacts entry and returns
+// the named facts that are present.
+func SplitTaskEstimatedFacts(facts map[string]any) []string {
+	raw, ok := facts[TaskEstimatedFactsKey]
+	if !ok {
+		return nil
+	}
+	delete(facts, TaskEstimatedFactsKey)
+	names, _ := raw.(string)
+	var estimated []string
+	for name := range strings.SplitSeq(names, ",") {
+		name = strings.TrimSpace(name)
+		if _, present := facts[name]; present && name != "" && !slices.Contains(estimated, name) {
+			estimated = append(estimated, name)
+		}
+	}
+	return estimated
+}
+
+// RemainingTaskEstimates drops estimates that completion facts measured.
+func RemainingTaskEstimates(estimated []string, measured map[string]any) []string {
+	var remaining []string
+	for _, name := range estimated {
+		if _, ok := measured[name]; !ok {
+			remaining = append(remaining, name)
+		}
+	}
+	return remaining
+}
 
 // maxTaskToolCalls bounds one task's reported calls per tool. Counts come from
 // the upstream response, so larger values saturate instead of scaling the charge.
@@ -53,6 +90,10 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		}
 		if snap := info.TieredBillingSnapshot; snap != nil {
 			for key, value := range snap.UsageFacts {
+				if slices.Contains(snap.EstimatedFacts, key) {
+					contents = append(contents, fmt.Sprintf("%s: %v（预估）", key, value))
+					continue
+				}
 				contents = append(contents, fmt.Sprintf("%s: %v", key, value))
 			}
 			for _, item := range snap.ToolSurcharges {

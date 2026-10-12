@@ -758,11 +758,17 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		bc.TieredSnapshot.UsageFacts = usageFacts
 		bc.TieredSnapshot.EstimatedTier = result.MatchedTier
 		bc.TieredSnapshot.ToolSurcharges = result.ToolSurcharges
+		bc.TieredSnapshot.EstimatedFacts = RemainingTaskEstimates(bc.TieredSnapshot.EstimatedFacts, taskResult.UsageFacts)
 		reason := "任务用量表达式结算"
 		for _, item := range result.ToolSurcharges {
 			reason += fmt.Sprintf("，%s 调用 %d 次", item.Name, item.Count)
 		}
 		RecalculateTaskQuota(ctx, task, result.ActualQuotaAfterGroup, reason, result.Clamp)
+		// RecalculateTaskQuota persists only the quota; keep the measured
+		// usage on the stored snapshot as well.
+		if err := task.UpdateBillingSnapshot(); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("任务 %s 结算快照保存失败: %v", task.TaskID, err))
+		}
 		return true
 	}
 	// 按次计费的成功任务保持预扣；失败任务由调用方全额退款。
