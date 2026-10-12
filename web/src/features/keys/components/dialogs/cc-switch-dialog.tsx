@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Info } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -23,6 +24,11 @@ import { Dialog } from '@/components/dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 
 type CCSwitchApp = 'claude' | 'codex' | 'gemini' | 'grokbuild'
@@ -146,7 +152,29 @@ export function CCSwitchDialog(props: Props) {
       }
     >
       <div className='space-y-2'>
-        <Label id='cc-switch-app-label'>{t('Application')}</Label>
+        <div className='flex items-center gap-1'>
+          <Label id='cc-switch-app-label'>{t('Application')}</Label>
+          <Popover>
+            <PopoverTrigger
+              render={
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='icon-xs'
+                  aria-label={t('Other apps')}
+                  className='text-muted-foreground'
+                />
+              }
+            >
+              <Info aria-hidden='true' />
+            </PopoverTrigger>
+            <PopoverContent className='w-72 text-xs leading-relaxed'>
+              {t(
+                "OpenCode, OpenClaw, Hermes, Claude Desktop, Pi and MiniMax Code can't be imported by link. In CC Switch, open that app, choose Add Provider, pick the built-in 88API preset and paste this API key."
+              )}
+            </PopoverContent>
+          </Popover>
+        </div>
         <RadioGroup
           aria-labelledby='cc-switch-app-label'
           value={app}
@@ -192,6 +220,13 @@ export function CCSwitchDialog(props: Props) {
             )}
           </p>
         )}
+        {app === 'claude' && (
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'Adds the provider to Claude Code (CLI) only. Claude Desktop does not see it; add the 88API preset there separately in CC Switch.'
+            )}
+          </p>
+        )}
       </div>
 
       <Alert>
@@ -203,12 +238,6 @@ export function CCSwitchDialog(props: Props) {
           )}
         </AlertDescription>
       </Alert>
-
-      <p className='text-muted-foreground text-xs'>
-        {t(
-          'For OpenCode, OpenClaw, Hermes, Claude Desktop, Pi and MiniMax Code, add the built-in 88API preset under Add Provider in CC Switch.'
-        )}
-      </p>
     </Dialog>
   )
 }

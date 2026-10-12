@@ -169,14 +169,33 @@ describe('CC Switch 88API preset import', () => {
     }
   )
 
-  it('offers only the apps CC Switch can import by link and points the others to the in-app preset', () => {
+  it('offers only the apps CC Switch can import by link and explains the others behind the info button', async () => {
     renderDialog()
+    const user = userEvent.setup()
 
     expect(screen.getAllByRole('radio')).toHaveLength(4)
     for (const name of ['Claude Code', 'Codex', 'Gemini CLI', 'Grok Build']) {
       expect(screen.getByRole('radio', { name })).toBeInTheDocument()
     }
-    expect(screen.getByText(/Claude Desktop/)).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: 'Other apps' }))
+
+    expect(
+      await screen.findByText(/MiniMax Code can't be imported by link/)
+    ).toBeVisible()
+  })
+
+  it('tells Claude Code users that Claude Desktop does not see the import only while Claude Code is selected', async () => {
+    renderDialog()
+    const user = userEvent.setup()
+
+    expect(screen.getByText(/Claude Code \(CLI\) only/)).toBeVisible()
+
+    await user.click(screen.getByRole('radio', { name: 'Codex' }))
+
+    expect(
+      screen.queryByText(/Claude Code \(CLI\) only/)
+    ).not.toBeInTheDocument()
   })
 
   it('keeps an existing sk- prefix when the key already has one', async () => {
