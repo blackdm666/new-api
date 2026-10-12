@@ -167,9 +167,14 @@ export function resolveChatUrl({
   const safeApiKey = normalizeApiKey(apiKey || '')
 
   if (url.includes('{cherryConfig}')) {
+    // A dedicated "88API" provider: id "new-api" would overwrite the user's
+    // built-in New API provider and append the key to its existing keys.
+    // Cherry Studio adds /v1 to the base URL itself.
     const payload = {
-      id: 'new-api',
-      baseUrl: safeServerAddress,
+      id: '88api',
+      name: '88API',
+      type: 'openai',
+      baseUrl: 'https://api.88api.ai',
       apiKey: safeApiKey,
     }
     const encoded = encodeURIComponent(toBase64(JSON.stringify(payload)))

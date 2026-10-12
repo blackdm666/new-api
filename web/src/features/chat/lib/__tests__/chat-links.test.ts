@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { describe, expect, it } from 'vitest'
 
-import { parseChatConfig } from '../chat-links'
+import { parseChatConfig, resolveChatUrl } from '../chat-links'
 
 describe('parseChatConfig', () => {
   it('drops the legacy ccswitch marker and keeps the ids of the other presets', () => {
@@ -62,5 +62,24 @@ describe('parseChatConfig', () => {
         type: 'custom-protocol',
       },
     ])
+  })
+})
+
+describe('resolveChatUrl', () => {
+  it('imports Cherry Studio keys as a separate 88API provider on the API host', () => {
+    const url = resolveChatUrl({
+      template: 'cherrystudio://providers/api-keys?v=1&data={cherryConfig}',
+      apiKey: 'test-only',
+      serverAddress: 'https://88api.ai',
+    })
+
+    const data = new URL(url).searchParams.get('data') ?? ''
+    expect(JSON.parse(atob(data))).toEqual({
+      id: '88api',
+      name: '88API',
+      type: 'openai',
+      baseUrl: 'https://api.88api.ai',
+      apiKey: 'sk-test-only',
+    })
   })
 })
