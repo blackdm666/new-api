@@ -7876,6 +7876,13 @@
     "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "Применяется к нативным запросам Claude Messages, которые отправляют мышление enabled или disabled моделям, принимающим только адаптивное мышление.",
     "Upstream requires adaptive thinking; retried with adaptive thinking": "Upstream требует адаптивное мышление; повтор с адаптивным мышлением",
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "Upstream отклонил адаптивное мышление; повтор с исходными параметрами мышления",
-    "Same channel retry": "Повтор на том же канале"
+    "Same channel retry": "Повтор на том же канале",
+    "Business": "Бизнес",
+    "Business overview": "Обзор сотрудничества",
+    "Enterprise": "Для компаний",
+    "Partner Program": "Партнёрская программа",
+    "Hong Kong company contracts · Corporate bank transfer · Enterprise inquiries": "Договор с гонконгской компанией · Безналичная оплата для юрлиц · Консультации для компаний",
+    "Referral commission {{range}} · Channel partner pricing": "Реферальная комиссия {{range}} · Цены для партнёров",
+    "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.": "Ссылки на бизнес-страницы сайта (для компаний и партнёрская программа). Включайте только после публикации этих страниц."
   }
 }

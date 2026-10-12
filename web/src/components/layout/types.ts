@@ -90,6 +90,20 @@ export type SidebarData = {
 }
 
 /**
+ * Secondary destination of a top navigation link.
+ * Always rendered as a plain `<a href>` in the current tab (full page load),
+ * because these pages live outside the SPA router.
+ */
+export type TopNavSubLink = {
+  title: string
+  href: string
+  description?: string
+  icon?: React.ElementType
+  /** `nav_item` value pushed to `window.dataLayer` on click */
+  trackId?: string
+}
+
+/**
  * Top navigation link type
  */
 export type TopNavLink = {
@@ -98,7 +112,16 @@ export type TopNavLink = {
   isActive?: boolean
   disabled?: boolean
   requiresAuth?: boolean
+  /** Render as a plain `<a href>` instead of a router link. */
   external?: boolean
+  /** Keep an external link in the current tab instead of opening a new one. */
+  sameTab?: boolean
+  /** `nav_item` value pushed to `window.dataLayer` on click */
+  trackId?: string
+  /** Shown as a desktop dropdown and as a labelled group in mobile menus. */
+  items?: TopNavSubLink[]
+  /** Label of the dropdown footer link back to `href`. */
+  overviewTitle?: string
 }
 
 /**

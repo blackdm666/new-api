@@ -19,7 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
-import { HEADER_NAV_DEFAULT, serializeHeaderNavModules } from '../config'
+import {
+  HEADER_NAV_DEFAULT,
+  parseHeaderNavModules,
+  serializeHeaderNavModules,
+} from '../config'
 import { HeaderNavigationSection } from '../header-navigation-section'
 
 const mutateAsync = vi.fn()
@@ -111,5 +115,53 @@ describe('header navigation Infinite Canvas settings', () => {
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
     const request = mutateAsync.mock.calls[0]?.[0] as { value: string }
     expect(JSON.parse(request.value).infiniteCanvas.enabled).toBe(false)
+  })
+})
+
+describe('header navigation Business settings', () => {
+  afterEach(() => {
+    mutateAsync.mockReset()
+  })
+
+  test('turns on the Business switch and saves it in HeaderNavModules', async () => {
+    render(
+      <HeaderNavigationSection
+        config={HEADER_NAV_DEFAULT}
+        initialSerialized={serializeHeaderNavModules(HEADER_NAV_DEFAULT)}
+      />
+    )
+
+    const businessSwitch = screen.getByRole('switch', { name: 'Business' })
+    expect(businessSwitch).not.toBeChecked()
+    fireEvent.click(businessSwitch)
+    fireEvent.click(screen.getByRole('button', { name: 'Save navigation' }))
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    const request = mutateAsync.mock.calls[0]?.[0] as { value: string }
+    const saved = JSON.parse(request.value)
+    expect(saved.business).toBe(true)
+    expect(saved.infiniteCanvas).toEqual(HEADER_NAV_DEFAULT.infiniteCanvas)
+  })
+
+  test('keeps an enabled Business switch when another module changes', async () => {
+    const config = parseHeaderNavModules(
+      JSON.stringify({ docs: true, business: true })
+    )
+    render(
+      <HeaderNavigationSection
+        config={config}
+        initialSerialized={serializeHeaderNavModules(config)}
+      />
+    )
+
+    expect(screen.getByRole('switch', { name: 'Business' })).toBeChecked()
+    fireEvent.click(screen.getByRole('switch', { name: 'Docs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save navigation' }))
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    const request = mutateAsync.mock.calls[0]?.[0] as { value: string }
+    const saved = JSON.parse(request.value)
+    expect(saved.docs).toBe(false)
+    expect(saved.business).toBe(true)
   })
 })

@@ -17,11 +17,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
+import { Building2, Handshake } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import type { TopNavLink } from '@/components/layout/types'
 import { useStatus } from '@/hooks/use-status'
-import { INFINITE_CANVAS_NAME, INFINITE_CANVAS_URL } from '@/lib/external-links'
+import {
+  BUSINESS_ENTERPRISE_PATH,
+  BUSINESS_PARTNER_COMMISSION_RANGE,
+  BUSINESS_PARTNER_PATH,
+  BUSINESS_PATH,
+  getLocalizedSitePath,
+  INFINITE_CANVAS_NAME,
+  INFINITE_CANVAS_URL,
+} from '@/lib/external-links'
 import {
   DEFAULT_INFINITE_CANVAS_LINK,
   type HeaderNavModules,
@@ -30,19 +40,14 @@ import {
 import { useAuthStore } from '@/stores/auth-store'
 
 export { INFINITE_CANVAS_URL }
-
-export type TopNavLink = {
-  title: string
-  href: string
-  disabled?: boolean
-  requiresAuth?: boolean
-  external?: boolean
-}
+export type { TopNavLink }
 
 type BuildTopNavLinksOptions = {
   modules: HeaderNavModules
   docsLink?: string
   isAuthed: boolean
+  /** Interface language used to pick the localized website pages */
+  language?: string
   t: TFunction
 }
 
@@ -104,6 +109,42 @@ export function buildTopNavLinks(
     }
   }
 
+  if (options.modules.business === true) {
+    // Static website pages: a full page load in the current tab, never the SPA router.
+    links.push({
+      title: options.t('Business'),
+      href: getLocalizedSitePath(options.language, BUSINESS_PATH),
+      external: true,
+      sameTab: true,
+      trackId: 'business',
+      overviewTitle: options.t('Business overview'),
+      items: [
+        {
+          title: options.t('Enterprise'),
+          description: options.t(
+            'Hong Kong company contracts · Corporate bank transfer · Enterprise inquiries'
+          ),
+          href: getLocalizedSitePath(
+            options.language,
+            BUSINESS_ENTERPRISE_PATH
+          ),
+          icon: Building2,
+          trackId: 'business_enterprise',
+        },
+        {
+          title: options.t('Partner Program'),
+          description: options.t(
+            'Referral commission {{range}} · Channel partner pricing',
+            { range: BUSINESS_PARTNER_COMMISSION_RANGE }
+          ),
+          href: getLocalizedSitePath(options.language, BUSINESS_PARTNER_PATH),
+          icon: Handshake,
+          trackId: 'business_partner',
+        },
+      ],
+    })
+  }
+
   if (options.modules.about !== false) {
     links.push({ title: options.t('About'), href: '/about' })
   }
@@ -120,11 +161,12 @@ export function buildTopNavLinks(
  *   pricing: { enabled: true, requireAuth: false },
  *   rankings: { enabled: true, requireAuth: false },
  *   docs: true,
+ *   business: false,
  *   about: true
  * }
  */
 export function useTopNavLinks(): TopNavLink[] {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { status } = useStatus()
   const { auth } = useAuthStore()
 
@@ -140,5 +182,11 @@ export function useTopNavLinks(): TopNavLink[] {
 
   const isAuthed = !!auth?.user
 
-  return buildTopNavLinks({ modules, docsLink, isAuthed, t })
+  return buildTopNavLinks({
+    modules,
+    docsLink,
+    isAuthed,
+    language: i18n.resolvedLanguage || i18n.language,
+    t,
+  })
 }

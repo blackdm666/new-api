@@ -31,6 +31,7 @@ import { useUserDisplay } from '@/hooks/use-user-display'
 import type { AuthUser } from '@/stores/auth-store'
 
 import { MOBILE_DRAWER_ANIMATION, MOBILE_DRAWER_CONFIG } from '../constants'
+import { getExternalLinkProps } from '../lib/top-nav-link'
 import type { TopNavLink } from '../types'
 
 /**
@@ -283,8 +284,7 @@ export function MobileDrawer({
                         {link.external ? (
                           <a
                             href={link.href}
-                            target='_blank'
-                            rel='noopener noreferrer'
+                            {...getExternalLinkProps(link)}
                             className='text-primary/60 hover:text-primary/80 transition-colors'
                             onClick={onClose}
                           >

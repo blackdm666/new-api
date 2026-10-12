@@ -7876,6 +7876,13 @@
     "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "S'applique aux requêtes Claude Messages natives qui envoient une réflexion enabled ou disabled à des modèles n'acceptant que la réflexion adaptative.",
     "Upstream requires adaptive thinking; retried with adaptive thinking": "L'amont exige la réflexion adaptative ; nouvel essai avec réflexion adaptative",
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "L'amont a refusé la réflexion adaptative ; nouvel essai avec les paramètres de réflexion d'origine",
-    "Same channel retry": "Nouvel essai sur le même canal"
+    "Same channel retry": "Nouvel essai sur le même canal",
+    "Business": "Partenariats",
+    "Business overview": "Aperçu des partenariats",
+    "Enterprise": "Entreprises",
+    "Partner Program": "Programme partenaires",
+    "Hong Kong company contracts · Corporate bank transfer · Enterprise inquiries": "Contrat avec une société hongkongaise · Virement d'entreprise · Demandes des entreprises",
+    "Referral commission {{range}} · Channel partner pricing": "Commission de parrainage {{range}} · Tarifs revendeurs",
+    "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.": "Liens vers les pages partenariats du site (entreprises et programme partenaires). À activer uniquement après la publication de ces pages."
   }
 }

@@ -42,6 +42,7 @@ test('places Infinite Canvas immediately after Model Square', () => {
         url: INFINITE_CANVAS_URL,
       },
       docs: true,
+      business: false,
       about: true,
     },
     isAuthed: true,
@@ -147,6 +148,145 @@ test('places Infinite Canvas immediately before Playground', () => {
       url: '/playground',
     }
   )
+})
+
+// HeaderNavModules as published by the 88API production /api/status (2026-10-12).
+const PRODUCTION_HEADER_NAV_MODULES = {
+  home: true,
+  console: true,
+  pricing: { enabled: true, requireAuth: false },
+  rankings: { enabled: true, requireAuth: true },
+  infiniteCanvas: {
+    enabled: true,
+    name: 'Infinite Canvas',
+    url: 'https://img-pro.88api.ai/',
+  },
+  docs: true,
+  about: false,
+}
+const PRODUCTION_DOCS_LINK = 'https://88api.ai/zh/docs/'
+
+function findBusinessLink(raw: unknown, language?: string) {
+  const links = buildTopNavLinks({
+    modules: parseHeaderNavModules(raw),
+    docsLink: PRODUCTION_DOCS_LINK,
+    isAuthed: false,
+    language,
+    t: translate,
+  })
+  return links.find((link) => link.trackId === 'business')
+}
+
+test('hides Business when HeaderNavModules has no business switch', () => {
+  assert.equal(findBusinessLink(undefined), undefined)
+  assert.equal(
+    findBusinessLink(JSON.stringify(PRODUCTION_HEADER_NAV_MODULES)),
+    undefined
+  )
+})
+
+test('hides Business when the business switch is off', () => {
+  assert.equal(findBusinessLink(JSON.stringify({ business: false })), undefined)
+})
+
+test('ignores an object business value because the switch is a boolean', () => {
+  assert.equal(
+    findBusinessLink(JSON.stringify({ business: { enabled: true } })),
+    undefined
+  )
+})
+
+test('places Business right after Docs as a same-tab website link when enabled', () => {
+  const modules = parseHeaderNavModules(
+    JSON.stringify({ ...PRODUCTION_HEADER_NAV_MODULES, business: true })
+  )
+  const links = buildTopNavLinks({
+    modules,
+    docsLink: PRODUCTION_DOCS_LINK,
+    isAuthed: false,
+    language: 'zhCN',
+    t: translate,
+  })
+
+  assert.deepEqual(
+    links.map((link) => link.href),
+    [
+      '/',
+      '/dashboard',
+      '/pricing',
+      'https://img-pro.88api.ai/',
+      '/rankings',
+      PRODUCTION_DOCS_LINK,
+      '/business/',
+    ]
+  )
+  const business = links.at(-1)
+  assert.ok(business)
+  assert.equal(business.title, 'Business')
+  assert.equal(business.external, true)
+  assert.equal(business.sameTab, true)
+  assert.equal(business.overviewTitle, 'Business overview')
+  assert.deepEqual(
+    business.items?.map((item) => [item.title, item.href, item.trackId]),
+    [
+      ['Enterprise', '/business/enterprise/', 'business_enterprise'],
+      ['Partner Program', '/business/partner/', 'business_partner'],
+    ]
+  )
+})
+
+test('accepts a string "true" for the business switch', () => {
+  assert.equal(
+    findBusinessLink(JSON.stringify({ business: 'true' }), 'zhCN')?.href,
+    '/business/'
+  )
+})
+
+test('keeps the Infinite Canvas link unchanged when Business is enabled', () => {
+  const modules = parseHeaderNavModules(
+    JSON.stringify({ ...PRODUCTION_HEADER_NAV_MODULES, business: true })
+  )
+  const links = buildTopNavLinks({ modules, isAuthed: true, t: translate })
+
+  assert.deepEqual(
+    links.find((link) => link.href === 'https://img-pro.88api.ai/'),
+    {
+      title: 'Infinite Canvas',
+      href: 'https://img-pro.88api.ai/',
+      external: true,
+    }
+  )
+})
+
+test('localizes the Business pages for every interface language', () => {
+  const cases: Array<[string | undefined, string]> = [
+    ['zhCN', ''],
+    ['zh-CN', ''],
+    ['zhTW', '/zh-tw'],
+    ['en', '/en'],
+    ['fr', '/en'],
+    ['ru', '/en'],
+    ['ja', '/en'],
+    ['vi', '/en'],
+    ['xx-invalid', '/en'],
+    [undefined, '/en'],
+  ]
+
+  for (const [language, prefix] of cases) {
+    const business = findBusinessLink(
+      JSON.stringify({ business: true }),
+      language
+    )
+    assert.deepEqual(
+      [business?.href, ...(business?.items ?? []).map((item) => item.href)],
+      [
+        `${prefix}/business/`,
+        `${prefix}/business/enterprise/`,
+        `${prefix}/business/partner/`,
+      ],
+      `language ${String(language)}`
+    )
+  }
 })
 
 test('places referral and invoice pages between Wallet and Profile', () => {

@@ -34,6 +34,7 @@ export type HeaderNavModulesConfig = {
   rankings: HeaderNavAccessConfig
   infiniteCanvas: HeaderNavLink
   docs: boolean
+  business: boolean
   about: boolean
   [key: string]: boolean | HeaderNavAccessConfig | HeaderNavLink
 }
@@ -58,6 +59,7 @@ export const HEADER_NAV_DEFAULT: HeaderNavModulesConfig = {
   },
   infiniteCanvas: { ...DEFAULT_INFINITE_CANVAS_LINK },
   docs: true,
+  business: false,
   about: true,
 }
 

@@ -39,6 +39,8 @@ export type HeaderNavModules = {
   rankings: ModuleAccess
   infiniteCanvas: HeaderNavLink
   docs: boolean
+  /** Website business cooperation pages; off unless the operator publishes them. */
+  business: boolean
   about: boolean
   [key: string]: boolean | ModuleAccess | HeaderNavLink
 }
@@ -56,6 +58,7 @@ const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
   rankings: { enabled: true, requireAuth: false },
   infiniteCanvas: { ...DEFAULT_INFINITE_CANVAS_LINK },
   docs: true,
+  business: false,
   about: true,
 }
 

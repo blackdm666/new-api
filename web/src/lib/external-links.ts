@@ -16,5 +16,33 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { normalizeInterfaceLanguage } from '@/i18n/languages'
+
 export const INFINITE_CANVAS_NAME = 'Infinite Canvas'
 export const INFINITE_CANVAS_URL = 'https://canvas.best/'
+
+/**
+ * Business cooperation pages of the static website, served outside the SPA.
+ * Paths keep the trailing slash used by the website.
+ */
+export const BUSINESS_PATH = '/business/'
+export const BUSINESS_ENTERPRISE_PATH = '/business/enterprise/'
+export const BUSINESS_PARTNER_PATH = '/business/partner/'
+
+/** Referral commission range shown in the Partner Program menu entry. */
+export const BUSINESS_PARTNER_COMMISSION_RANGE = '5%–15%'
+
+/**
+ * Resolve a website page for the interface language: Simplified Chinese lives
+ * at the root, Traditional Chinese under `/zh-tw/`, and every other language
+ * uses the English pages under `/en/` until it gets its own translation.
+ */
+export function getLocalizedSitePath(
+  language: string | null | undefined,
+  path: string
+): string {
+  const interfaceLanguage = normalizeInterfaceLanguage(language)
+  if (interfaceLanguage === 'zhCN') return path
+  if (interfaceLanguage === 'zhTW') return `/zh-tw${path}`
+  return `/en${path}`
+}

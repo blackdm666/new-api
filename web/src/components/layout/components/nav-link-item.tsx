@@ -20,6 +20,7 @@ import { Link } from '@tanstack/react-router'
 
 import { cn } from '@/lib/utils'
 
+import { getExternalLinkProps } from '../lib/top-nav-link'
 import type { TopNavLink } from '../types'
 
 interface NavLinkItemProps {
@@ -42,8 +43,7 @@ export function NavLinkItem({ link, className }: NavLinkItemProps) {
     return (
       <a
         href={link.href}
-        target='_blank'
-        rel='noopener noreferrer'
+        {...getExternalLinkProps(link)}
         className={linkClassName}
         aria-disabled={link.disabled}
       >
@@ -76,9 +76,9 @@ export function NavLinkList({
 }: NavLinkListProps) {
   return (
     <>
-      {links.map((link, index) => (
+      {links.map((link) => (
         <NavLinkItem
-          key={index}
+          key={`${link.title}:${link.href}`}
           link={link}
           className={cn(className, itemClassName)}
         />

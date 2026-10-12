@@ -79,6 +79,7 @@ const createHeaderNavSchema = (t: TFunction) =>
         }
       }, t('Must be a valid URL')),
     docs: z.boolean(),
+    business: z.boolean(),
     about: z.boolean(),
   })
 
@@ -122,6 +123,10 @@ const toFormValues = (config: HeaderNavModulesConfig): HeaderNavFormValues => ({
   infiniteCanvasUrl: config.infiniteCanvas.url,
   docs:
     config.docs === undefined ? HEADER_NAV_DEFAULT.docs : Boolean(config.docs),
+  business:
+    config.business === undefined
+      ? HEADER_NAV_DEFAULT.business
+      : Boolean(config.business),
   about:
     config.about === undefined
       ? HEADER_NAV_DEFAULT.about
@@ -152,6 +157,7 @@ export function HeaderNavigationSection({
       home: values.home,
       console: values.console,
       docs: values.docs,
+      business: values.business,
       about: values.about,
       pricing: {
         ...(config.pricing ?? HEADER_NAV_DEFAULT.pricing),
@@ -204,6 +210,13 @@ export function HeaderNavigationSection({
       key: 'docs',
       title: t('Docs'),
       description: t('Documentation or external knowledge base.'),
+    },
+    {
+      key: 'business',
+      title: t('Business'),
+      description: t(
+        'Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.'
+      ),
     },
     {
       key: 'about',

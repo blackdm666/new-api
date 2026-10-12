@@ -96,3 +96,31 @@ describe('header navigation Infinite Canvas config', () => {
     )
   })
 })
+
+describe('header navigation Business config', () => {
+  test('keeps Business off for saved configs without the switch', () => {
+    const config = parseHeaderNavModules('{"home":false,"docs":true}')
+
+    assert.equal(config.business, false)
+  })
+
+  test('round-trips an enabled Business switch', () => {
+    const config = parseHeaderNavModules('{"business":true}')
+
+    assert.equal(config.business, true)
+    assert.equal(JSON.parse(serializeHeaderNavModules(config)).business, true)
+  })
+
+  test('keeps unknown boolean switches but drops unknown objects on save', () => {
+    const config = parseHeaderNavModules(
+      JSON.stringify({
+        futureSwitch: true,
+        futureLink: { enabled: true, url: 'https://example.com' },
+      })
+    )
+    const saved = JSON.parse(serializeHeaderNavModules(config))
+
+    assert.equal(saved.futureSwitch, true)
+    assert.equal('futureLink' in saved, false)
+  })
+})

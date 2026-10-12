@@ -31,12 +31,15 @@ import { SystemUpdateAction } from '@/features/system-update/system-update-actio
 import { useNotifications } from '@/hooks/use-notifications'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
+import { trackNavClick } from '@/lib/analytics'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { defaultTopNavLinks } from '../config/top-nav.config'
+import { getExternalLinkProps } from '../lib/top-nav-link'
 import type { TopNavLink } from '../types'
 import { HeaderLogo } from './header-logo'
+import { TopNavDropdown } from './top-nav-dropdown'
 
 const AUTH_PROMPT_SECONDS = 5
 
@@ -203,7 +206,8 @@ export function PublicHeader(props: PublicHeaderProps) {
         <div
           className={cn(
             'pointer-events-auto mx-auto transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
-            scrolled ? 'max-w-[52rem] px-3 pt-3' : 'max-w-7xl px-4 pt-0 md:px-6'
+            // Wide enough for every Chinese link plus the Business dropdown without truncation.
+            scrolled ? 'max-w-[60rem] px-3 pt-3' : 'max-w-7xl px-4 pt-0 md:px-6'
           )}
         >
           <nav
@@ -241,14 +245,23 @@ export function PublicHeader(props: PublicHeaderProps) {
             <div className='hidden min-w-0 items-center gap-0.5 lg:flex'>
               {links.map((link) => {
                 const isActive = pathname === link.href
+                if (link.items?.length) {
+                  return (
+                    <TopNavDropdown
+                      key={`${link.title}:${link.href}`}
+                      link={link}
+                      navLocation='console_header'
+                      triggerClassName='text-muted-foreground hover:text-foreground data-open:text-foreground rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200'
+                    />
+                  )
+                }
                 if (link.external) {
                   return (
                     <a
                       key={`${link.title}:${link.href}`}
                       href={link.href}
                       title={t(link.title)}
-                      target='_blank'
-                      rel='noopener noreferrer'
+                      {...getExternalLinkProps(link)}
                       aria-disabled={link.disabled}
                       tabIndex={link.disabled ? -1 : undefined}
                       onClick={(event) => handleNavLinkClick(event, link)}
@@ -374,13 +387,48 @@ export function PublicHeader(props: PublicHeaderProps) {
               const transitionStyle = {
                 transitionDelay: mobileOpen ? `${100 + i * 50}ms` : '0ms',
               }
+              if (link.items?.length) {
+                // Flat group instead of a nested accordion: one tap reaches each page.
+                return (
+                  <div
+                    key={`${link.title}:${link.href}`}
+                    role='group'
+                    aria-label={link.title}
+                    className={cn(
+                      'border-border/60 mt-2 flex flex-col border-t pt-3 transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]',
+                      mobileOpen
+                        ? 'translate-y-0 opacity-100'
+                        : 'translate-y-4 opacity-0'
+                    )}
+                    style={transitionStyle}
+                  >
+                    <span className='text-muted-foreground/80 text-xs font-medium tracking-wide'>
+                      {link.title}
+                    </span>
+                    {link.items.map((item) => (
+                      <a
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => {
+                          if (item.trackId) {
+                            trackNavClick(item.trackId, 'mobile_menu')
+                          }
+                          setMobileOpen(false)
+                        }}
+                        className='text-muted-foreground hover:text-foreground flex items-center gap-3 py-3 text-base font-medium tracking-tight transition-colors'
+                      >
+                        {item.title}
+                      </a>
+                    ))}
+                  </div>
+                )
+              }
               if (link.external) {
                 return (
                   <a
                     key={`${link.title}:${link.href}`}
                     href={link.href}
-                    target='_blank'
-                    rel='noopener noreferrer'
+                    {...getExternalLinkProps(link)}
                     aria-disabled={link.disabled}
                     tabIndex={link.disabled ? -1 : undefined}
                     onClick={(event) => handleNavLinkClick(event, link, true)}

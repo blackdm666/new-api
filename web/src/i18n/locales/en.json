@@ -7972,6 +7972,13 @@
     "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.": "Applies to native Claude Messages requests that send enabled or disabled thinking to models that only accept adaptive thinking.",
     "Upstream requires adaptive thinking; retried with adaptive thinking": "Upstream requires adaptive thinking; retried with adaptive thinking",
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "Upstream rejected adaptive thinking; retried with the original thinking controls",
-    "Same channel retry": "Same channel retry"
+    "Same channel retry": "Same channel retry",
+    "Business": "Business",
+    "Business overview": "Business overview",
+    "Enterprise": "Enterprise",
+    "Partner Program": "Partner Program",
+    "Hong Kong company contracts · Corporate bank transfer · Enterprise inquiries": "Hong Kong company contracts · Corporate bank transfer · Enterprise inquiries",
+    "Referral commission {{range}} · Channel partner pricing": "Referral commission {{range}} · Channel partner pricing",
+    "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.": "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published."
   }
 }
