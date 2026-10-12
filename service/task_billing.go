@@ -19,7 +19,17 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
+
+// TaskToolCallFactPrefix marks completion usage facts that count provider tool
+// calls, e.g. "tool_calls.web_search": 2. Task settlement prices them from the
+// tool price table ($ per 1K calls) like text relays, on top of the expression.
+const TaskToolCallFactPrefix = "tool_calls."
+
+// maxTaskToolCalls bounds one task's reported calls per tool. Counts come from
+// the upstream response, so larger values saturate instead of scaling the charge.
+const maxTaskToolCalls = 1000
 
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
 // 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
@@ -44,6 +54,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		if snap := info.TieredBillingSnapshot; snap != nil {
 			for key, value := range snap.UsageFacts {
 				contents = append(contents, fmt.Sprintf("%s: %v", key, value))
+			}
+			for _, item := range snap.ToolSurcharges {
+				contents = append(contents, fmt.Sprintf("%s 调用 %d 次", item.Name, item.Count))
 			}
 		}
 		if len(contents) > 0 {
@@ -81,6 +94,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		if len(snap.UsageFacts) > 0 {
 			other.SetPublic("usage_facts", snap.UsageFacts)
 		}
+		appendToolSurchargeLogInfo(other, snap.ToolSurcharges)
 		setTaskImageCount(other, snap.UsageFacts["image_count"])
 	} else {
 		setTaskImageCount(other, info.PriceData.OtherRatios()["image_count"])
@@ -176,6 +190,7 @@ func taskBillingOther(task *model.Task) *model.LogOther {
 			if len(snap.UsageFacts) > 0 {
 				other.SetPublic("usage_facts", snap.UsageFacts)
 			}
+			appendToolSurchargeLogInfo(other, snap.ToolSurcharges)
 			setTaskImageCount(other, snap.UsageFacts["image_count"])
 		} else if priceData := taskBillingContextPriceData(bc); priceData != nil {
 			setTaskImageCount(other, priceData.OtherRatios()["image_count"])
@@ -452,5 +467,53 @@ func EvaluateTaskCompletionUsage(snap *billingexpr.BillingSnapshot, facts map[st
 	if err == nil && (result.ActualQuotaBeforeGroup < 0 || math.IsNaN(result.ActualQuotaBeforeGroup)) {
 		err = fmt.Errorf("task completion expression produced an invalid cost")
 	}
-	return result, usage, err
+	if err != nil {
+		return result, usage, err
+	}
+	items := taskToolSurchargeItems(snap.ModelName, usage)
+	if len(items) == 0 {
+		return result, usage, nil
+	}
+	// Same composition as text tiered billing: the expression's pre-group cost
+	// and every tool charge take the frozen group ratio, then one saturating
+	// conversion of the sum. Other request multipliers do not apply to tools.
+	groupRatio := decimal.NewFromFloat(snap.GroupRatio)
+	total := decimal.NewFromFloat(result.ActualQuotaBeforeGroup).Mul(groupRatio)
+	for _, item := range items {
+		total = total.Add(decimal.NewFromFloat(item.Price).
+			Mul(decimal.NewFromInt(int64(item.Count))).
+			Div(decimal.NewFromInt(1000)).
+			Mul(groupRatio).
+			Mul(decimal.NewFromFloat(snap.QuotaPerUnit)))
+	}
+	quota, clamp := common.QuotaFromDecimalChecked(total)
+	result.ActualQuotaAfterGroup = quota
+	if result.Clamp == nil {
+		result.Clamp = clamp
+	}
+	result.ToolSurcharges = items
+	return result, usage, nil
+}
+
+// taskToolSurchargeItems turns "tool_calls.<tool>" usage facts into priced
+// lines. Tools without a positive price for the model bill nothing; counts are
+// floored and saturated at maxTaskToolCalls.
+func taskToolSurchargeItems(modelName string, usage map[string]any) []ToolSurchargeItem {
+	var items []ToolSurchargeItem
+	for key, value := range usage {
+		name, ok := strings.CutPrefix(key, TaskToolCallFactPrefix)
+		if !ok || name == "" {
+			continue
+		}
+		count, numeric := value.(float64)
+		if !numeric || math.IsNaN(count) || count <= 0 {
+			continue
+		}
+		if count > maxTaskToolCalls {
+			common.SysError(fmt.Sprintf("task tool call count saturated: %s=%v", key, count))
+			count = maxTaskToolCalls
+		}
+		items = collectToolSurchargeItem(items, name, int(math.Floor(count)), modelName)
+	}
+	return mergeToolSurchargeItems(items)
 }

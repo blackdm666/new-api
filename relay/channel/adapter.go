@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"io"
 	"net/http"
 
@@ -128,6 +129,20 @@ type TaskContentRequest struct {
 
 type TaskContentRequestProvider interface {
 	BuildContentRequest(task *model.Task, artifactKey string, clientRequest TaskArtifactClientRequest) (*TaskContentRequest, error)
+}
+
+// TaskCancelResult is the provider's answer to a cancellation request.
+// Cancelled is true only when the provider confirmed the task will not run;
+// Message explains a refusal to the client.
+type TaskCancelResult struct {
+	Cancelled bool
+	Message   string
+}
+
+// TaskCancelProvider cancels a task at the provider. A nil result with a nil
+// error means the adaptor does not support cancellation.
+type TaskCancelProvider interface {
+	CancelTask(ctx context.Context, task *model.Task) (*TaskCancelResult, error)
 }
 
 type TaskUsageFactsProvider interface {

@@ -82,6 +82,12 @@ const (
 	maxTaskPreflightRequestBytes  = 1 << 20
 	maxTaskPreflightResponseBytes = 1 << 20
 	taskPreflightTimeout          = 30 * time.Second
+	// Uploads stream request files (videos included), so they get longer than
+	// the presign round trip.
+	taskUploadTimeout = 5 * time.Minute
+	// maxTaskPreflightRounds matches the multipart file limit of task routes.
+	maxTaskPreflightRounds = 32
+	taskCancelTimeout      = 30 * time.Second
 )
 
 // maxTaskPluginPersistedJSONBytes is the shared ceiling for taskData and plugin state.
@@ -96,6 +102,10 @@ type TaskAdaptor struct {
 	files          []map[string]any
 	preflight      any
 	preflightDone  bool
+	// task-preflight@2: every completed round's response, in order, and the
+	// index of the round being prepared.
+	preflights     []any
+	preflightRound int
 }
 
 func New(plugin *pluginruntime.LoadedPlugin) *TaskAdaptor { return &TaskAdaptor{plugin: plugin} }
@@ -156,37 +166,71 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 }
 
 func (a *TaskAdaptor) runTaskPreflight(c *gin.Context, info *relaycommon.RelayInfo) error {
-	if a.preflightDone || !slices.Contains(a.plugin.Meta.RequiredCapabilities, pluginruntime.CapabilityTaskPreflight) {
+	rounds := 0
+	switch {
+	case a.preflightRounds():
+		rounds = maxTaskPreflightRounds
+	case slices.Contains(a.plugin.Meta.RequiredCapabilities, pluginruntime.CapabilityTaskPreflight):
+		rounds = 1
+	}
+	if a.preflightDone || rounds == 0 {
 		return nil
 	}
 	a.preflightDone = true
+	for round := range rounds {
+		a.preflightRound = round
+		finished, err := a.runTaskPreflightRound(c, info)
+		if err != nil {
+			return err
+		}
+		if finished {
+			break
+		}
+	}
+	// buildSubmitRequest sees the last round as preflightResponse.
+	if count := len(a.preflights); count > 0 {
+		a.preflight = a.preflights[count-1]
+	}
+	return nil
+}
+
+func (a *TaskAdaptor) preflightRounds() bool {
+	return slices.Contains(a.plugin.Meta.RequiredCapabilities, pluginruntime.CapabilityTaskPreflightRounds)
+}
+
+// runTaskPreflightRound runs one presign request and its optional upload. It
+// reports finished when the plugin has no further round.
+func (a *TaskAdaptor) runTaskPreflightRound(c *gin.Context, info *relaycommon.RelayInfo) (bool, error) {
+	// buildPreflightRequest never sees a current preflightResponse; later
+	// rounds read the earlier ones from preflightResponses.
+	a.preflight = nil
 	ctx := c.Request.Context()
 	value, err := a.plugin.Engine.Call(ctx, "buildPreflightRequest", a.submitContext(c, info))
 	if err != nil {
-		return fmt.Errorf("plugin preflight hook failed: %w", err)
+		return false, fmt.Errorf("plugin preflight hook failed: %w", err)
 	}
 	if value == nil {
-		return nil
+		return true, nil
 	}
 	var descriptor requestDescriptor
 	if err = convert(value, &descriptor); err != nil {
-		return fmt.Errorf("plugin returned an invalid preflight request")
+		return false, fmt.Errorf("plugin returned an invalid preflight request")
 	}
 	response, err := a.executePreflightRequest(c, info, descriptor, false)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if response.StatusCode/100 != 2 {
 		_ = response.Body.Close()
-		return fmt.Errorf("plugin preflight request returned status %d", response.StatusCode)
+		return false, fmt.Errorf("plugin preflight request returned status %d", response.StatusCode)
 	}
 	body, err := readTaskPreflightBody(response)
 	if err != nil {
-		return err
+		return false, err
 	}
 	var decoded any
 	if err = common.Unmarshal(body, &decoded); err != nil {
-		return fmt.Errorf("plugin preflight response is not valid JSON")
+		return false, fmt.Errorf("plugin preflight response is not valid JSON")
 	}
 	data := decoded
 	if object, ok := decoded.(map[string]any); ok {
@@ -200,30 +244,33 @@ func (a *TaskAdaptor) runTaskPreflight(c *gin.Context, info *relaycommon.RelayIn
 		"data":    data,
 		"body":    decoded,
 	}
-	if a.preflight == nil || !a.hasHook(ctx, "buildUploadRequest") {
-		return nil
+	finished := !a.preflightRounds()
+	if !a.hasHook(ctx, "buildUploadRequest") {
+		a.preflights = append(a.preflights, a.preflight)
+		return finished, nil
 	}
 	value, err = a.plugin.Engine.Call(ctx, "buildUploadRequest", a.submitContext(c, info))
 	if err != nil {
-		return fmt.Errorf("plugin upload hook failed: %w", err)
+		return false, fmt.Errorf("plugin upload hook failed: %w", err)
 	}
+	a.preflights = append(a.preflights, a.preflight)
 	if value == nil {
-		return nil
+		return finished, nil
 	}
 	var upload requestDescriptor
 	if err = convert(value, &upload); err != nil {
-		return fmt.Errorf("plugin returned an invalid upload request")
+		return false, fmt.Errorf("plugin returned an invalid upload request")
 	}
 	uploadResponse, err := a.executePreflightRequest(c, info, upload, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if uploadResponse.StatusCode/100 != 2 {
 		_ = uploadResponse.Body.Close()
-		return fmt.Errorf("plugin upload request returned status %d", uploadResponse.StatusCode)
+		return false, fmt.Errorf("plugin upload request returned status %d", uploadResponse.StatusCode)
 	}
 	_, err = readTaskPreflightBody(uploadResponse)
-	return err
+	return finished, err
 }
 
 func (a *TaskAdaptor) executePreflightRequest(c *gin.Context, info *relaycommon.RelayInfo, descriptor requestDescriptor, upload bool) (*http.Response, error) {
@@ -291,7 +338,11 @@ func (a *TaskAdaptor) executePreflightRequest(c *gin.Context, info *relaycommon.
 			body = bytes.NewReader(encoded)
 		}
 	}
-	requestContext, cancel := context.WithTimeout(c.Request.Context(), taskPreflightTimeout)
+	timeout := taskPreflightTimeout
+	if upload {
+		timeout = taskUploadTimeout
+	}
+	requestContext, cancel := context.WithTimeout(c.Request.Context(), timeout)
 	req, err := http.NewRequestWithContext(requestContext, method, descriptor.URL, body)
 	if err != nil {
 		cancel()
@@ -1255,6 +1306,93 @@ func (a *TaskAdaptor) BuildContentRequest(task *model.Task, artifactKey string, 
 	}, nil
 }
 
+// CancelTask asks the provider to cancel a task through the optional
+// buildCancelRequest/parseCancelResponse hooks. The request carries the
+// channel credentials, so it is held to the channel host and allowedHosts.
+func (a *TaskAdaptor) CancelTask(ctx context.Context, task *model.Task) (*channel.TaskCancelResult, error) {
+	if !a.hasHook(ctx, "buildCancelRequest") {
+		return nil, nil
+	}
+	if a.info == nil || task == nil {
+		return nil, fmt.Errorf("plugin adaptor is not initialized")
+	}
+	hookCtx, err := a.queryContext(task, a.info.ApiKey, a.info.ChannelBaseUrl, a.info.ChannelSetting.Proxy)
+	if err != nil {
+		return nil, err
+	}
+	value, err := a.plugin.Engine.Call(ctx, "buildCancelRequest", hookCtx)
+	if err != nil {
+		return nil, err
+	}
+	var descriptor requestDescriptor
+	if err = convert(value, &descriptor); err != nil {
+		return nil, err
+	}
+	if err = pluginruntime.ValidateRequestURL(descriptor.URL, a.info.ChannelBaseUrl, a.plugin.Meta.AllowedHosts); err != nil {
+		return nil, err
+	}
+	method := strings.ToUpper(strings.TrimSpace(descriptor.Method))
+	if method == "" {
+		method = http.MethodDelete
+	}
+	if method != http.MethodDelete && method != http.MethodPost {
+		return nil, fmt.Errorf("plugin returned an unsupported cancel request method")
+	}
+	var body io.Reader
+	if descriptor.Body != nil {
+		encoded, ok := descriptor.Body.(string)
+		if !ok {
+			raw, marshalErr := common.Marshal(descriptor.Body)
+			if marshalErr != nil {
+				return nil, fmt.Errorf("plugin returned an invalid cancel request body")
+			}
+			encoded = string(raw)
+		}
+		if len(encoded) > maxTaskPreflightRequestBytes {
+			return nil, fmt.Errorf("cancel request body exceeds size limit")
+		}
+		body = strings.NewReader(encoded)
+	}
+	requestContext, cancel := context.WithTimeout(ctx, taskCancelTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestContext, method, descriptor.URL, body)
+	if err != nil {
+		return nil, err
+	}
+	for name, headerValue := range descriptor.Headers {
+		req.Header.Set(name, headerValue)
+	}
+	client, err := service.GetHttpClientWithProxy(a.info.ChannelSetting.Proxy)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cancel request failed: %w", err)
+	}
+	responseBody, err := readTaskPreflightBody(resp)
+	if err != nil {
+		return nil, err
+	}
+	var decoded any = string(responseBody)
+	var parsed any
+	if common.Unmarshal(responseBody, &parsed) == nil {
+		decoded = parsed
+	}
+	value, err = a.plugin.Engine.Call(ctx, "parseCancelResponse", hookCtx, decoded, hookHTTPResponse(resp))
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Cancelled bool   `json:"cancelled"`
+		Message   string `json:"message"`
+	}
+	if err = convert(value, &result); err != nil {
+		return nil, fmt.Errorf("plugin returned an invalid cancel result")
+	}
+	return &channel.TaskCancelResult{Cancelled: result.Cancelled, Message: strings.TrimSpace(result.Message)}, nil
+}
+
 func taskArtifactContext(task *model.Task) (map[string]any, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is required")
@@ -1620,6 +1758,10 @@ func (a *TaskAdaptor) submitContext(c *gin.Context, info *relaycommon.RelayInfo)
 	ctx["files"] = files
 	if a.preflight != nil {
 		ctx["preflightResponse"] = jsonValue(a.preflight)
+	}
+	if a.preflightRounds() {
+		ctx["preflightRound"] = a.preflightRound
+		ctx["preflightResponses"] = jsonValue(append([]any{}, a.preflights...))
 	}
 	ctx["action"] = info.Action
 	ctx["originTaskId"] = info.OriginTaskID
