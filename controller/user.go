@@ -929,6 +929,7 @@ func UpdateUser(c *gin.Context) {
 	authzTouched := false
 	previousInviterId := originUser.InviterId
 	inviterChanged := false
+	cyberGuardEditedAt := common.GetTimestamp() // 88api cyberguard: see CyberGuardOnAdminGroupChange below
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
 		if request.InviterId != nil {
 			var err error
@@ -949,6 +950,9 @@ func UpdateUser(c *gin.Context) {
 		}
 		common.ApiError(c, err)
 		return
+	}
+	if originUser.Group != updatedUser.Group { // 88api cyberguard: an admin group edit ends an active ban as admin_override
+		service.CyberGuardOnAdminGroupChange(updatedUser.Id, updatedUser.Group, cyberGuardEditedAt, c.GetInt("id"), c.GetInt("role"))
 	}
 	if authzTouched {
 		if err := authz.ReloadPolicy(); err != nil {
@@ -975,9 +979,6 @@ func UpdateUser(c *gin.Context) {
 		auditDetails["inviter_id"] = *request.InviterId
 	}
 	recordManageAuditFor(c, updatedUser.Id, "user.update", auditDetails)
-	if originUser.Group != updatedUser.Group { // 88api cyberguard: an admin group edit ends an active ban as admin_override
-		service.CyberGuardOnAdminGroupChange(updatedUser.Id, c.GetInt("id"), c.GetInt("role"))
-	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

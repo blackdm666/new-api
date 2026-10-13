@@ -69,6 +69,9 @@ export function UsersTable(props: {
                 {row.role >= ROLE.ADMIN && (
                   <Badge variant='secondary'>{t('Administrator')}</Badge>
                 )}
+                {row.is_exempt === true && (
+                  <Badge variant='secondary'>{t('Exempt')}</Badge>
+                )}
               </div>
               <div className='text-muted-foreground text-xs'>
                 UID {row.user_id}
@@ -156,7 +159,13 @@ function UserActions(props: {
   const { t } = useTranslation()
   const row = props.row
   const ban = row.ban
-  const protectedUser = row.role >= ROLE.ADMIN
+  // The server refuses these bans too; the title explains the disabled button.
+  let banBlockedReason: string | undefined
+  if (row.role >= ROLE.ADMIN) {
+    banBlockedReason = t('Administrators cannot be banned')
+  } else if (row.is_exempt === true) {
+    banBlockedReason = t('Exempt users cannot be banned')
+  }
   return (
     <div className='flex flex-wrap gap-1'>
       <Button
@@ -189,6 +198,8 @@ function UserActions(props: {
           type='button'
           size='sm'
           variant='destructive'
+          disabled={banBlockedReason !== undefined}
+          title={banBlockedReason}
           onClick={() =>
             props.onAction({
               kind: 'promote',
@@ -206,10 +217,8 @@ function UserActions(props: {
           type='button'
           size='sm'
           variant='destructive'
-          disabled={protectedUser}
-          title={
-            protectedUser ? t('Administrators cannot be banned') : undefined
-          }
+          disabled={banBlockedReason !== undefined}
+          title={banBlockedReason}
           onClick={() => props.onBan(row)}
         >
           {t('Ban')}

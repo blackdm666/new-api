@@ -84,6 +84,15 @@ func recordCyberGuardAudit(c *gin.Context, targetUserId int, action string, para
 	markAuditLogged(c)
 }
 
+// cyberGuardPageQuery reads p/page_size and clamps them to page >= 1 and
+// 1 <= page_size <= 100 (GetPageQuery keeps negative values).
+func cyberGuardPageQuery(c *gin.Context) *common.PageInfo {
+	pageInfo := common.GetPageQuery(c)
+	pageInfo.Page = max(pageInfo.Page, 1)
+	pageInfo.PageSize = min(max(pageInfo.PageSize, 1), 100)
+	return pageInfo
+}
+
 func GetCyberGuardOverview(c *gin.Context) {
 	overview, err := service.GetCyberGuardOverview()
 	if err != nil {
@@ -101,7 +110,7 @@ func ListCyberGuardUsers(c *gin.Context) {
 		common.ApiError(c, service.ErrCyberGuardInvalidInput)
 		return
 	}
-	pageInfo := common.GetPageQuery(c)
+	pageInfo := cyberGuardPageQuery(c)
 	rows, total, err := service.ListCyberGuardUsers(c.Query("keyword"), status, pageInfo.GetPage(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
@@ -113,7 +122,7 @@ func ListCyberGuardUsers(c *gin.Context) {
 }
 
 func ListCyberGuardEvents(c *gin.Context) {
-	pageInfo := common.GetPageQuery(c)
+	pageInfo := cyberGuardPageQuery(c)
 	filter := model.CyberGuardEventFilter{
 		Category: strings.TrimSpace(c.Query("category")),
 		State:    strings.TrimSpace(c.Query("state")),
@@ -153,7 +162,7 @@ func VoidCyberGuardEvent(c *gin.Context) {
 }
 
 func ListCyberGuardBans(c *gin.Context) {
-	pageInfo := common.GetPageQuery(c)
+	pageInfo := cyberGuardPageQuery(c)
 	userId, _ := strconv.Atoi(c.Query("user_id"))
 	rows, total, err := service.ListCyberGuardBanRows(strings.TrimSpace(c.Query("status")), userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {

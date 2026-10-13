@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	appI18n "github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -51,11 +52,20 @@ func refreshCyberGuardGroupCache(userId int) {
 	}
 }
 
-func notifyCyberGuardRoot(subject string, content string) {
-	if root := model.GetRootUser(); root == nil || root.Id == 0 {
+// notifyCyberGuardRoot notifies the root user once per case and event. The
+// deterministic delivery key keeps the notice idempotent and outside the
+// generic per-type notification limit, which would otherwise drop the third
+// and later notices of a busy hour.
+func notifyCyberGuardRoot(caseId string, event string, subject string, content string) {
+	root := model.GetRootUser()
+	if root == nil || root.Id == 0 {
 		return
 	}
-	NotifyRootUser("cyber_guard", subject, content)
+	base := root.ToBaseUser()
+	deliveryKey := fmt.Sprintf("cyberguard-root:%s:%s", caseId, event)
+	if err := NotifyUserWithDeliveryKey(base.Id, base.Email, base.GetSetting(), dto.NewNotify("cyber_guard", subject, content, nil), deliveryKey); err != nil {
+		common.SysError(fmt.Sprintf("cyberguard: failed to notify root of %s: %v", caseId, err))
+	}
 }
 
 // recordCyberGuardSystemAudit writes a poller-originated audit entry owned by
@@ -115,7 +125,7 @@ func applyCyberGuardBan(s operation_setting.CyberGuardSetting, input model.Cyber
 		queueCyberGuardBanEmail(ban, user, fmt.Sprintf("cyberguard-ban:%d", ban.Id))
 	}
 	if notifyRoot && s.NotifyRoot {
-		notifyCyberGuardRoot(fmt.Sprintf("风控中心已自动封禁 %s", ban.CaseId),
+		notifyCyberGuardRoot(ban.CaseId, "ban", fmt.Sprintf("风控中心已自动封禁 %s", ban.CaseId),
 			fmt.Sprintf("用户 %s（ID %d）已从分组「%s」移入「%s」。触发：%s；%s。恢复：%s。",
 				ban.Username, ban.UserId, ban.OriginalGroup, ban.BanGroup, ban.UnitsSummary, ban.Reason,
 				cyberGuardExpiryText(ban.ExpiresAt, appI18n.LangZhCN)))
@@ -123,10 +133,10 @@ func applyCyberGuardBan(s operation_setting.CyberGuardSetting, input model.Cyber
 	return ban, user, nil
 }
 
-func endCyberGuardBan(banId int, actor int, reason string, note string, now int64, onlyIfDrifted bool) (*model.CyberGuardEndResult, error) {
-	outcome, err := model.EndCyberGuardBan(banId, actor, reason, note, now, onlyIfDrifted)
-	if err != nil || outcome == nil {
-		return outcome, err
+func endCyberGuardBan(banId int, actor int, reason string, note string, now int64) (*model.CyberGuardEndResult, error) {
+	outcome, err := model.EndCyberGuardBan(banId, actor, reason, note, now)
+	if err != nil {
+		return nil, err
 	}
 	if outcome.GroupChanged {
 		refreshCyberGuardGroupCache(outcome.Ban.UserId)
@@ -342,7 +352,7 @@ func CyberGuardPromote(actorId int, banId int) (*model.CyberGuardBan, error) {
 }
 
 func CyberGuardUnban(actorId int, banId int, note string) (*model.CyberGuardEndResult, error) {
-	return endCyberGuardBan(banId, actorId, model.CyberGuardEndReasonManualUnban, note, common.GetTimestamp(), false)
+	return endCyberGuardBan(banId, actorId, model.CyberGuardEndReasonManualUnban, note, common.GetTimestamp())
 }
 
 func CyberGuardDismiss(actorId int, banId int, note string) (*model.CyberGuardBan, error) {
@@ -396,28 +406,30 @@ func CyberGuardResendEmail(banId int) (*model.CyberGuardBan, error) {
 	return ban, nil
 }
 
-// CyberGuardOnAdminGroupChange is called by the admin user editor after it
-// changed a user's group. An active ban whose user left the ban group this
-// way ends as admin_override (the admin's choice is kept).
-func CyberGuardOnAdminGroupChange(userId int, adminId int, adminRole int) {
+// CyberGuardOnAdminGroupChange is called by the admin user editor right after
+// its transaction changed a user's group to newGroup (editedAt is taken before
+// that transaction). An active ban ends as admin_override and the admin's
+// group is kept, also when the poller re-applied the ban in between.
+func CyberGuardOnAdminGroupChange(userId int, newGroup string, editedAt int64, adminId int, adminRole int) {
 	active, err := model.GetActiveCyberGuardBanByUser(userId)
 	if err != nil || active == nil {
 		return
 	}
-	outcome, err := endCyberGuardBan(active.Id, adminId, model.CyberGuardEndReasonAdminOverride,
-		"group changed in the user editor", common.GetTimestamp(), true)
+	outcome, err := model.EndCyberGuardBanForAdminEdit(userId, newGroup, editedAt, adminId,
+		"group changed in the user editor", common.GetTimestamp())
 	if err != nil {
-		if !errors.Is(err, model.ErrCyberGuardBanStateChanged) {
-			common.SysError(fmt.Sprintf("cyberguard: admin override of %s failed: %v", active.CaseId, err))
-		}
+		common.SysError(fmt.Sprintf("cyberguard: admin override of %s failed: %v", active.CaseId, err))
 		return
 	}
 	if outcome == nil {
 		return
 	}
+	if outcome.GroupChanged {
+		refreshCyberGuardGroupCache(userId)
+	}
 	params := cyberGuardEndAuditParams(outcome)
 	params["target_user_id"] = userId
-	model.RecordOperationAuditLog(adminId, adminRole, fmt.Sprintf("CyberGuard %s ended: group changed by an administrator", active.CaseId),
+	model.RecordOperationAuditLog(adminId, adminRole, fmt.Sprintf("CyberGuard %s ended: group changed by an administrator", outcome.Ban.CaseId),
 		"", "cyber_guard.admin_override", params, &model.AuditAdminInfo{AdminID: adminId, AdminRole: adminRole, AuthMethod: "session"}, nil)
 }
 
@@ -465,12 +477,14 @@ type CyberGuardUserRow struct {
 	LastHitAt    int64                   `json:"last_hit_at"`
 	Ban          *CyberGuardUserBanBrief `json:"ban"`
 	IsReseller   bool                    `json:"is_reseller"`
+	IsExempt     bool                    `json:"is_exempt"`
 }
 
 // ListCyberGuardUsers lists users with CyberGuard activity (or, with a
 // keyword, any matching user so that an admin can ban by hand). Units are
-// counted like the tier evaluation (distinct units after the counting floor).
+// counted like the tier evaluation (CyberGuardUnitSpan.Counts).
 func ListCyberGuardUsers(keyword string, status string, page int, pageSize int) ([]CyberGuardUserRow, int, error) {
+	page, pageSize = max(page, 1), min(max(pageSize, 1), 100)
 	activity, err := model.ListCyberGuardUserActivity()
 	if err != nil {
 		return nil, 0, err
@@ -519,7 +533,7 @@ func ListCyberGuardUsers(keyword string, status string, page int, pageSize int) 
 		filtered = append(filtered, userId)
 	}
 	total := len(filtered)
-	start := min(max((page-1)*pageSize, 0), total)
+	start := min((page-1)*pageSize, total)
 	pageIds := filtered[start:min(start+pageSize, total)]
 
 	now := common.GetTimestamp()
@@ -531,7 +545,7 @@ func ListCyberGuardUsers(keyword string, status string, page int, pageSize int) 
 	if err != nil {
 		return nil, 0, err
 	}
-	units, err := model.ListCyberGuardCountedUnits(pageIds, now-30*86400)
+	spans, err := model.ListCyberGuardUnitSpans(pageIds)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -539,23 +553,20 @@ func ListCyberGuardUsers(keyword string, status string, page int, pageSize int) 
 	if err != nil {
 		return nil, 0, err
 	}
-	units7d, units30d := map[int]map[string]bool{}, map[int]map[string]bool{}
-	for _, unit := range units {
-		if unit.OccurredAt <= floors[unit.UserId] {
-			continue
+	units7d, units30d := map[int]int{}, map[int]int{}
+	for _, span := range spans {
+		if span.Counts(now-30*86400, floors[span.UserId]) {
+			units30d[span.UserId]++
 		}
-		if units30d[unit.UserId] == nil {
-			units30d[unit.UserId], units7d[unit.UserId] = map[string]bool{}, map[string]bool{}
-		}
-		units30d[unit.UserId][unit.UnitKey] = true
-		if unit.OccurredAt > now-7*86400 {
-			units7d[unit.UserId][unit.UnitKey] = true
+		if span.Counts(now-7*86400, floors[span.UserId]) {
+			units7d[span.UserId]++
 		}
 	}
+	s := operation_setting.GetCyberGuardSetting()
 	rows := make([]CyberGuardUserRow, 0, len(pageIds))
 	for _, userId := range pageIds {
-		row := CyberGuardUserRow{UserId: userId, Units7d: len(units7d[userId]), Units30d: len(units30d[userId]),
-			Hits30d: hits[userId].Hits, LastHitAt: lastHit[userId]}
+		row := CyberGuardUserRow{UserId: userId, Units7d: units7d[userId], Units30d: units30d[userId],
+			Hits30d: hits[userId].Hits, LastHitAt: lastHit[userId], IsExempt: s.IsExempt(userId)}
 		if user := users[userId]; user != nil {
 			row.Username, row.Email, row.CurrentGroup, row.Role = user.Username, user.MaskedEmail(), user.Group, user.Role
 		}
@@ -637,7 +648,8 @@ func GetCyberGuardOverview() (*CyberGuardOverview, error) {
 		Mode:         s.Mode,
 		IsMasterNode: common.IsMasterNode,
 		LastPoll: CyberGuardLastPoll{
-			At: state.LastRunAt, Ok: state.LastStatus == CyberGuardPollStatusOK, Status: state.LastStatus, Error: state.LastError,
+			At: state.LastRunAt, Ok: state.LastStatus == CyberGuardPollStatusOK || state.LastStatus == CyberGuardPollStatusPartial,
+			Status: state.LastStatus, Error: state.LastError,
 			Fetched: state.LastFetched, NewEvents: state.LastNewEvents, CursorEnd: state.CursorEnd,
 		},
 		Counts:            counts,
@@ -750,7 +762,8 @@ func MergeCyberGuardSettingUpdate(body []byte) (operation_setting.CyberGuardSett
 
 // UpdateCyberGuardSettings validates and persists the whole setting (empty
 // secret keeps the stored key). It returns the option fields that changed;
-// turning the mode on from off resets the poll cursor so nothing is backfilled.
+// turning the mode on from off resets the poll cursor so nothing is backfilled
+// (other settings paths rely on the off-mode poll clearing it).
 func UpdateCyberGuardSettings(input operation_setting.CyberGuardSetting) ([]string, error) {
 	current := operation_setting.GetCyberGuardSetting()
 	input.Mode = strings.TrimSpace(input.Mode)
@@ -798,13 +811,15 @@ func UpdateCyberGuardSettings(input operation_setting.CyberGuardSetting) ([]stri
 	if len(values) == 0 {
 		return changed, nil
 	}
-	if err := model.UpdateOptionsBulk(values); err != nil {
-		return nil, err
-	}
+	// Reset before the mode is written, so that no poll in between can use a
+	// cursor from before the off period.
 	if current.Mode == operation_setting.CyberGuardModeOff && input.Mode != operation_setting.CyberGuardModeOff {
 		if err := model.ResetCyberGuardPollCursor(); err != nil {
-			return changed, err
+			return nil, err
 		}
+	}
+	if err := model.UpdateOptionsBulk(values); err != nil {
+		return nil, err
 	}
 	slices.Sort(changed)
 	return changed, nil

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -34,8 +35,15 @@ const (
 	cyberGuardMaxDetailFetches     = 10
 	cyberGuardPendingBatch         = 500
 	cyberGuardMaxResponseBodyBytes = 16 << 20
+	// A poll reads at most lookback + this many seconds past its start, so a
+	// backlog drains in bounded slices instead of one unbounded window.
+	cyberGuardCatchUpSliceSeconds = int64(1800)
+	// Users with counted events this recent are re-evaluated every poll.
+	cyberGuardRecheckSeconds        = int64(1800)
+	cyberGuardHistoryCleanupSeconds = int64(3600)
 
 	CyberGuardPollStatusOK      = "ok"
+	CyberGuardPollStatusPartial = "partial" // catch-up in progress; the next poll continues
 	CyberGuardPollStatusError   = "error"
 	CyberGuardPollStatusSkipped = "skipped"
 )
@@ -48,11 +56,21 @@ var (
 
 	ErrCyberGuardPollBusy = errors.New("a CyberGuard poll is already running")
 
-	cyberGuardPollMu     sync.Mutex
-	cyberGuardHTTPClient = &http.Client{Timeout: cyberGuardHTTPTimeout}
+	cyberGuardPollMu sync.Mutex
+	// Redirects are never followed, so the admin API key is only ever sent to
+	// the configured sub2api host.
+	cyberGuardHTTPClient = &http.Client{
+		Timeout: cyberGuardHTTPTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	// cyberGuardDetailSeen remembers ops rows whose detail was already fetched
 	// (guarded by cyberGuardPollMu) so overlapping windows never refetch them.
 	cyberGuardDetailSeen = map[int64]int64{}
+	// cyberGuardHistoryCleanedAt is when the poll's succeeded system task
+	// history was last pruned (unix seconds).
+	cyberGuardHistoryCleanedAt atomic.Int64
 )
 
 // ClassifyCyberGuardOpsRow mirrors the operator report (cg_report.py): rows
@@ -165,36 +183,24 @@ func cyberGuardSub2apiGet(ctx context.Context, s operation_setting.CyberGuardSet
 	return nil
 }
 
-// fetchCyberGuardOpsRows lists every ops error row of the configured sub2api
-// API keys in [start, end). view=all is required because sub2api stores cyber
-// rows as business-limited and hides them from the default view.
-func fetchCyberGuardOpsRows(ctx context.Context, s operation_setting.CyberGuardSetting, start int64, end int64) ([]cyberGuardOpsRow, error) {
-	var rows []cyberGuardOpsRow
-	for _, apiKeyId := range s.Sub2apiApiKeyIds {
-		for page := 1; ; page++ {
-			if page > cyberGuardMaxPagesPerKey {
-				return rows, fmt.Errorf("sub2api api key %d has more than %d rows in the poll window", apiKeyId, cyberGuardMaxPagesPerKey*cyberGuardPageSize)
-			}
-			query := url.Values{}
-			query.Set("view", "all")
-			query.Set("api_key_id", strconv.FormatInt(apiKeyId, 10))
-			query.Set("start_time", time.Unix(start, 0).UTC().Format(time.RFC3339))
-			query.Set("end_time", time.Unix(end, 0).UTC().Format(time.RFC3339))
-			query.Set("sort_by", "created_at")
-			query.Set("sort_order", "asc")
-			query.Set("page", strconv.Itoa(page))
-			query.Set("page_size", strconv.Itoa(cyberGuardPageSize))
-			var result cyberGuardOpsPage
-			if err := cyberGuardSub2apiGet(ctx, s, "/api/v1/admin/ops/errors", query, &result); err != nil {
-				return rows, err
-			}
-			rows = append(rows, result.Items...)
-			if len(result.Items) == 0 || page >= result.Pages {
-				break
-			}
-		}
+// fetchCyberGuardOpsPage lists one page of the ops error rows of a sub2api API
+// key in [start, end), oldest first. view=all is required because sub2api
+// stores cyber rows as business-limited and hides them from the default view.
+func fetchCyberGuardOpsPage(ctx context.Context, s operation_setting.CyberGuardSetting, apiKeyId int64, start int64, end int64, page int) (*cyberGuardOpsPage, error) {
+	query := url.Values{}
+	query.Set("view", "all")
+	query.Set("api_key_id", strconv.FormatInt(apiKeyId, 10))
+	query.Set("start_time", time.Unix(start, 0).UTC().Format(time.RFC3339))
+	query.Set("end_time", time.Unix(end, 0).UTC().Format(time.RFC3339))
+	query.Set("sort_by", "created_at")
+	query.Set("sort_order", "asc")
+	query.Set("page", strconv.Itoa(page))
+	query.Set("page_size", strconv.Itoa(cyberGuardPageSize))
+	var result cyberGuardOpsPage
+	if err := cyberGuardSub2apiGet(ctx, s, "/api/v1/admin/ops/errors", query, &result); err != nil {
+		return nil, err
 	}
-	return rows, nil
+	return &result, nil
 }
 
 func fetchCyberGuardOpsDetail(ctx context.Context, s operation_setting.CyberGuardSetting, opsId int64) (*cyberGuardOpsRow, error) {
@@ -241,21 +247,35 @@ func RunCyberGuardPoll(ctx context.Context) (*CyberGuardPollResult, error) {
 	switch {
 	case s.Mode == operation_setting.CyberGuardModeOff:
 		result.Status, result.Error = CyberGuardPollStatusSkipped, "CyberGuard mode is off"
-		state.CursorEnd = 0 // re-enabling starts fresh instead of backfilling the off period
+		// Re-enabling starts fresh instead of backfilling the off period.
+		state.CursorEnd, state.CatchUp = 0, false
 	case s.Sub2apiAdminApiKey == "":
 		result.Status, result.Error = CyberGuardPollStatusSkipped, "sub2api admin API key is not configured"
 	default:
 		lookback := int64(s.LookbackMinutes) * 60
 		start := state.CursorEnd - lookback
+		if state.CatchUp {
+			start = state.CursorEnd // resume exactly where the page budget ran out
+		}
 		if state.CursorEnd <= 0 || state.CursorEnd < now-cyberGuardMaxCatchUpSeconds {
 			start = now - lookback // first run or long gap: never backfill beyond the lookback
 		}
-		result.WindowStart, result.WindowEnd = start, now
-		if err := ingestCyberGuardWindow(ctx, s, start, now, result); err != nil {
+		end := min(now, start+lookback+cyberGuardCatchUpSliceSeconds)
+		result.WindowStart, result.WindowEnd = start, end
+		ingestedTo, err := ingestCyberGuardWindow(ctx, s, start, end, result)
+		switch {
+		case err != nil:
+			// Rows stored before the failure stay; the cursor does not move.
 			result.Status = CyberGuardPollStatusError
 			problems = append(problems, err.Error())
-		} else {
-			state.CursorEnd = now
+		case ingestedTo < end:
+			state.CursorEnd, state.CatchUp = ingestedTo, true
+			result.Status = CyberGuardPollStatusPartial
+		default:
+			state.CursorEnd, state.CatchUp = end, false
+			if end < now {
+				result.Status = CyberGuardPollStatusPartial
+			}
 		}
 	}
 
@@ -263,6 +283,18 @@ func RunCyberGuardPoll(ctx context.Context) (*CyberGuardPollResult, error) {
 		flagged, err := resolveCyberGuardPendingEvents(s, now, result)
 		if err != nil {
 			problems = append(problems, "attribution: "+err.Error())
+		}
+		// Also re-check recently flagged users, so that a failed or interrupted
+		// evaluation (or escalation) is retried instead of waiting for a new hit.
+		recheck, err := model.ListCyberGuardRecheckUsers(now - cyberGuardRecheckSeconds)
+		if err != nil {
+			problems = append(problems, "recheck: "+err.Error())
+		}
+		slices.Sort(recheck)
+		for _, userId := range recheck {
+			if !slices.Contains(flagged, userId) {
+				flagged = append(flagged, userId)
+			}
 		}
 		for _, userId := range flagged {
 			if err := evaluateCyberGuardUser(s, userId, now, result); err != nil {
@@ -293,64 +325,96 @@ func RunCyberGuardPoll(ctx context.Context) (*CyberGuardPollResult, error) {
 	return result, nil
 }
 
-func ingestCyberGuardWindow(ctx context.Context, s operation_setting.CyberGuardSetting, start int64, end int64, result *CyberGuardPollResult) error {
-	rows, err := fetchCyberGuardOpsRows(ctx, s, start, end)
-	if err != nil {
-		return err
-	}
-	result.Fetched = len(rows)
+// ingestCyberGuardWindow stores the classified ops rows of [start, end) page
+// by page, so rows already fetched are kept when a later page fails or the
+// page budget runs out. It returns the time up to which every API key was
+// fully ingested: end, or, for a key whose page budget ran out, the created_at
+// second of the last row it stored. Rows come oldest first, so resuming there
+// re-reads at most that second; the unique ops_id makes the overlap harmless.
+func ingestCyberGuardWindow(ctx context.Context, s operation_setting.CyberGuardSetting, start int64, end int64, result *CyberGuardPollResult) (int64, error) {
 	for seenId, seenAt := range cyberGuardDetailSeen {
 		if seenAt < start-cyberGuardMaxCatchUpSeconds {
 			delete(cyberGuardDetailSeen, seenId)
 		}
 	}
+	ingestedTo := end
 	detailBudget := cyberGuardMaxDetailFetches
-	for _, row := range rows {
-		if row.ApiKeyId == nil || !slices.Contains(s.Sub2apiApiKeyIds, *row.ApiKeyId) {
-			continue
-		}
-		text := row.Message
-		category := ClassifyCyberGuardOpsRow(row.Type, text)
-		// The list omits the upstream message/detail. Only uncoded 400/502
-		// rows can hide a policy refusal there; fetch a bounded number once.
-		if category == "" && detailBudget > 0 && (row.StatusCode == http.StatusBadRequest || row.StatusCode == http.StatusBadGateway) &&
-			!strings.Contains(strings.ToLower(text), "excel bps") {
-			if _, seen := cyberGuardDetailSeen[row.Id]; !seen {
-				cyberGuardDetailSeen[row.Id] = row.CreatedAt.Unix()
-				detailBudget--
-				if detail, err := fetchCyberGuardOpsDetail(ctx, s, row.Id); err == nil {
-					text = strings.TrimSpace(text + " " + detail.UpstreamErrorMessage + " " + detail.UpstreamErrorDetail)
-					category = ClassifyCyberGuardOpsRow(row.Type, text)
+	for _, apiKeyId := range s.Sub2apiApiKeyIds {
+		lastAt := start
+		for page := 1; ; page++ {
+			if page > cyberGuardMaxPagesPerKey {
+				// More rows than one poll may read: continue from the last
+				// stored row next time. A full budget inside one second skips
+				// the rest of that second rather than stalling forever.
+				ingestedTo = min(ingestedTo, max(lastAt, start+1))
+				break
+			}
+			opsPage, err := fetchCyberGuardOpsPage(ctx, s, apiKeyId, start, end, page)
+			if err != nil {
+				return ingestedTo, err
+			}
+			result.Fetched += len(opsPage.Items)
+			for _, row := range opsPage.Items {
+				if err := storeCyberGuardOpsRow(ctx, s, row, &detailBudget, result); err != nil {
+					return ingestedTo, err
 				}
+				lastAt = max(lastAt, row.CreatedAt.Unix())
+			}
+			if len(opsPage.Items) == 0 || page >= opsPage.Pages {
+				break
 			}
 		}
-		if category == "" {
-			continue
+	}
+	return ingestedTo, nil
+}
+
+// storeCyberGuardOpsRow classifies one ops row and stores it once when it is
+// a content-policy refusal. The list omits the upstream message/detail; only
+// uncoded 400/502 rows can hide a policy refusal there, so a bounded number of
+// those details is fetched once per row.
+func storeCyberGuardOpsRow(ctx context.Context, s operation_setting.CyberGuardSetting, row cyberGuardOpsRow, detailBudget *int, result *CyberGuardPollResult) error {
+	if row.ApiKeyId == nil || !slices.Contains(s.Sub2apiApiKeyIds, *row.ApiKeyId) {
+		return nil
+	}
+	text := row.Message
+	category := ClassifyCyberGuardOpsRow(row.Type, text)
+	if category == "" && *detailBudget > 0 && (row.StatusCode == http.StatusBadRequest || row.StatusCode == http.StatusBadGateway) &&
+		!strings.Contains(strings.ToLower(text), "excel bps") {
+		if _, seen := cyberGuardDetailSeen[row.Id]; !seen {
+			cyberGuardDetailSeen[row.Id] = row.CreatedAt.Unix()
+			*detailBudget--
+			if detail, err := fetchCyberGuardOpsDetail(ctx, s, row.Id); err == nil {
+				text = strings.TrimSpace(text + " " + detail.UpstreamErrorMessage + " " + detail.UpstreamErrorDetail)
+				category = ClassifyCyberGuardOpsRow(row.Type, text)
+			}
 		}
-		event := &model.CyberGuardEvent{
-			OpsId:            row.Id,
-			OccurredAt:       row.CreatedAt.Unix(),
-			Sub2apiRequestId: model.TruncateCyberGuardText(row.RequestId, 128),
-			ApiKeyId:         *row.ApiKeyId,
-			AccountName:      model.TruncateCyberGuardText(row.AccountName, 128),
-			Category:         category,
-			ErrorType:        model.TruncateCyberGuardText(row.Type, 64),
-			StatusCode:       row.StatusCode,
-			Endpoint:         model.TruncateCyberGuardText(firstNonEmpty(row.InboundEndpoint, row.RequestPath), 128),
-			Model:            model.TruncateCyberGuardText(firstNonEmpty(row.RequestedModel, row.Model), 128),
-			Message:          model.TruncateCyberGuardText(text, 300),
-			State:            model.CyberGuardEventStatePending,
-		}
-		if row.AccountId != nil {
-			event.AccountId = *row.AccountId
-		}
-		created, err := model.InsertCyberGuardEvent(event)
-		if err != nil {
-			return fmt.Errorf("store ops row %d: %w", row.Id, err)
-		}
-		if created {
-			result.NewEvents++
-		}
+	}
+	if category == "" {
+		return nil
+	}
+	event := &model.CyberGuardEvent{
+		OpsId:            row.Id,
+		OccurredAt:       row.CreatedAt.Unix(),
+		Sub2apiRequestId: model.TruncateCyberGuardText(row.RequestId, 128),
+		ApiKeyId:         *row.ApiKeyId,
+		AccountName:      model.TruncateCyberGuardText(row.AccountName, 128),
+		Category:         category,
+		ErrorType:        model.TruncateCyberGuardText(row.Type, 64),
+		StatusCode:       row.StatusCode,
+		Endpoint:         model.TruncateCyberGuardText(firstNonEmpty(row.InboundEndpoint, row.RequestPath), 128),
+		Model:            model.TruncateCyberGuardText(firstNonEmpty(row.RequestedModel, row.Model), 128),
+		Message:          model.TruncateCyberGuardText(text, 300),
+		State:            model.CyberGuardEventStatePending,
+	}
+	if row.AccountId != nil {
+		event.AccountId = *row.AccountId
+	}
+	created, err := model.InsertCyberGuardEvent(event)
+	if err != nil {
+		return fmt.Errorf("store ops row %d: %w", row.Id, err)
+	}
+	if created {
+		result.NewEvents++
 	}
 	return nil
 }
@@ -530,16 +594,22 @@ func matchCyberGuardTier(s operation_setting.CyberGuardSetting, userId int, now 
 	if err != nil {
 		return nil, "", err
 	}
+	spans, err := model.ListCyberGuardUnitSpans([]int{userId})
+	if err != nil {
+		return nil, "", err
+	}
 	parts := make([]string, 0, len(s.Tiers))
 	var best *cyberGuardTierMatch
 	for i, tier := range s.Tiers {
-		since := max(now-int64(tier.WindowDays)*86400, floor)
-		units, err := model.CountCyberGuardUnits(userId, since)
-		if err != nil {
-			return nil, "", err
+		since := now - int64(tier.WindowDays)*86400
+		units := 0
+		for _, span := range spans {
+			if span.Counts(since, floor) {
+				units++
+			}
 		}
 		parts = append(parts, fmt.Sprintf("%d天%d个", tier.WindowDays, units))
-		if units >= int64(tier.MinUnits) && (best == nil || cyberGuardTierStricter(tier, best.Tier)) {
+		if units >= tier.MinUnits && (best == nil || cyberGuardTierStricter(tier, best.Tier)) {
 			best = &cyberGuardTierMatch{Index: i, Tier: tier}
 		}
 	}
@@ -561,6 +631,9 @@ func evaluateCyberGuardUser(s operation_setting.CyberGuardSetting, userId int, n
 	}
 	if active != nil {
 		previousExpiry := active.ExpiresAt
+		if previousExpiry == 0 || (match.Tier.BanHours > 0 && active.StartedAt+int64(match.Tier.BanHours)*3600 <= previousExpiry) {
+			return nil // nothing stricter to apply; skip the locking transaction
+		}
 		ban, changed, err := model.EscalateCyberGuardBan(active.Id, match.Index, match.Tier.BanHours, match.Summary, now)
 		if err != nil || !changed {
 			return err
@@ -615,7 +688,7 @@ func evaluateCyberGuardUser(s operation_setting.CyberGuardSetting, userId int, n
 	if created {
 		result.Proposals++
 		if s.NotifyRoot {
-			notifyCyberGuardRoot(fmt.Sprintf("风控中心封禁建议 %s", proposal.CaseId),
+			notifyCyberGuardRoot(proposal.CaseId, "proposal", fmt.Sprintf("风控中心封禁建议 %s", proposal.CaseId),
 				fmt.Sprintf("观察模式：用户 %s（ID %d，分组 %s）达到封禁线（%s，%s）。请在「风控中心」确认封禁或忽略。",
 					proposal.Username, userId, proposal.OriginalGroup, match.Summary, proposal.Reason))
 		}
@@ -634,7 +707,7 @@ func expireCyberGuardBans(now int64, result *CyberGuardPollResult) error {
 		return err
 	}
 	for _, ban := range due {
-		outcome, err := endCyberGuardBan(ban.Id, 0, model.CyberGuardEndReasonExpired, "", now, false)
+		outcome, err := endCyberGuardBan(ban.Id, 0, model.CyberGuardEndReasonExpired, "", now)
 		if err != nil {
 			if errors.Is(err, model.ErrCyberGuardBanStateChanged) {
 				continue
@@ -670,7 +743,7 @@ func reapplyCyberGuardDrift(now int64, result *CyberGuardPollResult) error {
 			continue
 		}
 		if !exists {
-			outcome, err := endCyberGuardBan(ban.Id, 0, model.CyberGuardEndReasonUserMissing, "", now, false)
+			outcome, err := endCyberGuardBan(ban.Id, 0, model.CyberGuardEndReasonUserMissing, "", now)
 			if err == nil {
 				recordCyberGuardSystemAudit("cyber_guard.unban", ban.UserId, cyberGuardEndAuditParams(outcome),
 					fmt.Sprintf("CyberGuard ended %s: user %d no longer exists", ban.CaseId, ban.UserId))
@@ -679,7 +752,9 @@ func reapplyCyberGuardDrift(now int64, result *CyberGuardPollResult) error {
 			}
 			continue
 		}
-		outcome, err := model.ReapplyCyberGuardBanDrift(ban.Id, now)
+		// Stamp the real time: an admin edit made while this poll was running
+		// recognises a re-apply after it by updated_at (EndCyberGuardBanForAdminEdit).
+		outcome, err := model.ReapplyCyberGuardBanDrift(ban.Id, common.GetTimestamp())
 		if err != nil {
 			return err
 		}
@@ -702,11 +777,14 @@ type cyberGuardPollHandler struct{}
 
 func (cyberGuardPollHandler) Type() string { return model.SystemTaskTypeCyberGuardPoll }
 
+// Enabled is always true outside off mode. While off, a run is needed only to
+// end a timed ban that is due, or once to clear the cursor so that turning
+// the mode back on (through any settings path) never backfills the off period.
 func (cyberGuardPollHandler) Enabled() bool {
 	if operation_setting.GetCyberGuardSetting().Mode != operation_setting.CyberGuardModeOff {
 		return true
 	}
-	return model.HasTimedActiveCyberGuardBans() // expiry must keep running while off
+	return model.HasDueCyberGuardBans(common.GetTimestamp()) || model.CyberGuardPollCursorSet()
 }
 
 func (cyberGuardPollHandler) Interval() time.Duration {
@@ -729,6 +807,17 @@ func (cyberGuardPollHandler) Run(ctx context.Context, task *model.SystemTask, ru
 	}
 	if finishErr := model.FinishSystemTask(task.TaskID, runnerID, status, result, errorMessage); finishErr != nil {
 		logSystemTaskLockError(ctx, task, finishErr)
+	}
+	// One row per poll would grow system_tasks by thousands of rows a day.
+	// Hourly, drop this type's succeeded history; the newest row (which the
+	// scheduler needs) and failed runs are kept.
+	if now := common.GetTimestamp(); now-cyberGuardHistoryCleanedAt.Load() >= cyberGuardHistoryCleanupSeconds {
+		cyberGuardHistoryCleanedAt.Store(now)
+		if _, err := model.DeleteSystemTaskHistory(model.SystemTaskFilter{
+			Type: model.SystemTaskTypeCyberGuardPoll, Status: model.SystemTaskStatusSucceeded,
+		}); err != nil {
+			common.SysError("cyberguard: failed to prune poll task history: " + err.Error())
+		}
 	}
 }
 

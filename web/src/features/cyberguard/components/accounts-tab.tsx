@@ -29,7 +29,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { formatTimestampToDate } from '@/lib/format'
 
 import { CYBERGUARD_QUERY_KEY, fetchCyberGuardAccounts } from '../api'
-import { schedulableLabel } from '../lib/labels'
+import { accountStatusLabel, schedulableLabel } from '../lib/labels'
 
 const ACCOUNT_STATUS_VARIANT: Record<string, StatusVariant> = {
   active: 'success',
@@ -139,7 +139,7 @@ export function AccountsTab() {
               cell: (row) => (
                 <StatusBadge
                   copyable={false}
-                  label={row.status === 'unknown' ? t('Unknown') : row.status}
+                  label={accountStatusLabel(row.status, t)}
                   variant={ACCOUNT_STATUS_VARIANT[row.status] ?? 'warning'}
                 />
               ),

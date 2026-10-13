@@ -48,14 +48,16 @@ export function AdoptForm(props: {
 }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  // ['groups'] is shared with the channel, user and usage-log screens, which
+  // all cache the whole {success, message, data} envelope under it.
   const groupsQuery = useQuery({
     queryKey: ['groups'],
-    queryFn: async () => requireServerSuccess(await getGroups()).data ?? [],
+    queryFn: async () => requireServerSuccess(await getGroups()),
   })
   const groupOptions = [
     ...new Set([
       props.user.suggested_original_group,
-      ...(groupsQuery.data ?? []),
+      ...(groupsQuery.data?.data ?? []),
     ]),
   ].filter((group) => group && group !== props.banGroup)
   const form = useForm<AdoptFormValues>({

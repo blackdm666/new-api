@@ -47,7 +47,8 @@ export type CyberGuardOverview = {
   last_poll: {
     at: number
     ok: boolean
-    status: '' | 'ok' | 'error' | 'skipped'
+    /** partial: a catch-up poll read part of the backlog; the next run continues. */
+    status: '' | 'ok' | 'partial' | 'error' | 'skipped'
     error: string
     fetched: number
     new_events: number
@@ -89,6 +90,8 @@ export type CyberGuardUserRow = {
     expires_at: number
   } | null
   is_reseller: boolean
+  /** True when the user id is in the exempt_user_ids setting. */
+  is_exempt?: boolean
 }
 
 export type CyberGuardEvent = {
@@ -213,7 +216,7 @@ export type CyberGuardSettingsUpdate = Omit<
 > & { sub2api_admin_api_key?: string }
 
 export type CyberGuardPollResult = {
-  status: 'ok' | 'error' | 'skipped'
+  status: 'ok' | 'partial' | 'error' | 'skipped'
   error?: string
   window_start: number
   window_end: number

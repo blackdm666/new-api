@@ -63,6 +63,17 @@ export function CyberGuardWorkspace(props: {
             }
           )
         )
+      } else if (result.status === 'partial') {
+        toast.info(
+          t(
+            'Poll caught up partly: {{fetched}} rows read, {{events}} new events, {{bans}} bans applied. The next poll continues with the rest of the backlog.',
+            {
+              fetched: result.fetched,
+              events: result.new_events,
+              bans: result.bans_applied,
+            }
+          )
+        )
       } else if (result.status === 'skipped') {
         toast.warning(
           t(

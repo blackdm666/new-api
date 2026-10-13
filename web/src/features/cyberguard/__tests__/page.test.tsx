@@ -26,6 +26,7 @@ import {
 } from '@tanstack/react-router'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { Toaster } from 'sonner'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -66,10 +67,13 @@ const overview: CyberGuardOverview = {
 
 const emptyPage = { page: 1, page_size: 10, total: 0, items: [] }
 
-async function renderPage(initialUrl: string) {
+async function renderPage(
+  initialUrl: string,
+  overviewData: CyberGuardOverview = overview
+) {
   const get = vi.spyOn(api, 'get').mockImplementation((url) => {
     if (url === '/api/cyber-guard/overview') {
-      return Promise.resolve({ data: { success: true, data: overview } })
+      return Promise.resolve({ data: { success: true, data: overviewData } })
     }
     if (url === '/api/cyber-guard/events' || url === '/api/cyber-guard/bans') {
       return Promise.resolve({ data: { success: true, data: emptyPage } })
@@ -103,6 +107,7 @@ async function renderPage(initialUrl: string) {
   render(
     <QueryClientProvider client={client}>
       <RouterProvider router={router} />
+      <Toaster />
     </QueryClientProvider>
   )
   return { get, router }
@@ -162,6 +167,66 @@ describe('CyberGuard page', () => {
     expect(
       await screen.findByRole('button', { name: 'Import existing bans' })
     ).toBeVisible()
+  })
+
+  test('a partial catch-up poll shows Catching up with a hint instead of a failure', async () => {
+    await renderPage('/admin-cyberguard/', {
+      ...overview,
+      last_poll: {
+        ...overview.last_poll,
+        at: 1_760_000_000,
+        ok: true,
+        status: 'partial',
+        fetched: 20_000,
+        new_events: 12,
+        cursor_end: 1_759_990_000,
+      },
+    })
+
+    expect(await screen.findByText('Catching up')).toBeVisible()
+    expect(
+      screen.getByText(
+        'Catching up on a backlog. The next poll continues where this one stopped.'
+      )
+    ).toBeVisible()
+    expect(screen.queryByText('Failed')).toBeNull()
+  })
+
+  test('a manual poll that only caught up partly reports progress, not a failure', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, 'post').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          status: 'partial',
+          window_start: 1_759_990_000,
+          window_end: 1_760_000_000,
+          fetched: 20_000,
+          new_events: 12,
+          attributed: 12,
+          unattributed: 0,
+          counted: 3,
+          bans_applied: 1,
+          proposals: 0,
+          escalated: 0,
+          expired: 0,
+          drift_reapplied: 0,
+        },
+      },
+    })
+    await renderPage('/admin-cyberguard/', {
+      ...overview,
+      is_master_node: true,
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Poll now' }))
+
+    expect(
+      await screen.findByText(
+        'Poll caught up partly: 20000 rows read, 12 new events, 1 bans applied. The next poll continues with the rest of the backlog.'
+      )
+    ).toBeVisible()
+    expect(screen.queryByText(/^Poll failed/)).toBeNull()
   })
 
   test('an unknown tab in the URL falls back to the overview', async () => {

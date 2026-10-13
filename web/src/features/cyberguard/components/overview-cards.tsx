@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/card'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatTimestampRelative, formatTimestampToDate } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 import type { CyberGuardOverview } from '../types'
 
@@ -43,6 +44,7 @@ function Row(props: { label: string; children: ReactNode }) {
 
 const POLL_STATUS_VARIANT: Record<string, StatusVariant> = {
   ok: 'success',
+  partial: 'warning',
   error: 'danger',
   skipped: 'warning',
 }
@@ -53,6 +55,7 @@ export function LastPollCard(props: { poll: CyberGuardOverview['last_poll'] }) {
   const poll = props.poll
   const statusLabels: Record<string, string> = {
     ok: t('Succeeded'),
+    partial: t('Catching up'),
     error: t('Failed'),
     skipped: t('Skipped'),
   }
@@ -93,8 +96,22 @@ export function LastPollCard(props: { poll: CyberGuardOverview['last_poll'] }) {
             {formatTimestampToDate(poll.cursor_end)}
           </Row>
         </dl>
+        {poll.status === 'partial' && (
+          <p className='text-muted-foreground mt-3 text-sm'>
+            {t(
+              'Catching up on a backlog. The next poll continues where this one stopped.'
+            )}
+          </p>
+        )}
         {poll.error && (
-          <p className='text-destructive mt-3 text-sm break-words'>
+          <p
+            className={cn(
+              'mt-3 text-sm break-words',
+              poll.status === 'partial'
+                ? 'text-muted-foreground'
+                : 'text-destructive'
+            )}
+          >
             {poll.error}
           </p>
         )}

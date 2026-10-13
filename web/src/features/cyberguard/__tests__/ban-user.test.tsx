@@ -149,6 +149,37 @@ describe('manual ban from the users tab', () => {
     expect(banned.queryByRole('button', { name: 'Ban' })).toBeNull()
   })
 
+  test('an exempt user cannot be banned and the disabled button says why', async () => {
+    renderUsers([userRow(4872, { is_exempt: true }), userRow(5950)])
+
+    await screen.findByText('user4872')
+    const exemptBan = rowOf('user4872').getByRole('button', { name: 'Ban' })
+    expect(exemptBan).toBeDisabled()
+    expect(exemptBan).toHaveAttribute('title', 'Exempt users cannot be banned')
+    expect(rowOf('user4872').getByText('Exempt')).toBeVisible()
+    expect(rowOf('user5950').getByRole('button', { name: 'Ban' })).toBeEnabled()
+  })
+
+  test('an exempt user with an open proposal cannot have it applied', async () => {
+    renderUsers([
+      userRow(4872, {
+        is_exempt: true,
+        ban: {
+          id: 4,
+          case_id: 'CG-4',
+          status: 'observed',
+          source: 'auto',
+          expires_at: 0,
+        },
+      }),
+    ])
+
+    await screen.findByText('user4872')
+    expect(
+      rowOf('user4872').getByRole('button', { name: 'Apply ban' })
+    ).toBeDisabled()
+  })
+
   test('searching sends the keyword and restarts at page 1', async () => {
     const user = userEvent.setup()
     const { get } = renderUsers([userRow(5950)])

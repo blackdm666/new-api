@@ -195,23 +195,6 @@ func GetCyberGuardUsers(userIds []int) (map[int]*CyberGuardUser, error) {
 	return result, nil
 }
 
-type CyberGuardUnitRow struct {
-	UserId     int
-	UnitKey    string
-	OccurredAt int64
-}
-
-func ListCyberGuardCountedUnits(userIds []int, since int64) ([]CyberGuardUnitRow, error) {
-	var rows []CyberGuardUnitRow
-	if len(userIds) == 0 {
-		return rows, nil
-	}
-	err := DB.Model(&CyberGuardEvent{}).Select("user_id, unit_key, occurred_at").
-		Where("user_id IN ? AND state = ? AND occurred_at > ?", userIds, CyberGuardEventStateCounted, since).
-		Scan(&rows).Error
-	return rows, err
-}
-
 func CyberGuardCountingFloors(userIds []int) (map[int]int64, error) {
 	floors := make(map[int]int64, len(userIds))
 	if len(userIds) == 0 {

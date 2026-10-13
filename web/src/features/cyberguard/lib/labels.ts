@@ -173,6 +173,15 @@ export function banExpiryLabel(expiresAt: number, t: TFunction): string {
   return formatTimestampToDate(expiresAt)
 }
 
+/** sub2api account status; "unknown" when sub2api could not be asked. */
+export function accountStatusLabel(status: string, t: TFunction): string {
+  if (status === 'active') return t('Enabled')
+  if (status === 'disabled') return t('Disabled')
+  if (status === 'error') return t('Error')
+  if (status === 'unknown') return t('Unknown')
+  return status
+}
+
 /** sub2api account schedulability; null when sub2api could not be asked. */
 export function schedulableLabel(value: boolean | null, t: TFunction): string {
   if (value === null) return t('Unknown')
