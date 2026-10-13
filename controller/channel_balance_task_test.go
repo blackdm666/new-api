@@ -24,9 +24,11 @@ func TestLowBalanceAlertNotifiesOnceAndRearmsAfterRecovery(t *testing.T) {
 
 	root := &model.User{Username: "root", Password: "unused", Email: "root@example.com", Role: common.RoleRootUser, Status: common.UserStatusEnabled}
 	require.NoError(t, db.Create(root).Error)
+	baseURL := "https://upstream.example.com/v1"
 	channel := &model.Channel{
-		Name:   "alert-channel",
-		Status: common.ChannelStatusEnabled,
+		Name:    "alert-channel",
+		Status:  common.ChannelStatusEnabled,
+		BaseURL: &baseURL,
 		BalanceInfo: &model.ChannelBalanceInfo{
 			Remaining:   "5",
 			Unit:        model.ChannelBalanceUnitMoney,
@@ -56,6 +58,9 @@ func TestLowBalanceAlertNotifiesOnceAndRearmsAfterRecovery(t *testing.T) {
 	var deliveryCount int64
 	require.NoError(t, db.Model(&model.EmailDelivery{}).Count(&deliveryCount).Error)
 	assert.EqualValues(t, 1, deliveryCount)
+	var delivery model.EmailDelivery
+	require.NoError(t, db.First(&delivery).Error)
+	assert.Contains(t, delivery.Body, `上游地址：<a href="https://upstream.example.com" style="color:#0066cc;text-decoration:none;">https://upstream.example.com</a>`)
 
 	recovered := *channel.BalanceInfo
 	recovered.Remaining = "20"

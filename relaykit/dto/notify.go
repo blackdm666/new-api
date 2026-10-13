@@ -9,6 +9,10 @@ type Notify struct {
 
 const ContentValueParam = "{{value}}"
 
+// NotifyLink is a notification value that email renders as a clickable link.
+// Other channels receive the plain URL. Only code-built http(s) URLs belong here.
+type NotifyLink string
+
 const (
 	NotifyTypeQuotaExceed     = "quota_exceed"
 	NotifyTypeChannelUpdate   = "channel_update"

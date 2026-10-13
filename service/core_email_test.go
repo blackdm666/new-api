@@ -202,6 +202,20 @@ func TestBuildSystemAlertEmailEscapesUntrustedProviderContent(t *testing.T) {
 	assert.NotContains(t, body, `<script>alert(1)</script>`)
 }
 
+func TestBuildSystemAlertEmailRendersOnlyHTTPNotifyLinksAsAnchors(t *testing.T) {
+	data := dto.NewNotify(
+		dto.NotifyTypeInspectionAlert,
+		"Channel balance",
+		"Channel <b>{{value}}</b>\nUpstream: {{value}}\nOther: {{value}}",
+		[]any{"<i>name</i>", dto.NotifyLink(`https://up.example.com/?a=1&b="x"`), dto.NotifyLink("javascript:alert(1)")},
+	)
+	_, body := BuildSystemAlertEmail("en", data)
+	assert.Contains(t, body, "Channel &lt;b&gt;&lt;i&gt;name&lt;/i&gt;&lt;/b&gt;")
+	assert.Contains(t, body, `Upstream: <a href="https://up.example.com/?a=1&amp;b=&#34;x&#34;" style="color:#0066cc;text-decoration:none;">https://up.example.com/?a=1&amp;b=&#34;x&#34;</a>`)
+	assert.Contains(t, body, "Other: javascript:alert(1)")
+	assert.NotContains(t, body, `href="javascript:`)
+}
+
 func TestNotificationEmailTemplateKeyRoutesBusinessNotifications(t *testing.T) {
 	tests := map[string]string{
 		dto.NotifyTypeQuotaExceed:          constant.EmailTemplateKeyQuotaWarningUser,

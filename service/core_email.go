@@ -95,15 +95,24 @@ func BuildPasswordResetEmail(lang string, email string, token string) (string, s
 }
 
 func renderNotificationContent(data dto.Notify) string {
-	content := data.Content
-	for _, value := range data.Values {
-		content = strings.Replace(content, dto.ContentValueParam, fmt.Sprintf("%v", value), 1)
-	}
 	// Quota warnings are assembled entirely by this service and may contain the
 	// trusted, escaped top-up link. All other notification bodies can include
 	// upstream/provider error text and must be treated as untrusted plain text.
-	if data.Type != dto.NotifyTypeQuotaExceed {
+	trusted := data.Type == dto.NotifyTypeQuotaExceed
+	content := data.Content
+	if !trusted {
 		content = html.EscapeString(content)
+	}
+	for _, value := range data.Values {
+		replacement := fmt.Sprintf("%v", value)
+		link, isLink := value.(dto.NotifyLink)
+		if isLink && (strings.HasPrefix(string(link), "https://") || strings.HasPrefix(string(link), "http://")) {
+			escapedURL := html.EscapeString(string(link))
+			replacement = fmt.Sprintf(`<a href="%s" style="color:#0066cc;text-decoration:none;">%s</a>`, escapedURL, escapedURL)
+		} else if !trusted {
+			replacement = html.EscapeString(replacement)
+		}
+		content = strings.Replace(content, dto.ContentValueParam, replacement, 1)
 	}
 	return strings.ReplaceAll(content, "\n", "<br/>")
 }
