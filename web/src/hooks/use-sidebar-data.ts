@@ -37,6 +37,7 @@ import {
   ServerCog,
   Settings,
   Share2,
+  ShieldAlert,
   ShieldCheck,
   User,
   Users,
@@ -209,6 +210,13 @@ export function buildSidebarData(
             title: t('Email Marketing'),
             url: '/admin-marketing',
             icon: MailPlus,
+            requiredRole: ROLE.SUPER_ADMIN,
+          },
+          // 88api cyberguard: 风控中心
+          {
+            title: t('CyberGuard'),
+            url: '/admin-cyberguard',
+            icon: ShieldAlert,
             requiredRole: ROLE.SUPER_ADMIN,
           },
           {

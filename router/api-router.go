@@ -364,6 +364,28 @@ func SetApiRouter(router *gin.Engine) {
 			marketingRoute.DELETE("/suppressions/:id", controller.DeleteMarketingSuppression)
 		}
 
+		// 88api cyberguard: 风控中心 (root only, same guards as marketing)
+		cyberGuardRoute := apiRouter.Group("/cyber-guard")
+		cyberGuardRoute.Use(middleware.DisableCache(), middleware.RootAuth())
+		{
+			cyberGuardRoute.GET("/overview", controller.GetCyberGuardOverview)
+			cyberGuardRoute.GET("/users", controller.ListCyberGuardUsers)
+			cyberGuardRoute.GET("/events", controller.ListCyberGuardEvents)
+			cyberGuardRoute.POST("/events/:id/void", controller.VoidCyberGuardEvent)
+			cyberGuardRoute.GET("/bans", controller.ListCyberGuardBans)
+			cyberGuardRoute.POST("/bans", controller.CreateCyberGuardBan)
+			cyberGuardRoute.POST("/bans/:id/unban", controller.UnbanCyberGuard)
+			cyberGuardRoute.POST("/bans/:id/promote", controller.PromoteCyberGuardBan)
+			cyberGuardRoute.POST("/bans/:id/dismiss", controller.DismissCyberGuardBan)
+			cyberGuardRoute.POST("/bans/:id/resend-email", middleware.CriticalRateLimit(), controller.ResendCyberGuardBanEmail)
+			cyberGuardRoute.GET("/adoptable", controller.ListCyberGuardAdoptable)
+			cyberGuardRoute.POST("/adopt", controller.AdoptCyberGuardBan)
+			cyberGuardRoute.GET("/accounts", controller.ListCyberGuardAccounts)
+			cyberGuardRoute.GET("/settings", controller.GetCyberGuardSettings)
+			cyberGuardRoute.PUT("/settings", controller.UpdateCyberGuardSettings)
+			cyberGuardRoute.POST("/poll-now", controller.PollCyberGuardNow)
+		}
+
 		// Custom OAuth provider management (root only)
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")
 		customOAuthRoute.Use(middleware.RootAuth())

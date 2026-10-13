@@ -30,6 +30,7 @@ import {
   RotateCcw,
   Save,
   ScanSearch,
+  ShieldAlert,
   ShieldCheck,
   type LucideIcon,
 } from 'lucide-react'
@@ -139,6 +140,15 @@ const TEMPLATE_META: Record<string, TemplateMeta> = {
     group: 'account',
     audience: 'user',
     icon: LockKeyhole,
+  },
+  // 88api cyberguard
+  cyber_guard_ban: {
+    name: 'Account restriction notice',
+    description:
+      'Sent when CyberGuard moves a user into the ban group and pauses the GPT groups. Unbanning sends no email.',
+    group: 'account',
+    audience: 'user',
+    icon: ShieldAlert,
   },
   quota_warning_user: {
     name: 'Quota warning',
