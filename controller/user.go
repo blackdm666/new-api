@@ -975,6 +975,9 @@ func UpdateUser(c *gin.Context) {
 		auditDetails["inviter_id"] = *request.InviterId
 	}
 	recordManageAuditFor(c, updatedUser.Id, "user.update", auditDetails)
+	if originUser.Group != updatedUser.Group { // 88api cyberguard: an admin group edit ends an active ban as admin_override
+		service.CyberGuardOnAdminGroupChange(updatedUser.Id, c.GetInt("id"), c.GetInt("role"))
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

@@ -201,3 +201,21 @@ test('shows email marketing only as a Root administration entry', () => {
   assert.equal(marketing.title, 'Email Marketing')
   assert.equal(marketing.requiredRole, ROLE.SUPER_ADMIN)
 })
+
+// 88api cyberguard
+test('places CyberGuard between Email Marketing and System Info for Root only', () => {
+  const sidebar = buildSidebarData(translate)
+  const adminItems = sidebar.navGroups.find(
+    (group) => group.id === 'admin'
+  )?.items
+
+  assert.ok(adminItems)
+  const urls = adminItems.map((item) => ('url' in item ? item.url : undefined))
+  const index = urls.indexOf('/admin-cyberguard')
+  const cyberGuard = adminItems[index]
+
+  assert.equal(urls[index - 1], '/admin-marketing')
+  assert.equal(urls[index + 1], '/system-info')
+  assert.equal(cyberGuard.title, 'CyberGuard')
+  assert.equal(cyberGuard.requiredRole, ROLE.SUPER_ADMIN)
+})

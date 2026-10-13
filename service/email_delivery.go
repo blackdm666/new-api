@@ -21,6 +21,8 @@ func smtpProfileForCategory(category string) string {
 	switch strings.TrimSpace(category) {
 	case "email_verification", "password_reset", model.UserNoticeCategory:
 		return common.SMTPProfileSecurity
+	case CyberGuardBanEmailCategory: // 88api cyberguard: same sender as user notices
+		return common.SMTPProfileSecurity
 	case "marketing_custom", "email_preview":
 		return common.SMTPProfileMarketing
 	default:

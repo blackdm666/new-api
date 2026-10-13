@@ -24,6 +24,7 @@ const (
 	SystemTaskTypeAsyncTaskPoll        = "async_task_poll"
 	SystemTaskTypeEmailDeliveryCleanup = "email_delivery_cleanup"
 	SystemTaskTypeMarketingDispatch    = "marketing_dispatch"
+	SystemTaskTypeCyberGuardPoll       = "cyber_guard_poll" // 88api cyberguard
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

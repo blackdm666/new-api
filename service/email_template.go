@@ -104,6 +104,7 @@ func sampleVarsFromSpecForLang(spec constant.EmailTemplateSpec, lang string) map
 	applyCoreEmailTemplatePreviewSamples(spec.Key, lang, vars)
 	applyInvoiceTemplatePreviewSamples(spec.Key, lang, vars)
 	applyAffiliateTemplatePreviewSamples(spec.Key, lang, vars)
+	applyCyberGuardTemplatePreviewSamples(spec.Key, lang, vars) // 88api cyberguard
 	return vars
 }
 
