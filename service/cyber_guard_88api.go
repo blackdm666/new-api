@@ -286,7 +286,7 @@ func RunCyberGuardPoll(ctx context.Context) (*CyberGuardPollResult, error) {
 		}
 		// Also re-check recently flagged users, so that a failed or interrupted
 		// evaluation (or escalation) is retried instead of waiting for a new hit.
-		recheck, err := model.ListCyberGuardRecheckUsers(now - cyberGuardRecheckSeconds)
+		recheck, err := model.ListCyberGuardRecheckUsers(now-cyberGuardRecheckSeconds, s.Mode == operation_setting.CyberGuardModeObserve)
 		if err != nil {
 			problems = append(problems, "recheck: "+err.Error())
 		}
@@ -585,6 +585,8 @@ type cyberGuardTierMatch struct {
 	Index   int
 	Tier    operation_setting.CyberGuardTier
 	Summary string
+	// Floor is the counting floor the units were counted against.
+	Floor int64
 }
 
 // matchCyberGuardTier counts the user's distinct units per tier window (never
@@ -615,18 +617,24 @@ func matchCyberGuardTier(s operation_setting.CyberGuardSetting, userId int, now 
 	}
 	summary := strings.Join(parts, "/")
 	if best != nil {
-		best.Summary = summary
+		best.Summary, best.Floor = summary, floor
 	}
 	return best, summary, nil
 }
 
+// evaluateCyberGuardUser applies the strictest reached tier to a user: it
+// escalates an active ban, or bans (enforce) or proposes (observe). The active
+// ban is read before the counting floor, so an unban that commits in between
+// either is already in the floor or leaves the escalation to find the ban
+// ended. An unban or dismissal that commits after the floor was read makes the
+// ban or proposal refuse the stale evaluation (EvaluatedFloor).
 func evaluateCyberGuardUser(s operation_setting.CyberGuardSetting, userId int, now int64, result *CyberGuardPollResult) error {
-	match, _, err := matchCyberGuardTier(s, userId, now)
-	if err != nil || match == nil {
-		return err
-	}
 	active, err := model.GetActiveCyberGuardBanByUser(userId)
 	if err != nil {
+		return err
+	}
+	match, _, err := matchCyberGuardTier(s, userId, now)
+	if err != nil || match == nil {
 		return err
 	}
 	if active != nil {
@@ -655,15 +663,16 @@ func evaluateCyberGuardUser(s operation_setting.CyberGuardSetting, userId int, n
 		return nil // manual ban without a record: listed as adoptable, never touched automatically
 	}
 	input := model.CyberGuardBanInput{
-		UserId:        userId,
-		BanGroup:      s.BanGroup,
-		Source:        model.CyberGuardBanSourceAuto,
-		TierIndex:     match.Index,
-		BanHours:      match.Tier.BanHours,
-		UnitsSummary:  match.Summary,
-		Reason:        fmt.Sprintf("自动：第 %d 档（%d 天内 ≥%d 个被标记会话）", match.Index+1, match.Tier.WindowDays, match.Tier.MinUnits),
-		ExemptUserIds: s.ExemptUserIds,
-		Now:           now,
+		UserId:         userId,
+		BanGroup:       s.BanGroup,
+		Source:         model.CyberGuardBanSourceAuto,
+		TierIndex:      match.Index,
+		BanHours:       match.Tier.BanHours,
+		UnitsSummary:   match.Summary,
+		Reason:         fmt.Sprintf("自动：第 %d 档（%d 天内 ≥%d 个被标记会话）", match.Index+1, match.Tier.WindowDays, match.Tier.MinUnits),
+		ExemptUserIds:  s.ExemptUserIds,
+		Now:            now,
+		EvaluatedFloor: &match.Floor,
 	}
 	if s.Mode == operation_setting.CyberGuardModeEnforce {
 		ban, _, err := applyCyberGuardBan(s, input, true)
@@ -696,9 +705,14 @@ func evaluateCyberGuardUser(s operation_setting.CyberGuardSetting, userId int, n
 	return nil
 }
 
+// isCyberGuardSkippableBanError reports the refusals of an automatic ban or
+// proposal that are not poll errors: the user is protected, already banned or
+// gone, or (ErrCyberGuardBanStateChanged) an unban or dismissal made the
+// evaluation stale, and later evaluations count from the new floor.
 func isCyberGuardSkippableBanError(err error) bool {
 	return errors.Is(err, model.ErrCyberGuardProtectedUser) || errors.Is(err, model.ErrCyberGuardInBanGroup) ||
-		errors.Is(err, model.ErrCyberGuardAlreadyBanned) || errors.Is(err, model.ErrCyberGuardUserNotFound)
+		errors.Is(err, model.ErrCyberGuardAlreadyBanned) || errors.Is(err, model.ErrCyberGuardUserNotFound) ||
+		errors.Is(err, model.ErrCyberGuardBanStateChanged)
 }
 
 func expireCyberGuardBans(now int64, result *CyberGuardPollResult) error {

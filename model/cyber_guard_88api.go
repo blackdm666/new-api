@@ -311,6 +311,28 @@ type CyberGuardBanInput struct {
 	Now           int64
 	// PromoteFromId, when set, must still be an observed proposal of the user.
 	PromoteFromId int
+	// EvaluatedFloor is set for the poller's automatic decisions: the counting
+	// floor its tier evaluation used. See checkCyberGuardEvaluatedFloorTx.
+	EvaluatedFloor *int64
+}
+
+// checkCyberGuardEvaluatedFloorTx refuses an automatic ban or proposal whose
+// tier evaluation is stale: a record of the user ended (an unban or a
+// dismissal committed) after the counting floor the evaluation used, so the
+// units it counted may no longer count. Run it after locking the user, which
+// an unban locks too.
+func checkCyberGuardEvaluatedFloorTx(tx *gorm.DB, userId int, evaluatedFloor *int64) error {
+	if evaluatedFloor == nil {
+		return nil
+	}
+	floor, err := cyberGuardCountingFloor(tx, userId)
+	if err != nil {
+		return err
+	}
+	if floor > *evaluatedFloor {
+		return ErrCyberGuardBanStateChanged
+	}
+	return nil
 }
 
 // ApplyCyberGuardBan moves the user into the ban group and records an active
@@ -333,6 +355,9 @@ func ApplyCyberGuardBan(input CyberGuardBanInput) (*CyberGuardBan, *CyberGuardUs
 		}
 		if locked.Role >= common.RoleAdminUser || slices.Contains(input.ExemptUserIds, locked.Id) {
 			return ErrCyberGuardProtectedUser
+		}
+		if err := checkCyberGuardEvaluatedFloorTx(tx, locked.Id, input.EvaluatedFloor); err != nil {
+			return err
 		}
 		active, err := findOpenCyberGuardBan(tx, locked.Id, CyberGuardBanStatusActive)
 		if err != nil {
@@ -363,14 +388,22 @@ func ApplyCyberGuardBan(input CyberGuardBanInput) (*CyberGuardBan, *CyberGuardUs
 			return err
 		}
 		if len(observedIds) > 0 {
-			if err := tx.Model(&CyberGuardBan{}).Where("id IN ?", observedIds).Updates(map[string]any{
-				"status":     CyberGuardBanStatusEnded,
-				"ended_at":   input.Now,
-				"ended_by":   input.CreatedBy,
-				"end_reason": CyberGuardEndReasonPromoted,
-				"updated_at": input.Now,
-			}).Error; err != nil {
-				return err
+			result := tx.Model(&CyberGuardBan{}).
+				Where("id IN ? AND status = ?", observedIds, CyberGuardBanStatusObserved).
+				Updates(map[string]any{
+					"status":     CyberGuardBanStatusEnded,
+					"ended_at":   input.Now,
+					"ended_by":   input.CreatedBy,
+					"end_reason": CyberGuardEndReasonPromoted,
+					"updated_at": input.Now,
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			// A proposal dismissed after the ids were read must not be
+			// overwritten as promoted.
+			if result.RowsAffected != int64(len(observedIds)) {
+				return ErrCyberGuardBanStateChanged
 			}
 		}
 		if err := tx.Model(&User{}).Where("id = ?", locked.Id).Update("group", banGroup).Error; err != nil {
@@ -437,12 +470,18 @@ func endCyberGuardBanTx(tx *gorm.DB, ban *CyberGuardBan, actor int, reason strin
 // that expiry skipped its downgrade because the user was not in the upgrade
 // group, so the user goes where the expiry would have put them instead (the
 // rules mirror ExpireDueSubscriptions).
-func resolveCyberGuardRestoreTarget(tx *gorm.DB, ban *CyberGuardBan, now int64) (string, error) {
+//
+// ignoredSubscriptionIds are left out of the "still paid for" check: a
+// subscription whose revert is being repointed cannot vouch for its own group.
+func resolveCyberGuardRestoreTarget(tx *gorm.DB, ban *CyberGuardBan, now int64, ignoredSubscriptionIds ...int) (string, error) {
 	target := cyberGuardRestoreTarget(ban)
+	grantingQuery := tx.Model(&UserSubscription{}).
+		Where("user_id = ? AND status = ? AND end_time > ? AND upgrade_group = ?", ban.UserId, "active", now, target)
+	if len(ignoredSubscriptionIds) > 0 {
+		grantingQuery = grantingQuery.Where("id NOT IN ?", ignoredSubscriptionIds)
+	}
 	var granting int64
-	if err := tx.Model(&UserSubscription{}).
-		Where("user_id = ? AND status = ? AND end_time > ? AND upgrade_group = ?", ban.UserId, "active", now, target).
-		Count(&granting).Error; err != nil {
+	if err := grantingQuery.Count(&granting).Error; err != nil {
 		return "", err
 	}
 	if granting > 0 {
@@ -474,9 +513,50 @@ func resolveCyberGuardRestoreTarget(tx *gorm.DB, ban *CyberGuardBan, now int64) 
 	return "default", nil
 }
 
+// repointCyberGuardSubscriptionRevertTx runs in every transaction that ends a
+// ban of an existing user or re-applies it after a drift. A legacy plan (an
+// upgrade group and no downgrade group) bought while the user sat in the ban
+// group stored the ban group as the group its expiry reverts to; left alone,
+// that expiry would silently ban the user again after the ban ended. Such
+// active subscriptions revert to target instead: the group the user keeps or
+// gets back. A subscription whose own upgrade group is target would keep that
+// group once nobody pays for it, so it reverts to the group the ban restores
+// instead (resolveCyberGuardRestoreTarget). Call it before the ban row
+// changes. Rows are updated by primary key (no MySQL gap lock).
+func repointCyberGuardSubscriptionRevertTx(tx *gorm.DB, ban *CyberGuardBan, target string, now int64) error {
+	var subscriptions []UserSubscription
+	if err := tx.Select("id", "upgrade_group").
+		Where("user_id = ? AND status = ? AND prev_user_group = ?", ban.UserId, "active", ban.BanGroup).
+		Find(&subscriptions).Error; err != nil {
+		return err
+	}
+	var toTarget, toRestore []int
+	for _, subscription := range subscriptions {
+		if strings.TrimSpace(subscription.UpgradeGroup) == target {
+			toRestore = append(toRestore, subscription.Id)
+		} else {
+			toTarget = append(toTarget, subscription.Id)
+		}
+	}
+	if len(toTarget) > 0 {
+		if err := tx.Model(&UserSubscription{}).Where("id IN ?", toTarget).Update("prev_user_group", target).Error; err != nil {
+			return err
+		}
+	}
+	if len(toRestore) == 0 {
+		return nil
+	}
+	restore, err := resolveCyberGuardRestoreTarget(tx, ban, now, toRestore...)
+	if err != nil {
+		return err
+	}
+	return tx.Model(&UserSubscription{}).Where("id IN ?", toRestore).Update("prev_user_group", restore).Error
+}
+
 // EndCyberGuardBan ends an active ban. The group is restored only while the
 // user is still in the ban group; otherwise the ban ends as admin_override and
-// the group is left alone.
+// the group is left alone. Either way a subscription bought during the ban
+// reverts to the group the user ends up in.
 func EndCyberGuardBan(banId int, actor int, endReason string, note string, now int64) (*CyberGuardEndResult, error) {
 	existing, err := GetCyberGuardBan(banId)
 	if err != nil {
@@ -512,6 +592,11 @@ func EndCyberGuardBan(banId int, actor int, endReason string, note string, now i
 		default:
 			reason = CyberGuardEndReasonAdminOverride
 			res.FromGroup, res.ToGroup = user.Group, user.Group
+		}
+		if userExists {
+			if err := repointCyberGuardSubscriptionRevertTx(tx, ban, res.ToGroup, now); err != nil {
+				return err
+			}
 		}
 		if err := endCyberGuardBanTx(tx, ban, actor, reason, note, now); err != nil {
 			return err
@@ -561,6 +646,9 @@ func EndCyberGuardBanForAdminEdit(userId int, newGroup string, editedAt int64, a
 			}
 			res.ToGroup, res.GroupChanged = newGroup, true
 		}
+		if err := repointCyberGuardSubscriptionRevertTx(tx, ban, res.ToGroup, now); err != nil {
+			return err
+		}
 		if err := endCyberGuardBanTx(tx, ban, actor, CyberGuardEndReasonAdminOverride, note, now); err != nil {
 			return err
 		}
@@ -594,21 +682,15 @@ func ReapplyCyberGuardBanDrift(banId int, now int64) (*CyberGuardEndResult, erro
 		if ban.Status != CyberGuardBanStatusActive || !userExists || user.Group == ban.BanGroup {
 			return nil
 		}
-		// A subscription bought during the ban recorded the ban group as the
-		// group its expiry reverts to. Point it at the group this ban restored
-		// so far, so that the expiry never moves the user back into the ban
-		// group. Rows are updated by primary key (no MySQL gap lock).
-		var subscriptionIds []int
-		if err := tx.Model(&UserSubscription{}).
-			Where("user_id = ? AND status = ? AND prev_user_group = ?", user.Id, "active", ban.BanGroup).
-			Pluck("id", &subscriptionIds).Error; err != nil {
+		// A subscription bought during the ban reverts to the group an unban
+		// would have restored before this drift (not to the drifted group,
+		// which the subscription may be paying for).
+		restored, err := resolveCyberGuardRestoreTarget(tx, ban, now)
+		if err != nil {
 			return err
 		}
-		if len(subscriptionIds) > 0 {
-			if err := tx.Model(&UserSubscription{}).Where("id IN ?", subscriptionIds).
-				Update("prev_user_group", cyberGuardRestoreTarget(ban)).Error; err != nil {
-				return err
-			}
+		if err := repointCyberGuardSubscriptionRevertTx(tx, ban, restored, now); err != nil {
+			return err
 		}
 		reason := TruncateCyberGuardText(ban.Reason+" | drift reapplied ("+user.Group+")", 500)
 		if err := tx.Model(&User{}).Where("id = ?", user.Id).Update("group", ban.BanGroup).Error; err != nil {
@@ -686,6 +768,9 @@ func UpsertCyberGuardProposal(input CyberGuardBanInput) (*CyberGuardBan, bool, e
 		}
 		if user.Role >= common.RoleAdminUser || slices.Contains(input.ExemptUserIds, user.Id) {
 			return ErrCyberGuardProtectedUser
+		}
+		if err := checkCyberGuardEvaluatedFloorTx(tx, user.Id, input.EvaluatedFloor); err != nil {
+			return err
 		}
 		if user.Group == strings.TrimSpace(input.BanGroup) {
 			return ErrCyberGuardInBanGroup
@@ -808,8 +893,18 @@ func AdoptCyberGuardBan(input CyberGuardAdoptInput) (*CyberGuardBan, error) {
 // DismissCyberGuardProposal closes an observed proposal; its ended_at acts as
 // the counting floor for the user.
 func DismissCyberGuardProposal(banId int, actor int, note string, now int64) (*CyberGuardBan, error) {
+	current, err := GetCyberGuardBan(banId)
+	if err != nil {
+		return nil, err
+	}
 	var ban *CyberGuardBan
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		// Lock the user before the ban (the order ApplyCyberGuardBan and
+		// EndCyberGuardBan use) so a poller evaluation that re-checks the
+		// counting floor under the user lock serializes with this dismissal.
+		if _, _, err := lockCyberGuardUser(tx, current.UserId); err != nil {
+			return err
+		}
 		locked, err := lockCyberGuardBan(tx, banId)
 		if err != nil {
 			return err
@@ -922,8 +1017,12 @@ func CyberGuardUnitAlreadyCounted(userId int, unitKey string, excludeId int) (bo
 // dismissed record (promoted proposals excluded). Units at or before it never
 // count again, so an unban does not lead to an instant re-ban.
 func CyberGuardCountingFloor(userId int) (int64, error) {
+	return cyberGuardCountingFloor(DB, userId)
+}
+
+func cyberGuardCountingFloor(db *gorm.DB, userId int) (int64, error) {
 	var floor int64
-	err := DB.Model(&CyberGuardBan{}).
+	err := db.Model(&CyberGuardBan{}).
 		Select("COALESCE(MAX(ended_at), 0)").
 		Where("user_id = ? AND status IN ? AND end_reason <> ?", userId,
 			[]string{CyberGuardBanStatusEnded, CyberGuardBanStatusDismissed}, CyberGuardEndReasonPromoted).
@@ -961,17 +1060,22 @@ func ListCyberGuardUnitSpans(userIds []int) ([]CyberGuardUnitSpan, error) {
 	return spans, err
 }
 
-// ListCyberGuardRecheckUsers returns the users with counted events after since
-// that have no open observe-mode proposal: users without a record (so a failed
-// or interrupted tier evaluation is retried) and users with an active ban (so a
-// missed escalation is retried). Re-evaluating them is idempotent.
-func ListCyberGuardRecheckUsers(since int64) ([]int, error) {
-	observed := DB.Model(&CyberGuardBan{}).Select("user_id").Where("status = ?", CyberGuardBanStatusObserved)
+// ListCyberGuardRecheckUsers returns the users with counted events that
+// occurred or were ingested after since (a catch-up ingests events hours after
+// they occurred), so that a failed or interrupted tier evaluation, ban or
+// escalation is retried. With skipObserved (observe mode) users with an open
+// proposal are left out, as re-evaluating them only refreshes the proposal;
+// otherwise they stay in, so that a failed automatic ban is retried.
+// Re-evaluating is idempotent.
+func ListCyberGuardRecheckUsers(since int64, skipObserved bool) ([]int, error) {
+	query := DB.Model(&CyberGuardEvent{}).
+		Where("state = ? AND user_id > 0 AND (occurred_at > ? OR created_at > ?)", CyberGuardEventStateCounted, since, since)
+	if skipObserved {
+		observed := DB.Model(&CyberGuardBan{}).Select("user_id").Where("status = ?", CyberGuardBanStatusObserved)
+		query = query.Where("user_id NOT IN (?)", observed)
+	}
 	var userIds []int
-	err := DB.Model(&CyberGuardEvent{}).
-		Where("state = ? AND occurred_at > ? AND user_id > 0", CyberGuardEventStateCounted, since).
-		Where("user_id NOT IN (?)", observed).
-		Distinct().Pluck("user_id", &userIds).Error
+	err := query.Distinct().Pluck("user_id", &userIds).Error
 	return userIds, err
 }
 

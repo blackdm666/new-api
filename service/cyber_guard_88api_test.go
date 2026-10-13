@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 const (
@@ -524,21 +525,36 @@ func TestCyberGuardPollCatchUpDrainsBacklogWithoutGaps(t *testing.T) {
 }
 
 // Users whose tier evaluation never ran (crash, transient DB error) are
-// re-evaluated by the next poll even without a new hit.
+// re-evaluated by the next poll even without a new hit: recent hits, hits a
+// catch-up ingested hours after they occurred and, outside observe mode,
+// users with an open observe-mode proposal.
 func TestCyberGuardPollRechecksRecentlyFlaggedUsers(t *testing.T) {
 	forEachCyberGuardDatabase(t, func(t *testing.T) {
-		setupCyberGuardTest(t, nil)
+		s := setupCyberGuardTest(t, nil)
 		now := common.GetTimestamp()
-		seedCyberGuardUser(t, 9001, "default", common.RoleCommonUser, "")
+		for _, userId := range []int{9001, 9002, 9003} {
+			seedCyberGuardUser(t, userId, "default", common.RoleCommonUser, "")
+		}
 		seedCyberGuardEvent(t, 1, now-120, "r1", model.CyberGuardEventStateCounted, 9001, "fp:aaaaaaa1")
 		seedCyberGuardEvent(t, 2, now-60, "r2", model.CyberGuardEventStateCounted, 9001, "fp:aaaaaaa2")
+		seedCyberGuardEvent(t, 3, now-3*3600, "r3", model.CyberGuardEventStateCounted, 9002, "fp:bbbbbbb1")
+		seedCyberGuardEvent(t, 4, now-3*3600+60, "r4", model.CyberGuardEventStateCounted, 9002, "fp:bbbbbbb2")
+		seedCyberGuardEvent(t, 5, now-120, "r5", model.CyberGuardEventStateCounted, 9003, "fp:ccccccc1")
+		seedCyberGuardEvent(t, 6, now-60, "r6", model.CyberGuardEventStateCounted, 9003, "fp:ccccccc2")
+		_, _, err := model.UpsertCyberGuardProposal(model.CyberGuardBanInput{UserId: 9003, BanGroup: s.BanGroup, Now: now})
+		require.NoError(t, err)
+		observed, err := model.ListCyberGuardRecheckUsers(now-cyberGuardRecheckSeconds, true)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []int{9001, 9002}, observed, "observe mode leaves users with an open proposal alone")
 		useFakeSub2api(t, nil, nil)
 
 		result, err := RunCyberGuardPoll(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, CyberGuardPollStatusOK, result.Status, result.Error)
-		assert.Equal(t, 1, result.BansApplied)
-		assert.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9001))
+		assert.Equal(t, 3, result.BansApplied, "enforce mode retries recent, late-ingested and proposed users")
+		for _, userId := range []int{9001, 9002, 9003} {
+			assert.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, userId), "user %d", userId)
+		}
 		again, err := RunCyberGuardPoll(context.Background())
 		require.NoError(t, err)
 		assert.Equal(t, CyberGuardPollStatusOK, again.Status, again.Error)
@@ -629,6 +645,31 @@ func TestCyberGuardTierStrictestWinsAndFloorAfterUnban(t *testing.T) {
 		require.NoError(t, evaluateCyberGuardUser(s, 9001, now+20, result))
 		assert.Equal(t, 1, result.BansApplied)
 		assert.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9001))
+
+		// A dismissal that commits while an evaluation counts the units (after
+		// it read the counting floor) is never overridden by a stale ban.
+		seedCyberGuardUser(t, 9002, "default", common.RoleCommonUser, "")
+		seedCyberGuardEvent(t, 7, now-100, "r7", model.CyberGuardEventStateCounted, 9002, "fp:66666666")
+		seedCyberGuardEvent(t, 8, now-50, "r8", model.CyberGuardEventStateCounted, 9002, "fp:77777777")
+		proposal, _, err := model.UpsertCyberGuardProposal(model.CyberGuardBanInput{UserId: 9002, BanGroup: s.BanGroup, Now: now})
+		require.NoError(t, err)
+		// The hook fires once, before the unit spans query; this case's
+		// database is discarded afterwards.
+		dismissed, dismissErr := false, error(nil)
+		require.NoError(t, model.DB.Callback().Row().Before("gorm:row").Register("cyberguard_test:dismiss", func(db *gorm.DB) {
+			if !dismissed && db.Statement.Table == "cyber_guard_events" {
+				dismissed = true
+				_, dismissErr = CyberGuardDismiss(1, proposal.Id, "reviewed")
+			}
+		}))
+		result = &CyberGuardPollResult{}
+		require.NoError(t, evaluateCyberGuardUser(s, 9002, now+20, result))
+		require.True(t, dismissed)
+		require.NoError(t, dismissErr)
+		assert.Zero(t, result.BansApplied)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9002))
+		_, _, err = model.UpsertCyberGuardProposal(model.CyberGuardBanInput{UserId: 9002, BanGroup: s.BanGroup, Now: now, EvaluatedFloor: new(int64)})
+		assert.ErrorIs(t, err, model.ErrCyberGuardBanStateChanged, "a stale evaluation proposes nothing either")
 	})
 }
 
@@ -755,6 +796,42 @@ func TestCyberGuardBanWithLegacySubscriptionUpgrade(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "default", outcome.ToGroup)
 		assert.Equal(t, "default", cyberGuardUserGroup(t, 9002), "unban restores the group held before the subscription")
+
+		// Mode off (no drift pass): bought during the ban, which then expires
+		// while the user sits in the upgrade group. The ban ends without a group
+		// change, and the subscription's expiry still never bans.
+		s := operation_setting.GetCyberGuardSetting()
+		s.Mode = operation_setting.CyberGuardModeOff
+		operation_setting.SetCyberGuardSettingForTest(s)
+		seedCyberGuardUser(t, 9003, "default", common.RoleCommonUser, "")
+		ban, err = CyberGuardManualBan(1, 9003, "manual", 1)
+		require.NoError(t, err)
+		bought = buy(9003)
+		require.Equal(t, "vip", cyberGuardUserGroup(t, 9003))
+		require.NoError(t, model.DB.Model(&model.CyberGuardBan{}).Where("id = ?", ban.Id).Update("expires_at", common.GetTimestamp()-1).Error)
+		result, err := RunCyberGuardPoll(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, 1, result.Expired)
+		assert.Zero(t, result.DriftReapplied)
+		ended, err := model.GetCyberGuardBan(ban.Id)
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardEndReasonAdminOverride, ended.EndReason)
+		assert.Equal(t, "vip", cyberGuardUserGroup(t, 9003))
+		expire(bought)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9003), "the expiry reverts to the pre-ban group, not the ban group")
+
+		// An administrator's group edit ends the ban the same way: the expiry
+		// reverts to the administrator's group.
+		seedCyberGuardUser(t, 9004, "default", common.RoleCommonUser, "")
+		_, err = CyberGuardManualBan(1, 9004, "manual", 0)
+		require.NoError(t, err)
+		bought = buy(9004)
+		editedAt := common.GetTimestamp()
+		require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", 9004).Update("group", "svip").Error)
+		CyberGuardOnAdminGroupChange(9004, "svip", editedAt, 1, common.RoleRootUser)
+		var edited model.UserSubscription
+		require.NoError(t, model.DB.Where("id = ?", bought.Id).First(&edited).Error)
+		assert.Equal(t, "svip", edited.PrevUserGroup)
 	})
 }
 
@@ -913,5 +990,76 @@ func TestCyberGuardSettingsKeepSecretAndValidate(t *testing.T) {
 		require.NoError(t, err)
 		assert.Zero(t, state.CursorEnd)
 		assert.Equal(t, operation_setting.CyberGuardModeEnforce, operation_setting.GetCyberGuardSetting().Mode)
+	})
+}
+
+// A legacy plan that lapses during a ban and is renewed during the same ban
+// must not leave the user in the plan's group (or the ban group) once the
+// renewal ends, on both the drift path and the mode-off admin_override path.
+func TestCyberGuardRenewalAfterLapseDuringBan(t *testing.T) {
+	forEachCyberGuardDatabase(t, func(t *testing.T) {
+		setupCyberGuardTest(t, nil)
+		plan := &model.SubscriptionPlan{Id: 71, Title: "VIP", DurationUnit: model.SubscriptionDurationDay, DurationValue: 30, UpgradeGroup: "vip"}
+		buy := func(userId int) *model.UserSubscription {
+			subscription, err := model.CreateUserSubscriptionFromPlanTx(model.DB, userId, plan, "order")
+			require.NoError(t, err)
+			return subscription
+		}
+		expire := func(subscription *model.UserSubscription) {
+			require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("id = ?", subscription.Id).
+				Update("end_time", common.GetTimestamp()-1).Error)
+			_, err := model.ExpireDueSubscriptions(10)
+			require.NoError(t, err)
+		}
+		prev := func(id int) string {
+			var sub model.UserSubscription
+			require.NoError(t, model.DB.Where("id = ?", id).First(&sub).Error)
+			return sub.PrevUserGroup
+		}
+
+		// A: enforce mode, drift pass. Pre-ban group vip from S0, S0 lapses during the ban, S1 renewal bought during the ban.
+		seedCyberGuardUser(t, 9101, "default", common.RoleCommonUser, "")
+		s0 := buy(9101)
+		require.Equal(t, "vip", cyberGuardUserGroup(t, 9101))
+		ban, err := CyberGuardManualBan(1, 9101, "manual", 0)
+		require.NoError(t, err)
+		expire(s0)
+		require.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9101))
+		s1 := buy(9101)
+		require.Equal(t, "vip", cyberGuardUserGroup(t, 9101))
+		require.NoError(t, reapplyCyberGuardDrift(common.GetTimestamp(), &CyberGuardPollResult{}))
+		t.Logf("A: after drift prev(S1)=%q", prev(s1.Id))
+		outcome, err := CyberGuardUnban(1, ban.Id, "")
+		require.NoError(t, err)
+		t.Logf("A: unban to %q", outcome.ToGroup)
+		expire(s1)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9101), "A: after S1 ends the user should be back where S0's expiry would have put them")
+
+		// B: mode off (admin_override path), same purchase history.
+		s := operation_setting.GetCyberGuardSetting()
+		s.Mode = operation_setting.CyberGuardModeOff
+		operation_setting.SetCyberGuardSettingForTest(s)
+		seedCyberGuardUser(t, 9102, "default", common.RoleCommonUser, "")
+		s0 = buy(9102)
+		ban, err = CyberGuardManualBan(1, 9102, "manual", 1)
+		require.NoError(t, err)
+		expire(s0)
+		s1 = buy(9102)
+		require.NoError(t, model.DB.Model(&model.CyberGuardBan{}).Where("id = ?", ban.Id).Update("expires_at", common.GetTimestamp()-1).Error)
+		result, err := RunCyberGuardPoll(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, 1, result.Expired)
+		t.Logf("B: after admin_override prev(S1)=%q group=%q", prev(s1.Id), cyberGuardUserGroup(t, 9102))
+		expire(s1)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9102), "B: after S1 ends the user should be back where S0's expiry would have put them")
+
+		// Control: same history without any ban.
+		seedCyberGuardUser(t, 9103, "default", common.RoleCommonUser, "")
+		s0 = buy(9103)
+		expire(s0)
+		require.Equal(t, "default", cyberGuardUserGroup(t, 9103))
+		s1 = buy(9103)
+		expire(s1)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9103), "control")
 	})
 }
