@@ -589,6 +589,10 @@ type taskSnapshot struct {
 	PollFailures      int
 }
 
+// TaskSnapshot lets callers outside this package hold a snapshot, for example
+// while a finished task waits for its video transfer before the terminal CAS.
+type TaskSnapshot = taskSnapshot
+
 func (s taskSnapshot) Equal(other taskSnapshot) bool {
 	return s.Status == other.Status &&
 		s.Progress == other.Progress &&
