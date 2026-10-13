@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -202,18 +203,25 @@ func TestBuildSystemAlertEmailEscapesUntrustedProviderContent(t *testing.T) {
 	assert.NotContains(t, body, `<script>alert(1)</script>`)
 }
 
-func TestBuildSystemAlertEmailRendersOnlyHTTPNotifyLinksAsAnchors(t *testing.T) {
+func TestBuildSystemAlertEmailRendersOnlyHTTPNotifyLinksAsButtons(t *testing.T) {
 	data := dto.NewNotify(
 		dto.NotifyTypeInspectionAlert,
 		"Channel balance",
-		"Channel <b>{{value}}</b>\nUpstream: {{value}}\nOther: {{value}}",
-		[]any{"<i>name</i>", dto.NotifyLink(`https://up.example.com/?a=1&b="x"`), dto.NotifyLink("javascript:alert(1)")},
+		"Channel <b>{{value}}</b>\n{{value}}\nOther: {{value}}",
+		[]any{
+			"<i>name</i>",
+			dto.NotifyLink{URL: `https://up.example.com/?a=1&b="x"`, Label: "<Open> upstream"},
+			dto.NotifyLink{URL: "javascript:alert(1)", Label: "bad"},
+		},
 	)
 	_, body := BuildSystemAlertEmail("en", data)
 	assert.Contains(t, body, "Channel &lt;b&gt;&lt;i&gt;name&lt;/i&gt;&lt;/b&gt;")
-	assert.Contains(t, body, `Upstream: <a href="https://up.example.com/?a=1&amp;b=&#34;x&#34;" style="color:#0066cc;text-decoration:none;">https://up.example.com/?a=1&amp;b=&#34;x&#34;</a>`)
+	assert.Contains(t, body, `<br/><a href="https://up.example.com/?a=1&amp;b=&#34;x&#34;" style="display:inline-block;`)
+	assert.Contains(t, body, `">&lt;Open&gt; upstream</a>`)
+	assert.NotContains(t, body, `>https://up.example.com`)
 	assert.Contains(t, body, "Other: javascript:alert(1)")
 	assert.NotContains(t, body, `href="javascript:`)
+	assert.Equal(t, "https://up.example.com", fmt.Sprintf("%v", dto.NotifyLink{URL: "https://up.example.com", Label: "Open"}))
 }
 
 func TestNotificationEmailTemplateKeyRoutesBusinessNotifications(t *testing.T) {

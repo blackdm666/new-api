@@ -106,9 +106,12 @@ func renderNotificationContent(data dto.Notify) string {
 	for _, value := range data.Values {
 		replacement := fmt.Sprintf("%v", value)
 		link, isLink := value.(dto.NotifyLink)
-		if isLink && (strings.HasPrefix(string(link), "https://") || strings.HasPrefix(string(link), "http://")) {
-			escapedURL := html.EscapeString(string(link))
-			replacement = fmt.Sprintf(`<a href="%s" style="color:#0066cc;text-decoration:none;">%s</a>`, escapedURL, escapedURL)
+		if isLink && (strings.HasPrefix(link.URL, "https://") || strings.HasPrefix(link.URL, "http://")) {
+			replacement = fmt.Sprintf(
+				`<a href="%s" style="display:inline-block;margin-top:12px;padding:11px 24px;background-color:#4f46e5;background-image:linear-gradient(135deg,#0891b2 0%%,#4f46e5 58%%,#7c3aed 100%%);color:#ffffff;text-decoration:none;border-radius:11px;box-shadow:0 8px 18px rgba(79,70,229,0.22);font-size:14px;font-weight:650;letter-spacing:0.01em;">%s</a>`,
+				html.EscapeString(link.URL),
+				html.EscapeString(link.Label),
+			)
 		} else if !trusted {
 			replacement = html.EscapeString(replacement)
 		}

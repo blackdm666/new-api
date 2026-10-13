@@ -60,7 +60,9 @@ func TestLowBalanceAlertNotifiesOnceAndRearmsAfterRecovery(t *testing.T) {
 	assert.EqualValues(t, 1, deliveryCount)
 	var delivery model.EmailDelivery
 	require.NoError(t, db.First(&delivery).Error)
-	assert.Contains(t, delivery.Body, `上游地址：<a href="https://upstream.example.com" style="color:#0066cc;text-decoration:none;">https://upstream.example.com</a>`)
+	assert.Contains(t, delivery.Body, `补充余额。<br/><a href="https://upstream.example.com" style="`)
+	assert.Contains(t, delivery.Body, `">前往上游网站</a>`)
+	assert.NotContains(t, delivery.Body, `>https://upstream.example.com`)
 
 	recovered := *channel.BalanceInfo
 	recovered.Remaining = "20"

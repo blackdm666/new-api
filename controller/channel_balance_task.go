@@ -158,8 +158,8 @@ func updateChannelLowBalanceAlert(channel *model.Channel, config *dto.ChannelBal
 	// The upstream site is the scheme and host of the channel base URL, so the
 	// administrator can open the upstream console directly from the alert.
 	if upstream, parseErr := url.Parse(strings.TrimSpace(channel.GetBaseURL())); parseErr == nil && upstream.Host != "" && (upstream.Scheme == "https" || upstream.Scheme == "http") {
-		content += "\n上游地址：" + dto.ContentValueParam
-		values = append(values, dto.NotifyLink(upstream.Scheme+"://"+upstream.Host))
+		content += "\n" + dto.ContentValueParam
+		values = append(values, dto.NotifyLink{URL: upstream.Scheme + "://" + upstream.Host, Label: "前往上游网站"})
 	}
 	baseUser := root.ToBaseUser()
 	deliveryKey := fmt.Sprintf("channel-low-balance:%d:%d", channel.Id, nextVersion)
