@@ -21,9 +21,12 @@ import (
 )
 
 const (
-	defaultTaskVideoWorkerTimeout = 15 * time.Minute
+	// The Worker attempt shares the prepare budget (TaskVideoPrepareTimeout,
+	// default 180s) with the VPS fallback. Capping it at 90s leaves the fallback
+	// at least half of the default budget when the Worker hangs.
+	defaultTaskVideoWorkerTimeout = 90 * time.Second
 	minTaskVideoWorkerTimeout     = 30 * time.Second
-	maxTaskVideoWorkerTimeout     = 30 * time.Minute
+	maxTaskVideoWorkerTimeout     = 90 * time.Second
 	maxTaskVideoWorkerResponse    = int64(64 * 1024)
 	maxTaskVideoWorkerBytes       = int64(5*1024*1024*1024 - 5*1024*1024)
 )
