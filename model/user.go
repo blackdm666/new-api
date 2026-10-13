@@ -671,6 +671,9 @@ func (user *User) Insert(inviterId int) error {
 			}
 			user.Quota = common.QuotaForNewUser
 			user.AffCode = common.GetRandomString(4)
+			if inviterId > 0 {
+				user.InviterId = inviterId
+			}
 
 			// 初始化用户设置，包括默认的边栏配置
 			if user.Setting == "" {
@@ -735,6 +738,10 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 		}
 		user.Quota = common.QuotaForNewUser
 		user.AffCode = common.GetRandomString(4)
+		// OAuth 注册只把邀请人传进来，必须在这里写入，否则 inviter_id 为 0、佣金不计
+		if inviterId > 0 {
+			user.InviterId = inviterId
+		}
 
 		// 初始化用户设置
 		if user.Setting == "" {
