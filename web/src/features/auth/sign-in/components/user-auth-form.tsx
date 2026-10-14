@@ -429,11 +429,7 @@ export function UserAuthForm({
           <Button
             type='submit'
             className='mt-2 w-full justify-center gap-2'
-            disabled={
-              isLoading ||
-              !turnstileReady ||
-              (requiresLegalConsent && !agreedToLegal)
-            }
+            disabled={isLoading || !turnstileReady}
           >
             {isLoading ? <Loader2 className='animate-spin' /> : <LogIn />}
             {t('Sign in')}

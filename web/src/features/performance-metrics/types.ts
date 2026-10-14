@@ -74,5 +74,6 @@ export type PerfSummaryAllData = {
     window_start?: number
     window_end?: number
     models: PerfModelSummary[]
+    recent_success_series?: Record<string, SuccessRatePoint[]>
   }
 }

@@ -486,7 +486,7 @@ func GetInvoiceUserProfile(c *gin.Context) {
 		UsedQuota:    user.UsedQuota,
 		RequestCount: user.RequestCount,
 	}
-	recentLogs, _, logErr := model.GetUserLogs(user.Id, model.LogTypeConsume, 0, 0, "", "", 0, 15, "", "", "")
+	recentLogs, _, logErr := model.GetUserLogs(user.Id, model.LogFilter{Type: model.LogTypeConsume}, 0, 15)
 	if logErr != nil {
 		common.SysLog(fmt.Sprintf("invoice user profile: failed to fetch logs for user %d: %s", user.Id, logErr.Error()))
 	} else {
