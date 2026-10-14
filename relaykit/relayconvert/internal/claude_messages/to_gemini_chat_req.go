@@ -302,7 +302,7 @@ func claudeMessageToGeminiContent(c context.Context, request dto.ClaudeRequest, 
 			if err != nil {
 				return content, fmt.Errorf("get file data from '%s' failed: %w", source.GetIdentifier(), err)
 			}
-			if _, ok := sharedgemini.SupportedMimeTypes[strings.ToLower(mimeType)]; !ok {
+			if !sharedgemini.IsSupportedMimeType(mimeType) {
 				return content, fmt.Errorf("mime type is not supported by Gemini: '%s'", mimeType)
 			}
 			content.Parts = append(content.Parts, dto.GeminiPart{
