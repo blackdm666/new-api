@@ -50,13 +50,17 @@ func claudeAdaptiveSupportKey(channelID int, model string) string {
 //   - "<model> requires adaptive thinking; omit thinking or use
 //     thinking.type=adaptive and output_config.effort" (returned by
 //     Claude-compatible upstreams for claude-opus-5-5);
+//   - "thinking.type: omit thinking or use type adaptive" (the short form
+//     some Claude-compatible upstreams return for claude-opus-5-5 and
+//     claude-haiku-5-5);
 //   - Anthropic's wording for adaptive-only models, which names the rejected
 //     manual mode and the adaptive replacement together:
 //     "thinking.type.enabled" is not supported for this model. Use
 //     "thinking.type.adaptive" and "output_config.effort" ...
 func isClaudeAdaptiveThinkingRequiredMessage(message string) bool {
 	message = strings.ToLower(message)
-	if strings.Contains(message, "requires adaptive thinking") {
+	if strings.Contains(message, "requires adaptive thinking") ||
+		strings.Contains(message, "omit thinking or use type adaptive") {
 		return true
 	}
 	return (strings.Contains(message, "thinking.type.enabled") || strings.Contains(message, "thinking.type.disabled")) &&
