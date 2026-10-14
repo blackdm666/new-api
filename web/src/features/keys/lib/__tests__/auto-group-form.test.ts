@@ -183,13 +183,13 @@ describe('API key Auto group form mapping', () => {
 })
 
 describe('API key user quota query form mapping', () => {
-  test('lets a new key query the user quota by default', () => {
+  test('keeps user quota queries off for a new key by default (88API)', () => {
     for (const defaultUseAutoGroup of [true, false]) {
       const defaults = getApiKeyFormDefaultValues(defaultUseAutoGroup)
 
-      expect(defaults.allow_user_quota_query).toBe(true)
+      expect(defaults.allow_user_quota_query).toBe(false)
       expect(transformFormDataToPayload(defaults).allow_user_quota_query).toBe(
-        true
+        false
       )
     }
   })
