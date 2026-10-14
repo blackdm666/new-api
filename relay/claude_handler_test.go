@@ -33,6 +33,7 @@ type claudeUpstreamReply struct {
 
 const (
 	claudeAdaptiveRequiredBody   = `{"type":"error","error":{"type":"invalid_request_error","message":"claude-opus-5-5 requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort"}}`
+	claudeShortAdaptiveBody      = `{"type":"error","error":{"type":"invalid_request_error","message":"thinking.type: omit thinking or use type adaptive"}}`
 	claudeAnthropicAdaptiveBody  = `{"type":"error","error":{"type":"invalid_request_error","message":"\"thinking.type.enabled\" is not supported for this model. Use \"thinking.type.adaptive\" and \"output_config.effort\" to control thinking behavior."}}`
 	claudeAdaptiveRejectedBody   = `{"type":"error","error":{"type":"invalid_request_error","message":"thinking: Input tag 'adaptive' found using 'type' does not match any of the expected tags: 'disabled', 'enabled'"}}`
 	claudeUnrelatedBadRequest    = `{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 999999 > 128000, which is the maximum allowed number of output tokens"}}`
@@ -50,6 +51,7 @@ var (
 	claudeStreamReply     = claudeUpstreamReply{status: http.StatusOK, contentType: "text/event-stream", body: claudeMessageStreamResponse}
 	claudeUnrelatedReply  = claudeUpstreamReply{status: http.StatusBadRequest, body: claudeUnrelatedBadRequest}
 	claudeAnthropicReply  = claudeUpstreamReply{status: http.StatusBadRequest, body: claudeAnthropicAdaptiveBody}
+	claudeShortAdaptive   = claudeUpstreamReply{status: http.StatusBadRequest, body: claudeShortAdaptiveBody}
 	claudeReplyContentRaw = "application/json"
 )
 
@@ -163,6 +165,14 @@ func TestSendClaudeRequestThinkingCompatibility(t *testing.T) {
 			name:         "Anthropic adaptive-only wording also triggers the retry",
 			channelType:  constant.ChannelTypeAnthropic,
 			replies:      []claudeUpstreamReply{claudeAnthropicReply, claudeMessageReply},
+			wantThinking: []string{"enabled", "adaptive"},
+			wantCached:   claudeAdaptiveRequired,
+			wantReason:   policyReasonClaudeAdaptiveRequired,
+		},
+		{
+			name:         "the short omit-thinking wording also triggers the retry",
+			channelType:  constant.ChannelTypeAnthropic,
+			replies:      []claudeUpstreamReply{claudeShortAdaptive, claudeMessageReply},
 			wantThinking: []string{"enabled", "adaptive"},
 			wantCached:   claudeAdaptiveRequired,
 			wantReason:   policyReasonClaudeAdaptiveRequired,
