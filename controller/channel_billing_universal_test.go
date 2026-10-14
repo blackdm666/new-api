@@ -417,6 +417,30 @@ func TestParseSub2APIBalancePreservesQuotaSubscriptionAndRateLimitMeaning(t *tes
 		assert.False(t, channelBalanceExhausted(&info))
 	})
 
+	t.Run("unlimited subscription with null limits", func(t *testing.T) {
+		info, legacy, err := parseSub2APIBalance([]byte(`{"mode":"unrestricted","isValid":true,"remaining":-1,"subscription":{"daily_limit_usd":null,"weekly_limit_usd":null,"monthly_limit_usd":null}}`))
+		require.NoError(t, err)
+		assert.Nil(t, legacy)
+		assert.True(t, info.Unlimited)
+	})
+
+	t.Run("overdrawn wallet is exhausted, not unlimited", func(t *testing.T) {
+		info, legacy, err := parseSub2APIBalance([]byte(`{"mode":"unrestricted","isValid":true,"remaining":-3.25,"balance":-3.25,"unit":"USD"}`))
+		require.NoError(t, err)
+		require.NotNil(t, legacy)
+		assert.InDelta(t, -3.25, *legacy, 1e-9)
+		assert.False(t, info.Unlimited)
+		assert.Equal(t, "-3.25", info.Remaining)
+		assert.True(t, channelBalanceExhausted(&info))
+	})
+
+	t.Run("limited subscription keeps a negative remaining", func(t *testing.T) {
+		info, _, err := parseSub2APIBalance([]byte(`{"isValid":true,"remaining":-1,"subscription":{"daily_limit_usd":20,"weekly_limit_usd":null,"monthly_limit_usd":null}}`))
+		require.NoError(t, err)
+		assert.False(t, info.Unlimited)
+		assert.Equal(t, "-1", info.Remaining)
+	})
+
 	t.Run("rate limit", func(t *testing.T) {
 		payload := map[string]any{
 			"isValid": true,
