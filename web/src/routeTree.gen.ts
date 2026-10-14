@@ -35,6 +35,7 @@ import { Route as RankingsIndexRouteImport } from './routes/rankings/index'
 import { Route as SetupIndexRouteImport } from './routes/setup/index'
 import { Route as authUserResetRouteImport } from './routes/(auth)/user/reset'
 import { Route as AuthenticatedAdminAffiliatesIndexRouteImport } from './routes/_authenticated/admin-affiliates/index'
+import { Route as AuthenticatedAdminCyberguardIndexRouteImport } from './routes/_authenticated/admin-cyberguard/index'
 import { Route as AuthenticatedAdminInvoicesIndexRouteImport } from './routes/_authenticated/admin-invoices/index'
 import { Route as AuthenticatedAdminInvoicesIdRouteImport } from './routes/_authenticated/admin-invoices/$id'
 import { Route as AuthenticatedAdminMarketingIndexRouteImport } from './routes/_authenticated/admin-marketing/index'
@@ -208,6 +209,12 @@ const AuthenticatedAdminAffiliatesIndexRoute =
   AuthenticatedAdminAffiliatesIndexRouteImport.update({
     id: '/admin-affiliates/',
     path: '/admin-affiliates/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAdminCyberguardIndexRoute =
+  AuthenticatedAdminCyberguardIndexRouteImport.update({
+    id: '/admin-cyberguard/',
+    path: '/admin-cyberguard/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedAdminInvoicesIndexRoute =
@@ -503,6 +510,7 @@ export interface FileRoutesByFullPath {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/admin-affiliates/': typeof AuthenticatedAdminAffiliatesIndexRoute
+  '/admin-cyberguard/': typeof AuthenticatedAdminCyberguardIndexRoute
   '/admin-invoices/': typeof AuthenticatedAdminInvoicesIndexRoute
   '/admin-marketing/': typeof AuthenticatedAdminMarketingIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -572,6 +580,7 @@ export interface FileRoutesByTo {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/admin-affiliates': typeof AuthenticatedAdminAffiliatesIndexRoute
+  '/admin-cyberguard': typeof AuthenticatedAdminCyberguardIndexRoute
   '/admin-invoices': typeof AuthenticatedAdminInvoicesIndexRoute
   '/admin-marketing': typeof AuthenticatedAdminMarketingIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
@@ -645,6 +654,7 @@ export interface FileRoutesById {
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/_authenticated/admin-affiliates/': typeof AuthenticatedAdminAffiliatesIndexRoute
+  '/_authenticated/admin-cyberguard/': typeof AuthenticatedAdminCyberguardIndexRoute
   '/_authenticated/admin-invoices/': typeof AuthenticatedAdminInvoicesIndexRoute
   '/_authenticated/admin-marketing/': typeof AuthenticatedAdminMarketingIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -717,6 +727,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/usage-logs/audit'
     | '/admin-affiliates/'
+    | '/admin-cyberguard/'
     | '/admin-invoices/'
     | '/admin-marketing/'
     | '/channels/'
@@ -786,6 +797,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/usage-logs/audit'
     | '/admin-affiliates'
+    | '/admin-cyberguard'
     | '/admin-invoices'
     | '/admin-marketing'
     | '/channels'
@@ -858,6 +870,7 @@ export interface FileRouteTypes {
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/usage-logs/audit'
     | '/_authenticated/admin-affiliates/'
+    | '/_authenticated/admin-cyberguard/'
     | '/_authenticated/admin-invoices/'
     | '/_authenticated/admin-marketing/'
     | '/_authenticated/channels/'
@@ -1097,6 +1110,13 @@ declare module '@tanstack/react-router' {
       path: '/admin-affiliates'
       fullPath: '/admin-affiliates/'
       preLoaderRoute: typeof AuthenticatedAdminAffiliatesIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/admin-cyberguard/': {
+      id: '/_authenticated/admin-cyberguard/'
+      path: '/admin-cyberguard'
+      fullPath: '/admin-cyberguard/'
+      preLoaderRoute: typeof AuthenticatedAdminCyberguardIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/admin-invoices/': {
@@ -1511,6 +1531,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedUsageLogsAuditRoute: typeof AuthenticatedUsageLogsAuditRoute
   AuthenticatedAdminAffiliatesIndexRoute: typeof AuthenticatedAdminAffiliatesIndexRoute
+  AuthenticatedAdminCyberguardIndexRoute: typeof AuthenticatedAdminCyberguardIndexRoute
   AuthenticatedAdminInvoicesIndexRoute: typeof AuthenticatedAdminInvoicesIndexRoute
   AuthenticatedAdminMarketingIndexRoute: typeof AuthenticatedAdminMarketingIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
@@ -1545,6 +1566,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedUsageLogsAuditRoute: AuthenticatedUsageLogsAuditRoute,
   AuthenticatedAdminAffiliatesIndexRoute:
     AuthenticatedAdminAffiliatesIndexRoute,
+  AuthenticatedAdminCyberguardIndexRoute:
+    AuthenticatedAdminCyberguardIndexRoute,
   AuthenticatedAdminInvoicesIndexRoute: AuthenticatedAdminInvoicesIndexRoute,
   AuthenticatedAdminMarketingIndexRoute: AuthenticatedAdminMarketingIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,

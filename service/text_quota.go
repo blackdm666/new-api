@@ -22,11 +22,7 @@ import (
 )
 
 // ToolSurchargeItem is one billable tool-call line for consume logs.
-type ToolSurchargeItem struct {
-	Name  string  `json:"name"`
-	Count int     `json:"count"`
-	Price float64 `json:"price"`
-}
+type ToolSurchargeItem = billingexpr.ToolSurcharge
 
 func appendToolSurchargeLogInfo(other *model.LogOther, items []ToolSurchargeItem) {
 	if len(items) == 0 {

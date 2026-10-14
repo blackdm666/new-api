@@ -46,6 +46,11 @@ func TestInvoiceOperationalErrorsAreTranslatedInEveryLanguage(t *testing.T) {
 		MsgInvoiceFileTypeNotAllowed,
 		MsgInvoiceFileTypeMismatch,
 		MsgInvoiceFileSVGForbidden,
+		MsgInvoiceOrphanKeyRejected,
+		MsgInvoiceWechatNotConfigured,
+		MsgInvoiceWechatTestFailed,
+		MsgInvoiceWechatAutoIssueOff,
+		MsgInvoiceWechatGroupMismatch,
 	}
 	for _, language := range SupportedLanguages() {
 		for _, key := range keys {

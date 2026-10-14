@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -27,101 +27,195 @@ let queryClient: QueryClient
 
 beforeEach(() => {
   queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    defaultOptions: { queries: { retry: false } },
   })
+  // The console's own address differs from the API host used by the
+  // CC Switch preset; the import link must not be derived from it.
+  localStorage.setItem(
+    'status',
+    JSON.stringify({ server_address: 'https://88api.ai' })
+  )
+  vi.spyOn(window, 'open').mockReturnValue(null)
 })
 
 afterEach(() => {
   queryClient.clear()
+  localStorage.clear()
+  vi.restoreAllMocks()
 })
 
-function renderDialog(models = ['gpt-5.4', 'claude-sonnet-4-6']) {
-  queryClient.setQueryData(['user-models-ccswitch'], {
-    success: true,
-    data: models,
-  })
+function renderDialog({ tokenKey = 'test-only', group = 'Claude Kiro' } = {}) {
+  const onOpenChange = vi.fn()
   render(
     <QueryClientProvider client={queryClient}>
-      <CCSwitchDialog open onOpenChange={vi.fn()} tokenKey='test-only' />
+      <CCSwitchDialog
+        open
+        onOpenChange={onOpenChange}
+        tokenKey={tokenKey}
+        group={group}
+      />
     </QueryClientProvider>
   )
+  return { onOpenChange }
 }
 
-describe('CC Switch model selection', () => {
-  it.each(['Claude', 'Codex', 'Gemini'])(
-    'opens %s models outside the clipping dialog and keeps the dialog open after selection',
-    async (app) => {
+function openedImportParams() {
+  expect(window.open).toHaveBeenCalledTimes(1)
+  const url = new URL(vi.mocked(window.open).mock.calls[0][0] as string)
+  expect(`${url.protocol}//${url.host}${url.pathname}`).toBe(
+    'ccswitch://v1/import'
+  )
+  return Object.fromEntries(url.searchParams)
+}
+
+describe('CC Switch 88API preset import', () => {
+  it('imports Claude with the 88API preset fields and the selected key when opened with defaults', async () => {
+    const { onOpenChange } = renderDialog()
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))
+
+    expect(openedImportParams()).toEqual({
+      resource: 'provider',
+      app: 'claude',
+      name: '88API',
+      icon: '88api',
+      homepage: 'https://88api.ai',
+      endpoint: 'https://api.88api.ai,https://88api.ai',
+      apiKey: 'sk-test-only',
+      enabled: 'true',
+    })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it.each([
+    {
+      label: 'Codex',
+      app: 'codex',
+      endpoint: 'https://api.88api.ai/v1,https://88api.ai/v1',
+      model: 'gpt-6.1-sol',
+    },
+    {
+      label: 'Gemini CLI',
+      app: 'gemini',
+      endpoint: 'https://api.88api.ai,https://88api.ai',
+      model: 'gemini-3.8-flash',
+    },
+    {
+      label: 'Grok Build',
+      app: 'grokbuild',
+      endpoint: 'https://api.88api.ai/v1,https://88api.ai/v1',
+      model: 'grok-4.7',
+    },
+  ])(
+    'imports $label with the preset endpoint and model when $label is selected',
+    async ({ label, app, endpoint, model }) => {
       renderDialog()
       const user = userEvent.setup()
-      await user.click(screen.getByRole('radio', { name: app }))
-      const input = screen.getByRole('combobox', { name: 'Primary Model' })
 
-      await user.click(input)
+      await user.click(screen.getByRole('radio', { name: label }))
+      await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))
 
-      expect(input).toHaveAttribute('aria-expanded', 'true')
-      const list = await screen.findByRole('listbox')
-      const dialog = screen.getByRole('dialog', { name: 'Import to CC Switch' })
-      // The dialog is translated and clips overflow. Its popup must escape
-      // that containing block to remain aligned and fully visible.
-      expect(dialog).not.toContainElement(list)
-      await user.click(screen.getByRole('option', { name: 'gpt-5.4' }))
-      await waitFor(() => expect(input).toHaveValue('gpt-5.4'))
-      expect(input).toHaveAttribute('aria-expanded', 'false')
-      expect(dialog).toBeVisible()
+      expect(openedImportParams()).toMatchObject({
+        app,
+        name: '88API',
+        endpoint,
+        model,
+      })
     }
   )
 
-  it('filters model names and supports keyboard selection and Escape without closing the dialog', async () => {
+  it('shows the preset name, API address and default model for the selected app without editable fields', async () => {
     renderDialog()
     const user = userEvent.setup()
-    await user.click(screen.getByRole('radio', { name: 'Codex' }))
-    const input = screen.getByRole('combobox', { name: 'Primary Model' })
-    await user.click(input)
-    await user.type(input, 'sonnet')
 
+    expect(screen.getByText('88API')).toBeVisible()
+    expect(screen.getByText('https://api.88api.ai')).toBeVisible()
+    expect(screen.queryByText('Default model')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('radio', { name: 'Codex' }))
+
+    expect(screen.getByText('https://api.88api.ai/v1')).toBeVisible()
+    expect(screen.getByText('Default model')).toBeVisible()
+    expect(screen.getByText('gpt-6.1-sol')).toBeVisible()
     expect(
-      screen.queryByRole('option', { name: 'gpt-5.4' })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.getByRole('option', { name: 'claude-sonnet-4-6' })
+      screen.getByText(/only the initial choice.+any model in the key's group/)
     ).toBeVisible()
-    await user.keyboard('{ArrowDown}{Enter}')
-    await waitFor(() => expect(input).toHaveValue('claude-sonnet-4-6'))
-    await user.click(input)
-    await user.keyboard('{Escape}')
-
-    expect(input).toHaveValue('claude-sonnet-4-6')
-    expect(input).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.getByRole('dialog')).toBeVisible()
   })
 
-  it('shows an empty result when no models are available and updates an open dropdown when models arrive', async () => {
-    renderDialog([])
+  it('shows the key group and asks for a group with the models of the selected app', async () => {
+    renderDialog({ group: 'Grok' })
     const user = userEvent.setup()
-    await user.click(screen.getByRole('radio', { name: 'Codex' }))
-    const input = screen.getByRole('combobox', { name: 'Primary Model' })
-    await user.click(screen.getByRole('button', { name: 'Primary Model' }))
 
-    expect(await screen.findByText('No models found')).toBeVisible()
-    await act(async () => {
-      queryClient.setQueryData(['user-models-ccswitch'], {
-        success: true,
-        data: ['gpt-5.4'],
-      })
-    })
-    await user.click(await screen.findByRole('option', { name: 'gpt-5.4' }))
-    await waitFor(() => expect(input).toHaveValue('gpt-5.4'))
+    await user.click(screen.getByRole('radio', { name: 'Grok Build' }))
+
+    expect(screen.getByText('Grok', { exact: true })).toBeVisible()
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Grok Build needs a key in a group that offers Grok models'
+    )
   })
 
-  it('lets users edit the provider name without opening a model dropdown', async () => {
+  it.each([
+    { group: '', label: 'Follow user group' },
+    { group: 'auto', label: 'Cross-group' },
+  ])(
+    'labels the key group as $label when the key group is "$group"',
+    ({ group, label }) => {
+      renderDialog({ group })
+
+      expect(screen.getByText(label)).toBeVisible()
+    }
+  )
+
+  it('offers Claude Code CLI and Claude Desktop separately and explains the remaining apps behind the info button', async () => {
     renderDialog()
     const user = userEvent.setup()
-    const input = screen.getByRole('textbox', { name: 'Name' })
 
-    await user.clear(input)
-    await user.type(input, 'Development')
+    expect(screen.getAllByRole('radio')).toHaveLength(5)
+    for (const name of [
+      'Claude Code CLI',
+      'Claude Desktop',
+      'Codex',
+      'Gemini CLI',
+      'Grok Build',
+    ]) {
+      expect(screen.getByRole('radio', { name })).toBeInTheDocument()
+    }
 
-    expect(input).toHaveValue('Development')
-    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Other apps' }))
+
+    expect(
+      await screen.findByText(/MiniMax Code can't be imported by link/)
+    ).toBeVisible()
+  })
+
+  it('shows the in-app preset steps and copies the key instead of opening CC Switch when Claude Desktop is selected', async () => {
+    renderDialog()
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('radio', { name: 'Claude Desktop' }))
+
+    expect(
+      screen.getByText(/Claude Desktop can't be imported by link/)
+    ).toBeVisible()
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Claude Desktop needs a key in a group that offers Claude models'
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Copy Key' }))
+
+    await expect(navigator.clipboard.readText()).resolves.toBe('sk-test-only')
+    expect(window.open).not.toHaveBeenCalled()
+  })
+
+  it('keeps an existing sk- prefix when the key already has one', async () => {
+    renderDialog({ tokenKey: 'sk-test-only' })
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))
+
+    expect(openedImportParams().apiKey).toBe('sk-test-only')
   })
 })

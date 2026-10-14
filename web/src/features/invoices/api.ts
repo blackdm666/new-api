@@ -48,6 +48,17 @@ export type InvoiceListParams = {
   keyword?: string
 }
 
+export const invoiceQueryKeys = {
+  all: ['invoices'] as const,
+  lists: () => ['invoices', 'list'] as const,
+  list: (admin: boolean, params: InvoiceListParams) =>
+    ['invoices', 'list', admin ? 'admin' : 'user', params] as const,
+  detail: (admin: boolean, id: number) =>
+    ['invoices', 'detail', admin ? 'admin' : 'user', id] as const,
+  config: () => ['invoices', 'config'] as const,
+  eligibleOrders: () => ['invoices', 'eligible-orders'] as const,
+}
+
 export function buildInvoiceListQuery(params: InvoiceListParams): string {
   const search = new URLSearchParams()
   search.set('p', String(params.page))
@@ -121,7 +132,8 @@ export async function fetchInvoiceConfig(): Promise<InvoiceConfig> {
     fresh('/api/invoice/config'),
     invoiceRequestConfig
   )
-  return unwrap(response.data)
+  const config = unwrap(response.data)
+  return { ...config, file_allowed_exts: config.file_allowed_exts ?? [] }
 }
 
 export async function createInvoiceRequest(

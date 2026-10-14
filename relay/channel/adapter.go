@@ -131,6 +131,31 @@ type TaskContentRequestProvider interface {
 	BuildContentRequest(ctx context.Context, task *model.Task, artifactKey string, clientRequest TaskArtifactClientRequest) (*TaskContentRequest, error)
 }
 
+// TaskOfficialIDProvider exposes the task ID assigned by the model's own
+// platform (for example a Volcengine Ark cgt- ID) for display to the task
+// owner. It returns "" when the plugin declares none or the task has none yet;
+// it must never return a gateway's private ID.
+type TaskOfficialIDProvider interface {
+	OfficialTaskID(task *model.Task) string
+	// DeclaresOfficialTaskID reports whether the plugin publishes official IDs,
+	// so task lists load the snapshot only for those tasks.
+	DeclaresOfficialTaskID() bool
+}
+
+// TaskCancelResult is the provider's answer to a cancellation request.
+// Cancelled is true only when the provider confirmed the task will not run;
+// Message explains a refusal to the client.
+type TaskCancelResult struct {
+	Cancelled bool
+	Message   string
+}
+
+// TaskCancelProvider cancels a task at the provider. A nil result with a nil
+// error means the adaptor does not support cancellation.
+type TaskCancelProvider interface {
+	CancelTask(ctx context.Context, task *model.Task) (*TaskCancelResult, error)
+}
+
 type TaskUsageFactsProvider interface {
 	ExtractUsageFacts(c *gin.Context, info *relaycommon.RelayInfo) map[string]any
 }

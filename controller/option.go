@@ -163,6 +163,14 @@ func GetOptions(c *gin.Context) {
 		Key:   "TurnstileSecretKeyConfigured",
 		Value: strconv.FormatBool(common.CurrentTurnstileConfig().SecretKey != ""),
 	})
+	options = append(options, &model.Option{
+		Key:   "InvoiceWechatApiTokenConfigured",
+		Value: strconv.FormatBool(strings.TrimSpace(setting.InvoiceWechatApiToken) != ""),
+	})
+	options = append(options, &model.Option{
+		Key:   "InvoiceWechatInboundTokenConfigured",
+		Value: strconv.FormatBool(strings.TrimSpace(setting.InvoiceWechatInboundToken) != ""),
+	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

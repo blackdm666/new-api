@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -88,14 +89,17 @@ type InvoiceRequest struct {
 	TaxRateBasisPoints int     `json:"tax_rate_basis_points" gorm:"default:0"`
 	TaxFeeCents        int64   `json:"tax_fee_cents" gorm:"bigint;default:0"`
 	TaxFeeQuota        int     `json:"tax_fee_quota" gorm:"default:0"`
-	Status             int     `json:"status" gorm:"type:int;index;default:1"`
-	RejectionReason    string  `json:"rejection_reason" gorm:"type:varchar(500)"`
-	IssuedTime         int64   `json:"issued_time" gorm:"bigint;default:0"`
-	RedactedTime       int64   `json:"redacted_time" gorm:"bigint;index;default:0"`
-	ExpiryWarningTime  int64   `json:"expiry_warning_time" gorm:"bigint;index;default:0"`
-	ExpiresAt          int64   `json:"expires_at" gorm:"-"`
-	CreatedTime        int64   `json:"created_time" gorm:"bigint;index"`
-	UpdatedTime        int64   `json:"updated_time" gorm:"bigint;index"`
+	// TaxFeeRefundedTime is set when the request leaves the pending state
+	// without an invoice and TaxFeeQuota was credited back to the wallet.
+	TaxFeeRefundedTime int64  `json:"tax_fee_refunded_time" gorm:"bigint;default:0"`
+	Status             int    `json:"status" gorm:"type:int;index;default:1"`
+	RejectionReason    string `json:"rejection_reason" gorm:"type:varchar(500)"`
+	IssuedTime         int64  `json:"issued_time" gorm:"bigint;default:0"`
+	RedactedTime       int64  `json:"redacted_time" gorm:"bigint;index;default:0"`
+	ExpiryWarningTime  int64  `json:"expiry_warning_time" gorm:"bigint;index;default:0"`
+	ExpiresAt          int64  `json:"expires_at" gorm:"-"`
+	CreatedTime        int64  `json:"created_time" gorm:"bigint;index"`
+	UpdatedTime        int64  `json:"updated_time" gorm:"bigint;index"`
 }
 
 type InvoiceOrderClaim struct {
@@ -113,6 +117,8 @@ type InvoiceRequestEvent struct {
 	OperatorId       int    `json:"operator_id" gorm:"index;not null"`
 	Reason           string `json:"reason" gorm:"type:varchar(500)"`
 	CreatedTime      int64  `json:"created_time" gorm:"bigint;index"`
+	// OperatorName is the operator's username, resolved when events are listed.
+	OperatorName string `json:"operator_name" gorm:"-"`
 }
 
 const (
@@ -154,6 +160,11 @@ type CreateInvoiceRequestParams struct {
 }
 
 type InvoiceNotificationFactory func(request *InvoiceRequest) ([]*InvoiceNotificationDelivery, error)
+
+// InvoiceUserNotificationFactory builds notifications addressed to the
+// applicant. The account is read inside the same transaction as the status
+// change, so background jobs need no extra lookup outside it.
+type InvoiceUserNotificationFactory func(request *InvoiceRequest, user *User) ([]*InvoiceNotificationDelivery, error)
 
 func CalculateInvoiceTaxFee(totalCents int64, rateBasisPoints int) (int64, int, error) {
 	if totalCents < 0 || rateBasisPoints < 0 || rateBasisPoints > 10000 {
@@ -266,6 +277,13 @@ func fetchInvoiceOrders(tx *gorm.DB, userId int, orderIds []int) ([]*TopUp, erro
 		Where("id IN ?", orderIds).
 		Find(&orders).Error
 	return orders, err
+}
+
+// invoiceableTopUps keeps only top-ups paid in CNY, the only currency invoices
+// are issued in. Orders from CNY-only gateways and orders created before the
+// currency column existed have no currency recorded and stay eligible.
+func invoiceableTopUps(db *gorm.DB) *gorm.DB {
+	return db.Where("(currency IS NULL OR TRIM(currency) = '' OR UPPER(TRIM(currency)) = ?)", "CNY")
 }
 
 func orderInvoiceTopUps(orderIds []int, orders []*TopUp) []*TopUp {
@@ -447,7 +465,7 @@ func CreateInvoiceRequestWithNotifications(params CreateInvoiceRequestParams, no
 	var request *InvoiceRequest
 	var orderedTopUps []*TopUp
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		orders, err := fetchInvoiceOrders(tx, params.UserId, orderIds)
+		orders, err := fetchInvoiceOrders(tx.Scopes(invoiceableTopUps), params.UserId, orderIds)
 		if err != nil {
 			return err
 		}
@@ -616,6 +634,14 @@ func enrichInvoiceRequestExpiry(requests []*InvoiceRequest) {
 	}
 }
 
+// ListPendingInvoiceRequests returns every pending request that still holds
+// its applicant details, oldest first.
+func ListPendingInvoiceRequests() ([]*InvoiceRequest, error) {
+	var requests []*InvoiceRequest
+	err := DB.Where("status = ? AND redacted_time = ?", InvoiceStatusPending, 0).Order("id ASC").Find(&requests).Error
+	return requests, err
+}
+
 func GetInvoiceRequestById(id int) (*InvoiceRequest, error) {
 	var request InvoiceRequest
 	if err := DB.First(&request, "id = ?", id).Error; err != nil {
@@ -655,7 +681,7 @@ func ListEligibleInvoiceOrders(userId int) ([]*TopUp, error) {
 	if err := DB.Model(&InvoiceOrderClaim{}).Where("user_id = ?", userId).Pluck("top_up_id", &claimedIds).Error; err != nil {
 		return nil, err
 	}
-	query := DB.Where("user_id = ? AND status = ?", userId, common.TopUpStatusSuccess)
+	query := DB.Scopes(invoiceableTopUps).Where("user_id = ? AND status = ?", userId, common.TopUpStatusSuccess)
 	if len(claimedIds) > 0 {
 		query = query.Not("id IN ?", claimedIds)
 	}
@@ -682,7 +708,9 @@ func UpdateInvoiceRequestStatusWithNotifications(id int, status int, operatorId 
 		}
 	}
 	var request InvoiceRequest
+	refundedQuota := 0
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		refundedQuota = 0
 		if err := lockForUpdate(tx).First(&request, "id = ?", id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrInvoiceRequestNotFound
@@ -695,7 +723,13 @@ func UpdateInvoiceRequestStatusWithNotifications(id int, status int, operatorId 
 		if request.Status != InvoiceStatusPending || (status != InvoiceStatusIssued && status != InvoiceStatusRejected) {
 			return ErrInvoiceStatusTransition
 		}
-		if status == InvoiceStatusIssued {
+		if status == InvoiceStatusRejected {
+			refunded, err := closePendingInvoiceRequestTx(tx, &request, InvoiceStatusRejected, operatorId, reason)
+			if err != nil {
+				return err
+			}
+			refundedQuota = refunded
+		} else {
 			var fileCount int64
 			if err := tx.Model(&InvoiceFile{}).Where("invoice_request_id = ?", request.Id).Count(&fileCount).Error; err != nil {
 				return err
@@ -703,46 +737,36 @@ func UpdateInvoiceRequestStatusWithNotifications(id int, status int, operatorId 
 			if fileCount == 0 {
 				return ErrInvoiceFileRequired
 			}
-		}
-		now := common.GetTimestamp()
-		updates := map[string]interface{}{
-			"status":           status,
-			"updated_time":     now,
-			"issued_time":      int64(0),
-			"rejection_reason": "",
-		}
-		if status == InvoiceStatusIssued {
-			updates["issued_time"] = now
-		}
-		if status == InvoiceStatusRejected {
-			updates["rejection_reason"] = reason
-			if err := tx.Where("invoice_request_id = ?", request.Id).Delete(&InvoiceOrderClaim{}).Error; err != nil {
+			now := common.GetTimestamp()
+			result := tx.Model(&InvoiceRequest{}).
+				Where("id = ? AND status = ?", request.Id, InvoiceStatusPending).
+				Updates(map[string]any{
+					"status":           status,
+					"updated_time":     now,
+					"issued_time":      now,
+					"rejection_reason": "",
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return ErrInvoiceStatusTransition
+			}
+			if err := tx.Create(&InvoiceRequestEvent{
+				InvoiceRequestId: request.Id,
+				FromStatus:       request.Status,
+				ToStatus:         status,
+				OperatorId:       operatorId,
+				Reason:           reason,
+				CreatedTime:      now,
+			}).Error; err != nil {
 				return err
 			}
-			if err := queueAndDeleteInvoiceFilesTx(tx, request.Id); err != nil {
-				return err
-			}
-			if err := queueAndDeleteInvoiceUploadsTx(tx, request.Id); err != nil {
-				return err
-			}
+			request.Status = status
+			request.RejectionReason = ""
+			request.UpdatedTime = now
+			request.IssuedTime = now
 		}
-		if err := tx.Model(&InvoiceRequest{}).Where("id = ?", request.Id).Updates(updates).Error; err != nil {
-			return err
-		}
-		if err := tx.Create(&InvoiceRequestEvent{
-			InvoiceRequestId: request.Id,
-			FromStatus:       request.Status,
-			ToStatus:         status,
-			OperatorId:       operatorId,
-			Reason:           reason,
-			CreatedTime:      now,
-		}).Error; err != nil {
-			return err
-		}
-		request.Status = status
-		request.RejectionReason = updates["rejection_reason"].(string)
-		request.UpdatedTime = now
-		request.IssuedTime = updates["issued_time"].(int64)
 		if notificationFactory != nil {
 			deliveries, err := notificationFactory(&request)
 			if err != nil {
@@ -759,6 +783,7 @@ func UpdateInvoiceRequestStatusWithNotifications(id int, status int, operatorId 
 	if err != nil {
 		return nil, err
 	}
+	recordInvoiceTaxFeeRefund(&request, refundedQuota)
 	enrichInvoiceRequestExpiry([]*InvoiceRequest{&request})
 	return &request, nil
 }
@@ -805,9 +830,11 @@ func queueAndDeleteInvoiceUploadsTx(tx *gorm.DB, requestId int) error {
 	return tx.Where("invoice_request_id = ?", requestId).Delete(&InvoiceFileUpload{}).Error
 }
 
-func WithdrawInvoiceRequest(id int, userId int) (*InvoiceRequest, error) {
+func WithdrawInvoiceRequest(id int, userId int, notificationFactory InvoiceNotificationFactory) (*InvoiceRequest, error) {
 	var request InvoiceRequest
+	refundedQuota := 0
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		refundedQuota = 0
 		if err := lockForUpdate(tx).First(&request, "id = ?", id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrInvoiceRequestNotFound
@@ -820,80 +847,234 @@ func WithdrawInvoiceRequest(id int, userId int) (*InvoiceRequest, error) {
 		if request.Status != InvoiceStatusPending {
 			return ErrInvoiceWithdrawForbidden
 		}
-		return closePendingInvoiceRequestTx(tx, &request, InvoiceStatusWithdrawn, userId)
+		refunded, err := closePendingInvoiceRequestTx(tx, &request, InvoiceStatusWithdrawn, userId, "")
+		if err != nil {
+			return err
+		}
+		if notificationFactory != nil {
+			deliveries, err := notificationFactory(&request)
+			if err != nil {
+				return err
+			}
+			for _, delivery := range deliveries {
+				if _, _, err := EnqueueInvoiceNotificationTx(tx, delivery); err != nil {
+					return err
+				}
+			}
+		}
+		refundedQuota = refunded
+		return nil
 	})
+	if err == nil {
+		recordInvoiceTaxFeeRefund(&request, refundedQuota)
+	}
 	return &request, err
 }
 
-func closePendingInvoiceRequestTx(tx *gorm.DB, request *InvoiceRequest, status int, operatorId int) error {
-	if request == nil || request.Status != InvoiceStatusPending || (status != InvoiceStatusWithdrawn && status != InvoiceStatusExpired) {
-		return ErrInvoiceStatusTransition
+// closePendingInvoiceRequestTx closes a pending request that will never be
+// invoiced (rejected, withdrawn or expired): it releases the claimed orders,
+// queues stored files for deletion, records the event and credits the tax fee
+// charged at submission back to the wallet. The caller must hold the request
+// row lock. It returns the quota refunded by this call.
+//
+// The refund is exactly-once because it is tied to leaving the pending state:
+// the status update only matches a row that is still pending, a request can
+// leave that state only once, and TaxFeeRefundedTime is written in the same
+// statement. A second closer therefore gets ErrInvoiceStatusTransition and the
+// whole transaction, including any credit, rolls back.
+func closePendingInvoiceRequestTx(tx *gorm.DB, request *InvoiceRequest, status int, operatorId int, reason string) (int, error) {
+	if request == nil || request.Status != InvoiceStatusPending ||
+		(status != InvoiceStatusRejected && status != InvoiceStatusWithdrawn && status != InvoiceStatusExpired) {
+		return 0, ErrInvoiceStatusTransition
 	}
+	// Credit exactly the quota that was deducted at submission. It is never
+	// recomputed from the current tax rate or exchange rate.
+	refundQuota := 0
+	var user User
+	if request.TaxFeeQuota > 0 && request.TaxFeeRefundedTime == 0 {
+		if err := common.ValidateWalletQuota(request.TaxFeeQuota); err != nil {
+			return 0, err
+		}
+		// Soft-deleted accounts are still credited so a restored account keeps
+		// its balance; a hard-deleted account has nothing left to credit.
+		result := lockForUpdate(tx).Unscoped().Select("id", "quota").
+			Where("id = ?", request.UserId).Limit(1).Find(&user)
+		if result.Error != nil {
+			return 0, result.Error
+		}
+		if result.RowsAffected == 1 {
+			if user.Quota > common.MaxWalletQuota-request.TaxFeeQuota {
+				return 0, ErrWalletQuotaLimitExceeded
+			}
+			refundQuota = request.TaxFeeQuota
+		} else {
+			common.SysError(fmt.Sprintf("invoice request %d tax fee was not refunded: user %d no longer exists", request.Id, request.UserId))
+		}
+	}
+
 	now := common.GetTimestamp()
-	if err := tx.Model(&InvoiceRequest{}).Where("id = ?", request.Id).Updates(map[string]interface{}{
+	updates := map[string]any{
 		"status":           status,
 		"updated_time":     now,
-		"rejection_reason": "",
-	}).Error; err != nil {
-		return err
+		"rejection_reason": reason,
+	}
+	if refundQuota > 0 {
+		updates["tax_fee_refunded_time"] = now
+	}
+	result := tx.Model(&InvoiceRequest{}).
+		Where("id = ? AND status = ?", request.Id, InvoiceStatusPending).
+		Updates(updates)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return 0, ErrInvoiceStatusTransition
+	}
+	if refundQuota > 0 {
+		credit := tx.Unscoped().Model(&User{}).
+			Where("id = ? AND quota <= ?", user.Id, common.MaxWalletQuota-refundQuota).
+			Update("quota", gorm.Expr("quota + ?", refundQuota))
+		if credit.Error != nil {
+			return 0, credit.Error
+		}
+		if credit.RowsAffected != 1 {
+			return 0, ErrWalletQuotaLimitExceeded
+		}
 	}
 	if err := tx.Where("invoice_request_id = ?", request.Id).Delete(&InvoiceOrderClaim{}).Error; err != nil {
-		return err
+		return 0, err
 	}
 	if err := queueAndDeleteInvoiceFilesTx(tx, request.Id); err != nil {
-		return err
+		return 0, err
 	}
 	if err := queueAndDeleteInvoiceUploadsTx(tx, request.Id); err != nil {
-		return err
+		return 0, err
 	}
 	if err := tx.Create(&InvoiceRequestEvent{
 		InvoiceRequestId: request.Id,
 		FromStatus:       request.Status,
 		ToStatus:         status,
 		OperatorId:       operatorId,
+		Reason:           reason,
 		CreatedTime:      now,
 	}).Error; err != nil {
-		return err
+		return 0, err
 	}
 	request.Status = status
+	request.RejectionReason = reason
 	request.UpdatedTime = now
-	return nil
+	if refundQuota > 0 {
+		request.TaxFeeRefundedTime = now
+	}
+	return refundQuota, nil
 }
 
-func ExpirePendingInvoiceRequests(cutoff int64, limit int) (int, error) {
+// recordInvoiceTaxFeeRefund mirrors a committed tax fee refund into the quota
+// cache and the user's log, the same way the submission debit is recorded.
+func recordInvoiceTaxFeeRefund(request *InvoiceRequest, refundedQuota int) {
+	if request == nil || refundedQuota <= 0 {
+		return
+	}
+	if err := cacheIncrUserQuota(request.UserId, int64(refundedQuota)); err != nil {
+		common.SysLog(fmt.Sprintf("failed to sync invoice tax fee refund to user quota cache: %v", err))
+		_ = invalidateUserCache(request.UserId)
+	}
+	closure := "已关闭"
+	switch request.Status {
+	case InvoiceStatusRejected:
+		closure = "已驳回"
+	case InvoiceStatusWithdrawn:
+		closure = "已撤回"
+	case InvoiceStatusExpired:
+		closure = "已过期"
+	}
+	RecordLog(request.UserId, LogTypeSystem, common.NewMessage(fmt.Sprintf(
+		"发票申请税费退还：申请 #%d %s，退还税费 ¥%.2f",
+		request.Id,
+		closure,
+		float64(request.TaxFeeCents)/100,
+	)))
+}
+
+// ExpirePendingInvoiceRequests closes every request left pending past cutoff,
+// refunding its tax fee, reading candidates in pages of limit ids.
+// notificationFactory, when set, receives the applicant's account (nil once
+// the account was deleted). A request that cannot be closed (for example
+// because the refund would exceed the wallet limit) is logged and skipped so
+// it never blocks the requests after it; the next run tries it again. Only a
+// failure to list candidates is returned.
+func ExpirePendingInvoiceRequests(cutoff int64, limit int, notificationFactory InvoiceUserNotificationFactory) (int, error) {
 	if cutoff <= 0 {
 		return 0, nil
 	}
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	var ids []int
-	if err := DB.Model(&InvoiceRequest{}).
-		Where("status = ? AND created_time > 0 AND created_time <= ?", InvoiceStatusPending, cutoff).
-		Order("id ASC").Limit(limit).Pluck("id", &ids).Error; err != nil {
-		return 0, err
-	}
 	expired := 0
-	for _, id := range ids {
-		err := DB.Transaction(func(tx *gorm.DB) error {
-			var request InvoiceRequest
-			if err := lockForUpdate(tx).First(&request, "id = ?", id).Error; err != nil {
-				return err
-			}
-			if request.Status != InvoiceStatusPending || request.CreatedTime > cutoff {
-				return nil
-			}
-			if err := closePendingInvoiceRequestTx(tx, &request, InvoiceStatusExpired, 0); err != nil {
-				return err
-			}
-			expired++
-			return nil
-		})
-		if err != nil {
+	// Paging by id past the last examined request keeps a skipped request
+	// from being picked up again within this run.
+	lastId := 0
+	for {
+		var ids []int
+		if err := DB.Model(&InvoiceRequest{}).
+			Where("status = ? AND created_time > 0 AND created_time <= ? AND id > ?", InvoiceStatusPending, cutoff, lastId).
+			Order("id ASC").Limit(limit).Pluck("id", &ids).Error; err != nil {
 			return expired, err
 		}
+		for _, id := range ids {
+			lastId = id
+			var request InvoiceRequest
+			closed := false
+			refundedQuota := 0
+			err := DB.Transaction(func(tx *gorm.DB) error {
+				closed, refundedQuota = false, 0
+				if err := lockForUpdate(tx).First(&request, "id = ?", id).Error; err != nil {
+					return err
+				}
+				if request.Status != InvoiceStatusPending || request.CreatedTime > cutoff {
+					return nil
+				}
+				refunded, err := closePendingInvoiceRequestTx(tx, &request, InvoiceStatusExpired, 0, "")
+				if err != nil {
+					return err
+				}
+				if notificationFactory != nil {
+					var user *User
+					var account User
+					result := tx.Select("id", "username", "email", "setting").
+						Where("id = ?", request.UserId).Limit(1).Find(&account)
+					if result.Error != nil {
+						return result.Error
+					}
+					if result.RowsAffected == 1 {
+						user = &account
+					}
+					deliveries, err := notificationFactory(&request, user)
+					if err != nil {
+						return err
+					}
+					for _, delivery := range deliveries {
+						if _, _, err := EnqueueInvoiceNotificationTx(tx, delivery); err != nil {
+							return err
+						}
+					}
+				}
+				closed, refundedQuota = true, refunded
+				return nil
+			})
+			if err != nil {
+				common.SysError(fmt.Sprintf("failed to expire invoice request %d, skipping it until the next run: %v", id, err))
+				continue
+			}
+			if closed {
+				expired++
+				recordInvoiceTaxFeeRefund(&request, refundedQuota)
+			}
+		}
+		if len(ids) < limit {
+			return expired, nil
+		}
 	}
-	return expired, nil
 }
 
 func QueuePendingInvoiceExpiryWarnings(warningCutoff int64, expiryCutoff int64, limit int, notificationFactory InvoiceNotificationFactory) (int, error) {
@@ -987,10 +1168,35 @@ func PurgeInvoiceRequest(id int) error {
 	})
 }
 
+// ListInvoiceRequestEvents returns the request history with OperatorName
+// resolved by one batched lookup. System events (operator 0) and operators
+// whose account no longer exists keep an empty name.
 func ListInvoiceRequestEvents(requestId int) ([]*InvoiceRequestEvent, error) {
 	var events []*InvoiceRequestEvent
-	err := DB.Where("invoice_request_id = ?", requestId).Order("id ASC").Find(&events).Error
-	return events, err
+	if err := DB.Where("invoice_request_id = ?", requestId).Order("id ASC").Find(&events).Error; err != nil {
+		return nil, err
+	}
+	operatorIds := make([]int, 0, len(events))
+	for _, event := range events {
+		if event.OperatorId > 0 && !slices.Contains(operatorIds, event.OperatorId) {
+			operatorIds = append(operatorIds, event.OperatorId)
+		}
+	}
+	if len(operatorIds) == 0 {
+		return events, nil
+	}
+	var operators []User
+	if err := DB.Unscoped().Select("id", "username").Where("id IN ?", operatorIds).Find(&operators).Error; err != nil {
+		return nil, err
+	}
+	names := make(map[int]string, len(operators))
+	for _, operator := range operators {
+		names[operator.Id] = operator.Username
+	}
+	for _, event := range events {
+		event.OperatorName = names[event.OperatorId]
+	}
+	return events, nil
 }
 
 func RedactExpiredInvoiceRequests(cutoff int64, limit int) (int, error) {

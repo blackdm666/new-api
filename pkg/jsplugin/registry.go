@@ -363,7 +363,8 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 	if slices.Contains(meta.RequiredCapabilities, CapabilityQuerySSEDelta) {
 		requiredHooks = append(requiredHooks, "parseQueryEventDelta")
 	}
-	if slices.Contains(meta.RequiredCapabilities, CapabilityTaskPreflight) {
+	if slices.Contains(meta.RequiredCapabilities, CapabilityTaskPreflight) ||
+		slices.Contains(meta.RequiredCapabilities, CapabilityTaskPreflightRounds) {
 		requiredHooks = append(requiredHooks, "buildPreflightRequest")
 	}
 	if slices.Contains(meta.SubmitResponseTypes, "sse") {
@@ -387,22 +388,26 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 			return nil, fmt.Errorf("plugin %s is missing required export %q", meta.Key, hook)
 		}
 	}
-	artifactHooks := make(map[string]bool, 2)
-	for _, hook := range []string{"listArtifacts", "buildContentRequest"} {
-		if !engine.HasExport(hook) {
-			continue
+	// Optional driver hooks that only work as a pair: artifact delivery and
+	// task cancellation.
+	for _, pair := range [][2]string{{"listArtifacts", "buildContentRequest"}, {"buildCancelRequest", "parseCancelResponse"}} {
+		pairHooks := make(map[string]bool, 2)
+		for _, hook := range pair {
+			if !engine.HasExport(hook) {
+				continue
+			}
+			callable, callableErr := engine.HasCallablePath(context.Background(), hook)
+			if callableErr != nil {
+				return nil, callableErr
+			}
+			if !callable {
+				return nil, fmt.Errorf("plugin %s export %q is not a function", meta.Key, hook)
+			}
+			pairHooks[hook] = true
 		}
-		callable, callableErr := engine.HasCallablePath(context.Background(), hook)
-		if callableErr != nil {
-			return nil, callableErr
+		if pairHooks[pair[0]] != pairHooks[pair[1]] {
+			return nil, fmt.Errorf("plugin %s must export %s and %s together", meta.Key, pair[0], pair[1])
 		}
-		if !callable {
-			return nil, fmt.Errorf("plugin %s export %q is not a function", meta.Key, hook)
-		}
-		artifactHooks[hook] = true
-	}
-	if artifactHooks["listArtifacts"] != artifactHooks["buildContentRequest"] {
-		return nil, fmt.Errorf("plugin %s must export listArtifacts and buildContentRequest together", meta.Key)
 	}
 	for _, route := range meta.Routes {
 		for kind, member := range map[string]string{"decode": route.Decode, "render": route.Render} {

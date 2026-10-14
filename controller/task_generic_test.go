@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -886,4 +887,120 @@ func TestTaskListsOmitPersistedSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exists)
 	assert.JSONEq(t, string(task.Data), string(stored.Data), "single-task lookups keep the snapshot")
+}
+
+func TestCancelVideoTask(t *testing.T) {
+	const pluginKey = "cancel-test"
+	source := `
+export const meta = {apiVersion: 1, key: "cancel-test", name: "Cancel", version: "1.0.0", author: {name: "Test"}, models: ["doc"], fetchMode: "per_task"};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+export function buildCancelRequest(ctx) {
+  return {url: ctx.baseUrl + "/tasks/" + ctx.taskId, method: "DELETE", headers: {Authorization: "Bearer " + ctx.apiKey}};
+}
+export function parseCancelResponse(ctx, body, response) {
+  return {cancelled: response.status === 200 && body.cancelled === true, message: body.error ? body.error.message : ""};
+}
+`
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = jsplugin.DefaultRegistry.Unregister(pluginKey) })
+
+	var calls []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path+" "+r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/tasks/up_started" {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":{"code":"task_not_cancellable","message":"generation already started"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"cancelled","cancelled":true}`))
+	}))
+	defer upstream.Close()
+	allowPrivateTaskMediaTest(t)
+	previousMemoryCache := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCache })
+
+	tests := []struct {
+		name           string
+		userID         int
+		status         model.TaskStatus
+		upstreamTaskID string
+		expectedCode   int
+		expectedBody   string
+		expectedCalls  []string
+		expectedStatus model.TaskStatus
+		expectedQuota  int
+	}{
+		{
+			name: "provider confirmation fails the task and refunds it", userID: 7, status: model.TaskStatusQueued,
+			upstreamTaskID: "up_queued", expectedCode: http.StatusOK, expectedBody: `"status":"cancelled"`,
+			expectedCalls:  []string{"DELETE /tasks/up_queued Bearer provider-key"},
+			expectedStatus: model.TaskStatusFailure, expectedQuota: 500,
+		},
+		{
+			name: "provider refusal keeps the task and its charge", userID: 7, status: model.TaskStatusInProgress,
+			upstreamTaskID: "up_started", expectedCode: http.StatusConflict, expectedBody: "generation already started",
+			expectedCalls:  []string{"DELETE /tasks/up_started Bearer provider-key"},
+			expectedStatus: model.TaskStatusInProgress,
+		},
+		{
+			name: "finished tasks are not sent to the provider", userID: 7, status: model.TaskStatusSuccess,
+			upstreamTaskID: "up_done", expectedCode: http.StatusConflict, expectedBody: "task_not_cancellable",
+			expectedStatus: model.TaskStatusSuccess,
+		},
+		{
+			name: "another user's task stays hidden", userID: 8, status: model.TaskStatusQueued,
+			upstreamTaskID: "up_queued", expectedCode: http.StatusNotFound, expectedBody: "task_not_exist",
+			expectedStatus: model.TaskStatusQueued,
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			task := setupGenericTaskTest(t)
+			require.NoError(t, model.DB.AutoMigrate(&model.Log{}))
+			originalLogDB := model.LOG_DB
+			model.LOG_DB = model.DB
+			t.Cleanup(func() { model.LOG_DB = originalLogDB })
+			require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", task.ChannelId).Updates(map[string]any{
+				"type": constant.ChannelTypeTaskPlugin, "key": "provider-key", "base_url": upstream.URL,
+			}).Error)
+			task.Platform = constant.TaskPlatform(pluginKey)
+			task.Status = testCase.status
+			task.Quota = 500
+			task.PrivateData.UpstreamTaskID = testCase.upstreamTaskID
+			task.PrivateData.BillingSource = service.BillingSourceWallet
+			task.PrivateData.Execution = &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{
+				Key: pluginKey, Name: "Cancel", Version: "1.0.0", APIVersion: 1,
+			}}
+			require.NoError(t, model.DB.Save(task).Error)
+			calls = nil
+
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Set("id", testCase.userID)
+			c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+			c.Request = httptest.NewRequest(http.MethodDelete, "/v1/videos/"+task.TaskID, nil)
+
+			CancelVideoTask(c)
+
+			assert.Equal(t, testCase.expectedCode, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), testCase.expectedBody)
+			assert.Equal(t, testCase.expectedCalls, calls)
+			var stored model.Task
+			require.NoError(t, model.DB.Where("task_id = ?", task.TaskID).First(&stored).Error)
+			assert.Equal(t, testCase.expectedStatus, stored.Status)
+			var owner model.User
+			require.NoError(t, model.DB.First(&owner, 7).Error)
+			assert.Equal(t, testCase.expectedQuota, owner.Quota)
+			if testCase.expectedQuota > 0 {
+				assert.Equal(t, 0, stored.Quota)
+				assert.Equal(t, "任务已被用户取消", stored.FailReason)
+			}
+		})
+	}
 }

@@ -155,6 +155,8 @@ var SMTPMarketingToken = ""
 // 发票邮件通知配置。
 var InvoiceApplicationNotifyAdminEnabled = false
 var InvoiceIssuedNotifyUserEnabled = false
+var InvoiceRejectedNotifyUserEnabled = true
+var InvoiceExpiredNotifyUserEnabled = true
 var InvoiceAdminEmail = ""
 
 var GitHubClientId = ""

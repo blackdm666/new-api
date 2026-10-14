@@ -128,6 +128,20 @@ const OPERATIONS_SECTIONS = [
             settings.InvoiceApplicationNotifyAdminEnabled,
           InvoiceIssuedNotifyUserEnabled:
             settings.InvoiceIssuedNotifyUserEnabled,
+          InvoiceRejectedNotifyUserEnabled:
+            settings.InvoiceRejectedNotifyUserEnabled,
+          InvoiceExpiredNotifyUserEnabled:
+            settings.InvoiceExpiredNotifyUserEnabled,
+          InvoiceWechatNotifyEnabled: settings.InvoiceWechatNotifyEnabled,
+          InvoiceWechatApiBaseUrl: settings.InvoiceWechatApiBaseUrl,
+          InvoiceWechatApiToken: settings.InvoiceWechatApiToken,
+          InvoiceWechatApiTokenConfigured:
+            settings.InvoiceWechatApiTokenConfigured,
+          InvoiceWechatAppId: settings.InvoiceWechatAppId,
+          InvoiceWechatGroupId: settings.InvoiceWechatGroupId,
+          InvoiceWechatAutoIssueEnabled: settings.InvoiceWechatAutoIssueEnabled,
+          InvoiceWechatInboundTokenConfigured:
+            settings.InvoiceWechatInboundTokenConfigured,
           InvoiceAdminEmail: settings.InvoiceAdminEmail,
           InvoiceMinimumAmountCents: settings.InvoiceMinimumAmountCents,
           InvoiceTaxRateBasisPoints: settings.InvoiceTaxRateBasisPoints,

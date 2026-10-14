@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -134,12 +135,20 @@ func sweepTimedOutTasks(ctx context.Context) {
 	}
 }
 
+const maxTaskPollChannelConcurrency = 32
+
 // TaskPollSummary is the result recorded on an async_task_poll system task row,
 // summarizing one polling pass.
 type TaskPollSummary struct {
 	UnfinishedTasks  int `json:"unfinished_tasks"`
 	PlatformsScanned int `json:"platforms_scanned"`
 	NullTasksFailed  int `json:"null_tasks_failed"`
+	// Video transfer pool state at the end of the pass. TransferDeferredFull
+	// counts finished tasks this pass could not hand over because the pool or
+	// their source host was full.
+	TransferInFlight      int   `json:"transfer_in_flight"`
+	TransferOldestSeconds int64 `json:"transfer_oldest_seconds"`
+	TransferDeferredFull  int64 `json:"transfer_deferred_full"`
 }
 
 // RunTaskPollingOnce performs one async-task (Suno/video) polling pass
@@ -157,6 +166,7 @@ func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) 
 	}
 
 	common.SysLog(common.LogText("task progress polling started"))
+	deferredBefore := TaskVideoTransferStatsSnapshot().DeferredFull
 	sweepTimedOutTasks(ctx)
 	allTasks := model.GetAllUnFinishSyncTasks(constant.TaskQueryLimit)
 	summary.UnfinishedTasks = len(allTasks)
@@ -167,15 +177,27 @@ func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) 
 
 	totalPlatforms := len(platformTask)
 	processedPlatforms := 0
+	var reportMu sync.Mutex
+	markPlatformProcessed := func() {
+		reportMu.Lock()
+		defer reportMu.Unlock()
+		processedPlatforms++
+		if report != nil && ctx.Err() == nil {
+			report(processedPlatforms, totalPlatforms)
+		}
+	}
+	if report != nil {
+		report(0, totalPlatforms)
+	}
+	// Platforms are polled concurrently so a slow upstream or result transfer
+	// on one platform cannot hold back status updates on every other platform.
+	var wg sync.WaitGroup
 	for platform, tasks := range platformTask {
 		if ctx.Err() != nil {
 			break
 		}
-		if report != nil {
-			report(processedPlatforms, totalPlatforms)
-		}
-		processedPlatforms++
 		if len(tasks) == 0 {
+			markPlatformProcessed()
 			continue
 		}
 		summary.PlatformsScanned++
@@ -205,13 +227,27 @@ func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) 
 			}
 		}
 		if len(taskChannelM) == 0 {
+			markPlatformProcessed()
 			continue
 		}
 
-		DispatchPlatformUpdate(ctx, platform, taskChannelM, taskM)
+		wg.Add(1)
+		gopool.Go(func() {
+			defer wg.Done()
+			defer markPlatformProcessed()
+			DispatchPlatformUpdate(ctx, platform, taskChannelM, taskM)
+		})
 	}
+	wg.Wait()
 	if report != nil && ctx.Err() == nil {
 		report(totalPlatforms, totalPlatforms)
+	}
+	transfers := TaskVideoTransferStatsSnapshot()
+	summary.TransferInFlight = transfers.InFlight
+	summary.TransferOldestSeconds = transfers.OldestSeconds
+	summary.TransferDeferredFull = transfers.DeferredFull - deferredBefore
+	if summary.TransferDeferredFull > 0 {
+		common.SysLog(common.LogText("video transfer pool full: %d finished tasks wait for the next pass (in_flight=%d)", summary.TransferDeferredFull, transfers.InFlight))
 	}
 	common.SysLog(common.LogText("task progress polling finished"))
 	return summary
@@ -459,8 +495,7 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 		}
 		return fmt.Errorf("CacheGetChannel failed: %w", err)
 	}
-	adaptor := GetTaskAdaptorFunc(platform)
-	if adaptor == nil {
+	if GetTaskAdaptorFunc(platform) == nil {
 		return fmt.Errorf("video adaptor not found")
 	}
 	info := &relaycommon.RelayInfo{}
@@ -471,27 +506,62 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 		ChannelSetting: cacheGetChannel.GetSetting(),
 	}
 	info.ApiKey = cacheGetChannel.Key
-	adaptor.Init(info)
 	disablePollingSleep := cacheGetChannel.GetOtherSettings().DisableTaskPollingSleep
-	for i, taskId := range taskIds {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err := updateVideoSingleTask(ctx, adaptor, cacheGetChannel, taskId, taskM); err != nil {
-			logger.LogError(ctx, common.LogText("Failed to update video task %s: %s", taskId, err.Error()))
-		}
-		if disablePollingSleep || i == len(taskIds)-1 {
+
+	// Tasks whose result is being transferred or backing off need no upstream
+	// query this pass, and must not cost the channel a pacing second.
+	now := time.Now()
+	pending := make([]string, 0, len(taskIds))
+	for _, taskId := range taskIds {
+		if task := taskM[taskId]; task != nil && taskAwaitingVideoTransfer(task.TaskID, now) {
 			continue
 		}
-
-		// sleep 1 second between tasks for this channel only.
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(1 * time.Second):
-		}
+		pending = append(pending, taskId)
 	}
-	return nil
+
+	// Each worker queries one task at a time and, unless the channel disables
+	// it, waits one second before its next task, so a channel sees at most
+	// TaskPollChannelConcurrency() queries per second.
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range min(TaskPollChannelConcurrency(), len(pending)) {
+		adaptor := GetTaskAdaptorFunc(platform)
+		adaptor.Init(info)
+		wg.Add(1)
+		gopool.Go(func() {
+			defer wg.Done()
+			for {
+				index := int(next.Add(1)) - 1
+				if index >= len(pending) || ctx.Err() != nil {
+					return
+				}
+				taskId := pending[index]
+				if err := updateVideoSingleTask(ctx, adaptor, cacheGetChannel, taskId, taskM); err != nil {
+					logger.LogError(ctx, common.LogText("Failed to update video task %s: %s", taskId, err.Error()))
+				}
+				if disablePollingSleep || int(next.Load()) >= len(pending) {
+					continue
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(1 * time.Second):
+				}
+			}
+		})
+	}
+	wg.Wait()
+	return ctx.Err()
+}
+
+// TaskPollChannelConcurrency is how many tasks of one channel are queried at
+// the same time. The default of 1 keeps the historical one-at-a-time pacing.
+func TaskPollChannelConcurrency() int {
+	limit := common.GetEnvOrDefault("TASK_POLL_CHANNEL_CONCURRENCY", 1)
+	if limit < 1 || limit > maxTaskPollChannelConcurrency {
+		return 1
+	}
+	return limit
 }
 
 func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *model.Channel, taskId string, taskM map[string]*model.Task) error {
@@ -576,6 +646,10 @@ func FinalizeVideoTaskResult(ctx context.Context, adaptor TaskPollingAdaptor, ta
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if taskVideoTransferInFlight(task.TaskID) {
+		// The transfer pool owns this task until its terminal write.
+		return nil
+	}
 	snap := task.Snapshot()
 	parsedStatus := model.TaskStatus(taskResult.Status)
 
@@ -587,17 +661,46 @@ func FinalizeVideoTaskResult(ctx context.Context, adaptor TaskPollingAdaptor, ta
 		task.PrivateData.PollFailures = 0
 	}
 
-	now := time.Now().Unix()
-	shouldFinalizeBilling := false
 	videoPreparation := TaskVideoPreparation{}
 	if taskResult.Status == model.TaskStatusSuccess {
-		var prepareErr error
-		videoPreparation, prepareErr = PrepareTaskVideoResult(ctx, task, taskResult.Url)
-		if prepareErr != nil {
-			return fmt.Errorf("prepare video result for task %s: %w", task.TaskID, prepareErr)
+		if retryAt, deferred := taskVideoPrepareRetryAt(task.TaskID, time.Now()); deferred {
+			logger.LogDebug(ctx, "video result for task %s is backing off until %s", task.TaskID, retryAt.Format(time.RFC3339))
+			return nil
 		}
+		if TaskVideoTransferAsyncEnabled() {
+			// The pool gets its own copy; the caller's task keeps the persisted
+			// view so a response rendered from it cannot show the unpublished
+			// upstream result.
+			owned := *task
+			task.Data = snap.Data
+			task.PrivateData.PluginState = snap.PluginState
+			task.PrivateData.PollFailures = snap.PollFailures
+			submitTaskVideoTransfer(adaptor, &owned, taskResult, snap)
+			return nil
+		}
+		prepareCtx, cancel := context.WithTimeout(ctx, taskVideoPrepareTimeout())
+		var prepareErr error
+		videoPreparation, prepareErr = PrepareTaskVideoResult(prepareCtx, task, taskResult.Url)
+		cancel()
+		if prepareErr != nil {
+			retry := recordTaskVideoPrepareFailure(task.TaskID, time.Now())
+			return fmt.Errorf("prepare video result for task %s (attempt %d, next retry %s): %w",
+				task.TaskID, retry.failures, retry.retryAt.Format(time.DateTime), prepareErr)
+		}
+		clearTaskVideoPrepareFailure(task.TaskID)
 	}
+	completeVideoTaskResult(ctx, adaptor, task, taskResult, snap, videoPreparation)
+	return nil
+}
 
+// completeVideoTaskResult applies an upstream result to the task and persists
+// it. A success result must already be deliverable (videoPreparation). Terminal
+// transitions go through the status CAS so that exactly one caller — poller,
+// transfer pool, timeout sweep or cancellation — settles or refunds.
+func completeVideoTaskResult(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo, snap model.TaskSnapshot, videoPreparation TaskVideoPreparation) {
+	parsedStatus := model.TaskStatus(taskResult.Status)
+	now := time.Now().Unix()
+	shouldFinalizeBilling := false
 	task.Status = parsedStatus
 	switch parsedStatus {
 	case model.TaskStatusSubmitted:
@@ -667,8 +770,6 @@ func FinalizeVideoTaskResult(ctx context.Context, adaptor TaskPollingAdaptor, ta
 	if shouldFinalizeBilling && terminalTransitionWon {
 		finalizeTerminalTask(ctx, adaptor, task, taskResult)
 	}
-
-	return nil
 }
 
 // finalizeTerminalTask 终态统一收尾（状态 CAS 赢家调用，恰好一次）：采样 + 结算 + 失败兜底退款。
@@ -764,7 +865,22 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		}
 		bc.TieredSnapshot.UsageFacts = usageFacts
 		bc.TieredSnapshot.EstimatedTier = result.MatchedTier
-		RecalculateTaskQuota(ctx, task, result.ActualQuotaAfterGroup, common.NewMessage("Settled by the task usage expression"), result.Clamp)
+		bc.TieredSnapshot.ToolSurcharges = result.ToolSurcharges
+		bc.TieredSnapshot.EstimatedFacts = RemainingTaskEstimates(bc.TieredSnapshot.EstimatedFacts, taskResult.UsageFacts)
+		reason := common.NewMessage("Settled by the task usage expression")
+		if len(result.ToolSurcharges) > 0 {
+			tools := make([]string, 0, len(result.ToolSurcharges))
+			for _, item := range result.ToolSurcharges {
+				tools = append(tools, fmt.Sprintf("%s 调用 %d 次", item.Name, item.Count))
+			}
+			reason = common.NewMessage("Settled by the task usage expression, {{tools}}", map[string]any{"tools": strings.Join(tools, ", ")})
+		}
+		RecalculateTaskQuota(ctx, task, result.ActualQuotaAfterGroup, reason, result.Clamp)
+		// RecalculateTaskQuota persists only the quota; keep the measured
+		// usage on the stored snapshot as well.
+		if err := task.UpdateBillingSnapshot(); err != nil {
+			logger.LogWarn(ctx, common.LogText("task %s failed to save the settled billing snapshot: %v", task.TaskID, err))
+		}
 		return true
 	}
 	// 按次计费的成功任务保持预扣；失败任务由调用方全额退款。
@@ -878,6 +994,15 @@ func recordPollFailureForTasks(ctx context.Context, adaptor TaskPollingAdaptor, 
 }
 
 func failTaskFromPoll(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, fromStatus model.TaskStatus, reason string) error {
+	_, err := FailTask(ctx, adaptor, task, fromStatus, reason)
+	return err
+}
+
+// FailTask moves a task from fromStatus to FAILURE and, only for the caller
+// that wins that transition, settles it like any failed task: full refund,
+// metrics and callback. It reports whether this caller won; a loser's task
+// fields are stale and must be reloaded.
+func FailTask(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, fromStatus model.TaskStatus, reason string) (bool, error) {
 	now := time.Now().Unix()
 	task.Status = model.TaskStatusFailure
 	task.Progress = taskcommon.ProgressComplete
@@ -886,14 +1011,11 @@ func failTaskFromPoll(ctx context.Context, adaptor TaskPollingAdaptor, task *mod
 	}
 	task.FailReason = reason
 	won, err := task.UpdateWithStatus(fromStatus)
-	if err != nil {
-		return err
-	}
-	if !won {
-		return nil
+	if err != nil || !won {
+		return false, err
 	}
 	finalizeTerminalTask(ctx, adaptor, task, relaycommon.FailTaskInfo(reason))
-	return nil
+	return true, nil
 }
 
 func failTasksFromPoll(ctx context.Context, adaptor TaskPollingAdaptor, tasks []*model.Task, reason string) error {

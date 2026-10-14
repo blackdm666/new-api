@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -153,9 +154,16 @@ func updateChannelLowBalanceAlert(channel *model.Channel, config *dto.ChannelBal
 	thresholdDisplay := displayUnit + threshold.String()
 	subject := fmt.Sprintf("渠道余额预警：%s（#%d）", channel.Name, channel.Id)
 	content := fmt.Sprintf("渠道「%s」（#%d）的上游余额已低于预警阈值。\n当前余额：%s\n预警阈值：%s\n余额类型：%s\n请及时检查上游账户并补充余额。", channel.Name, channel.Id, currentDisplay, thresholdDisplay, info.MetricKind)
+	var values []any
+	// The upstream site is the scheme and host of the channel base URL, so the
+	// administrator can open the upstream console directly from the alert.
+	if upstream, parseErr := url.Parse(strings.TrimSpace(channel.GetBaseURL())); parseErr == nil && upstream.Host != "" && (upstream.Scheme == "https" || upstream.Scheme == "http") {
+		content += "\n" + dto.ContentValueParam
+		values = append(values, dto.NotifyLink{URL: upstream.Scheme + "://" + upstream.Host, Label: "前往上游网站"})
+	}
 	baseUser := root.ToBaseUser()
 	deliveryKey := fmt.Sprintf("channel-low-balance:%d:%d", channel.Id, nextVersion)
-	if err := service.NotifyUserWithDeliveryKey(baseUser.Id, baseUser.Email, baseUser.GetSetting(), dto.NewNotify(dto.NotifyTypeInspectionAlert, subject, content, nil), deliveryKey); err != nil {
+	if err := service.NotifyUserWithDeliveryKey(baseUser.Id, baseUser.Email, baseUser.GetSetting(), dto.NewNotify(dto.NotifyTypeInspectionAlert, subject, content, values), deliveryKey); err != nil {
 		_ = channel.UpdateBalanceAlertState(false, current.LowBalanceAlertVersion, current.LowBalanceAlertedAt, thresholdText)
 		return false, err
 	}

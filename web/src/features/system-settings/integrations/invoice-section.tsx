@@ -21,6 +21,7 @@ import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { CopyButton } from '@/components/copy-button'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -34,12 +35,29 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error'
 
-import { testInvoiceStorage, updateInvoiceSettings } from '../api'
+import {
+  testInvoiceStorage,
+  testInvoiceWechatNotification,
+  updateInvoiceSettings,
+} from '../api'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import type { InvoiceSettingsPayload } from '../types'
 
 type StorageType = 'local' | 'oss' | 's3' | 'cos'
+
+const DEFAULT_WECHAT_API_BASE_URL = 'http://api.wechatapi.net/finder/v2/api'
+const WECHAT_GROUP_ID_SUFFIX = '@chatroom'
+const WECHAT_FILE_ENDPOINT_PATH = '/api/invoice/wechat/files'
+
+// A 256-bit random hex token for the finance group bot. Only its digest is
+// stored, so it must be copied into the bot before saving.
+function generateBotToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32))
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
+    ''
+  )
+}
 
 const STORAGE_FIELDS = {
   oss: [
@@ -82,6 +100,18 @@ type Props = {
   defaultValues: {
     InvoiceApplicationNotifyAdminEnabled: boolean
     InvoiceIssuedNotifyUserEnabled: boolean
+    InvoiceRejectedNotifyUserEnabled: boolean
+    InvoiceExpiredNotifyUserEnabled: boolean
+    InvoiceWechatNotifyEnabled: boolean
+    InvoiceWechatApiBaseUrl: string
+    InvoiceWechatApiToken: string
+    // Reported by the server; the token itself is never sent back.
+    InvoiceWechatApiTokenConfigured?: boolean
+    InvoiceWechatAppId: string
+    InvoiceWechatGroupId: string
+    InvoiceWechatAutoIssueEnabled: boolean
+    // Reported by the server; only a digest of the bot token is stored.
+    InvoiceWechatInboundTokenConfigured?: boolean
     InvoiceAdminEmail: string
     InvoiceMinimumAmountCents: string
     InvoiceTaxRateBasisPoints: string
@@ -98,6 +128,7 @@ type Props = {
 }
 
 type FormValues = Props['defaultValues'] & {
+  InvoiceWechatInboundToken: string
   InvoiceMinimumAmountYuan: string
   InvoiceTaxRatePercent: string
   InvoiceFileMaxSizeMiB: string
@@ -114,6 +145,11 @@ function initialValues(defaultValues: Props['defaultValues']): FormValues {
       defaultValues.InvoiceMinimumAmountCents || '50000',
     InvoiceTaxRateBasisPoints: defaultValues.InvoiceTaxRateBasisPoints || '300',
     InvoiceFileMaxSize: defaultValues.InvoiceFileMaxSize || '5242880',
+    InvoiceWechatApiBaseUrl:
+      defaultValues.InvoiceWechatApiBaseUrl || DEFAULT_WECHAT_API_BASE_URL,
+    // The stored token is never sent to the browser; blank keeps it.
+    InvoiceWechatApiToken: '',
+    InvoiceWechatInboundToken: '',
     InvoiceMinimumAmountYuan: decimalString(
       Number(defaultValues.InvoiceMinimumAmountCents || 50000) / 100,
       500
@@ -137,6 +173,15 @@ function buildPayload(values: FormValues): InvoiceSettingsPayload {
     InvoiceApplicationNotifyAdminEnabled:
       values.InvoiceApplicationNotifyAdminEnabled,
     InvoiceIssuedNotifyUserEnabled: values.InvoiceIssuedNotifyUserEnabled,
+    InvoiceRejectedNotifyUserEnabled: values.InvoiceRejectedNotifyUserEnabled,
+    InvoiceExpiredNotifyUserEnabled: values.InvoiceExpiredNotifyUserEnabled,
+    InvoiceWechatNotifyEnabled: values.InvoiceWechatNotifyEnabled,
+    InvoiceWechatApiBaseUrl: values.InvoiceWechatApiBaseUrl.trim(),
+    InvoiceWechatApiToken: values.InvoiceWechatApiToken.trim(),
+    InvoiceWechatAppId: values.InvoiceWechatAppId.trim(),
+    InvoiceWechatGroupId: values.InvoiceWechatGroupId.trim(),
+    InvoiceWechatAutoIssueEnabled: values.InvoiceWechatAutoIssueEnabled,
+    InvoiceWechatInboundToken: values.InvoiceWechatInboundToken.trim(),
     InvoiceAdminEmail: values.InvoiceAdminEmail,
     InvoiceMinimumAmountCents: Math.round(
       Number(values.InvoiceMinimumAmountYuan) * 100
@@ -212,9 +257,97 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
       ),
   })
 
+  const wechatTestMutation = useMutation({
+    mutationFn: testInvoiceWechatNotification,
+    onSuccess: (result) =>
+      toast.success(result.message?.trim() || t('WeChat test message sent')),
+    onError: (error: unknown) =>
+      toast.error(
+        getUserFacingErrorMessage(
+          error,
+          'Failed to send the WeChat test message'
+        )
+      ),
+  })
+  const wechatGroupId = values.InvoiceWechatGroupId.trim()
+  const wechatGroupIdError =
+    wechatGroupId !== '' && !wechatGroupId.endsWith(WECHAT_GROUP_ID_SUFFIX)
+      ? t('The WeChat group ID must end with @chatroom.')
+      : ''
+
+  const wechatTokenConfigured =
+    defaultValues.InvoiceWechatApiTokenConfigured === true
+  const botTokenConfigured =
+    defaultValues.InvoiceWechatInboundTokenConfigured === true
+  const botTokenGenerated = values.InvoiceWechatInboundToken !== ''
+  const botEndpoint = `${window.location.origin}${WECHAT_FILE_ENDPOINT_PATH}`
+  // Mirrors the server rule: new-application notices and expiry reminders go
+  // to this address, so it is required whenever either is active.
+  const adminEmailRequired =
+    values.InvoiceApplicationNotifyAdminEnabled ||
+    Number(values.InvoicePendingExpiryDays) > 0
+  const adminEmailError =
+    adminEmailRequired && values.InvoiceAdminEmail.trim() === ''
+      ? t(
+          'Enter the invoice admin email. It is required while new-application notices are on or pending applications expire.'
+        )
+      : ''
+
   const save = () => {
     if (!dirty) {
       toast.info(t('No changes to save'))
+      return
+    }
+    if (adminEmailError) {
+      toast.error(adminEmailError)
+      return
+    }
+    if (wechatGroupIdError) {
+      toast.error(wechatGroupIdError)
+      return
+    }
+    if (
+      values.InvoiceWechatNotifyEnabled &&
+      !wechatTokenConfigured &&
+      values.InvoiceWechatApiToken.trim() === ''
+    ) {
+      toast.error(
+        t(
+          'Enter the WeChat API token before enabling WeChat group notifications.'
+        )
+      )
+      return
+    }
+    if (
+      values.InvoiceWechatNotifyEnabled &&
+      (values.InvoiceWechatAppId.trim() === '' || wechatGroupId === '')
+    ) {
+      toast.error(
+        t(
+          'Enter the WeChat App ID and group ID before enabling WeChat group notifications.'
+        )
+      )
+      return
+    }
+    if (
+      values.InvoiceWechatAutoIssueEnabled &&
+      (!values.InvoiceWechatNotifyEnabled || !values.InvoiceFileEnabled)
+    ) {
+      toast.error(
+        t(
+          'Turn on WeChat group notifications and invoice file delivery before auto-issuing from group PDFs.'
+        )
+      )
+      return
+    }
+    if (
+      values.InvoiceWechatAutoIssueEnabled &&
+      !botTokenConfigured &&
+      !botTokenGenerated
+    ) {
+      toast.error(
+        t('Generate a bot token before auto-issuing from group PDFs.')
+      )
       return
     }
     saveMutation.mutate()
@@ -227,7 +360,9 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
         <SettingsPageFormActions
           onSave={save}
           isSaving={saveMutation.isPending}
-          isSaveDisabled={testMutation.isPending}
+          isSaveDisabled={
+            testMutation.isPending || wechatTestMutation.isPending
+          }
           saveLabel='Save invoice settings'
         />
         <p className='text-muted-foreground text-sm'>
@@ -260,7 +395,7 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
           />
           <p className='text-muted-foreground text-xs'>
             {t(
-              'The tax fee is deducted from the user balance when the invoice application is submitted. Set to 0 to disable the fee.'
+              'The tax fee is deducted from the user balance when the invoice application is submitted and refunded in full if no invoice is issued (withdrawn, rejected, or expired). Set to 0 to disable the fee.'
             )}
           </p>
           <TextField
@@ -316,6 +451,7 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
             onChange={(value) => update('InvoiceAdminEmail', value)}
             type='email'
             placeholder='billing@example.com'
+            error={adminEmailError}
           />
           <p className='text-muted-foreground text-xs'>
             {t(
@@ -332,6 +468,178 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
               update('InvoiceIssuedNotifyUserEnabled', value)
             }
           />
+          <SettingSwitch
+            label={t('Notify user when an invoice application is rejected')}
+            description={t(
+              'Email the applicant the rejection reason and the refunded tax fee.'
+            )}
+            checked={values.InvoiceRejectedNotifyUserEnabled}
+            onCheckedChange={(value) =>
+              update('InvoiceRejectedNotifyUserEnabled', value)
+            }
+          />
+          <SettingSwitch
+            label={t('Notify user when an invoice application expires')}
+            description={t(
+              'Email the applicant that the pending application expired and the tax fee was refunded.'
+            )}
+            checked={values.InvoiceExpiredNotifyUserEnabled}
+            onCheckedChange={(value) =>
+              update('InvoiceExpiredNotifyUserEnabled', value)
+            }
+          />
+        </section>
+
+        <section className='bg-card space-y-4 rounded-xl border p-4'>
+          <h4 className='text-sm font-semibold'>
+            {t('WeChat group notifications')}
+          </h4>
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'Only new invoice applications and user withdrawals are pushed to the finance WeChat group, with the invoice details and amount.'
+            )}
+          </p>
+          <SettingSwitch
+            label={t('Enable WeChat group notifications')}
+            description={t(
+              'Push new invoice applications and withdrawals to the finance WeChat group'
+            )}
+            checked={values.InvoiceWechatNotifyEnabled}
+            onCheckedChange={(value) =>
+              update('InvoiceWechatNotifyEnabled', value)
+            }
+          />
+          <div className='grid gap-3 sm:grid-cols-2'>
+            <TextField
+              label={t('WeChat API base URL')}
+              value={values.InvoiceWechatApiBaseUrl}
+              onChange={(value) => update('InvoiceWechatApiBaseUrl', value)}
+              placeholder={DEFAULT_WECHAT_API_BASE_URL}
+              className='sm:col-span-2'
+              description={t(
+                'This provider only supports HTTP, so the token and the invoice details are sent unencrypted.'
+              )}
+            />
+            <TextField
+              label={t('WeChat API token')}
+              value={values.InvoiceWechatApiToken}
+              onChange={(value) => update('InvoiceWechatApiToken', value)}
+              type='password'
+              placeholder={
+                wechatTokenConfigured
+                  ? t('Leave blank to keep the saved secret')
+                  : t('No token saved yet')
+              }
+              description={
+                wechatTokenConfigured
+                  ? t('A token is saved.')
+                  : t('No token saved yet')
+              }
+            />
+            <TextField
+              label={t('WeChat App ID')}
+              value={values.InvoiceWechatAppId}
+              onChange={(value) => update('InvoiceWechatAppId', value)}
+            />
+            <TextField
+              label={t('WeChat group ID')}
+              value={values.InvoiceWechatGroupId}
+              onChange={(value) => update('InvoiceWechatGroupId', value)}
+              placeholder='12345678901@chatroom'
+              error={wechatGroupIdError}
+              className='sm:col-span-2'
+            />
+          </div>
+          <div className='flex flex-wrap items-center justify-end gap-3'>
+            {dirty && (
+              <p className='text-muted-foreground mr-auto text-xs'>
+                {t('Save the current settings before sending a test message.')}
+              </p>
+            )}
+            <Button
+              variant='outline'
+              onClick={() => wechatTestMutation.mutate()}
+              disabled={
+                dirty || wechatTestMutation.isPending || saveMutation.isPending
+              }
+            >
+              {t('Send test message')}
+            </Button>
+          </div>
+          <SettingSwitch
+            label={t('Auto-issue from group PDFs')}
+            description={t(
+              'When the finance group posts a PDF whose file name contains the company name of a pending application, the bot attaches it, marks the application issued, emails the applicant and tells the group the order is complete. If several pending applications share the company name, add #<application ID> to the file name.'
+            )}
+            checked={values.InvoiceWechatAutoIssueEnabled}
+            onCheckedChange={(value) =>
+              update('InvoiceWechatAutoIssueEnabled', value)
+            }
+          />
+          <div className='space-y-1.5'>
+            <Label htmlFor='invoice-wechat-bot-token'>{t('Bot token')}</Label>
+            <div className='flex gap-2'>
+              <Input
+                id='invoice-wechat-bot-token'
+                readOnly
+                value={values.InvoiceWechatInboundToken}
+                placeholder={
+                  botTokenConfigured
+                    ? t('A bot token is saved.')
+                    : t('No bot token saved yet')
+                }
+                aria-describedby='invoice-wechat-bot-token-help'
+                className='font-mono'
+              />
+              {botTokenGenerated && (
+                <CopyButton
+                  value={values.InvoiceWechatInboundToken}
+                  variant='outline'
+                  tooltip={t('Copy bot token')}
+                />
+              )}
+              <Button
+                variant='outline'
+                onClick={() =>
+                  update('InvoiceWechatInboundToken', generateBotToken())
+                }
+              >
+                {botTokenConfigured || botTokenGenerated
+                  ? t('Regenerate')
+                  : t('Generate')}
+              </Button>
+            </div>
+            <p
+              id='invoice-wechat-bot-token-help'
+              className='text-muted-foreground text-xs'
+            >
+              {botTokenGenerated
+                ? t(
+                    'Copy the token into the bot now. Only a fingerprint is saved, so it cannot be shown again.'
+                  )
+                : t(
+                    'The bot sends group PDFs to this site with this token. It can do nothing else.'
+                  )}
+            </p>
+          </div>
+          <div className='space-y-1.5'>
+            <Label htmlFor='invoice-wechat-bot-endpoint'>
+              {t('Bot endpoint')}
+            </Label>
+            <div className='flex gap-2'>
+              <Input
+                id='invoice-wechat-bot-endpoint'
+                readOnly
+                value={botEndpoint}
+                className='font-mono'
+              />
+              <CopyButton
+                value={botEndpoint}
+                variant='outline'
+                tooltip={t('Copy bot endpoint')}
+              />
+            </div>
+          </div>
         </section>
 
         <section className='bg-card space-y-4 rounded-xl border p-4'>
@@ -486,6 +794,8 @@ function TextField({
   min,
   max,
   step,
+  error,
+  description,
 }: {
   label: string
   value: string
@@ -496,6 +806,8 @@ function TextField({
   min?: string
   max?: string
   step?: string
+  error?: string
+  description?: string
 }) {
   const id = useId()
   return (
@@ -510,7 +822,17 @@ function TextField({
         min={min}
         max={max}
         step={step}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
       />
+      {error && (
+        <p id={`${id}-error`} className='text-destructive text-xs' role='alert'>
+          {error}
+        </p>
+      )}
+      {description && (
+        <p className='text-muted-foreground text-xs'>{description}</p>
+      )}
     </div>
   )
 }

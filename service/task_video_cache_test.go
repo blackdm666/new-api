@@ -284,6 +284,7 @@ func TestFinalizeVideoTaskResultDoesNotPublishSuccessWhenCacheFails(t *testing.T
 	previousFactory := taskVideoCacheStorageFactory
 	taskVideoCacheStorageFactory = func() (invoicefile.Storage, error) { return nil, errors.New("r2 unavailable") }
 	t.Cleanup(func() { taskVideoCacheStorageFactory = previousFactory })
+	t.Cleanup(func() { clearTaskVideoPrepareFailure("task_cache_failure") })
 	task := &model.Task{TaskID: "task_cache_failure", Status: model.TaskStatusInProgress}
 	require.NoError(t, model.DB.Create(task).Error)
 	resultURL := "data:video/mp4;base64," + base64.StdEncoding.EncodeToString([]byte("video"))
@@ -294,6 +295,60 @@ func TestFinalizeVideoTaskResultDoesNotPublishSuccessWhenCacheFails(t *testing.T
 	var stored model.Task
 	require.NoError(t, model.DB.First(&stored, task.ID).Error)
 	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), stored.Status)
+}
+
+type contextBlockingReader struct{ ctx context.Context }
+
+func (r contextBlockingReader) Read([]byte) (int, error) {
+	<-r.ctx.Done()
+	return 0, r.ctx.Err()
+}
+
+func TestFinalizeVideoTaskResultBoundsStalledTransferAndBacksOff(t *testing.T) {
+	truncate(t)
+	t.Setenv("TASK_VIDEO_CACHE_ENABLED", "true")
+	t.Setenv("TASK_VIDEO_WORKER_ENABLED", "false")
+	t.Setenv("TASK_VIDEO_DIRECT_HOSTS", "")
+	useLocalTaskVideoCache(t)
+	previousTimeout := taskVideoPrepareTimeout
+	taskVideoPrepareTimeout = func() time.Duration { return 50 * time.Millisecond }
+	t.Cleanup(func() { taskVideoPrepareTimeout = previousTimeout })
+	opens := 0
+	previousOpener := OpenTaskVideoSourceFunc
+	OpenTaskVideoSourceFunc = func(ctx context.Context, _ *model.Task, _ string) (*TaskVideoSource, error) {
+		opens++
+		return &TaskVideoSource{
+			Body:        io.NopCloser(contextBlockingReader{ctx: ctx}),
+			ContentType: "video/mp4",
+			Header:      make(http.Header),
+			StatusCode:  http.StatusOK,
+		}, nil
+	}
+	t.Cleanup(func() { OpenTaskVideoSourceFunc = previousOpener })
+	task := &model.Task{TaskID: "task_stalled_transfer", Status: model.TaskStatusInProgress}
+	require.NoError(t, model.DB.Create(task).Error)
+	t.Cleanup(func() { clearTaskVideoPrepareFailure(task.TaskID) })
+	result := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess, Url: "https://vidgen.example/result.mp4"}
+
+	started := time.Now()
+	err := FinalizeVideoTaskResult(context.Background(), &taskPollingFetchAdaptor{}, task, result, []byte(`{"status":"SUCCESS"}`))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(started), 5*time.Second)
+
+	// The next pass inside the backoff window skips the transfer entirely.
+	require.NoError(t, FinalizeVideoTaskResult(context.Background(), &taskPollingFetchAdaptor{}, task, result, []byte(`{"status":"SUCCESS"}`)))
+	assert.Equal(t, 1, opens)
+	var stored model.Task
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), stored.Status)
+
+	// Retries back off exponentially and stay capped.
+	clearTaskVideoPrepareFailure(task.TaskID)
+	now := time.Now()
+	for _, want := range []time.Duration{5 * time.Minute, 10 * time.Minute, 20 * time.Minute, 30 * time.Minute, 30 * time.Minute} {
+		retry := recordTaskVideoPrepareFailure(task.TaskID, now)
+		assert.Equal(t, now.Add(want), retry.retryAt)
+	}
 }
 
 func TestGetTaskVideoPreviewURLCreatesSevenDayDirectLink(t *testing.T) {

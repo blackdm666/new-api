@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,8 +47,14 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	assert.Nil(t, userView.RootInfo)
 	require.IsType(t, model.Properties{}, userView.Properties)
 	userProperties := userView.Properties.(model.Properties)
+	// The owner sees the model they requested, as in their consume logs; the
+	// channel-mapped upstream model can name the provider's internal model.
 	assert.Empty(t, userProperties.OriginModelName)
-	assert.Equal(t, "provider-model", userProperties.UpstreamModelName)
+	assert.Equal(t, "private-sales-alias", userProperties.UpstreamModelName)
+	userJSON, err := common.Marshal(userView)
+	require.NoError(t, err)
+	assert.NotContains(t, string(userJSON), "provider-model")
+	assert.NotContains(t, string(userJSON), "document-parser")
 
 	adminView := tasksToDto([]*model.Task{task}, false, common.RoleAdminUser)[0]
 	require.IsType(t, model.Properties{}, adminView.Properties)
@@ -149,4 +156,74 @@ func TestTaskLogDTOKeepsFailureReasonAndDoesNotMarkPluginTaskLegacy(t *testing.T
 	assert.False(t, pluginView.LegacyVideoAvailable)
 	assert.Empty(t, pluginView.ResultURL)
 	assert.Empty(t, pluginView.FailReason)
+}
+
+func TestTaskLogDTOPublishesPluginOfficialTaskIDAndHidesRouting(t *testing.T) {
+	source := `
+export const meta = {apiVersion: 1, key: "official-relay", name: "Official Relay", version: "1.0.0", author: {name: "Test"}, models: ["m"], fetchMode: "per_task"};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+export function officialTaskId(task) { return /^cgt-/.test(task.data && task.data.id) ? task.data.id : ""; }
+`
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = jsplugin.DefaultRegistry.Unregister("official-relay") })
+
+	tests := []struct {
+		name       string
+		data       string
+		officialID string
+	}{
+		{name: "provider task id is published", data: `{"id":"cgt-20261012-abc"}`, officialID: "cgt-20261012-abc"},
+		{name: "gateway private id stays hidden while queued", data: `{"id":"task_gateway_private"}`},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			task := &model.Task{
+				TaskID: "task_public", Platform: "official-relay", ChannelId: 162, Data: []byte(testCase.data),
+				PrivateData: model.TaskPrivateData{UpstreamTaskID: "task_gateway_private"},
+			}
+			userView := tasksToDto([]*model.Task{task}, false, common.RoleCommonUser)[0]
+			assert.Equal(t, testCase.officialID, userView.OfficialTaskID)
+			assert.Empty(t, userView.Platform)
+			assert.Zero(t, userView.ChannelId)
+			encoded, err := common.Marshal(userView)
+			require.NoError(t, err)
+			assert.NotContains(t, string(encoded), "official-relay")
+			assert.NotContains(t, string(encoded), "task_gateway_private")
+
+			adminView := tasksToDto([]*model.Task{task}, false, common.RoleAdminUser)[0]
+			assert.Equal(t, "official-relay", adminView.Platform)
+			assert.Equal(t, testCase.officialID, adminView.OfficialTaskID)
+		})
+	}
+}
+
+func TestUserTaskListLoadsSnapshotsForOfficialTaskIDs(t *testing.T) {
+	source := `
+export const meta = {apiVersion: 1, key: "official-list", name: "Official List", version: "1.0.0", author: {name: "Test"}, models: ["m"], fetchMode: "per_task"};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+export function officialTaskId(task) { return /^cgt-/.test(task.data && task.data.id) ? task.data.id : ""; }
+`
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = jsplugin.DefaultRegistry.Unregister("official-list") })
+
+	task := setupGenericTaskTest(t)
+	task.Platform = "official-list"
+	task.Data = []byte(`{"id":"cgt-list-1","status":"succeeded"}`)
+	require.NoError(t, model.DB.Save(task).Error)
+
+	// The list query omits snapshots; the official ID must still be resolved.
+	listed := model.TaskGetAllUserTask(task.UserId, 0, 10, model.SyncTaskQueryParams{})
+	require.Len(t, listed, 1)
+	view := tasksToDto(listed, false, common.RoleCommonUser)[0]
+	assert.Equal(t, "cgt-list-1", view.OfficialTaskID)
+	assert.Nil(t, view.Data)
+	assert.Empty(t, view.Platform)
 }

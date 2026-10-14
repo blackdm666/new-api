@@ -2,7 +2,10 @@ package model
 
 import (
 	"errors"
+	"fmt"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -16,7 +19,42 @@ var (
 	ErrInvoiceFileMutationArchived = errors.New("archived invoice files are immutable")
 	ErrInvoiceFileMutationFinal    = errors.New("final invoice files are immutable")
 	ErrInvoiceIssuedFileRequired   = errors.New("issued invoice must keep at least one file")
+	ErrInvoiceStorageKeyInvalid    = errors.New("storage key is not an invoice file key")
+	ErrInvoiceStorageKeyReferenced = errors.New("invoice storage key is still referenced")
 )
+
+// invoiceFileStorageKeyPattern matches exactly what InvoiceFileStorageKey
+// produces for an uploaded file: <request id>/<yyyy>/<mm>/<uuid>[.<ext>].
+var invoiceFileStorageKeyPattern = regexp.MustCompile(`^[1-9][0-9]*/[0-9]{4}/(0[1-9]|1[0-2])/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\.[a-z0-9]{1,16})?$`)
+
+// InvoiceFileStorageKey builds the object key of an uploaded invoice file from
+// its request, upload month (UTC) and server-generated stored name.
+func InvoiceFileStorageKey(requestId int, uploadedAt time.Time, storedName string) string {
+	uploadedAt = uploadedAt.UTC()
+	return fmt.Sprintf("%d/%04d/%02d/%s", requestId, uploadedAt.Year(), int(uploadedAt.Month()), storedName)
+}
+
+// IsInvoiceFileStorageKey reports whether key has the layout written by
+// InvoiceFileStorageKey. Storage reconciliation and orphan cleanup act only
+// on such keys, so other objects sharing a bucket are never reported or
+// deleted.
+func IsInvoiceFileStorageKey(key string) bool {
+	return invoiceFileStorageKeyPattern.MatchString(key)
+}
+
+// InvoiceFileStorageListPrefixes are the listing prefixes that cover every
+// invoice file key. Keys start with a positive decimal request id, which is
+// the only part of the layout shared by all of them.
+func InvoiceFileStorageListPrefixes() []string {
+	return []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"}
+}
+
+// InvoiceStorageKey identifies one object inside an invoice storage profile.
+type InvoiceStorageKey struct {
+	StorageProfileId int    `json:"storage_profile_id"`
+	StorageType      string `json:"storage_type"`
+	StorageKey       string `json:"storage_key"`
+}
 
 type InvoiceFile struct {
 	Id               int            `json:"id"`
@@ -108,6 +146,14 @@ func ListInvoiceFiles(requestId int) ([]*InvoiceFile, error) {
 	var files []*InvoiceFile
 	err := DB.Where("invoice_request_id = ?", requestId).Order("id ASC").Find(&files).Error
 	return files, err
+}
+
+// InvoiceFileExists reports whether the request already holds a file with
+// this SHA-256 digest.
+func InvoiceFileExists(requestId int, sha256Value string) (bool, error) {
+	var count int64
+	err := DB.Model(&InvoiceFile{}).Where("invoice_request_id = ? AND sha256 = ?", requestId, sha256Value).Count(&count).Error
+	return count > 0, err
 }
 
 func CountInvoiceFiles(requestId int) (int64, error) {
@@ -254,17 +300,21 @@ func RetryInvoiceFileCleanup(id int) (*InvoiceFileCleanup, error) {
 	return &cleanup, nil
 }
 
-func ListInvoiceFileStorageKeys(profileId int) ([]string, error) {
+// ListReferencedInvoiceStorageKeys returns every storage key still owned by
+// invoice metadata: files (soft-deleted rows awaiting cleanup included),
+// staged uploads and queued cleanups. Several profiles can point at the same
+// bucket, so the references are deliberately not scoped to one profile.
+func ListReferencedInvoiceStorageKeys() ([]string, error) {
 	var keys []string
-	if err := DB.Model(&InvoiceFile{}).Where("storage_profile_id = ?", profileId).Pluck("storage_key", &keys).Error; err != nil {
+	if err := DB.Unscoped().Model(&InvoiceFile{}).Pluck("storage_key", &keys).Error; err != nil {
 		return nil, err
 	}
 	var cleanupKeys []string
-	if err := DB.Model(&InvoiceFileCleanup{}).Where("storage_profile_id = ?", profileId).Pluck("storage_key", &cleanupKeys).Error; err != nil {
+	if err := DB.Model(&InvoiceFileCleanup{}).Pluck("storage_key", &cleanupKeys).Error; err != nil {
 		return nil, err
 	}
 	var uploadKeys []string
-	if err := DB.Model(&InvoiceFileUpload{}).Where("storage_profile_id = ?", profileId).Pluck("storage_key", &uploadKeys).Error; err != nil {
+	if err := DB.Model(&InvoiceFileUpload{}).Pluck("storage_key", &uploadKeys).Error; err != nil {
 		return nil, err
 	}
 	return append(append(keys, cleanupKeys...), uploadKeys...), nil
@@ -279,40 +329,72 @@ func ListInvoiceFilesByProfile(profileId int, afterId int, limit int) ([]*Invoic
 	return files, err
 }
 
-func QueueInvoiceOrphanCleanup(profileId int, storageType string, storageKey string) (*InvoiceFileCleanup, error) {
-	storageKey = strings.TrimSpace(storageKey)
-	if profileId <= 0 || storageKey == "" {
-		return nil, gorm.ErrInvalidData
-	}
-	var cleanup *InvoiceFileCleanup
+// QueueInvoiceOrphanCleanups queues deletion of objects reported as orphans by
+// storage reconciliation. Every key is checked inside one transaction before
+// anything is queued: it must have the invoice file key layout, belong to an
+// existing storage profile and not be referenced by any invoice file (soft-
+// deleted rows included) or staged upload under any profile. The storage type
+// is taken from the profile, never from the caller.
+func QueueInvoiceOrphanCleanups(keys []InvoiceStorageKey) ([]*InvoiceFileCleanup, error) {
+	var cleanups []*InvoiceFileCleanup
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		queries := []interface{}{&InvoiceFile{}, &InvoiceFileUpload{}}
-		for _, target := range queries {
-			var count int64
-			query := tx.Model(target).Where("storage_profile_id = ? AND storage_key = ?", profileId, storageKey)
-			if err := query.Count(&count).Error; err != nil {
+		cleanups = make([]*InvoiceFileCleanup, 0, len(keys))
+		profileTypes := make(map[int]string)
+		for _, key := range keys {
+			storageKey := strings.TrimSpace(key.StorageKey)
+			if key.StorageProfileId <= 0 || !IsInvoiceFileStorageKey(storageKey) {
+				return ErrInvoiceStorageKeyInvalid
+			}
+			storageType, known := profileTypes[key.StorageProfileId]
+			if !known {
+				var profile InvoiceStorageProfile
+				result := tx.Select("id", "storage_type").Where("id = ?", key.StorageProfileId).Limit(1).Find(&profile)
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected != 1 {
+					return ErrInvoiceStorageKeyInvalid
+				}
+				storageType = profile.StorageType
+				profileTypes[key.StorageProfileId] = storageType
+			}
+			var fileRefs int64
+			if err := tx.Unscoped().Model(&InvoiceFile{}).Where("storage_key = ?", storageKey).Count(&fileRefs).Error; err != nil {
 				return err
 			}
-			if count > 0 {
-				return errors.New("invoice storage key is still referenced")
+			var uploadRefs int64
+			if err := tx.Model(&InvoiceFileUpload{}).Where("storage_key = ?", storageKey).Count(&uploadRefs).Error; err != nil {
+				return err
 			}
+			if fileRefs > 0 || uploadRefs > 0 {
+				return ErrInvoiceStorageKeyReferenced
+			}
+			var existing InvoiceFileCleanup
+			result := tx.Where("storage_profile_id = ? AND storage_key = ?", key.StorageProfileId, storageKey).Limit(1).Find(&existing)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 1 {
+				cleanups = append(cleanups, &existing)
+				continue
+			}
+			now := common.GetTimestamp()
+			cleanup := &InvoiceFileCleanup{
+				StorageProfileId: key.StorageProfileId,
+				StorageType:      storageType,
+				StorageKey:       storageKey,
+				NextAttemptTime:  now,
+				CreatedTime:      now,
+			}
+			if err := tx.Create(cleanup).Error; err != nil {
+				return err
+			}
+			cleanups = append(cleanups, cleanup)
 		}
-		var existing InvoiceFileCleanup
-		if err := tx.Where("storage_profile_id = ? AND storage_key = ?", profileId, storageKey).First(&existing).Error; err == nil {
-			cleanup = &existing
-			return nil
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		now := common.GetTimestamp()
-		cleanup = &InvoiceFileCleanup{
-			StorageProfileId: profileId,
-			StorageType:      storageType,
-			StorageKey:       storageKey,
-			NextAttemptTime:  now,
-			CreatedTime:      now,
-		}
-		return tx.Create(cleanup).Error
+		return nil
 	})
-	return cleanup, err
+	if err != nil {
+		return nil, err
+	}
+	return cleanups, nil
 }

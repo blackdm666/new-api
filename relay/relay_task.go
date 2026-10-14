@@ -303,6 +303,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		} else {
 			facts = provider.ExtractUsageFacts(c, info)
 		}
+		estimatedFacts := service.SplitTaskEstimatedFacts(facts)
 		cost, trace, runErr := billingexpr.RunExprWithRequest(exprStr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
 		if runErr != nil || cost < 0 {
 			if runErr == nil {
@@ -314,7 +315,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		quota, clamp := common.QuotaRoundChecked(cost * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
 		noteTaskQuotaClamp(info, clamp)
 		priceData = types.PriceData{Quota: quota, QuotaToPreConsume: quota, GroupRatioInfo: groupRatioInfo}
-		info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{BillingMode: billing_setting.BillingModeTieredExpr, ModelName: modelName, ExprString: exprStr, ExprHash: billingexpr.ExprHashString(exprStr), GroupRatio: groupRatioInfo.GroupRatio, EstimatedQuotaBeforeGroup: cost * common.QuotaPerUnit, EstimatedQuotaAfterGroup: quota, EstimatedTier: trace.MatchedTier, QuotaPerUnit: common.QuotaPerUnit, ExprVersion: billingexpr.ExprVersion(exprStr), TaskUsageBilling: true, UsageFacts: facts}
+		info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{BillingMode: billing_setting.BillingModeTieredExpr, ModelName: modelName, ExprString: exprStr, ExprHash: billingexpr.ExprHashString(exprStr), GroupRatio: groupRatioInfo.GroupRatio, EstimatedQuotaBeforeGroup: cost * common.QuotaPerUnit, EstimatedQuotaAfterGroup: quota, EstimatedTier: trace.MatchedTier, QuotaPerUnit: common.QuotaPerUnit, ExprVersion: billingexpr.ExprVersion(exprStr), TaskUsageBilling: true, UsageFacts: facts, EstimatedFacts: estimatedFacts}
 	} else {
 		priceData, err = helper.ModelPriceHelperPerCall(c, info)
 		if err != nil {
@@ -421,6 +422,8 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 				finalQuota = settlement.ActualQuotaAfterGroup
 				snap.UsageFacts = facts
 				snap.EstimatedTier = settlement.MatchedTier
+				snap.ToolSurcharges = settlement.ToolSurcharges
+				snap.EstimatedFacts = service.RemainingTaskEstimates(snap.EstimatedFacts, parsed.Immediate.UsageFacts)
 				noteTaskQuotaClamp(info, settlement.Clamp)
 			}
 		}
@@ -715,6 +718,8 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	// 通用 TaskDto 格式
 	publicTask := TaskModel2Dto(originTask)
 	publicTask.ResultURL = service.TaskVideoDeliveryURL(c.Request.Context(), originTask)
+	HideTaskRouting(publicTask, originTask)
+	publicTask.OfficialTaskID = PublicOfficialTaskID(originTask)
 	// The raw upstream snapshot identifies the provider; ResultURL is the public deliverable.
 	publicTask.Data = nil
 	respBody, err = common.Marshal(dto.TaskResponse[any]{
@@ -835,6 +840,45 @@ func mapTaskStatusToSimple(status model.TaskStatus) string {
 	default:
 		return "processing"
 	}
+}
+
+// PublicOfficialTaskID is the model platform's own task ID that the task's
+// plugin declares public, or "".
+func PublicOfficialTaskID(task *model.Task) string {
+	if task == nil {
+		return ""
+	}
+	provider, ok := GetTaskAdaptor(task.Platform).(channel.TaskOfficialIDProvider)
+	if !ok {
+		return ""
+	}
+	return provider.OfficialTaskID(task)
+}
+
+// TaskDeclaresOfficialID reports whether the platform's plugin publishes the
+// model platform's own task ID.
+func TaskDeclaresOfficialID(platform constant.TaskPlatform) bool {
+	provider, ok := GetTaskAdaptor(platform).(channel.TaskOfficialIDProvider)
+	return ok && provider.DeclaresOfficialTaskID()
+}
+
+// HideTaskRouting removes what identifies the serving upstream from a task
+// shown to its owner: plugin keys name the provider, so only Suno keeps its
+// platform (the dashboard renders its audio clips from it); a channel-mapped
+// model name can be the provider's internal model, so the owner sees the model
+// they requested, as in their consume logs.
+func HideTaskRouting(item *dto.TaskDto, task *model.Task) {
+	if item.Platform != string(constant.TaskPlatformSuno) {
+		item.Platform = ""
+	}
+	item.ChannelId = 0
+	item.ChannelName = ""
+	properties := task.Properties
+	if properties.OriginModelName != "" {
+		properties.UpstreamModelName = properties.OriginModelName
+	}
+	properties.OriginModelName = ""
+	item.Properties = properties
 }
 
 func TaskModel2Dto(task *model.Task) *dto.TaskDto {

@@ -59,15 +59,22 @@ func GetTask(c *gin.Context) {
 	if task.Status == model.TaskStatusSuccess && taskFailReasonIsLegacyResultURL(task.FailReason) {
 		failReason = ""
 	}
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"task_id":     task.TaskID,
-		"platform":    task.Platform,
 		"status":      task.Status,
 		"progress":    task.Progress,
 		"fail_reason": failReason,
 		"created_at":  createdAt,
 		"finished_at": task.FinishTime,
-	})
+	}
+	// Plugin keys name the serving provider; only Suno clients use the platform.
+	if task.Platform == constant.TaskPlatformSuno {
+		response["platform"] = task.Platform
+	}
+	if officialID := relay.PublicOfficialTaskID(task); officialID != "" {
+		response["official_task_id"] = officialID
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func GetTaskArtifacts(c *gin.Context) {
@@ -600,6 +607,12 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 			}
 		}
 	}
+	// Lists are fetched without snapshots; official-ID plugins read theirs.
+	if err := model.HydrateTaskData(tasks, func(task *model.Task) bool {
+		return relay.TaskDeclaresOfficialID(task.Platform)
+	}); err != nil {
+		common.SysError("load task snapshots for official IDs: " + err.Error())
+	}
 	result := make([]*dto.TaskDto, len(tasks))
 	for i, task := range tasks {
 		if fillUser {
@@ -610,12 +623,9 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 		}
 		item := relay.TaskModel2Dto(task)
 		if viewerRole < common.RoleAdminUser {
-			// The requested model can be a private sales alias. Keep it for
-			// internal/admin workflows, but do not expose it in the user task
-			// list or task details response.
-			userProperties := task.Properties
-			userProperties.OriginModelName = ""
-			item.Properties = userProperties
+			// Users see the model they requested, never the plugin key, channel
+			// or channel-mapped upstream model that would name the provider.
+			relay.HideTaskRouting(item, task)
 			// Data is the raw upstream snapshot (provider task IDs, storage URLs)
 			// and would identify the upstream. Users only need the Suno preview clips.
 			item.Data = nil
@@ -625,6 +635,9 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 				}
 			}
 		}
+		// Plugins of official-relay channels declare the model platform's own
+		// task ID public; root also sees the best-effort ID for every task.
+		item.OfficialTaskID = relay.PublicOfficialTaskID(task)
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)
 		item.ResultDiscarded = task.PrivateData.ResultDiscarded
 		if task.Status == model.TaskStatusSuccess {
@@ -661,7 +674,9 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 				UpstreamTaskID: task.PrivateData.UpstreamTaskID,
 				NodeName:       task.PrivateData.NodeName,
 			}
-			item.OfficialTaskID = officialTaskID(task)
+			if item.OfficialTaskID == "" {
+				item.OfficialTaskID = officialTaskID(task)
+			}
 			if execution := task.PrivateData.Execution; execution != nil {
 				if snapshot := execution.TaskPlugin; snapshot != nil {
 					rootInfo.TaskPlugin = &dto.TaskPluginRuntimeInfo{
@@ -714,4 +729,74 @@ func taskFailReasonIsLegacyResultURL(value string) bool {
 	return len(value) >= len("https://") && strings.EqualFold(value[:len("https://")], "https://") ||
 		len(value) >= len("http://") && strings.EqualFold(value[:len("http://")], "http://") ||
 		len(value) >= len("data:") && strings.EqualFold(value[:len("data:")], "data:")
+}
+
+// CancelVideoTask cancels the caller's unfinished task at the provider
+// (DELETE /v1/videos/:task_id and /v1/video/generations/:task_id). Only a
+// provider-confirmed cancellation fails the task locally, which refunds the
+// reserved quota exactly once through the regular failure settlement.
+func CancelVideoTask(c *gin.Context) {
+	taskID := strings.TrimSpace(c.Param("task_id"))
+	task, exist, err := model.GetByTaskId(c.GetInt("id"), taskID)
+	if err != nil {
+		writeTaskCancelError(c, http.StatusInternalServerError, "get_task_failed", "查询任务失败，请稍后重试")
+		return
+	}
+	if !exist || task == nil || !task.ResultRetrievable() {
+		writeTaskCancelError(c, http.StatusNotFound, "task_not_exist", "任务不存在")
+		return
+	}
+	if task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
+		writeTaskCancelError(c, http.StatusConflict, "task_not_cancellable", "任务已结束，无法取消")
+		return
+	}
+	adaptor, err := initTaskArtifactAdaptor(task)
+	provider, cancellable := adaptor.(relaychannel.TaskCancelProvider)
+	pollingAdaptor, pollable := adaptor.(service.TaskPollingAdaptor)
+	if err != nil || !cancellable || !pollable {
+		writeTaskCancelError(c, http.StatusNotImplemented, "cancel_not_supported", "该模型暂不支持取消任务")
+		return
+	}
+	result, err := provider.CancelTask(c.Request.Context(), task)
+	if err != nil {
+		common.SysError(fmt.Sprintf("cancel task %s failed: %v", task.TaskID, err))
+		writeTaskCancelError(c, http.StatusBadGateway, "cancel_failed", "取消请求失败，请稍后重试或继续查询任务状态")
+		return
+	}
+	if result == nil {
+		writeTaskCancelError(c, http.StatusNotImplemented, "cancel_not_supported", "该模型暂不支持取消任务")
+		return
+	}
+	if !result.Cancelled {
+		message := result.Message
+		if message == "" {
+			message = "任务已开始生成或已结束，无法取消"
+		}
+		writeTaskCancelError(c, http.StatusConflict, "task_not_cancellable", message)
+		return
+	}
+	// The poller may move the task between non-terminal states concurrently;
+	// retry the transition from the latest status until it ends.
+	for range 3 {
+		won, failErr := service.FailTask(c.Request.Context(), pollingAdaptor, task, task.Status, "任务已被用户取消")
+		if failErr != nil {
+			common.SysError(fmt.Sprintf("fail cancelled task %s: %v", task.TaskID, failErr))
+			break
+		}
+		if won {
+			c.JSON(http.StatusOK, gin.H{"id": task.TaskID, "object": "video", "status": "cancelled", "cancelled": true})
+			return
+		}
+		task, exist, err = model.GetByTaskId(c.GetInt("id"), taskID)
+		if err != nil || !exist || task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
+			break
+		}
+	}
+	// The provider accepted the cancellation but the local task already ended;
+	// its own settlement stands and the next poll reconciles any difference.
+	writeTaskCancelError(c, http.StatusConflict, "task_not_cancellable", "任务状态已变化，请重新查询任务")
+}
+
+func writeTaskCancelError(c *gin.Context, status int, code, message string) {
+	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": message, "type": "new_api_error"}})
 }

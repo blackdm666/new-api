@@ -420,6 +420,101 @@ export function parseTaskResult(){return {status:"SUCCESS"}}
 	assert.Equal(t, "task-1", parsed.UpstreamTaskID)
 }
 
+func TestTaskAdaptorRunsOnePreflightRoundPerFile(t *testing.T) {
+	var presigned []string
+	uploads := map[string]string{}
+	var submitted map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/presign":
+			var body map[string]any
+			require.NoError(t, common.DecodeJson(r.Body, &body))
+			name := body["filename"].(string)
+			presigned = append(presigned, name)
+			_, _ = w.Write([]byte(`{"data":{"upload_url":"http://` + r.Host + `/upload/` + name + `","source":"tos://` + name + `"}}`))
+		case strings.HasPrefix(r.URL.Path, "/upload/"):
+			assert.Empty(t, r.Header.Get("Authorization"))
+			data, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			uploads[strings.TrimPrefix(r.URL.Path, "/upload/")] = string(data)
+		case r.URL.Path == "/submit":
+			require.NoError(t, common.DecodeJson(r.Body, &submitted))
+			_, _ = w.Write([]byte(`{"id":"task-1"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	source := `
+export const meta = {
+  apiVersion:1, key:"preflight-rounds", name:"Preflight Rounds", version:"1.0.0",
+  author:{name:"Test"}, models:["m"], fetchMode:"per_task",
+  requiredCapabilities:["task-preflight@2"]
+};
+function ordered(ctx) { return ctx.files.slice().sort((a, b) => a.ref < b.ref ? -1 : 1); }
+export function buildPreflightRequest(ctx) {
+  if (ctx.preflightResponse) throw new Error("presign must not see a current response");
+  if (ctx.preflightResponses.length !== ctx.preflightRound) throw new Error("rounds out of order");
+  const file = ordered(ctx)[ctx.preflightRound];
+  if (!file) return null;
+  return {url:ctx.baseUrl+"/presign", method:"POST", headers:{Authorization:"Bearer "+ctx.apiKey, "Content-Type":"application/json"}, body:{filename:file.filename}};
+}
+export function buildUploadRequest(ctx) {
+  const file = ordered(ctx)[ctx.preflightRound];
+  return {url:ctx.preflightResponse.data.upload_url, method:"PUT", credentialless:true, bodyType:"file", fileRef:file.ref};
+}
+export function buildSubmitRequest(ctx) {
+  return {url:ctx.baseUrl+"/submit", method:"POST", headers:{"Content-Type":"application/json"},
+    body:{sources:ctx.preflightResponses.map((r) => r.data.source), last:ctx.preflightResponse.data.source}};
+}
+export function parseSubmitResponse(ctx,r){return {taskId:r.body.id}}
+export function buildQueryRequest(){return {url:"https://example.com"}}
+export function parseTaskResult(){return {status:"SUCCESS"}}
+`
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	adaptor := New(plugin)
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelBaseUrl: server.URL, ApiKey: "secret"},
+		OriginModelName: "m",
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{PublicTaskID: "public-1"},
+	}
+	adaptor.Init(info)
+
+	var input bytes.Buffer
+	writer := multipart.NewWriter(&input)
+	for _, file := range []struct{ field, name, contentType, content string }{
+		{"video", "motion.mp4", "video/mp4", "video-bytes"},
+		{"image", "face.png", "image/png", "image-bytes"},
+	} {
+		part, partErr := writer.CreatePart(textproto.MIMEHeader{
+			"Content-Disposition": {`form-data; name="` + file.field + `"; filename="` + file.name + `"`},
+			"Content-Type":        {file.contentType},
+		})
+		require.NoError(t, partErr)
+		_, partErr = part.Write([]byte(file.content))
+		require.NoError(t, partErr)
+	}
+	require.NoError(t, writer.Close())
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewReader(input.Bytes()))
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	c.Set("task_request", map[string]any{"prompt": "p"})
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	assert.Equal(t, []string{"face.png", "motion.mp4"}, presigned)
+	assert.Equal(t, map[string]string{"face.png": "image-bytes", "motion.mp4": "video-bytes"}, uploads)
+
+	body, err := adaptor.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	response, err := adaptor.DoRequest(c, info, body)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	assert.Equal(t, []any{"tos://face.png", "tos://motion.mp4"}, submitted["sources"])
+	assert.Equal(t, "tos://motion.mp4", submitted["last"])
+}
+
 func TestTaskAdaptorDoesNotEmitInjectedMultipartDispositionHeaders(t *testing.T) {
 	tests := []struct {
 		name string

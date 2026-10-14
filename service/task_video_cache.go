@@ -105,6 +105,11 @@ func cacheTaskVideoDataURL(ctx context.Context, task *model.Task, resultURL stri
 }
 
 func cacheTaskVideoRemoteSource(ctx context.Context, task *model.Task, resultURL string) (bool, error) {
+	if reused, err := reuseCachedTaskVideo(ctx, task); err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("check stored video for task %s: %v", task.TaskID, err))
+	} else if reused {
+		return true, nil
+	}
 	if taskVideoWorkerEligible(task, resultURL) {
 		cached, err := cacheTaskVideoWithWorker(ctx, task, resultURL)
 		if err == nil && cached {
@@ -162,6 +167,30 @@ func cacheTaskVideoRemoteSource(ctx context.Context, task *model.Task, resultURL
 		return false, fmt.Errorf("rewind video cache temp file: %w", err)
 	}
 	return storeTaskVideo(ctx, task, temp, size, mimeType)
+}
+
+// reuseCachedTaskVideo adopts a copy an earlier attempt already stored under the
+// task's deterministic key, for example when the process restarted after the
+// upload but before the terminal state was written, so a slow source is not
+// downloaded twice.
+func reuseCachedTaskVideo(ctx context.Context, task *model.Task) (bool, error) {
+	storage, err := taskVideoCacheStorageFactory()
+	if err != nil {
+		return false, err
+	}
+	prefix := taskVideoCacheKeyPrefix(task)
+	for _, mimeType := range []string{"video/mp4", "video/webm", "video/quicktime"} {
+		key := prefix + videoExtension(mimeType)
+		exists, err := storage.Exists(ctx, key)
+		if err != nil {
+			return false, err
+		}
+		if exists {
+			installTaskVideoCacheResult(task, storage.Kind(), key, mimeType)
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func storeTaskVideo(ctx context.Context, task *model.Task, reader io.Reader, size int64, mimeType string) (bool, error) {

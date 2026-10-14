@@ -43,6 +43,7 @@ const EMAIL_CATEGORY_LABELS: Record<string, string> = {
   marketing_affiliate_program_activation: 'Referral program activation',
   marketing_announcement: 'New announcement',
   email_preview: 'Test email',
+  cyber_guard_ban: 'Account restriction notice', // 88api cyberguard
 }
 
 export function emailCategoryLabel(

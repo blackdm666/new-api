@@ -1,0 +1,1065 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+)
+
+const (
+	cyberGuardTestBanGroup = "cg-banned"
+	cyberGuardTestAdminKey = "test-admin-key"
+)
+
+// forEachCyberGuardDatabase runs a case on a fresh SQLite file and, when
+// TEST_MYSQL_DSN / TEST_POSTGRES_DSN are set, on MySQL and PostgreSQL. Every
+// database is opened through model.InitDB like production (dialect, column
+// quoting); the PostgreSQL DSN must be a postgres:// URL. The MySQL and
+// PostgreSQL DSNs must point at disposable test databases: the cases wipe the
+// tables they use before and after running.
+func forEachCyberGuardDatabase(t *testing.T, run func(t *testing.T)) {
+	for _, dialect := range []struct{ name, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
+		t.Run(dialect.name, func(t *testing.T) {
+			dsn := "local" // model.InitDB opens common.SQLitePath
+			if dialect.env != "" {
+				if dsn = os.Getenv(dialect.env); dsn == "" {
+					t.Skip(dialect.env + " is not configured")
+				}
+			}
+			useCyberGuardTestDatabase(t, dsn)
+			run(t)
+		})
+	}
+}
+
+func useCyberGuardTestDatabase(t *testing.T, dsn string) {
+	t.Helper()
+	previousDB, previousLogDB := model.DB, model.LOG_DB
+	previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
+	previousMaster, previousSQLite := common.IsMasterNode, common.SQLitePath
+	common.SQLitePath = filepath.ToSlash(filepath.Join(t.TempDir(), "cyberguard.db")) +
+		"?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_txlock=immediate"
+	common.IsMasterNode = false // skip the full migration; setupCyberGuardTest migrates the tables the cases use
+	t.Setenv("SQL_DSN", dsn)
+	t.Setenv("LOG_SQL_DSN", "")
+	err := model.InitDB()
+	common.IsMasterNode = previousMaster
+	require.NoError(t, err)
+	model.LOG_DB = model.DB
+	connection, err := model.DB.DB()
+	require.NoError(t, err)
+	versionQuery := "SELECT version()"
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		connection.SetMaxOpenConns(1) // like the package test database
+		versionQuery = "SELECT sqlite_version()"
+	}
+	t.Cleanup(func() {
+		_ = connection.Close() // waits for running queries, so the temp file can be removed
+		model.DB, model.LOG_DB = previousDB, previousLogDB
+		common.SetDatabaseTypes(previousMain, previousLog)
+		common.SQLitePath = previousSQLite
+	})
+	var version string
+	require.NoError(t, model.DB.Raw(versionQuery).Scan(&version).Error)
+	t.Logf("database: %s %s", common.MainDatabaseType(), version)
+}
+
+func setupCyberGuardTest(t *testing.T, mutate func(*operation_setting.CyberGuardSetting)) operation_setting.CyberGuardSetting {
+	t.Helper()
+	require.NoError(t, model.DB.AutoMigrate(&model.CyberGuardEvent{}, &model.CyberGuardBan{}, &model.CyberGuardPollState{},
+		&model.AuditLog{}, &model.User{}, &model.Option{}, &model.UserSubscription{}, &model.EmailDelivery{},
+		&model.EmailSenderAccount{}, &model.EmailDeliveryAttempt{}, &model.EmailReceiptEvent{}, &model.EmailDeliveryThrottle{},
+		&model.EmailDeliveryMinuteQuota{}, &model.EmailReceiptEndpoint{}))
+	require.NoError(t, model.LOG_DB.AutoMigrate(&model.Log{}))
+	s := operation_setting.DefaultCyberGuardSetting()
+	s.Mode = operation_setting.CyberGuardModeEnforce
+	s.BanGroup = cyberGuardTestBanGroup
+	s.Sub2apiAdminApiKey = cyberGuardTestAdminKey
+	s.Sub2apiApiKeyIds = []int64{1}
+	s.NotifyRoot = false
+	if mutate != nil {
+		mutate(&s)
+	}
+	operation_setting.SetCyberGuardSettingForTest(s)
+	clean := func() {
+		for _, table := range []string{"cyber_guard_events", "cyber_guard_bans", "cyber_guard_poll_states", "audit_logs", "users",
+			"logs", "email_deliveries", "user_subscriptions"} {
+			model.DB.Exec("DELETE FROM " + table)
+		}
+	}
+	clean()
+	t.Cleanup(func() {
+		clean()
+		operation_setting.SetCyberGuardSettingForTest(operation_setting.DefaultCyberGuardSetting())
+		cyberGuardDetailSeen = map[int64]int64{}
+		cyberGuardAccountCacheMu.Lock()
+		cyberGuardAccountCache = map[int64]cyberGuardAccountInfo{}
+		cyberGuardAccountCacheMu.Unlock()
+	})
+	seedCyberGuardUser(t, 1, "default", common.RoleRootUser, "")
+	return operation_setting.GetCyberGuardSetting()
+}
+
+func seedCyberGuardUser(t *testing.T, id int, group string, role int, remark string) {
+	t.Helper()
+	require.NoError(t, model.DB.Create(&model.User{Id: id, Username: fmt.Sprintf("cg_user_%d", id), Password: "unused-password",
+		Role: role, Status: common.UserStatusEnabled, Group: group, Email: fmt.Sprintf("u%d@example.com", id),
+		AffCode: fmt.Sprintf("cg%d", id), Remark: remark}).Error)
+}
+
+func seedCyberGuardLog(t *testing.T, userId int, channelId int, tokenId int, requestId string, createdAt int64, keyFp string) {
+	t.Helper()
+	other := ""
+	if keyFp != "" {
+		other = `{"admin_info":{"channel_affinity":{"key_fp":"` + keyFp + `"}}}`
+	}
+	require.NoError(t, model.LOG_DB.Create(&model.Log{UserId: userId, Username: fmt.Sprintf("cg_user_%d", userId), CreatedAt: createdAt,
+		Type: model.LogTypeConsume, TokenId: tokenId, TokenName: "tk", ModelName: "gpt-5", ChannelId: channelId, Group: "default",
+		UpstreamRequestId: requestId, Other: other}).Error)
+}
+
+func seedCyberGuardEvent(t *testing.T, opsId int64, occurredAt int64, requestId string, state string, userId int, unitKey string) {
+	t.Helper()
+	created, err := model.InsertCyberGuardEvent(&model.CyberGuardEvent{OpsId: opsId, OccurredAt: occurredAt, Sub2apiRequestId: requestId,
+		Category: operation_setting.CyberGuardCategoryCyber, Model: "gpt-5", State: state, UserId: userId, UnitKey: unitKey})
+	require.NoError(t, err)
+	require.True(t, created)
+}
+
+func cyberGuardEventByOps(t *testing.T, opsId int64) model.CyberGuardEvent {
+	t.Helper()
+	var event model.CyberGuardEvent
+	require.NoError(t, model.DB.Where("ops_id = ?", opsId).First(&event).Error)
+	return event
+}
+
+func cyberGuardUserGroup(t *testing.T, userId int) string {
+	t.Helper()
+	user, err := model.GetCyberGuardUser(userId)
+	require.NoError(t, err)
+	return user.Group
+}
+
+func opsRow(id int64, createdAt int64, errorType string, status int, requestId string, message string, accountId int64) map[string]any {
+	return map[string]any{
+		"id": id, "created_at": time.Unix(createdAt, 0).UTC().Format(time.RFC3339Nano), "type": errorType, "status_code": status,
+		"model": "gpt-5", "request_id": requestId, "message": message, "api_key_id": 1, "account_id": accountId,
+		"account_name": fmt.Sprintf("acc-%d", accountId), "inbound_endpoint": "/v1/responses",
+	}
+}
+
+// newFakeSub2api imitates sub2api v2.10.5: x-api-key admin auth, business-
+// limited cyber rows only visible with view=all, [start_time, end_time) sorted
+// by created_at ascending, page_size capped at 2.
+func newFakeSub2api(t *testing.T, rows []map[string]any, details map[int64]map[string]any) (*httptest.Server, func() []url.Values) {
+	t.Helper()
+	var mu sync.Mutex
+	var queries []url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		write := func(status int, payload any) {
+			body, err := common.Marshal(payload)
+			require.NoError(t, err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = w.Write(body)
+		}
+		if r.Header.Get("x-api-key") != cyberGuardTestAdminKey {
+			write(http.StatusUnauthorized, map[string]any{"code": 401, "message": "INVALID_ADMIN_KEY"})
+			return
+		}
+		if rest, ok := strings.CutPrefix(r.URL.Path, "/api/v1/admin/accounts/"); ok {
+			id, _ := strconv.ParseInt(rest, 10, 64)
+			write(http.StatusOK, map[string]any{"code": 0, "message": "success", "data": map[string]any{
+				"id": id, "name": fmt.Sprintf("acc-%d", id), "status": "active", "schedulable": id != 443, "error_message": "",
+			}})
+			return
+		}
+		if rest, ok := strings.CutPrefix(r.URL.Path, "/api/v1/admin/ops/errors/"); ok {
+			id, _ := strconv.ParseInt(rest, 10, 64)
+			write(http.StatusOK, map[string]any{"code": 0, "message": "success", "data": details[id]})
+			return
+		}
+		query := r.URL.Query()
+		mu.Lock()
+		queries = append(queries, query)
+		mu.Unlock()
+		start, err := time.Parse(time.RFC3339, query.Get("start_time"))
+		require.NoError(t, err)
+		end, err := time.Parse(time.RFC3339, query.Get("end_time"))
+		require.NoError(t, err)
+		createdAt := func(row map[string]any) time.Time {
+			at, err := time.Parse(time.RFC3339Nano, row["created_at"].(string))
+			require.NoError(t, err)
+			return at
+		}
+		items := []map[string]any{}
+		for _, row := range rows {
+			at := createdAt(row)
+			if query.Get("view") == "all" && fmt.Sprint(row["api_key_id"]) == query.Get("api_key_id") && !at.Before(start) && at.Before(end) {
+				items = append(items, row)
+			}
+		}
+		slices.SortStableFunc(items, func(a, b map[string]any) int { return createdAt(a).Compare(createdAt(b)) })
+		const pageSize = 2
+		page, _ := strconv.Atoi(query.Get("page"))
+		pages := max(1, (len(items)+pageSize-1)/pageSize)
+		first := min(max(page-1, 0)*pageSize, len(items))
+		write(http.StatusOK, map[string]any{"code": 0, "message": "success", "data": map[string]any{
+			"items": items[first:min(first+pageSize, len(items))], "total": len(items), "page": page, "page_size": pageSize, "pages": pages,
+		}})
+	}))
+	t.Cleanup(server.Close)
+	return server, func() []url.Values {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]url.Values(nil), queries...)
+	}
+}
+
+func useFakeSub2api(t *testing.T, rows []map[string]any, details map[int64]map[string]any) func() []url.Values {
+	t.Helper()
+	server, queries := newFakeSub2api(t, rows, details)
+	s := operation_setting.GetCyberGuardSetting()
+	s.Sub2apiBaseUrl = server.URL
+	operation_setting.SetCyberGuardSettingForTest(s)
+	return queries
+}
+
+func TestCyberGuardClassifyOpsRow(t *testing.T) {
+	cases := []struct {
+		errorType string
+		text      string
+		expected  string
+	}{
+		{"cyber_policy_session_blocked", "This session is blocked by cyber-security policy", "session_blocked"},
+		{"cyber_policy", "cyber_policy: flagged", "cyber"},
+		{"upstream_error", "[cyber] request rejected", "cyber"},
+		{"upstream_error", "This request was flagged for possible Cybersecurity Risk", "cyber"},
+		{"upstream_error", "[bio] request rejected", "bio"},
+		{"invalid_request_error", "flagged for possible biological risk", "bio"},
+		{"upstream_error", "[usage] request rejected", "usage"},
+		{"upstream_error", "The prompt violates our Usage Policy", "usage"},
+		{"cyber_policy", "Excel BPS cybersecurity risk", ""},
+		{"upstream_error", "rate limit exceeded", ""},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.expected, ClassifyCyberGuardOpsRow(tc.errorType, tc.text), tc.text)
+	}
+}
+
+// The admin API key must never reach another host through a redirect.
+func TestCyberGuardSub2apiClientDoesNotFollowRedirects(t *testing.T) {
+	var leaked atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked.Store(r.Header.Get("x-api-key") != "")
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"items":[],"pages":1}}`))
+	}))
+	t.Cleanup(target.Close)
+	origin := httptest.NewServer(http.RedirectHandler(target.URL+"/api/v1/admin/ops/errors", http.StatusFound))
+	t.Cleanup(origin.Close)
+	s := operation_setting.DefaultCyberGuardSetting()
+	s.Sub2apiBaseUrl, s.Sub2apiAdminApiKey = origin.URL, cyberGuardTestAdminKey
+
+	_, err := fetchCyberGuardOpsPage(context.Background(), s, 1, 0, 60, 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 302")
+	assert.False(t, leaked.Load())
+}
+
+func TestCyberGuardPollAttributesCountsAndBans(t *testing.T) {
+	forEachCyberGuardDatabase(t, func(t *testing.T) {
+		setupCyberGuardTest(t, nil)
+		now := common.GetTimestamp()
+		seedCyberGuardUser(t, 9001, "default", common.RoleCommonUser, "")
+		seedCyberGuardUser(t, 9002, "default", common.RoleAdminUser, "")
+		seedCyberGuardUser(t, 9004, "default", common.RoleCommonUser, "")
+		seedCyberGuardUser(t, 9005, "default", common.RoleCommonUser, "")
+		seedCyberGuardUser(t, 9006, "default", common.RoleCommonUser, "")
+		seedCyberGuardLog(t, 9001, 1, 70, "rid-a1", now-300, "aaaaaaaa")
+		seedCyberGuardLog(t, 9001, 9, 70, "rid-a2", now-200, "aaaaaaaa")
+		seedCyberGuardLog(t, 9001, 37, 70, "rid-a3", now-100, "")
+		seedCyberGuardLog(t, 9002, 1, 80, "rid-admin", now-100, "")
+		seedCyberGuardLog(t, 9004, 1, 81, "rid-amb", now-100, "")
+		seedCyberGuardLog(t, 9005, 9, 82, "rid-amb", now-95, "")
+		seedCyberGuardLog(t, 9001, 1, 70, "rid-usage", now-50, "")
+		seedCyberGuardLog(t, 9001, 1, 70, "rid-sb", now-40, "")
+		seedCyberGuardLog(t, 9006, 1, 83, "rid-bio", now-20, "")
+		seedCyberGuardLog(t, 9004, 5, 81, "rid-other-channel", now-100, "")
+
+		rows := []map[string]any{
+			opsRow(1, now-300, "cyber_policy", 200, "rid-a1", "cyber_policy: flagged", 332),
+			opsRow(2, now-200, "upstream_error", 400, "rid-a2", "[cyber] flagged for possible cybersecurity risk", 332),
+			opsRow(3, now-100, "cyber_policy", 400, "rid-a3", "cyber_policy: flagged", 443),
+			opsRow(4, now-100, "cyber_policy", 200, "rid-admin", "cyber_policy: flagged", 443),
+			opsRow(5, now-100, "cyber_policy", 200, "rid-amb", "cyber_policy: flagged", 443),
+			opsRow(6, now-50, "upstream_error", 400, "rid-usage", "[usage] violates usage policy", 443),
+			opsRow(7, now-40, "cyber_policy_session_blocked", 403, "rid-sb", "session blocked", 0),
+			opsRow(8, now-30, "cyber_policy", 200, "rid-none", "cyber_policy: flagged", 443),
+			opsRow(9, now-700, "cyber_policy", 200, "rid-late", "cyber_policy: flagged", 443),
+			opsRow(10, now-60, "upstream_error", 400, "rid-excel", "Excel BPS [cyber] quota", 443),
+			opsRow(11, now-20, "upstream_error", 502, "rid-bio", "Upstream request failed", 443),
+			opsRow(12, now-100, "cyber_policy", 200, "rid-other-channel", "cyber_policy: flagged", 443),
+		}
+		details := map[int64]map[string]any{11: {"id": 11, "upstream_error_message": "This request was flagged for possible biological risk"}}
+		queries := useFakeSub2api(t, rows, details)
+		s := operation_setting.GetCyberGuardSetting()
+
+		result, err := RunCyberGuardPoll(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, CyberGuardPollStatusOK, result.Status, result.Error)
+		assert.Equal(t, 12, result.Fetched, "every page must be fetched")
+		assert.Equal(t, 11, result.NewEvents, "Excel BPS rows are ignored")
+		assert.Equal(t, 1, result.BansApplied)
+
+		for _, query := range queries() {
+			assert.Equal(t, "all", query.Get("view"))
+			assert.Equal(t, "1", query.Get("api_key_id"))
+			assert.Equal(t, "created_at", query.Get("sort_by"))
+			assert.Equal(t, "asc", query.Get("sort_order"))
+			start, err := time.Parse(time.RFC3339, query.Get("start_time"))
+			require.NoError(t, err)
+			assert.InDelta(t, now-15*60, start.Unix(), 5, "first poll only looks back lookback_minutes")
+		}
+		assert.Len(t, queries(), 6, "12 rows at page_size 2")
+
+		first, second, third := cyberGuardEventByOps(t, 1), cyberGuardEventByOps(t, 2), cyberGuardEventByOps(t, 3)
+		assert.Equal(t, model.CyberGuardEventStateCounted, first.State)
+		assert.Equal(t, 9001, first.UserId)
+		assert.Equal(t, 1, first.ChannelId)
+		assert.Equal(t, int64(332), first.AccountId)
+		assert.Equal(t, "fp:aaaaaaaa", first.UnitKey)
+		assert.True(t, first.IsNewUnit)
+		assert.Equal(t, "fp:aaaaaaaa", second.UnitKey, "same session fingerprint is the same unit")
+		assert.False(t, second.IsNewUnit)
+		assert.Equal(t, fmt.Sprintf("ns:70:gpt-5:%d", now-100), third.UnitKey)
+		assert.True(t, third.IsNewUnit)
+
+		expectedStates := map[int64]string{
+			4:  model.CyberGuardEventStateExempt,
+			5:  model.CyberGuardEventStateUnattributed,
+			6:  model.CyberGuardEventStateRecordOnly,
+			7:  model.CyberGuardEventStateRecordOnly,
+			8:  model.CyberGuardEventStatePending,
+			9:  model.CyberGuardEventStateUnattributed,
+			11: model.CyberGuardEventStateCounted,
+			12: model.CyberGuardEventStatePending,
+		}
+		for opsId, state := range expectedStates {
+			assert.Equal(t, state, cyberGuardEventByOps(t, opsId).State, "ops %d", opsId)
+		}
+		assert.Equal(t, operation_setting.CyberGuardCategoryBio, cyberGuardEventByOps(t, 11).Category, "detail text classifies uncoded 502 rows")
+
+		ban, err := model.GetActiveCyberGuardBanByUser(9001)
+		require.NoError(t, err)
+		require.NotNil(t, ban)
+		assert.Equal(t, model.CyberGuardBanSourceAuto, ban.Source)
+		assert.Equal(t, 0, ban.TierIndex)
+		assert.Equal(t, "default", ban.OriginalGroup)
+		assert.InDelta(t, now+72*3600, ban.ExpiresAt, 5)
+		assert.Equal(t, "7天2个/30天2个", ban.UnitsSummary)
+		assert.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9001))
+		assert.Equal(t, model.CyberGuardEmailStateQueued, ban.EmailState)
+		var delivery model.EmailDelivery
+		require.NoError(t, model.DB.Where("delivery_key = ?", fmt.Sprintf("cyberguard-ban:%d", ban.Id)).First(&delivery).Error)
+		assert.Equal(t, CyberGuardBanEmailCategory, delivery.Category)
+		assert.Equal(t, common.SMTPProfileSecurity, delivery.SMTPProfile)
+		assert.Equal(t, "u9001@example.com", delivery.Recipient)
+
+		state, err := model.GetCyberGuardPollState()
+		require.NoError(t, err)
+		assert.Equal(t, CyberGuardPollStatusOK, state.LastStatus)
+		assert.GreaterOrEqual(t, state.CursorEnd, now)
+
+		overview, err := GetCyberGuardOverview()
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardOverviewCounts{HitsToday: overview.Counts.HitsToday, Hits7d: 10, Units7d: 3, UsersFlagged7d: 2,
+			ActiveBans: 1, Unattributed7d: 2, Pending: 2}, overview.Counts)
+		assert.Equal(t, model.CyberGuardReconciliation{Sub2apiRows: 11, Attributed: 7, Unattributed: 2, Pending: 2}, overview.Reconciliation24h)
+		assert.True(t, overview.LastPoll.Ok)
+
+		users, total, err := ListCyberGuardUsers("", "active", 1, 20)
+		require.NoError(t, err)
+		require.Equal(t, 1, total)
+		assert.Equal(t, 9001, users[0].UserId)
+		assert.Equal(t, 2, users[0].Units7d)
+		assert.Equal(t, int64(4), users[0].Hits30d)
+		assert.Equal(t, ban.Id, users[0].Ban.Id)
+		assert.NotContains(t, users[0].Email, "u9001", "emails are masked")
+		_, total, err = ListCyberGuardUsers("", "all", 1, 20)
+		require.NoError(t, err)
+		assert.Equal(t, 3, total)
+		_, _, err = ListCyberGuardUsers("", "all", -1, -1)
+		require.NoError(t, err, "out-of-range pagination is clamped")
+
+		events, total64, err := model.ListCyberGuardEvents(model.CyberGuardEventFilter{Keyword: ban.CaseId}, 0, 20)
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), total64, "a case id finds the banned user's events")
+		assert.Len(t, events, 5)
+		banRows, _, err := ListCyberGuardBanRows(model.CyberGuardBanStatusActive, 0, 0, 20)
+		require.NoError(t, err)
+		require.Len(t, banRows, 1)
+		assert.Equal(t, cyberGuardTestBanGroup, banRows[0].CurrentGroup)
+		assert.NotEmpty(t, banRows[0].EmailDeliveryState)
+
+		accounts, err := ListCyberGuardAccounts(context.Background(), 7)
+		require.NoError(t, err)
+		require.Len(t, accounts, 2)
+		assert.Equal(t, int64(443), accounts[0].AccountId)
+		assert.Equal(t, [4]int64{6, 1, 1, 3}, [4]int64{accounts[0].HitsCyber, accounts[0].HitsBio, accounts[0].HitsUsage, accounts[0].Users})
+		assert.Equal(t, "active", accounts[0].Status)
+		require.NotNil(t, accounts[0].Schedulable)
+		assert.False(t, *accounts[0].Schedulable)
+		assert.Equal(t, int64(332), accounts[1].AccountId)
+		assert.Equal(t, int64(2), accounts[1].HitsCyber)
+
+		again, err := RunCyberGuardPoll(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, 0, again.NewEvents, "ops rows are stored once")
+		assert.Equal(t, 0, again.BansApplied)
+		state, err = model.GetCyberGuardPollState()
+		require.NoError(t, err)
+
+		s.Sub2apiAdminApiKey = "wrong-key"
+		operation_setting.SetCyberGuardSettingForTest(s)
+		failed, err := RunCyberGuardPoll(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, CyberGuardPollStatusError, failed.Status)
+		assert.Contains(t, failed.Error, "HTTP 401")
+		assert.NotContains(t, failed.Error, "wrong-key")
+		failedState, err := model.GetCyberGuardPollState()
+		require.NoError(t, err)
+		assert.Equal(t, state.CursorEnd, failedState.CursorEnd, "a failed fetch keeps the cursor")
+		assert.Equal(t, CyberGuardPollStatusError, failedState.LastStatus)
+
+		// Turning the mode off by any path: one run clears the cursor, then
+		// nothing runs while no timed ban is due (9001's ban ends in 72 h).
+		s.Mode = operation_setting.CyberGuardModeOff
+		operation_setting.SetCyberGuardSettingForTest(s)
+		assert.True(t, cyberGuardPollHandler{}.Enabled(), "off mode runs once to clear the cursor")
+		_, err = RunCyberGuardPoll(context.Background())
+		require.NoError(t, err)
+		assert.False(t, cyberGuardPollHandler{}.Enabled())
+	})
+}
+
+// A backlog larger than one poll's page budget drains over several polls:
+// each poll stores what it fetched, a page-capped poll resumes at its last
+// stored row, and every refusal ends up stored exactly once.
+func TestCyberGuardPollCatchUpDrainsBacklogWithoutGaps(t *testing.T) {
+	forEachCyberGuardDatabase(t, func(t *testing.T) {
+		setupCyberGuardTest(t, nil)
+		now := common.GetTimestamp()
+		var rows []map[string]any
+		var refusals []int64
+		// 150 rows two per second exceed one poll's budget (40 pages of 2 rows
+		// at the fake's page size); every 10th row is a refusal.
+		for i := range 150 {
+			id, at := int64(i+1), now-7000+int64(i/2)
+			if i%10 == 0 {
+				rows = append(rows, opsRow(id, at, "cyber_policy", 200, fmt.Sprintf("rid-b%d", i), "cyber_policy: flagged", 332))
+				refusals = append(refusals, id)
+				continue
+			}
+			rows = append(rows, opsRow(id, at, "upstream_error", 429, fmt.Sprintf("rid-b%d", i), "rate limit exceeded", 332))
+		}
+		// Sparse refusals across the rest of the two-hour backlog.
+		for i := range 12 {
+			id := int64(1000 + i)
+			rows = append(rows, opsRow(id, now-6600+int64(i)*540, "cyber_policy", 200, fmt.Sprintf("rid-s%d", i), "cyber_policy: flagged", 332))
+			refusals = append(refusals, id)
+		}
+		useFakeSub2api(t, rows, nil)
+		require.NoError(t, model.SaveCyberGuardPollState(model.CyberGuardPollState{CursorEnd: now - 7200}))
+
+		first, err := RunCyberGuardPoll(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, CyberGuardPollStatusPartial, first.Status, first.Error)
+		assert.Equal(t, now-8100, first.WindowStart)
+		assert.Equal(t, now-5400, first.WindowEnd, "a poll reads one bounded slice")
+		assert.Equal(t, 80, first.Fetched, "one poll reads at most 40 pages per API key")
+		state, err := model.GetCyberGuardPollState()
+		require.NoError(t, err)
+		assert.True(t, state.CatchUp)
+		assert.Equal(t, now-7000+39, state.CursorEnd, "the cursor stops at the last stored row")
+
+		statuses := []string{first.Status}
+		for range 10 {
+			result, err := RunCyberGuardPoll(context.Background())
+			require.NoError(t, err)
+			statuses = append(statuses, result.Status)
+			if result.Status != CyberGuardPollStatusPartial {
+				break
+			}
+		}
+		assert.Equal(t, CyberGuardPollStatusOK, statuses[len(statuses)-1], "%v", statuses)
+		assert.Greater(t, len(statuses), 3, "the backlog drains in several polls")
+		var stored []int64
+		require.NoError(t, model.DB.Model(&model.CyberGuardEvent{}).Pluck("ops_id", &stored).Error)
+		assert.ElementsMatch(t, refusals, stored, "no refusal is lost or stored twice")
+		state, err = model.GetCyberGuardPollState()
+		require.NoError(t, err)
+		assert.False(t, state.CatchUp)
+		assert.GreaterOrEqual(t, state.CursorEnd, now)
+		overview, err := GetCyberGuardOverview()
+		require.NoError(t, err)
+		assert.True(t, overview.LastPoll.Ok)
+	})
+}
+
+// Users whose tier evaluation never ran (crash, transient DB error) are
+// re-evaluated by the next poll even without a new hit: recent hits, hits a
+// catch-up ingested hours after they occurred and, outside observe mode,
+// users with an open observe-mode proposal.
+func TestCyberGuardPollRechecksRecentlyFlaggedUsers(t *testing.T) {
+	forEachCyberGuardDatabase(t, func(t *testing.T) {
+		s := setupCyberGuardTest(t, nil)
+		now := common.GetTimestamp()
+		for _, userId := range []int{9001, 9002, 9003} {
+			seedCyberGuardUser(t, userId, "default", common.RoleCommonUser, "")
+		}
+		seedCyberGuardEvent(t, 1, now-120, "r1", model.CyberGuardEventStateCounted, 9001, "fp:aaaaaaa1")
+		seedCyberGuardEvent(t, 2, now-60, "r2", model.CyberGuardEventStateCounted, 9001, "fp:aaaaaaa2")
+		seedCyberGuardEvent(t, 3, now-3*3600, "r3", model.CyberGuardEventStateCounted, 9002, "fp:bbbbbbb1")
+		seedCyberGuardEvent(t, 4, now-3*3600+60, "r4", model.CyberGuardEventStateCounted, 9002, "fp:bbbbbbb2")
+		seedCyberGuardEvent(t, 5, now-120, "r5", model.CyberGuardEventStateCounted, 9003, "fp:ccccccc1")
+		seedCyberGuardEvent(t, 6, now-60, "r6", model.CyberGuardEventStateCounted, 9003, "fp:ccccccc2")
+		_, _, err := model.UpsertCyberGuardProposal(model.CyberGuardBanInput{UserId: 9003, BanGroup: s.BanGroup, Now: now})
+		require.NoError(t, err)
+		observed, err := model.ListCyberGuardRecheckUsers(now-cyberGuardRecheckSeconds, true)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []int{9001, 9002}, observed, "observe mode leaves users with an open proposal alone")
+		useFakeSub2api(t, nil, nil)
+
+		result, err := RunCyberGuardPoll(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, CyberGuardPollStatusOK, result.Status, result.Error)
+		assert.Equal(t, 3, result.BansApplied, "enforce mode retries recent, late-ingested and proposed users")
+		for _, userId := range []int{9001, 9002, 9003} {
+			assert.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, userId), "user %d", userId)
+		}
+		again, err := RunCyberGuardPoll(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, CyberGuardPollStatusOK, again.Status, again.Error)
+		assert.Zero(t, again.BansApplied+again.Escalated, "re-evaluation is idempotent")
+	})
+}
+
+func TestCyberGuardNoSessionUnitsMergeRetries(t *testing.T) {
+	forEachCyberGuardDatabase(t, func(t *testing.T) {
+		cases := []struct {
+			mergeSeconds int
+			units        int
+		}{
+			{mergeSeconds: 60, units: 3},
+			{mergeSeconds: 0, units: 5},
+		}
+		for _, tc := range cases {
+			t.Run(strconv.Itoa(tc.mergeSeconds), func(t *testing.T) {
+				s := setupCyberGuardTest(t, func(s *operation_setting.CyberGuardSetting) { s.NosessionMergeSeconds = tc.mergeSeconds })
+				now := common.GetTimestamp()
+				base := now - 1000
+				seedCyberGuardUser(t, 9001, "default", common.RoleCommonUser, "")
+				hits := []struct {
+					offset  int64
+					tokenId int
+				}{{0, 70}, {30, 70}, {80, 70}, {200, 70}, {210, 71}}
+				for i, hit := range hits {
+					rid := fmt.Sprintf("rid-%d", i)
+					seedCyberGuardLog(t, 9001, 1, hit.tokenId, rid, base+hit.offset, "")
+					seedCyberGuardEvent(t, int64(i+1), base+hit.offset, rid, model.CyberGuardEventStatePending, 0, "")
+				}
+				result := &CyberGuardPollResult{}
+				flagged, err := resolveCyberGuardPendingEvents(s, now, result)
+				require.NoError(t, err)
+				assert.Equal(t, []int{9001}, flagged)
+				assert.Equal(t, 5, result.Counted)
+				spans, err := model.ListCyberGuardUnitSpans([]int{9001})
+				require.NoError(t, err)
+				assert.Len(t, spans, tc.units)
+				if tc.mergeSeconds > 0 {
+					run := fmt.Sprintf("ns:70:gpt-5:%d", base)
+					assert.Equal(t, run, cyberGuardEventByOps(t, 2).UnitKey, "retry 30s later joins the run")
+					assert.Equal(t, run, cyberGuardEventByOps(t, 3).UnitKey, "each hit extends the run")
+					assert.False(t, cyberGuardEventByOps(t, 3).IsNewUnit)
+					assert.Equal(t, fmt.Sprintf("ns:70:gpt-5:%d", base+200), cyberGuardEventByOps(t, 4).UnitKey)
+					assert.Equal(t, fmt.Sprintf("ns:71:gpt-5:%d", base+210), cyberGuardEventByOps(t, 5).UnitKey, "other token is another unit")
+				}
+			})
+		}
+	})
+}
+
+func TestCyberGuardTierStrictestWinsAndFloorAfterUnban(t *testing.T) {
+	forEachCyberGuardDatabase(t, func(t *testing.T) {
+		s := setupCyberGuardTest(t, func(s *operation_setting.CyberGuardSetting) {
+			s.Tiers = []operation_setting.CyberGuardTier{{WindowDays: 7, MinUnits: 2, BanHours: 24}, {WindowDays: 7, MinUnits: 2, BanHours: 72}, {WindowDays: 30, MinUnits: 3, BanHours: 0}}
+		})
+		now := common.GetTimestamp()
+		seedCyberGuardUser(t, 9001, "default", common.RoleCommonUser, "")
+		seedCyberGuardEvent(t, 1, now-100, "r1", model.CyberGuardEventStateCounted, 9001, "fp:11111111")
+		seedCyberGuardEvent(t, 2, now-200, "r2", model.CyberGuardEventStateCounted, 9001, "fp:22222222")
+
+		match, _, err := matchCyberGuardTier(s, 9001, now)
+		require.NoError(t, err)
+		require.NotNil(t, match)
+		assert.Equal(t, 1, match.Index, "72h beats 24h")
+
+		seedCyberGuardEvent(t, 3, now-20*86400, "r3", model.CyberGuardEventStateCounted, 9001, "fp:33333333")
+		match, _, err = matchCyberGuardTier(s, 9001, now)
+		require.NoError(t, err)
+		require.NotNil(t, match)
+		assert.Equal(t, 2, match.Index, "indefinite beats any duration")
+
+		ban, err := CyberGuardManualBan(1, 9001, "test", 0)
+		require.NoError(t, err)
+		_, err = CyberGuardUnban(1, ban.Id, "reviewed")
+		require.NoError(t, err)
+		match, _, err = matchCyberGuardTier(s, 9001, now)
+		require.NoError(t, err)
+		assert.Nil(t, match, "units before the unban never count again")
+
+		seedCyberGuardEvent(t, 4, now+5, "r4", model.CyberGuardEventStateCounted, 9001, "fp:11111111")
+		seedCyberGuardEvent(t, 5, now+10, "r5", model.CyberGuardEventStateCounted, 9001, "fp:44444444")
+		result := &CyberGuardPollResult{}
+		require.NoError(t, evaluateCyberGuardUser(s, 9001, now+20, result))
+		assert.Equal(t, 0, result.BansApplied, "a session counted before the unban plus one new session does not re-ban")
+		seedCyberGuardEvent(t, 6, now+15, "r6", model.CyberGuardEventStateCounted, 9001, "fp:55555555")
+		require.NoError(t, evaluateCyberGuardUser(s, 9001, now+20, result))
+		assert.Equal(t, 1, result.BansApplied)
+		assert.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9001))
+
+		// A dismissal that commits while an evaluation counts the units (after
+		// it read the counting floor) is never overridden by a stale ban.
+		seedCyberGuardUser(t, 9002, "default", common.RoleCommonUser, "")
+		seedCyberGuardEvent(t, 7, now-100, "r7", model.CyberGuardEventStateCounted, 9002, "fp:66666666")
+		seedCyberGuardEvent(t, 8, now-50, "r8", model.CyberGuardEventStateCounted, 9002, "fp:77777777")
+		proposal, _, err := model.UpsertCyberGuardProposal(model.CyberGuardBanInput{UserId: 9002, BanGroup: s.BanGroup, Now: now})
+		require.NoError(t, err)
+		// The hook fires once, before the unit spans query; this case's
+		// database is discarded afterwards.
+		dismissed, dismissErr := false, error(nil)
+		require.NoError(t, model.DB.Callback().Row().Before("gorm:row").Register("cyberguard_test:dismiss", func(db *gorm.DB) {
+			if !dismissed && db.Statement.Table == "cyber_guard_events" {
+				dismissed = true
+				_, dismissErr = CyberGuardDismiss(1, proposal.Id, "reviewed")
+			}
+		}))
+		result = &CyberGuardPollResult{}
+		require.NoError(t, evaluateCyberGuardUser(s, 9002, now+20, result))
+		require.True(t, dismissed)
+		require.NoError(t, dismissErr)
+		assert.Zero(t, result.BansApplied)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9002))
+		_, _, err = model.UpsertCyberGuardProposal(model.CyberGuardBanInput{UserId: 9002, BanGroup: s.BanGroup, Now: now, EvaluatedFloor: new(int64)})
+		assert.ErrorIs(t, err, model.ErrCyberGuardBanStateChanged, "a stale evaluation proposes nothing either")
+	})
+}
+
+func TestCyberGuardBanLifecycleRestoresGroups(t *testing.T) {
+	forEachCyberGuardDatabase(t, func(t *testing.T) {
+		setupCyberGuardTest(t, nil)
+		seedCyberGuardUser(t, 9001, "代理商", common.RoleCommonUser, "")
+		setGroup := func(group string) {
+			require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", 9001).Update("group", group).Error)
+		}
+
+		ban, err := CyberGuardManualBan(1, 9001, "manual", 1)
+		require.NoError(t, err)
+		assert.Equal(t, "代理商", ban.OriginalGroup)
+		assert.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9001))
+		outcome, err := CyberGuardUnban(1, ban.Id, "ok")
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardEndReasonManualUnban, outcome.Ban.EndReason)
+		assert.Equal(t, "代理商", cyberGuardUserGroup(t, 9001), "unban restores the original group")
+		_, err = CyberGuardUnban(1, ban.Id, "again")
+		assert.ErrorIs(t, err, model.ErrCyberGuardBanStateChanged)
+
+		ban, err = CyberGuardManualBan(1, 9001, "manual", 0)
+		require.NoError(t, err)
+		setGroup("vip")
+		outcome, err = CyberGuardUnban(1, ban.Id, "")
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardEndReasonAdminOverride, outcome.Ban.EndReason)
+		assert.False(t, outcome.GroupChanged)
+		assert.Equal(t, "vip", cyberGuardUserGroup(t, 9001), "a changed group is left alone")
+
+		ban, err = CyberGuardManualBan(1, 9001, "manual", 0)
+		require.NoError(t, err)
+		editedAt := common.GetTimestamp()
+		CyberGuardOnAdminGroupChange(9001, "svip", editedAt, 1, common.RoleRootUser)
+		still, err := model.GetCyberGuardBan(ban.Id)
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardBanStatusActive, still.Status, "hook ignores users still in the ban group")
+		setGroup("svip")
+		CyberGuardOnAdminGroupChange(9001, "svip", editedAt, 1, common.RoleRootUser)
+		ended, err := model.GetCyberGuardBan(ban.Id)
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardEndReasonAdminOverride, ended.EndReason)
+		assert.Equal(t, "svip", cyberGuardUserGroup(t, 9001))
+
+		// The poller re-applies the ban between the admin's edit and the hook:
+		// the admin's group still wins.
+		ban, err = CyberGuardManualBan(1, 9001, "manual", 0)
+		require.NoError(t, err)
+		editedAt = common.GetTimestamp()
+		setGroup("default")
+		result := &CyberGuardPollResult{}
+		require.NoError(t, reapplyCyberGuardDrift(common.GetTimestamp(), result))
+		require.Equal(t, 1, result.DriftReapplied)
+		require.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9001))
+		CyberGuardOnAdminGroupChange(9001, "default", editedAt, 1, common.RoleRootUser)
+		ended, err = model.GetCyberGuardBan(ban.Id)
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardEndReasonAdminOverride, ended.EndReason)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9001))
+
+		ban, err = CyberGuardManualBan(1, 9001, "manual", 1)
+		require.NoError(t, err)
+		setGroup("vip") // e.g. an affiliate upgrade
+		result = &CyberGuardPollResult{}
+		require.NoError(t, reapplyCyberGuardDrift(common.GetTimestamp(), result))
+		assert.Equal(t, 1, result.DriftReapplied)
+		assert.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9001))
+		require.NoError(t, model.DB.Model(&model.CyberGuardBan{}).Where("id = ?", ban.Id).Update("expires_at", common.GetTimestamp()-1).Error)
+		require.NoError(t, expireCyberGuardBans(common.GetTimestamp(), result))
+		assert.Equal(t, 1, result.Expired)
+		expired, err := model.GetCyberGuardBan(ban.Id)
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardEndReasonExpired, expired.EndReason)
+		assert.Equal(t, "vip", expired.RestoreGroup)
+		assert.Equal(t, "vip", cyberGuardUserGroup(t, 9001), "expiry restores the group seen at drift time")
+	})
+}
+
+// Plans with an upgrade group and no downgrade group revert to the group held
+// before purchase when they expire; a ban in between must not corrupt that.
+func TestCyberGuardBanWithLegacySubscriptionUpgrade(t *testing.T) {
+	forEachCyberGuardDatabase(t, func(t *testing.T) {
+		setupCyberGuardTest(t, nil)
+		plan := &model.SubscriptionPlan{Id: 71, Title: "VIP", DurationUnit: model.SubscriptionDurationDay, DurationValue: 30, UpgradeGroup: "vip"}
+		buy := func(userId int) *model.UserSubscription {
+			subscription, err := model.CreateUserSubscriptionFromPlanTx(model.DB, userId, plan, "order")
+			require.NoError(t, err)
+			return subscription
+		}
+		expire := func(subscription *model.UserSubscription) {
+			require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("id = ?", subscription.Id).
+				Update("end_time", common.GetTimestamp()-1).Error)
+			_, err := model.ExpireDueSubscriptions(10)
+			require.NoError(t, err)
+		}
+
+		// Bought during the ban, expiring after it: no silent re-ban.
+		seedCyberGuardUser(t, 9001, "default", common.RoleCommonUser, "")
+		ban, err := CyberGuardManualBan(1, 9001, "manual", 1)
+		require.NoError(t, err)
+		bought := buy(9001)
+		assert.Equal(t, cyberGuardTestBanGroup, bought.PrevUserGroup)
+		require.NoError(t, reapplyCyberGuardDrift(common.GetTimestamp(), &CyberGuardPollResult{}))
+		require.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9001))
+		var relinked model.UserSubscription
+		require.NoError(t, model.DB.Where("id = ?", bought.Id).First(&relinked).Error)
+		assert.Equal(t, "default", relinked.PrevUserGroup, "the drift re-apply points the revert at the pre-ban group")
+		outcome, err := CyberGuardUnban(1, ban.Id, "")
+		require.NoError(t, err)
+		assert.Equal(t, "vip", outcome.ToGroup, "the subscription is still active")
+		expire(bought)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9001), "the expiry reverts to the pre-ban group, not the ban group")
+
+		// Bought before the ban, expiring during it: unban does not hand out the paid group.
+		seedCyberGuardUser(t, 9002, "default", common.RoleCommonUser, "")
+		owned := buy(9002)
+		ban, err = CyberGuardManualBan(1, 9002, "manual", 0)
+		require.NoError(t, err)
+		assert.Equal(t, "vip", ban.OriginalGroup)
+		expire(owned)
+		require.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9002), "the expiry skips its downgrade while banned")
+		outcome, err = CyberGuardUnban(1, ban.Id, "")
+		require.NoError(t, err)
+		assert.Equal(t, "default", outcome.ToGroup)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9002), "unban restores the group held before the subscription")
+
+		// Mode off (no drift pass): bought during the ban, which then expires
+		// while the user sits in the upgrade group. The ban ends without a group
+		// change, and the subscription's expiry still never bans.
+		s := operation_setting.GetCyberGuardSetting()
+		s.Mode = operation_setting.CyberGuardModeOff
+		operation_setting.SetCyberGuardSettingForTest(s)
+		seedCyberGuardUser(t, 9003, "default", common.RoleCommonUser, "")
+		ban, err = CyberGuardManualBan(1, 9003, "manual", 1)
+		require.NoError(t, err)
+		bought = buy(9003)
+		require.Equal(t, "vip", cyberGuardUserGroup(t, 9003))
+		require.NoError(t, model.DB.Model(&model.CyberGuardBan{}).Where("id = ?", ban.Id).Update("expires_at", common.GetTimestamp()-1).Error)
+		result, err := RunCyberGuardPoll(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, 1, result.Expired)
+		assert.Zero(t, result.DriftReapplied)
+		ended, err := model.GetCyberGuardBan(ban.Id)
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardEndReasonAdminOverride, ended.EndReason)
+		assert.Equal(t, "vip", cyberGuardUserGroup(t, 9003))
+		expire(bought)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9003), "the expiry reverts to the pre-ban group, not the ban group")
+
+		// An administrator's group edit ends the ban the same way: the expiry
+		// reverts to the administrator's group.
+		seedCyberGuardUser(t, 9004, "default", common.RoleCommonUser, "")
+		_, err = CyberGuardManualBan(1, 9004, "manual", 0)
+		require.NoError(t, err)
+		bought = buy(9004)
+		editedAt := common.GetTimestamp()
+		require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", 9004).Update("group", "svip").Error)
+		CyberGuardOnAdminGroupChange(9004, "svip", editedAt, 1, common.RoleRootUser)
+		var edited model.UserSubscription
+		require.NoError(t, model.DB.Where("id = ?", bought.Id).First(&edited).Error)
+		assert.Equal(t, "svip", edited.PrevUserGroup)
+	})
+}
+
+func TestCyberGuardAdoptProtectedAndObserveFlow(t *testing.T) {
+	forEachCyberGuardDatabase(t, func(t *testing.T) {
+		s := setupCyberGuardTest(t, func(s *operation_setting.CyberGuardSetting) {
+			s.Mode = operation_setting.CyberGuardModeObserve
+			s.ExemptUserIds = []int{9003}
+			s.NotifyRoot = true
+		})
+		now := common.GetTimestamp()
+		seedCyberGuardUser(t, 9001, "default", common.RoleCommonUser, "")
+		seedCyberGuardUser(t, 9002, "default", common.RoleAdminUser, "")
+		seedCyberGuardUser(t, 9003, "default", common.RoleCommonUser, "")
+		seedCyberGuardUser(t, 9010, cyberGuardTestBanGroup, common.RoleCommonUser, "[风控封号 2026-10-12 cyber 人工 原分组:default]")
+		seedCyberGuardUser(t, 9011, cyberGuardTestBanGroup, common.RoleCommonUser, "原分组：代理商")
+
+		_, err := CyberGuardManualBan(1, 9002, "", 0)
+		assert.ErrorIs(t, err, model.ErrCyberGuardProtectedUser, "admins are never banned")
+		_, err = CyberGuardManualBan(1, 9003, "", 0)
+		assert.ErrorIs(t, err, model.ErrCyberGuardProtectedUser, "exempt users are never banned")
+		_, err = CyberGuardManualBan(1, 9010, "", 0)
+		assert.ErrorIs(t, err, model.ErrCyberGuardInBanGroup)
+
+		adoptable, err := ListCyberGuardAdoptable()
+		require.NoError(t, err)
+		suggested := map[int]string{}
+		for _, row := range adoptable {
+			suggested[row.UserId] = row.SuggestedOriginalGroup
+		}
+		assert.Equal(t, map[int]string{9010: "default", 9011: "代理商"}, suggested)
+		_, err = CyberGuardAdopt(1, 9001, "default", "", 0)
+		assert.ErrorIs(t, err, model.ErrCyberGuardNotInBanGroup)
+		adopted, err := CyberGuardAdopt(1, 9011, "代理商", "import", 0)
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardBanSourceAdopted, adopted.Source)
+		assert.Equal(t, model.CyberGuardEmailStateNone, adopted.EmailState)
+		assert.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9011), "adopt never changes the group")
+		_, err = CyberGuardUnban(1, adopted.Id, "")
+		require.NoError(t, err)
+		assert.Equal(t, "代理商", cyberGuardUserGroup(t, 9011))
+
+		for i, userId := range []int{9001, 9003} {
+			seedCyberGuardEvent(t, int64(10*i+1), now-100, "", model.CyberGuardEventStateCounted, userId, "fp:aaaaaaa1")
+			seedCyberGuardEvent(t, int64(10*i+2), now-50, "", model.CyberGuardEventStateCounted, userId, "fp:aaaaaaa2")
+		}
+		result := &CyberGuardPollResult{}
+		require.NoError(t, evaluateCyberGuardUser(s, 9001, now, result))
+		require.NoError(t, evaluateCyberGuardUser(s, 9003, now, result))
+		assert.Equal(t, 1, result.Proposals, "observe mode proposes; exempt users get nothing")
+		assert.Equal(t, 0, result.BansApplied)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9001), "observe mode never changes groups")
+		open, err := model.CyberGuardOpenBansByUser([]int{9001, 9003})
+		require.NoError(t, err)
+		require.Contains(t, open, 9001)
+		assert.NotContains(t, open, 9003)
+		proposal := open[9001]
+		assert.Equal(t, model.CyberGuardBanStatusObserved, proposal.Status)
+		users, _, err := ListCyberGuardUsers("", "all", 1, 20)
+		require.NoError(t, err)
+		exempt := map[int]bool{}
+		for _, row := range users {
+			exempt[row.UserId] = row.IsExempt
+		}
+		assert.Equal(t, map[int]bool{9001: false, 9003: true, 9011: false}, exempt)
+
+		ban, err := CyberGuardPromote(1, proposal.Id)
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardBanStatusActive, ban.Status)
+		assert.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9001))
+		promoted, err := model.GetCyberGuardBan(proposal.Id)
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardEndReasonPromoted, promoted.EndReason)
+		floor, err := model.CyberGuardCountingFloor(9001)
+		require.NoError(t, err)
+		assert.Zero(t, floor, "a promoted proposal is not a counting floor")
+
+		for i, userId := range []int{9004, 9005} {
+			seedCyberGuardUser(t, userId, "default", common.RoleCommonUser, "")
+			seedCyberGuardEvent(t, int64(31+10*i), now-100, "", model.CyberGuardEventStateCounted, userId, "fp:bbbbbbb1")
+			seedCyberGuardEvent(t, int64(32+10*i), now-50, "", model.CyberGuardEventStateCounted, userId, "fp:bbbbbbb2")
+			require.NoError(t, evaluateCyberGuardUser(s, userId, now, result))
+		}
+		var rootNotices []string
+		require.NoError(t, model.DB.Model(&model.EmailDelivery{}).Where("delivery_key LIKE ?", "cyberguard-root:%").
+			Pluck("delivery_key", &rootNotices).Error)
+		assert.Len(t, rootNotices, 3, "every proposal notifies root; the generic notification limit does not apply")
+		open, err = model.CyberGuardOpenBansByUser([]int{9004})
+		require.NoError(t, err)
+		assert.Contains(t, rootNotices, fmt.Sprintf("cyberguard-root:%s:proposal", open[9004].CaseId))
+		dismissed, err := CyberGuardDismiss(1, open[9004].Id, "false positive")
+		require.NoError(t, err)
+		assert.Equal(t, model.CyberGuardBanStatusDismissed, dismissed.Status)
+		floor, err = model.CyberGuardCountingFloor(9004)
+		require.NoError(t, err)
+		assert.Equal(t, dismissed.EndedAt, floor, "dismissing restarts the count")
+	})
+}
+
+func TestCyberGuardSettingsKeepSecretAndValidate(t *testing.T) {
+	forEachCyberGuardDatabase(t, func(t *testing.T) {
+		setupCyberGuardTest(t, nil)
+		common.OptionMapRWMutex.Lock()
+		previousOptions := common.OptionMap
+		common.OptionMap = map[string]string{}
+		common.OptionMapRWMutex.Unlock()
+		t.Cleanup(func() {
+			model.DB.Exec("DELETE FROM options")
+			common.OptionMapRWMutex.Lock()
+			common.OptionMap = previousOptions
+			common.OptionMapRWMutex.Unlock()
+		})
+
+		input, err := MergeCyberGuardSettingUpdate([]byte(`{"mode":"observe","ban_group":"vip","tiers":[{"window_days":7,"min_units":2,"ban_hours":24}]}`))
+		require.NoError(t, err)
+		assert.Empty(t, input.Sub2apiAdminApiKey, "the stored secret is never prefilled")
+		assert.Equal(t, []int{1, 9, 37}, input.ProtectedChannelIds, "omitted fields keep their values")
+		changed, err := UpdateCyberGuardSettings(input)
+		require.NoError(t, err)
+		assert.Contains(t, changed, "tiers")
+		assert.NotContains(t, changed, "sub2api_admin_api_key", "empty secret keeps the stored key")
+
+		saved := operation_setting.GetCyberGuardSetting()
+		assert.Equal(t, operation_setting.CyberGuardModeObserve, saved.Mode)
+		assert.Equal(t, cyberGuardTestAdminKey, saved.Sub2apiAdminApiKey)
+		assert.Equal(t, []operation_setting.CyberGuardTier{{WindowDays: 7, MinUnits: 2, BanHours: 24}}, saved.Tiers)
+		view, err := common.Marshal(GetCyberGuardSettingView())
+		require.NoError(t, err)
+		assert.NotContains(t, string(view), cyberGuardTestAdminKey)
+		assert.NotContains(t, string(view), `"sub2api_admin_api_key"`)
+		assert.Contains(t, string(view), `"has_sub2api_admin_api_key":true`)
+
+		for _, body := range []string{
+			`{"tiers":[{"window_days":0,"min_units":2,"ban_hours":24}]}`,
+			`{"mode":"panic"}`,
+			`{"ban_group":"no-such-group"}`,
+			`{"poll_interval_seconds":5}`,
+		} {
+			bad, err := MergeCyberGuardSettingUpdate([]byte(body))
+			require.NoError(t, err)
+			_, err = UpdateCyberGuardSettings(bad)
+			assert.ErrorIs(t, err, ErrCyberGuardInvalidInput, body)
+		}
+
+		// Turning the mode back on from off never resumes from an old cursor.
+		for _, mode := range []string{operation_setting.CyberGuardModeOff, operation_setting.CyberGuardModeEnforce} {
+			if mode == operation_setting.CyberGuardModeEnforce {
+				require.NoError(t, model.SaveCyberGuardPollState(model.CyberGuardPollState{CursorEnd: common.GetTimestamp() - 3600}))
+			}
+			update, err := MergeCyberGuardSettingUpdate([]byte(`{"mode":"` + mode + `"}`))
+			require.NoError(t, err)
+			_, err = UpdateCyberGuardSettings(update)
+			require.NoError(t, err)
+		}
+		state, err := model.GetCyberGuardPollState()
+		require.NoError(t, err)
+		assert.Zero(t, state.CursorEnd)
+		assert.Equal(t, operation_setting.CyberGuardModeEnforce, operation_setting.GetCyberGuardSetting().Mode)
+	})
+}
+
+// A legacy plan that lapses during a ban and is renewed during the same ban
+// must not leave the user in the plan's group (or the ban group) once the
+// renewal ends, on both the drift path and the mode-off admin_override path.
+func TestCyberGuardRenewalAfterLapseDuringBan(t *testing.T) {
+	forEachCyberGuardDatabase(t, func(t *testing.T) {
+		setupCyberGuardTest(t, nil)
+		plan := &model.SubscriptionPlan{Id: 71, Title: "VIP", DurationUnit: model.SubscriptionDurationDay, DurationValue: 30, UpgradeGroup: "vip"}
+		buy := func(userId int) *model.UserSubscription {
+			subscription, err := model.CreateUserSubscriptionFromPlanTx(model.DB, userId, plan, "order")
+			require.NoError(t, err)
+			return subscription
+		}
+		expire := func(subscription *model.UserSubscription) {
+			require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("id = ?", subscription.Id).
+				Update("end_time", common.GetTimestamp()-1).Error)
+			_, err := model.ExpireDueSubscriptions(10)
+			require.NoError(t, err)
+		}
+		prev := func(id int) string {
+			var sub model.UserSubscription
+			require.NoError(t, model.DB.Where("id = ?", id).First(&sub).Error)
+			return sub.PrevUserGroup
+		}
+
+		// A: enforce mode, drift pass. Pre-ban group vip from S0, S0 lapses during the ban, S1 renewal bought during the ban.
+		seedCyberGuardUser(t, 9101, "default", common.RoleCommonUser, "")
+		s0 := buy(9101)
+		require.Equal(t, "vip", cyberGuardUserGroup(t, 9101))
+		ban, err := CyberGuardManualBan(1, 9101, "manual", 0)
+		require.NoError(t, err)
+		expire(s0)
+		require.Equal(t, cyberGuardTestBanGroup, cyberGuardUserGroup(t, 9101))
+		s1 := buy(9101)
+		require.Equal(t, "vip", cyberGuardUserGroup(t, 9101))
+		require.NoError(t, reapplyCyberGuardDrift(common.GetTimestamp(), &CyberGuardPollResult{}))
+		t.Logf("A: after drift prev(S1)=%q", prev(s1.Id))
+		outcome, err := CyberGuardUnban(1, ban.Id, "")
+		require.NoError(t, err)
+		t.Logf("A: unban to %q", outcome.ToGroup)
+		expire(s1)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9101), "A: after S1 ends the user should be back where S0's expiry would have put them")
+
+		// B: mode off (admin_override path), same purchase history.
+		s := operation_setting.GetCyberGuardSetting()
+		s.Mode = operation_setting.CyberGuardModeOff
+		operation_setting.SetCyberGuardSettingForTest(s)
+		seedCyberGuardUser(t, 9102, "default", common.RoleCommonUser, "")
+		s0 = buy(9102)
+		ban, err = CyberGuardManualBan(1, 9102, "manual", 1)
+		require.NoError(t, err)
+		expire(s0)
+		s1 = buy(9102)
+		require.NoError(t, model.DB.Model(&model.CyberGuardBan{}).Where("id = ?", ban.Id).Update("expires_at", common.GetTimestamp()-1).Error)
+		result, err := RunCyberGuardPoll(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, 1, result.Expired)
+		t.Logf("B: after admin_override prev(S1)=%q group=%q", prev(s1.Id), cyberGuardUserGroup(t, 9102))
+		expire(s1)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9102), "B: after S1 ends the user should be back where S0's expiry would have put them")
+
+		// Control: same history without any ban.
+		seedCyberGuardUser(t, 9103, "default", common.RoleCommonUser, "")
+		s0 = buy(9103)
+		expire(s0)
+		require.Equal(t, "default", cyberGuardUserGroup(t, 9103))
+		s1 = buy(9103)
+		expire(s1)
+		assert.Equal(t, "default", cyberGuardUserGroup(t, 9103), "control")
+	})
+}

@@ -121,6 +121,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/admin-affiliates': { section: 'admin', module: 'subscription' },
   '/admin-invoices': { section: 'admin', module: 'subscription' },
   '/admin-marketing': { section: 'admin', module: 'setting' },
+  '/admin-cyberguard': { section: 'admin', module: 'setting' }, // 88api cyberguard
   '/system-settings': { section: 'admin', module: 'setting' },
   '/system-settings/site': { section: 'admin', module: 'setting' },
 }

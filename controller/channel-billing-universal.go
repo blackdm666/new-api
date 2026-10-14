@@ -373,7 +373,11 @@ func parseSub2APIBalance(body []byte) (model.ChannelBalanceInfo, *float64, error
 		return model.ChannelBalanceInfo{}, nil, errors.New("Sub2API usage response does not contain remaining balance or rate limit data")
 	}
 
-	unlimited := remaining.IsNegative()
+	// Sub2API reports remaining=-1 for a subscription group with no daily,
+	// weekly or monthly limit. A wallet can legitimately be overdrawn, so a
+	// negative value means unlimited only for such a subscription; anything
+	// else stays negative and counts as exhausted.
+	unlimited := remaining.IsNegative() && sub2APISubscriptionUnlimited(raw)
 	if unlimited {
 		remaining = decimal.Zero
 	}
@@ -412,6 +416,20 @@ func parseSub2APIBalance(body []byte) (model.ChannelBalanceInfo, *float64, error
 		info.Unit, info.DisplayUnit = model.ChannelBalanceUnitCredits, unit
 	}
 	return info, legacyBalance, nil
+}
+
+func sub2APISubscriptionUnlimited(raw json.RawMessage) bool {
+	subscription, found, err := balanceRawAt(raw, "subscription")
+	if err != nil || !found || common.GetJsonType(subscription) != "object" {
+		return false
+	}
+	for _, limit := range []string{"daily_limit_usd", "weekly_limit_usd", "monthly_limit_usd"} {
+		value, limitFound, err := balanceRawAt(subscription, limit)
+		if err != nil || (limitFound && common.GetJsonType(value) != "null") {
+			return false
+		}
+	}
+	return true
 }
 
 func parseSub2APIRateLimit(raw json.RawMessage) (decimal.Decimal, decimal.Decimal, decimal.Decimal, bool, error) {

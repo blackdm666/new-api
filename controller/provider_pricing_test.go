@@ -90,6 +90,30 @@ func TestGetProviderPricingPublicDeepSeekGroups(t *testing.T) {
 		})
 	}
 	assert.Contains(t, model.GetModelEnableGroups("deepseek-v4-flash"), "内部自用", "public feed must not mutate the shared cache")
+
+	t.Run("extra groups publish an account-only group", func(t *testing.T) {
+		t.Setenv("HVOY_PROVIDER_PRICING_EXTRA_GROUPS", " 内部自用 , auto, missing")
+		response := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(response)
+		ctx.Request = httptest.NewRequest("GET", "/api/provider/pricing", nil)
+		GetProviderPricing(ctx)
+		require.Equal(t, 200, response.Code)
+		var payload providerPricingResponse
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &payload))
+		require.NotNil(t, payload.Data)
+
+		var internal *providerPricingModel
+		for i, entry := range payload.Data.Models {
+			assert.NotEqual(t, "auto", entry.GroupName)
+			if entry.ModelName == "deepseek-v4-flash" && entry.GroupName == "内部自用" {
+				internal = &payload.Data.Models[i]
+			}
+		}
+		require.NotNil(t, internal)
+		assert.InDelta(t, 1.5, *internal.InputPrice, 1e-9)
+		assert.InDelta(t, 4.5, *internal.OutputPrice, 1e-9)
+		assert.InDelta(t, 0.05, *internal.CacheInputPrice, 1e-9)
+	})
 }
 
 func TestBuildProviderPricingModels(t *testing.T) {

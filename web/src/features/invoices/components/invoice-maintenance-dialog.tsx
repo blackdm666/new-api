@@ -27,16 +27,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -46,7 +37,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { toIntlLocale } from '@/i18n/languages'
+import { ROLE } from '@/lib/roles'
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error'
+import { useAuthStore } from '@/stores/auth-store'
 
 import {
   cleanupInvoiceOrphans,
@@ -55,7 +49,12 @@ import {
   retryInvoiceCleanup,
   retryInvoiceNotification,
 } from '../api'
-import { formatInvoiceTimestamp } from '../lib/invoice-utils'
+import {
+  formatInvoiceTimestamp,
+  getInvoiceNotificationChannelLabel,
+  getInvoiceNotificationKindLabel,
+  getInvoiceStorageTypeLabel,
+} from '../lib/invoice-utils'
 import type {
   InvoiceMaintenance,
   InvoiceStorageReconcileReport,
@@ -67,7 +66,12 @@ type Props = {
 }
 
 export function InvoiceMaintenanceDialog({ open, onOpenChange }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  // Deleting orphan storage objects is irreversible and root-only on the server.
+  const canCleanupOrphans = useAuthStore(
+    (state) => state.auth.user?.role === ROLE.SUPER_ADMIN
+  )
   const [data, setData] = useState<InvoiceMaintenance | null>(null)
   const [report, setReport] = useState<InvoiceStorageReconcileReport | null>(
     null
@@ -216,7 +220,7 @@ export function InvoiceMaintenanceDialog({ open, onOpenChange }: Props) {
                     )}
                   </p>
                 </div>
-                {report.orphan_keys.length > 0 && (
+                {report.orphan_keys.length > 0 && canCleanupOrphans && (
                   <Button
                     variant='destructive'
                     disabled={Boolean(busy)}
@@ -227,14 +231,21 @@ export function InvoiceMaintenanceDialog({ open, onOpenChange }: Props) {
                   </Button>
                 )}
               </div>
+              {report.orphan_keys.length > 0 && !canCleanupOrphans && (
+                <p className='text-muted-foreground text-xs'>
+                  {t(
+                    'Only the root administrator can queue orphan objects for deletion.'
+                  )}
+                </p>
+              )}
               {report.profiles.some((profile) => profile.error) && (
                 <div className='border-destructive/30 bg-destructive/5 space-y-1 rounded-lg border p-3 text-xs'>
                   {report.profiles
                     .filter((profile) => profile.error)
                     .map((profile) => (
                       <p key={profile.storage_profile_id}>
-                        {profile.storage_type} #{profile.storage_profile_id}:{' '}
-                        {profile.error}
+                        {getInvoiceStorageTypeLabel(profile.storage_type, t)} #
+                        {profile.storage_profile_id}: {profile.error}
                       </p>
                     ))}
                 </div>
@@ -254,11 +265,14 @@ export function InvoiceMaintenanceDialog({ open, onOpenChange }: Props) {
               {data.cleanups.map((item) => (
                 <MaintenanceRow
                   key={item.id}
-                  title={`${item.storage_type} · ${item.storage_key}`}
+                  title={`${getInvoiceStorageTypeLabel(item.storage_type, t)} · ${item.storage_key}`}
                   detail={
                     item.last_error ||
                     t('Next attempt: {{time}}', {
-                      time: formatInvoiceTimestamp(item.next_attempt_time),
+                      time: formatInvoiceTimestamp(
+                        item.next_attempt_time,
+                        locale
+                      ),
                     })
                   }
                   badge={t('{{n}} attempts', { n: item.attempts })}
@@ -287,7 +301,7 @@ export function InvoiceMaintenanceDialog({ open, onOpenChange }: Props) {
               {data.notifications.map((item) => (
                 <MaintenanceRow
                   key={item.id}
-                  title={`${item.kind} · #${item.invoice_request_id}`}
+                  title={`${getInvoiceNotificationChannelLabel(item.channel, t)} · ${getInvoiceNotificationKindLabel(item.kind, t)} · ${t('Invoice application')} #${item.invoice_request_id}`}
                   detail={
                     item.last_error ||
                     item.recipient ||
@@ -315,30 +329,17 @@ export function InvoiceMaintenanceDialog({ open, onOpenChange }: Props) {
           )}
         </div>
       </DialogContent>
-      <AlertDialog
+      <ConfirmDialog
         open={cleanupConfirmation !== null}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) setCleanupConfirmation(null)
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('Confirm Cleanup')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {cleanupSummary} {t('This action cannot be undone.')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              variant='destructive'
-              onClick={() => void confirmCleanup()}
-            >
-              {t('Confirm Cleanup')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title={t('Confirm Cleanup')}
+        desc={`${cleanupSummary} ${t('This action cannot be undone.')}`}
+        confirmText={t('Confirm Cleanup')}
+        destructive
+        handleConfirm={() => void confirmCleanup()}
+      />
     </Dialog>
   )
 }

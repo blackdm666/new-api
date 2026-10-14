@@ -59,6 +59,14 @@ type TraceResult struct {
 	Cost         float64            `json:"cost"`
 }
 
+// ToolSurcharge is one per-call tool charge priced from the tool price table
+// (price is per 1K calls), shared by text relays and task settlement logs.
+type ToolSurcharge struct {
+	Name  string  `json:"name"`
+	Count int     `json:"count"`
+	Price float64 `json:"price"`
+}
+
 // BillingSnapshot captures billing state at pre-consume time. Expression and
 // request fields stay frozen; group-dependent fields are refreshed before an
 // auto-group retry and settlement. It is fully serializable and contains no
@@ -82,6 +90,13 @@ type BillingSnapshot struct {
 	ExprVersion               int            `json:"expr_version"`
 	TaskUsageBilling          bool           `json:"task_usage_billing,omitempty"`
 	UsageFacts                map[string]any `json:"usage_facts,omitempty"`
+	// ToolSurcharges records the tool calls a task settlement charged on top of
+	// the expression, with the prices used, so later logs show the same lines.
+	ToolSurcharges []ToolSurcharge `json:"tool_surcharges,omitempty"`
+	// EstimatedFacts names submission facts the plugin could only estimate
+	// (for example seconds of a provider-chosen duration); completion facts
+	// replace them and remove them from this list.
+	EstimatedFacts []string `json:"estimated_facts,omitempty"`
 }
 
 // TieredResult holds everything needed after running tiered settlement.
@@ -98,6 +113,9 @@ type TieredResult struct {
 	MatchedTier            string             `json:"matched_tier"`
 	RequestRules           []RequestRuleTrace `json:"request_rules,omitempty"`
 	CrossedTier            bool               `json:"crossed_tier"`
+	// ToolSurcharges lists task tool calls already included in
+	// ActualQuotaAfterGroup; text relays carry theirs on the quota summary.
+	ToolSurcharges []ToolSurcharge `json:"tool_surcharges,omitempty"`
 	// Clamp records a single-request saturation event during quota conversion so the
 	// caller can surface it on the consume log for admin auditing. Nil when no
 	// clamping occurred. Not serialized: the marker is attached separately via

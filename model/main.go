@@ -407,6 +407,9 @@ func migrateDB() error {
 		&CasbinRule{},
 		&AuthzRole{},
 		&UserAccessToken{},
+		&CyberGuardEvent{},     // 88api cyberguard
+		&CyberGuardBan{},       // 88api cyberguard
+		&CyberGuardPollState{}, // 88api cyberguard
 	)
 	if err != nil {
 		return err

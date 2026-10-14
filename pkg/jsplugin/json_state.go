@@ -18,18 +18,22 @@ const (
 	CapabilityTaskPreflight  = "task-preflight@1"
 	CapabilityJSONOrder      = "json-order@1"
 	CapabilityDurationAuto   = "duration-auto@1"
-	MaxJSONToolBytes         = 1 << 20
-	MaxQueryJSONBytes        = 128 << 20
-	maxJSONToolDepth         = 32
-	maxJSONToolNodes         = 32768
-	maxJSONChanges           = 256
+	// CapabilityTaskPreflightRounds repeats preflight and upload, one round per
+	// provider-side upload, until buildPreflightRequest returns null.
+	CapabilityTaskPreflightRounds = "task-preflight@2"
+	MaxJSONToolBytes              = 1 << 20
+	MaxQueryJSONBytes             = 128 << 20
+	maxJSONToolDepth              = 32
+	maxJSONToolNodes              = 32768
+	maxJSONChanges                = 256
 )
 
 // HasCapability describes host APIs independently of a plugin's mutable globals.
 func HasCapability(name string) bool {
 	return name == CapabilityJSONClone || name == CapabilitySubmitSSEDelta ||
 		name == CapabilityQuerySSEDelta || name == CapabilityTaskPreflight ||
-		name == CapabilityJSONOrder || name == CapabilityDurationAuto
+		name == CapabilityTaskPreflightRounds || name == CapabilityJSONOrder ||
+		name == CapabilityDurationAuto
 }
 
 // JSONState owns a request-local JSON result. Appended strings stay in Go and

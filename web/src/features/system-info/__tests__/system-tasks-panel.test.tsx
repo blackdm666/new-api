@@ -274,3 +274,23 @@ it('refreshes history when the last running task finishes', async () => {
   expect(screen.getByText('history-runner')).toBeVisible()
   client.clear()
 })
+
+it('labels CyberGuard poll tasks and offers them as a history type filter', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async (_url, config) => {
+    const data =
+      config?.params?.scope === 'active'
+        ? []
+        : [{ ...task, task_id: 'cyberguard', type: 'cyber_guard_poll' }]
+    return { data: { success: true, data, total: data.length } }
+  })
+  const client = renderPanel()
+  const row = (await screen.findByText('cyber_guard_poll')).closest('tr')
+  expect(row).not.toBeNull()
+  expect(within(row as HTMLElement).getByText('CyberGuard poll')).toBeVisible()
+  expect(
+    within(screen.getByRole('combobox', { name: 'Type' })).getByRole('option', {
+      name: 'CyberGuard poll',
+    })
+  ).toHaveValue('cyber_guard_poll')
+  client.clear()
+})

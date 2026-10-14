@@ -236,24 +236,23 @@ export function useTaskLogsColumns(
                 className='border-border/60 bg-muted/30 !text-foreground max-w-full truncate rounded-md border px-1.5 py-0.5 font-mono'
               />
               <span className='text-muted-foreground/60 truncate text-[11px]'>
-                {t(log.platform)} · {t(taskActionMapper.getLabel(log.action))}
+                {log.platform ? `${t(log.platform)} · ` : ''}
+                {t(taskActionMapper.getLabel(log.action))}
               </span>
             </div>
           )
         },
         meta: { mobileTitle: true },
       },
-      ...(isRoot
-        ? [
-            {
-              id: 'official_task_id',
-              header: t('Official Task ID'),
-              accessorFn: (row: TaskLog) => row.official_task_id ?? '',
-              cell: ({ row }) => <TaskOfficialIdCell log={row.original} />,
-              size: 190,
-            } satisfies ColumnDef<TaskLog>,
-          ]
-        : []),
+      // Official-relay plugins publish the model platform's own task ID to
+      // every user; root also sees it for the remaining tasks.
+      {
+        id: 'official_task_id',
+        header: t('Official Task ID'),
+        accessorFn: (row: TaskLog) => row.official_task_id ?? '',
+        cell: ({ row }) => <TaskOfficialIdCell log={row.original} />,
+        size: 190,
+      } satisfies ColumnDef<TaskLog>,
       {
         id: 'cost',
         header: t('Cost'),

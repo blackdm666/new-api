@@ -22,50 +22,56 @@ import { formatInvoiceCopyText } from '../lib/invoice-copy'
 import { INVOICE_STATUS, type InvoiceRequest } from '../types'
 
 const labels = {
-  companyName: '公司名称',
+  companyName: '发票抬头',
   taxNumber: '税号',
   bankName: '开户行',
   bankAccount: '银行账号',
   companyAddress: '公司地址',
   companyPhone: '公司电话',
+  remark: '备注',
   totalAmount: '开票金额',
-  includedOrders: '包含订单',
-  tradeNumber: '订单号',
-  payment: '支付方式',
-  amount: '金额',
 }
 
+const invoice = {
+  company_name: '上海示例科技有限公司',
+  tax_number: '91310000TEST2026',
+  bank_name: '招商银行上海分行',
+  bank_account: '6225880000000000',
+  company_address: '上海市浦东新区示例路 88 号',
+  company_phone: '021-88888888',
+  remark: '请备注项目名称',
+  topup_order_ids: '1001,1002',
+  total_money: 2979,
+  status: INVOICE_STATUS.PENDING,
+} as InvoiceRequest
+
 describe('invoice information copy', () => {
-  test('includes billing fields and every claimed order', () => {
-    const invoice = {
-      company_name: '上海示例科技有限公司',
-      tax_number: '91310000TEST2026',
-      bank_name: '招商银行上海分行',
-      bank_account: '6225880000000000',
-      company_address: '上海市浦东新区示例路 88 号',
-      company_phone: '021-88888888',
-      total_money: 888,
-      status: INVOICE_STATUS.PENDING,
-    } as InvoiceRequest
+  test('copies the billing details, remark and the formatted invoice amount', () => {
+    const text = formatInvoiceCopyText(invoice, labels)
+
+    expect(text.split('\n')).toEqual([
+      '发票抬头: 上海示例科技有限公司',
+      '税号: 91310000TEST2026',
+      '开户行: 招商银行上海分行',
+      '银行账号: 6225880000000000',
+      '公司地址: 上海市浦东新区示例路 88 号',
+      '公司电话: 021-88888888',
+      '备注: 请备注项目名称',
+      '开票金额: ¥2,979.00',
+    ])
+  })
+
+  test('leaves out top-up orders and empty optional fields', () => {
     const text = formatInvoiceCopyText(
-      invoice,
-      [
-        {
-          id: 1,
-          trade_no: 'PAY-20260814-001',
-          payment_method: '支付宝',
-          money: 888,
-          amount: 888,
-          status: 'success',
-          create_time: 1,
-        },
-      ],
+      { ...invoice, bank_name: '', bank_account: ' ', remark: '' },
       labels
     )
 
-    expect(text).toContain('公司名称: 上海示例科技有限公司')
-    expect(text).toContain('税号: 91310000TEST2026')
-    expect(text).toContain('订单号: PAY-20260814-001')
-    expect(text).toContain('开票金额: ¥888.00')
+    expect(text).not.toContain('1001')
+    expect(text).not.toContain('1002')
+    expect(text).not.toContain('开户行')
+    expect(text).not.toContain('银行账号')
+    expect(text).not.toContain('备注')
+    expect(text).toContain('开票金额: ¥2,979.00')
   })
 })

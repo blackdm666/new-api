@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -34,7 +35,27 @@ func useTaskVideoWorkerConfig(t *testing.T) {
 	t.Setenv("TASK_VIDEO_WORKER_ENABLED", "true")
 	t.Setenv("TASK_VIDEO_WORKER_URL", "https://new-api-video-transfer.example.workers.dev/transfer")
 	t.Setenv("TASK_VIDEO_WORKER_SECRET", "worker-shared-test-secret")
-	t.Setenv("TASK_VIDEO_WORKER_TIMEOUT_SECONDS", "900")
+	t.Setenv("TASK_VIDEO_WORKER_TIMEOUT_SECONDS", "90")
+}
+
+func TestTaskVideoWorkerTimeoutLeavesTimeForVPSFallback(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want time.Duration
+	}{
+		{raw: "", want: 90 * time.Second},
+		{raw: "60", want: 60 * time.Second},
+		{raw: "90", want: 90 * time.Second},
+		{raw: "900", want: 90 * time.Second},
+		{raw: "5", want: 90 * time.Second},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			t.Setenv("TASK_VIDEO_WORKER_TIMEOUT_SECONDS", tc.raw)
+			assert.Equal(t, tc.want, TaskVideoWorkerTimeout())
+		})
+	}
+	t.Setenv("TASK_VIDEO_PREPARE_TIMEOUT_SECONDS", "")
+	assert.GreaterOrEqual(t, TaskVideoPrepareTimeout()-TaskVideoWorkerTimeout(), 90*time.Second)
 }
 
 func TestCacheTaskVideoRemoteSourceUsesWorkerBeforeVPS(t *testing.T) {
@@ -46,13 +67,18 @@ func TestCacheTaskVideoRemoteSourceUsesWorkerBeforeVPS(t *testing.T) {
 	}
 	prefix := taskVideoCacheKeyPrefix(task)
 	key := prefix + ".mp4"
-	storage := &taskVideoWorkerStorage{existingKeys: map[string]bool{key: true}}
+	// The object appears only once the Worker has stored it, so the check for an
+	// earlier stored copy does not short-circuit the transfer.
+	storage := &taskVideoWorkerStorage{existingKeys: map[string]bool{}}
 	previousFactory := taskVideoCacheStorageFactory
 	taskVideoCacheStorageFactory = func() (invoicefile.Storage, error) { return storage, nil }
 	t.Cleanup(func() { taskVideoCacheStorageFactory = previousFactory })
 
 	previousDo := taskVideoWorkerDo
+	workerCalled := false
 	taskVideoWorkerDo = func(req *http.Request) (*http.Response, error) {
+		workerCalled = true
+		storage.existingKeys[key] = true
 		body, err := io.ReadAll(req.Body)
 		require.NoError(t, err)
 		timestamp := req.Header.Get("X-NewAPI-Timestamp")
@@ -92,6 +118,7 @@ func TestCacheTaskVideoRemoteSourceUsesWorkerBeforeVPS(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, cached)
+	assert.True(t, workerCalled)
 	assert.False(t, localOpened)
 	assert.Equal(t, key, task.PrivateData.ResultStorageKey)
 	assert.Equal(t, taskVideoCacheKind, task.PrivateData.ResultStorageKind)

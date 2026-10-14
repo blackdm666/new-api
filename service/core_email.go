@@ -95,15 +95,27 @@ func BuildPasswordResetEmail(lang string, email string, token string) (string, s
 }
 
 func renderNotificationContent(data dto.Notify) string {
-	content := data.Content
-	for _, value := range data.Values {
-		content = strings.Replace(content, dto.ContentValueParam, fmt.Sprintf("%v", value), 1)
-	}
 	// Quota warnings are assembled entirely by this service and may contain the
 	// trusted, escaped top-up link. All other notification bodies can include
 	// upstream/provider error text and must be treated as untrusted plain text.
-	if data.Type != dto.NotifyTypeQuotaExceed {
+	trusted := data.Type == dto.NotifyTypeQuotaExceed
+	content := data.Content
+	if !trusted {
 		content = html.EscapeString(content)
+	}
+	for _, value := range data.Values {
+		replacement := fmt.Sprintf("%v", value)
+		link, isLink := value.(dto.NotifyLink)
+		if isLink && (strings.HasPrefix(link.URL, "https://") || strings.HasPrefix(link.URL, "http://")) {
+			replacement = fmt.Sprintf(
+				`<a href="%s" style="display:inline-block;margin-top:12px;padding:11px 24px;background-color:#4f46e5;background-image:linear-gradient(135deg,#0891b2 0%%,#4f46e5 58%%,#7c3aed 100%%);color:#ffffff;text-decoration:none;border-radius:11px;box-shadow:0 8px 18px rgba(79,70,229,0.22);font-size:14px;font-weight:650;letter-spacing:0.01em;">%s</a>`,
+				html.EscapeString(link.URL),
+				html.EscapeString(link.Label),
+			)
+		} else if !trusted {
+			replacement = html.EscapeString(replacement)
+		}
+		content = strings.Replace(content, dto.ContentValueParam, replacement, 1)
 	}
 	return strings.ReplaceAll(content, "\n", "<br/>")
 }

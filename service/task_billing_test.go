@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -363,10 +364,14 @@ func TestLogTaskConsumptionIncludesTieredSnapshotUsageFacts(t *testing.T) {
 				"seconds":       5,
 				"upstreamUnits": 40594,
 			},
+			EstimatedFacts: []string{"seconds"},
 		},
 	}
 
 	log := callLogTaskConsumption(t, info, task)
+	assert.Contains(t, log.Content, "seconds: 5（预估）")
+	assert.Contains(t, log.Content, "resolution: 720P")
+	assert.NotContains(t, log.Content, "720P（预估）")
 
 	var other map[string]any
 	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
@@ -1780,6 +1785,128 @@ func TestSettle_TieredUsageFactsMergeCompletionOverSubmission(t *testing.T) {
 			assert.NotContains(t, other, "clips")
 		})
 	}
+}
+
+func TestSettle_TieredToolCallFactsChargeFromToolPriceTable(t *testing.T) {
+	operation_setting.SetToolPriceForTest("web_search:tool-billing-model*", 20)
+	t.Cleanup(func() { operation_setting.DeleteToolPriceForTest("web_search:tool-billing-model*") })
+
+	tests := []struct {
+		name            string
+		completionFacts map[string]any
+		expectedQuota   int
+		expectedTools   []billingexpr.ToolSurcharge
+	}{
+		{
+			// 5 s * 1000 * 0.5 + 20/1K * 3 calls * 0.5 * 1000
+			name:            "priced tool calls add to the expression cost after group ratio",
+			completionFacts: map[string]any{"tool_calls.web_search": float64(3)},
+			expectedQuota:   2530,
+			expectedTools:   []billingexpr.ToolSurcharge{{Name: "web_search", Count: 3, Price: 20}},
+		},
+		{
+			name:            "tools without a positive price bill nothing",
+			completionFacts: map[string]any{"tool_calls.unpriced_tool": float64(5)},
+			expectedQuota:   2500,
+		},
+		{
+			name:            "invalid counts bill nothing",
+			completionFacts: map[string]any{"tool_calls.web_search": float64(-2)},
+			expectedQuota:   2500,
+		},
+		{
+			name:            "oversized upstream counts saturate",
+			completionFacts: map[string]any{"tool_calls.web_search": float64(5000)},
+			expectedQuota:   12500,
+			expectedTools:   []billingexpr.ToolSurcharge{{Name: "web_search", Count: 1000, Price: 20}},
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			truncate(t)
+			const userID = 35
+			seedUser(t, userID, 100_000)
+
+			expression := `tier("base", u("seconds"))`
+			task := makeTask(userID, 0, 2500, 0, BillingSourceWallet, 0)
+			task.PrivateData.BillingContext.TieredSnapshot = &billingexpr.BillingSnapshot{
+				ModelName:        "tool-billing-model-v1",
+				ExprString:       expression,
+				ExprHash:         billingexpr.ExprHashString(expression),
+				GroupRatio:       0.5,
+				QuotaPerUnit:     1000,
+				ExprVersion:      1,
+				TaskUsageBilling: true,
+				UsageFacts:       map[string]any{"seconds": float64(5)},
+				EstimatedTier:    "base",
+			}
+
+			settled := settleTaskBillingOnComplete(
+				context.Background(),
+				&mockAdaptor{},
+				task,
+				&relaycommon.TaskInfo{Status: model.TaskStatusSuccess, UsageFacts: testCase.completionFacts},
+			)
+
+			assert.True(t, settled)
+			assert.Equal(t, testCase.expectedQuota, task.Quota)
+			assert.Equal(t, testCase.expectedTools, task.PrivateData.BillingContext.TieredSnapshot.ToolSurcharges)
+			if testCase.expectedTools == nil {
+				return
+			}
+			log := getLastLog(t)
+			require.NotNil(t, log)
+			assert.Contains(t, log.Content, "web_search 调用")
+			var other map[string]any
+			require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+			surcharges, ok := other["tool_surcharges"].([]any)
+			require.True(t, ok)
+			require.Len(t, surcharges, 1)
+			assert.Equal(t, "web_search", surcharges[0].(map[string]any)["name"])
+		})
+	}
+}
+
+func TestSplitTaskEstimatedFacts(t *testing.T) {
+	facts := map[string]any{"seconds": float64(30), "resolution": "1080p", TaskEstimatedFactsKey: "seconds, missing,seconds"}
+	assert.Equal(t, []string{"seconds"}, SplitTaskEstimatedFacts(facts))
+	assert.NotContains(t, facts, TaskEstimatedFactsKey)
+	assert.Nil(t, SplitTaskEstimatedFacts(map[string]any{"seconds": float64(5)}))
+	assert.Equal(t, []string{"resolution"}, RemainingTaskEstimates([]string{"seconds", "resolution"}, map[string]any{"seconds": float64(4)}))
+}
+
+func TestSettle_TieredPersistsMeasuredUsageOnStoredTask(t *testing.T) {
+	truncate(t)
+	const userID = 37
+	seedUser(t, userID, 10_000)
+
+	expression := `tier("base", u("seconds"))`
+	task := makeTask(userID, 0, 30, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.TieredSnapshot = &billingexpr.BillingSnapshot{
+		ExprString:       expression,
+		ExprHash:         billingexpr.ExprHashString(expression),
+		GroupRatio:       1,
+		QuotaPerUnit:     1,
+		ExprVersion:      1,
+		TaskUsageBilling: true,
+		UsageFacts:       map[string]any{"seconds": float64(30)},
+		EstimatedFacts:   []string{"seconds"},
+		EstimatedTier:    "base",
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+
+	settled := settleTaskBillingOnComplete(context.Background(), &mockAdaptor{}, task,
+		&relaycommon.TaskInfo{Status: model.TaskStatusSuccess, UsageFacts: map[string]any{"seconds": float64(4)}})
+	require.True(t, settled)
+
+	var stored model.Task
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	assert.Equal(t, 4, stored.Quota)
+	snap := stored.PrivateData.BillingContext.TieredSnapshot
+	require.NotNil(t, snap)
+	assert.Equal(t, float64(4), snap.UsageFacts["seconds"])
+	assert.Empty(t, snap.EstimatedFacts)
 }
 
 func TestSettle_TieredSnapshotWriteBackUsesSettledFactsAndMatchedTier(t *testing.T) {

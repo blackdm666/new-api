@@ -114,6 +114,8 @@ func InitOptionMap() {
 	common.OptionMap[setting.EmailDeliveryRulesOptionKey] = setting.EmailDeliveryRules2JSONString()
 	common.OptionMap["InvoiceApplicationNotifyAdminEnabled"] = strconv.FormatBool(common.InvoiceApplicationNotifyAdminEnabled)
 	common.OptionMap["InvoiceIssuedNotifyUserEnabled"] = strconv.FormatBool(common.InvoiceIssuedNotifyUserEnabled)
+	common.OptionMap["InvoiceRejectedNotifyUserEnabled"] = strconv.FormatBool(common.InvoiceRejectedNotifyUserEnabled)
+	common.OptionMap["InvoiceExpiredNotifyUserEnabled"] = strconv.FormatBool(common.InvoiceExpiredNotifyUserEnabled)
 	common.OptionMap["InvoiceAdminEmail"] = common.InvoiceAdminEmail
 	common.OptionMap[AffiliateCommissionEnabledOptionKey] = "false"
 	common.OptionMap[AffiliateCommissionAutoApproveOptionKey] = "false"
@@ -162,6 +164,13 @@ func InitOptionMap() {
 	common.OptionMap["InvoiceFileCOSSecretId"] = setting.InvoiceFileCOSSecretId
 	common.OptionMap["InvoiceFileCOSSecretKey"] = setting.InvoiceFileCOSSecretKey
 	common.OptionMap["InvoiceFileCOSCustomDomain"] = setting.InvoiceFileCOSCustomDomain
+	common.OptionMap["InvoiceWechatNotifyEnabled"] = strconv.FormatBool(setting.InvoiceWechatNotifyEnabled)
+	common.OptionMap["InvoiceWechatApiBaseUrl"] = setting.InvoiceWechatApiBaseUrl
+	common.OptionMap["InvoiceWechatApiToken"] = setting.InvoiceWechatApiToken
+	common.OptionMap["InvoiceWechatAppId"] = setting.InvoiceWechatAppId
+	common.OptionMap["InvoiceWechatGroupId"] = setting.InvoiceWechatGroupId
+	common.OptionMap["InvoiceWechatAutoIssueEnabled"] = strconv.FormatBool(setting.InvoiceWechatAutoIssueEnabled)
+	common.OptionMap["InvoiceWechatInboundToken"] = setting.InvoiceWechatInboundToken
 	common.OptionMap["Notice"] = ""
 	common.OptionMap["About"] = ""
 	common.OptionMap["HomePageContent"] = ""
@@ -430,6 +439,12 @@ func validateOptionValue(key string, value string) error {
 	}
 	if key == setting.EmailDeliveryRulesOptionKey {
 		return setting.ValidateEmailDeliveryRulesJSONString(value)
+	}
+	if key == "InvoiceWechatApiBaseUrl" {
+		return setting.ValidateInvoiceWechatApiBaseUrl(value)
+	}
+	if key == "InvoiceWechatGroupId" {
+		return setting.ValidateInvoiceWechatGroupId(value)
 	}
 	switch key {
 	case "TurnstileCheckEnabled":
@@ -894,8 +909,16 @@ func updateOptionMap(key string, value string) (err error) {
 			common.InvoiceApplicationNotifyAdminEnabled = boolValue
 		case "InvoiceIssuedNotifyUserEnabled":
 			common.InvoiceIssuedNotifyUserEnabled = boolValue
+		case "InvoiceRejectedNotifyUserEnabled":
+			common.InvoiceRejectedNotifyUserEnabled = boolValue
+		case "InvoiceExpiredNotifyUserEnabled":
+			common.InvoiceExpiredNotifyUserEnabled = boolValue
 		case "InvoiceFileEnabled":
 			setting.InvoiceFileEnabled = boolValue
+		case "InvoiceWechatNotifyEnabled":
+			setting.InvoiceWechatNotifyEnabled = boolValue
+		case "InvoiceWechatAutoIssueEnabled":
+			setting.InvoiceWechatAutoIssueEnabled = boolValue
 		case "WorkerAllowHttpImageRequestEnabled":
 			system_setting.WorkerAllowHttpImageRequestEnabled = boolValue
 		case "DefaultUseAutoGroup":
@@ -1028,6 +1051,16 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.InvoiceFileCOSSecretKey = value
 	case "InvoiceFileCOSCustomDomain":
 		setting.InvoiceFileCOSCustomDomain = value
+	case "InvoiceWechatApiBaseUrl":
+		setting.InvoiceWechatApiBaseUrl = strings.TrimSpace(value)
+	case "InvoiceWechatApiToken":
+		setting.InvoiceWechatApiToken = strings.TrimSpace(value)
+	case "InvoiceWechatAppId":
+		setting.InvoiceWechatAppId = strings.TrimSpace(value)
+	case "InvoiceWechatGroupId":
+		setting.InvoiceWechatGroupId = strings.TrimSpace(value)
+	case "InvoiceWechatInboundToken":
+		setting.InvoiceWechatInboundToken = strings.TrimSpace(value)
 	case "ServerAddress":
 		system_setting.ServerAddress = value
 	case "TaskPublicAddress":

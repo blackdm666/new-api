@@ -73,6 +73,7 @@ var accessToken88APIRouteRules = map[string]accessTokenRouteRule{
 	"DELETE /api/invoice/admin/requests/:id/files/:file_id":                accessTokenScopeRule("billing:write"),
 	"POST /api/invoice/admin/requests/:id/notifications/issued/resend":     accessTokenScopeRule("billing:write"),
 	"PUT /api/invoice/admin/requests/:id/status":                           accessTokenScopeRule("billing:write"),
+	"POST /api/invoice/admin/wechat/test":                                  accessTokenScopeRule("billing:write"),
 	"DELETE /api/invoice/admin/requests/:id":                               accessTokenScopeRule("billing:write"),
 	"GET /api/invoice/admin/maintenance":                                   accessTokenScopeRule("billing:read"),
 	"POST /api/invoice/admin/maintenance/cleanups/:cleanup_id/retry":       accessTokenScopeRule("billing:write"),
@@ -142,6 +143,26 @@ var accessToken88APIRouteRules = map[string]accessTokenRouteRule{
 	// router/channel-router.go: the balance query token route is RootAuth, not
 	// Casbin-guarded, and reveals a channel secret like the key route.
 	"POST /api/channel/:id/balance_query/token": accessTokenScopeRule(service.AccessTokenScopeOf(authz.ChannelSecretView)),
+
+	// router/api-router.go: /api/cyber-guard (RootAuth). Reads take the user
+	// scopes; actions that ban, unban or adopt users and the ban email stay
+	// browser-session only, like other account status changes.
+	"GET /api/cyber-guard/overview":               accessTokenScopeRule("user:read"),
+	"GET /api/cyber-guard/users":                  accessTokenScopeRule("user:read"),
+	"GET /api/cyber-guard/events":                 accessTokenScopeRule("user:read"),
+	"GET /api/cyber-guard/bans":                   accessTokenScopeRule("user:read"),
+	"GET /api/cyber-guard/adoptable":              accessTokenScopeRule("user:read"),
+	"GET /api/cyber-guard/accounts":               accessTokenScopeRule("user:read"),
+	"GET /api/cyber-guard/settings":               accessTokenScopeRule("option:read"),
+	"PUT /api/cyber-guard/settings":               accessTokenScopeRule("option:write"),
+	"POST /api/cyber-guard/poll-now":              accessTokenScopeRule("option:write"),
+	"POST /api/cyber-guard/events/:id/void":       accessTokenSessionRule,
+	"POST /api/cyber-guard/bans":                  accessTokenSessionRule,
+	"POST /api/cyber-guard/bans/:id/unban":        accessTokenSessionRule,
+	"POST /api/cyber-guard/bans/:id/promote":      accessTokenSessionRule,
+	"POST /api/cyber-guard/bans/:id/dismiss":      accessTokenSessionRule,
+	"POST /api/cyber-guard/bans/:id/resend-email": accessTokenSessionRule,
+	"POST /api/cyber-guard/adopt":                 accessTokenSessionRule,
 
 	// router/relay-router.go: playground relays, like /pg/chat/completions
 	"POST /pg/images/generations": accessTokenSessionRule,

@@ -130,6 +130,12 @@ export function parseChatConfig(raw: RawChatConfig): ChatPreset[] {
         return null
       }
 
+      // The legacy `ccswitch` marker is not a link; CC Switch imports use the
+      // per-key "CC Switch" action on the API keys page instead.
+      if (url.toLowerCase() === 'ccswitch') {
+        return null
+      }
+
       return {
         id: String(index),
         name,
@@ -161,9 +167,14 @@ export function resolveChatUrl({
   const safeApiKey = normalizeApiKey(apiKey || '')
 
   if (url.includes('{cherryConfig}')) {
+    // A dedicated "88API" provider: id "new-api" would overwrite the user's
+    // built-in New API provider and append the key to its existing keys.
+    // Cherry Studio adds /v1 to the base URL itself.
     const payload = {
-      id: 'new-api',
-      baseUrl: safeServerAddress,
+      id: '88api',
+      name: '88API',
+      type: 'openai',
+      baseUrl: 'https://api.88api.ai',
       apiKey: safeApiKey,
     }
     const encoded = encodeURIComponent(toBase64(JSON.stringify(payload)))

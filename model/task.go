@@ -382,9 +382,15 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 // hydrateTaskListData restores the response data required by Suno audio
 // previews without loading large video-provider payloads into list responses.
 func hydrateTaskListData(tasks []*Task) error {
+	return HydrateTaskData(tasks, func(task *Task) bool { return task.Platform == constant.TaskPlatformSuno })
+}
+
+// HydrateTaskData loads the persisted snapshot, in one query, for the listed
+// tasks that need it and were fetched without it.
+func HydrateTaskData(tasks []*Task, needs func(*Task) bool) error {
 	ids := make([]int64, 0)
 	for _, task := range tasks {
-		if task != nil && task.Platform == constant.TaskPlatformSuno {
+		if task != nil && len(task.Data) == 0 && needs(task) {
 			ids = append(ids, task.ID)
 		}
 	}
@@ -583,6 +589,10 @@ type taskSnapshot struct {
 	PollFailures      int
 }
 
+// TaskSnapshot lets callers outside this package hold a snapshot, for example
+// while a finished task waits for its video transfer before the terminal CAS.
+type TaskSnapshot = taskSnapshot
+
 func (s taskSnapshot) Equal(other taskSnapshot) bool {
 	return s.Status == other.Status &&
 		s.Progress == other.Progress &&
@@ -623,6 +633,14 @@ func (Task *Task) Update() error {
 
 func (t *Task) UpdateQuota() error {
 	return DB.Model(t).Update("quota", t.Quota).Error
+}
+
+// UpdateBillingSnapshot persists private data after completion settlement has
+// written measured usage, tier and tool charges back into the billing
+// snapshot. Settlement runs right after the terminal transition, before later
+// private-data writers such as result caching load the task.
+func (t *Task) UpdateBillingSnapshot() error {
+	return DB.Model(t).Select("private_data").Updates(t).Error
 }
 
 // UpdateResultLocation persists only video-result metadata for an already

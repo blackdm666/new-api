@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -12,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type CreateInvoiceRequestPayload struct {
@@ -39,25 +41,33 @@ type InvoiceRequestDetailResponse struct {
 }
 
 type InvoiceRequestEventResponse struct {
-	Id          int    `json:"id"`
-	FromStatus  int    `json:"from_status"`
-	ToStatus    int    `json:"to_status"`
-	OperatorId  int    `json:"operator_id,omitempty"`
-	Reason      string `json:"reason"`
-	CreatedTime int64  `json:"created_time"`
+	Id           int    `json:"id"`
+	FromStatus   int    `json:"from_status"`
+	ToStatus     int    `json:"to_status"`
+	OperatorId   int    `json:"operator_id,omitempty"`
+	OperatorName string `json:"operator_name"`
+	Reason       string `json:"reason"`
+	CreatedTime  int64  `json:"created_time"`
 }
 
 func GetInvoiceConfig(c *gin.Context) {
-	quota, err := model.GetUserQuota(c.GetInt("id"), true)
+	user, err := model.GetUserById(c.GetInt("id"), false)
 	if err != nil {
 		respondInvoiceInternalError(c, i18n.MsgInvoiceLoadFailed, err)
 		return
 	}
+	email := strings.TrimSpace(user.Email)
 	common.ApiSuccess(c, gin.H{
 		"minimum_amount_cents":    setting.InvoiceMinimumAmountCents,
 		"tax_rate_basis_points":   setting.InvoiceTaxRateBasisPoints,
-		"available_balance_cents": model.InvoiceQuotaToCNYCents(quota),
+		"available_balance_cents": model.InvoiceQuotaToCNYCents(user.Quota),
 		"issue_day":               10,
+		"email":                   email,
+		"email_bound":             email != "",
+		"pending_expiry_days":     setting.InvoicePendingExpiryDays,
+		"file_allowed_exts":       setting.InvoiceFileAllowedExtList(),
+		"file_max_count":          setting.InvoiceFileMaxCount,
+		"file_max_size":           setting.InvoiceFileMaxSize,
 	})
 }
 
@@ -171,17 +181,23 @@ func buildInvoiceRequestDetail(request *model.InvoiceRequest, admin bool) (*Invo
 	}
 	eventResponses := make([]*InvoiceRequestEventResponse, 0, len(events))
 	for _, event := range events {
+		// Applicants see their own name but not which staff account acted.
 		operatorId := 0
+		operatorName := ""
 		if admin {
 			operatorId = event.OperatorId
+			operatorName = event.OperatorName
+		} else if event.OperatorId == request.UserId {
+			operatorName = event.OperatorName
 		}
 		eventResponses = append(eventResponses, &InvoiceRequestEventResponse{
-			Id:          event.Id,
-			FromStatus:  event.FromStatus,
-			ToStatus:    event.ToStatus,
-			OperatorId:  operatorId,
-			Reason:      event.Reason,
-			CreatedTime: event.CreatedTime,
+			Id:           event.Id,
+			FromStatus:   event.FromStatus,
+			ToStatus:     event.ToStatus,
+			OperatorId:   operatorId,
+			OperatorName: operatorName,
+			Reason:       event.Reason,
+			CreatedTime:  event.CreatedTime,
 		})
 	}
 	response := &InvoiceRequestDetailResponse{
@@ -238,6 +254,7 @@ func CreateInvoiceRequest(c *gin.Context) {
 		handleInvoiceError(c, err, i18n.MsgInvoiceSubmitFailed)
 		return
 	}
+	service.WakeInvoiceWechatDelivery()
 	detail, err := buildInvoiceRequestDetail(request, false)
 	if err != nil {
 		respondInvoiceInternalError(c, i18n.MsgInvoiceSubmitFailed, err)
@@ -342,6 +359,20 @@ func UpdateInvoiceRequestStatus(c *gin.Context) {
 			return service.BuildInvoiceIssuedNotifications(updated, previous.Status, user)
 		}
 	}
+	if common.InvoiceRejectedNotifyUserEnabled && payload.Status == model.InvoiceStatusRejected {
+		// A deleted applicant cannot be notified, but the rejection and the
+		// tax fee refund must still go through.
+		user, userErr := model.GetUserById(previous.UserId, false)
+		if userErr != nil && !errors.Is(userErr, gorm.ErrRecordNotFound) {
+			respondInvoiceInternalError(c, i18n.MsgInvoiceUpdateFailed, userErr)
+			return
+		}
+		if userErr == nil {
+			notificationFactory = func(updated *model.InvoiceRequest) ([]*model.InvoiceNotificationDelivery, error) {
+				return service.BuildInvoiceClosedNotifications(updated, user)
+			}
+		}
+	}
 	updated, err := model.UpdateInvoiceRequestStatusWithNotifications(id, payload.Status, c.GetInt("id"), payload.RejectionReason, notificationFactory)
 	if err != nil {
 		handleInvoiceError(c, err, i18n.MsgInvoiceUpdateFailed)
@@ -389,11 +420,12 @@ func WithdrawInvoiceRequest(c *gin.Context) {
 	if !ok {
 		return
 	}
-	request, err := model.WithdrawInvoiceRequest(id, c.GetInt("id"))
+	request, err := model.WithdrawInvoiceRequest(id, c.GetInt("id"), service.BuildInvoiceWithdrawnNotifications)
 	if err != nil {
 		handleInvoiceError(c, err, i18n.MsgInvoiceUpdateFailed)
 		return
 	}
+	service.WakeInvoiceWechatDelivery()
 	common.ApiSuccess(c, request)
 }
 
@@ -468,4 +500,29 @@ func GetInvoiceUserProfile(c *gin.Context) {
 		response.ModelUsage = usage
 	}
 	common.ApiSuccess(c, response)
+}
+
+// TestInvoiceWechatNotification posts a test message to the finance WeChat
+// group with the saved settings. It is root-only like the settings themselves.
+func TestInvoiceWechatNotification(c *gin.Context) {
+	if c.GetInt("role") < common.RoleRootUser {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"code":    "AUTH_INSUFFICIENT_PRIVILEGE",
+			"message": common.TranslateMessage(c, i18n.MsgAuthInsufficientPrivilege),
+		})
+		return
+	}
+	err := service.SendInvoiceWechatTestMessage(c.Request.Context())
+	if errors.Is(err, service.ErrInvoiceWechatNotConfigured) {
+		common.ApiErrorI18n(c, i18n.MsgInvoiceWechatNotConfigured)
+		return
+	}
+	if err != nil {
+		common.SysLog("invoice wechat test failed: " + err.Error())
+		common.ApiErrorI18n(c, i18n.MsgInvoiceWechatTestFailed, map[string]any{"Reason": err.Error()})
+		return
+	}
+	recordManageAudit(c, "invoice.wechat.test", nil)
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 }

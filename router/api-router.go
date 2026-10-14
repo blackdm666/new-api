@@ -233,6 +233,10 @@ func SetApiRouter(router *gin.Engine) {
 			invoiceRoute.GET("/requests/:id/files/:file_id", controller.DownloadInvoiceFile)
 		}
 
+		// The finance group bot authenticates with its own token instead of a
+		// user session.
+		apiRouter.POST("/invoice/wechat/files", middleware.DisableCache(), controller.ReceiveInvoiceWechatFile)
+
 		invoiceAdminRoute := apiRouter.Group("/invoice/admin")
 		invoiceAdminRoute.Use(middleware.DisableCache(), middleware.AdminAuth())
 		{
@@ -249,6 +253,7 @@ func SetApiRouter(router *gin.Engine) {
 			invoiceAdminRoute.POST("/maintenance/notifications/:delivery_id/retry", middleware.CriticalRateLimit(), controller.RetryInvoiceNotification)
 			invoiceAdminRoute.POST("/maintenance/reconcile", middleware.CriticalRateLimit(), controller.ReconcileInvoiceStorage)
 			invoiceAdminRoute.POST("/maintenance/orphans/cleanup", middleware.CriticalRateLimit(), controller.CleanupInvoiceOrphans)
+			invoiceAdminRoute.POST("/wechat/test", middleware.CriticalRateLimit(), controller.TestInvoiceWechatNotification)
 		}
 
 		// Subscription billing (plans, purchase, admin management)
@@ -366,6 +371,28 @@ func SetApiRouter(router *gin.Engine) {
 			marketingRoute.GET("/suppressions", controller.ListMarketingSuppressions)
 			marketingRoute.POST("/suppressions", controller.CreateMarketingSuppression)
 			marketingRoute.DELETE("/suppressions/:id", controller.DeleteMarketingSuppression)
+		}
+
+		// 88api cyberguard: 风控中心 (root only, same guards as marketing)
+		cyberGuardRoute := apiRouter.Group("/cyber-guard")
+		cyberGuardRoute.Use(middleware.DisableCache(), middleware.RootAuth())
+		{
+			cyberGuardRoute.GET("/overview", controller.GetCyberGuardOverview)
+			cyberGuardRoute.GET("/users", controller.ListCyberGuardUsers)
+			cyberGuardRoute.GET("/events", controller.ListCyberGuardEvents)
+			cyberGuardRoute.POST("/events/:id/void", controller.VoidCyberGuardEvent)
+			cyberGuardRoute.GET("/bans", controller.ListCyberGuardBans)
+			cyberGuardRoute.POST("/bans", controller.CreateCyberGuardBan)
+			cyberGuardRoute.POST("/bans/:id/unban", controller.UnbanCyberGuard)
+			cyberGuardRoute.POST("/bans/:id/promote", controller.PromoteCyberGuardBan)
+			cyberGuardRoute.POST("/bans/:id/dismiss", controller.DismissCyberGuardBan)
+			cyberGuardRoute.POST("/bans/:id/resend-email", middleware.CriticalRateLimit(), controller.ResendCyberGuardBanEmail)
+			cyberGuardRoute.GET("/adoptable", controller.ListCyberGuardAdoptable)
+			cyberGuardRoute.POST("/adopt", controller.AdoptCyberGuardBan)
+			cyberGuardRoute.GET("/accounts", controller.ListCyberGuardAccounts)
+			cyberGuardRoute.GET("/settings", controller.GetCyberGuardSettings)
+			cyberGuardRoute.PUT("/settings", controller.UpdateCyberGuardSettings)
+			cyberGuardRoute.POST("/poll-now", controller.PollCyberGuardNow)
 		}
 
 		// Custom OAuth provider management (root only)
