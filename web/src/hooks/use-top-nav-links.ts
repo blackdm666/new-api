@@ -125,7 +125,7 @@ export function buildTopNavLinks(
         {
           title: options.t('Enterprise'),
           description: options.t(
-            'Hong Kong company contracts · Corporate bank transfer · Enterprise inquiries'
+            'Enterprise contracts · Corporate billing · Business inquiries'
           ),
           href: getLocalizedSitePath(
             options.language,
