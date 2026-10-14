@@ -419,7 +419,7 @@ func sendEmailThroughChannel(config smtpChannelConfig, subject string, receiver 
 func sendEmailThroughChannelWithIdentifiers(config smtpChannelConfig, subject string, receiver string, content string, attachments []emailAttachmentData, requestedMessageID string, notifyMessageID string) (string, error) {
 	from := config.fromAddress()
 	if strings.TrimSpace(config.server) == "" {
-		return "", fmt.Errorf("SMTP server is not configured")
+		return "", NewMessage("SMTP server is not configured")
 	}
 	if config.port < 1 || config.port > 65535 {
 		return "", fmt.Errorf("invalid SMTP port")
@@ -477,7 +477,7 @@ func sendEmailThroughChannelWithIdentifiers(config smtpChannelConfig, subject st
 		return "", err
 	}
 	if err = client.Quit(); err != nil {
-		SysError(fmt.Sprintf("SMTP QUIT failed after email delivery through %s channel: %v", config.name, err))
+		SysError(LogText("SMTP QUIT failed after email delivery through %s channel: %v", config.name, err))
 		// DATA was already accepted by the server. Treat a failed QUIT as a
 		// connection-close problem so workers do not resend the same message.
 		return messageID, nil

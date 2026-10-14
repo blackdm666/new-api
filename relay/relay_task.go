@@ -417,7 +417,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		if parsed.Immediate != nil && parsed.Immediate.Status == model.TaskStatusSuccess && len(parsed.Immediate.UsageFacts) > 0 {
 			settlement, facts, err := service.EvaluateTaskCompletionUsage(snap, parsed.Immediate.UsageFacts)
 			if err != nil {
-				logger.LogWarn(c, fmt.Sprintf("task immediate usage settlement failed; retaining reserved quota: %v", err))
+				logger.LogWarn(c, common.LogText("task immediate usage settlement failed; retaining reserved quota: %v", err))
 			} else {
 				finalQuota = settlement.ActualQuotaAfterGroup
 				snap.UsageFacts = facts
@@ -524,9 +524,12 @@ const (
 )
 
 // Provider responses that mean our account there cannot pay for the task.
+// The phrases match provider text. new-api providers from v1.0.0-rc.43 on
+// translate their quota errors (English by default, zh-CN or zh-TW otherwise),
+// so all three wordings are listed.
 var (
 	upstreamQuotaErrorCodes   = []string{"insufficient_user_quota", "insufficient_quota", "insufficient_balance", "insufficient_credit", "insufficient_credits"}
-	upstreamQuotaErrorPhrases = []string{"预扣费额度失败", "额度不足", "余额不足", "积分不足", "token quota is not enough", "credit balance is too low", "exceeded your current quota", "insufficient balance", "insufficient credit", "insufficient quota"}
+	upstreamQuotaErrorPhrases = []string{"预扣费额度失败", "额度不足", "額度不足", "余额不足", "积分不足", "token quota is not enough", "insufficient user quota", "not enough quota to pre-consume", "subscription quota is insufficient", "credit balance is too low", "exceeded your current quota", "insufficient balance", "insufficient credit", "insufficient quota"}
 )
 
 // modelPriceTaskError hides pricing internals (model names, expressions and

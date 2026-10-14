@@ -74,7 +74,7 @@ it('reloads once without showing the error page when a stale route chunk fails t
   renderRouteThatFailsWith(rspackChunkLoadError())
 
   await waitFor(() => expect(reload).toHaveBeenCalledTimes(1))
-  expect(screen.queryByRole('heading', { name: '500' })).not.toBeInTheDocument()
+  expect(screen.queryByText(/Oops! Something went wrong/)).not.toBeInTheDocument()
 })
 
 it('shows the error page instead of reloading again when the chunk still fails right after a reload', async () => {
@@ -83,7 +83,7 @@ it('shows the error page instead of reloading again when the chunk still fails r
   renderRouteThatFailsWith(rspackChunkLoadError())
 
   expect(
-    await screen.findByRole('heading', { name: '500' })
+    await screen.findByText(/Oops! Something went wrong/)
   ).toBeInTheDocument()
   expect(reload).not.toHaveBeenCalled()
 })
@@ -102,7 +102,7 @@ it('shows the error page without reloading when a route fails for another reason
   )
 
   expect(
-    await screen.findByRole('heading', { name: '500' })
+    await screen.findByText(/Oops! Something went wrong/)
   ).toBeInTheDocument()
   expect(reload).not.toHaveBeenCalled()
 })

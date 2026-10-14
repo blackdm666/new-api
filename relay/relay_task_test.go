@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -197,6 +198,7 @@ func pinMappingOrderPlugin(t *testing.T, c *gin.Context, source string) {
 
 func newTaskSubmitContext(t *testing.T, originalModel, mapping string) (*gin.Context, *relaycommon.RelayInfo) {
 	t.Helper()
+	require.NoError(t, i18n.Init())
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -593,6 +595,9 @@ func TestUpstreamTaskSubmitErrorReportsExhaustedProviderAccount(t *testing.T) {
 		{"new-api pre-consume", http.StatusForbidden, `{"error":{"message":"预扣费额度失败, 用户剩余额度: ＄0.012, 需要预扣费额度: ＄0.500","type":"new_api_error"}}`},
 		{"quota code without message", http.StatusForbidden, `{"error":{"type":"insufficient_user_quota"}}`},
 		{"user quota message", http.StatusForbidden, `{"error":{"message":"用户额度不足，剩余额度: ＄0.000000"}}`},
+		{"translated new-api pre-consume", http.StatusForbidden, `{"error":{"message":"Not enough quota to pre-consume for this request: ＄0.012 remaining, ＄0.500 required"}}`},
+		{"translated new-api user quota", http.StatusForbidden, `{"message":"Insufficient user quota, remaining quota: ＄0.000000"}`},
+		{"zh-TW new-api user quota", http.StatusForbidden, `{"error":{"message":"使用者額度不足，剩餘額度：＄0.000000"}}`},
 		{"payment required", http.StatusPaymentRequired, `{"code":402,"msg":"积分不足"}`},
 		{"payment required without body", http.StatusPaymentRequired, ``},
 		{"openai quota", http.StatusTooManyRequests, `{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}`},

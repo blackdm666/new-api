@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	taskdto "github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -118,9 +120,17 @@ func TestRespondTaskErrorPreservesLocalRateLimitMessage(t *testing.T) {
 	require.Equal(t, "本地限流，请稍后再试", taskErr.Message)
 }
 
+// The upstream 429 rewrite is a backend message for AI clients; a reader who
+// states no language gets DEFAULT_LANGUAGE, which 88API deployments set to
+// zh-CN to keep the Chinese wording.
 func TestRespondTaskErrorRewritesUpstreamRateLimitMessage(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	previousLanguage := common.DefaultLanguage
+	common.DefaultLanguage = i18n.LangZhCN
+	t.Cleanup(func() { common.DefaultLanguage = previousLanguage })
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
 	taskErr := &taskdto.TaskError{
 		Message:    "upstream rate limit",
 		StatusCode: http.StatusTooManyRequests,

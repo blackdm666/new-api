@@ -575,13 +575,13 @@ func CreateInvoiceRequestWithNotifications(params CreateInvoiceRequestParams, no
 			common.SysLog(fmt.Sprintf("failed to sync invoice tax fee debit to user quota cache: %v", err))
 			_ = invalidateUserCache(request.UserId)
 		}
-		RecordLog(request.UserId, LogTypeSystem, fmt.Sprintf(
+		RecordLog(request.UserId, LogTypeSystem, common.NewMessage(fmt.Sprintf(
 			"发票申请税费扣款：申请 #%d，开票金额 ¥%.2f，税率 %.2f%%，税费 ¥%.2f",
 			request.Id,
 			request.TotalMoney,
 			float64(request.TaxRateBasisPoints)/100,
 			float64(request.TaxFeeCents)/100,
-		))
+		)))
 	}
 	return request, orderedTopUps, nil
 }
@@ -988,12 +988,12 @@ func recordInvoiceTaxFeeRefund(request *InvoiceRequest, refundedQuota int) {
 	case InvoiceStatusExpired:
 		closure = "已过期"
 	}
-	RecordLog(request.UserId, LogTypeSystem, fmt.Sprintf(
+	RecordLog(request.UserId, LogTypeSystem, common.NewMessage(fmt.Sprintf(
 		"发票申请税费退还：申请 #%d %s，退还税费 ¥%.2f",
 		request.Id,
 		closure,
 		float64(request.TaxFeeCents)/100,
-	))
+	)))
 }
 
 // ExpirePendingInvoiceRequests closes every request left pending past cutoff,

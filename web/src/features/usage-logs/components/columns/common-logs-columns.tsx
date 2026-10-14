@@ -45,7 +45,12 @@ import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
-import { formatModelName, parseLogOther } from '../../lib/format'
+import {
+  formatModelName,
+  logTokenName,
+  parseLogOther,
+  renderLogContent,
+} from '../../lib/format'
 import {
   buildTypeDetailSegments,
   type DetailSegment,
@@ -96,6 +101,15 @@ function buildDetailSegments(
   usageSchema?: BillingUsageSchema
 ): DetailSegment[] {
   const segments = buildTypeDetailSegments(log, other, t, language, usageSchema)
+  // Top-up, audit, and login logs without an operation descriptor show their
+  // structured content in the viewer's language.
+  if (
+    segments.length === 0 &&
+    (log.type === 1 || log.type === 3 || log.type === 7)
+  ) {
+    const text = renderLogContent(other, t)
+    if (text) segments.push({ text })
+  }
   const adminSegments: DetailSegment[] = []
   // Quota saturation is a rare, admin-only anomaly marker; surface it first
   // and in danger styling so it stands out on the related billing log. The
@@ -381,7 +395,7 @@ export function useCommonLogsColumns(
         const log = row.original
         if (!isDisplayableLogType(log.type)) return null
 
-        const tokenName = log.token_name
+        const tokenName = logTokenName(log, t)
         if (!tokenName) return null
 
         const other = parseLogOther(log.other)
@@ -398,7 +412,7 @@ export function useCommonLogsColumns(
                   <StatusBadge
                     label={displayName}
                     icon={KeyRound}
-                    copyText={sensitiveVisible ? tokenName : undefined}
+                    copyText={sensitiveVisible ? log.token_name : undefined}
                     size='sm'
                     showDot={false}
                     className='border-border/60 bg-muted/30 text-foreground h-6 max-w-full gap-1.5 overflow-hidden rounded-md border px-2 py-0.5 [font-family:var(--font-body)]'
@@ -485,7 +499,7 @@ export function useCommonLogsColumns(
       },
       {
         accessorKey: 'prompt_tokens',
-        header: 'Tokens',
+        header: t('Tokens', { context: 'usage' }),
         cell: ({ row }) => {
           const log = row.original
           if (!isDisplayableLogType(log.type)) return null
@@ -628,7 +642,7 @@ export function useCommonLogsColumns(
           } else if (log.content) {
             detailPreview = (
               <span className='text-muted-foreground truncate group-hover:underline'>
-                {log.content}
+                {renderLogContent(other, t) ?? log.content}
               </span>
             )
           }

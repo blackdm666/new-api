@@ -6,7 +6,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -23,7 +22,7 @@ func (a *TaskAdaptor) readSubmitEvents(parent context.Context, resp *http.Respon
 	options := taskStreamOptions{
 		hook: "parseSubmitEvent", eventLimit: maxTaskPluginPersistedJSONBytes, label: "submit",
 	}
-	if slices.Contains(a.plugin.Meta.RequiredCapabilities, pluginruntime.CapabilitySubmitSSEDelta) {
+	if pluginruntime.UsesSubmitEventDelta(a.plugin.Meta, a.plugin.Engine) {
 		options.hook = "parseSubmitEventDelta"
 		options.accumulated = pluginruntime.NewJSONState(maxTaskPluginPersistedJSONBytes)
 	}
@@ -177,15 +176,17 @@ func (a *TaskAdaptor) readTaskEvents(parent context.Context, resp *http.Response
 				return nil, fmt.Errorf("invalid %s stream changes: %w", options.label, err)
 			}
 		}
-		// Keep the exact encoded-byte limit above. Plain JSON state can be
-		// isolated without parsing large strings again; codec-specific values
-		// (for example exported typed arrays) retain the old normalization.
-		var plainJSON bool
-		state, plainJSON = cloneJSONValue(nextState, 0)
-		if !plainJSON {
-			if err = common.Unmarshal(encoded, &state); err != nil {
+		// Keep the exact encoded-byte limit above. Plain JSON state goes back
+		// to the next event as is; codec-specific values (for example exported
+		// typed arrays) retain the old normalization.
+		if isPlainJSONValue(nextState, 0) {
+			state = nextState
+		} else {
+			var decoded any
+			if err = common.Unmarshal(encoded, &decoded); err != nil {
 				return nil, err
 			}
+			state = decoded
 		}
 		if done {
 			if accumulated != nil {
