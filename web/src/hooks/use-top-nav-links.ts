@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
-import { Building2, Handshake } from 'lucide-react'
+import { Building2, Megaphone, Plug } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -25,9 +25,10 @@ import type { TopNavLink } from '@/components/layout/types'
 import { useStatus } from '@/hooks/use-status'
 import {
   BUSINESS_ENTERPRISE_PATH,
-  BUSINESS_PARTNER_COMMISSION_RANGE,
   BUSINESS_PARTNER_PATH,
   BUSINESS_PATH,
+  BUSINESS_REFERRAL_COMMISSION_RANGE,
+  BUSINESS_REFERRAL_PATH,
   getLocalizedSitePath,
   INFINITE_CANVAS_NAME,
   INFINITE_CANVAS_URL,
@@ -111,6 +112,8 @@ export function buildTopNavLinks(
 
   if (options.modules.business === true) {
     // Static website pages: a full page load in the current tab, never the SPA router.
+    // Three blocks (2026-10-14): Enterprise (To B), Reseller Partners (downstream
+    // API sites) and Referral Rewards (creators / group owners / influencers).
     links.push({
       title: options.t('Business'),
       href: getLocalizedSitePath(options.language, BUSINESS_PATH),
@@ -132,14 +135,21 @@ export function buildTopNavLinks(
           trackId: 'business_enterprise',
         },
         {
-          title: options.t('Partner Program'),
-          description: options.t(
-            'Referral commission {{range}} · Downstream API sites',
-            { range: BUSINESS_PARTNER_COMMISSION_RANGE }
-          ),
+          title: options.t('Reseller Partners'),
+          description: options.t('Downstream API site integration'),
           href: getLocalizedSitePath(options.language, BUSINESS_PARTNER_PATH),
-          icon: Handshake,
+          icon: Plug,
           trackId: 'business_partner',
+        },
+        {
+          title: options.t('Referral Rewards'),
+          description: options.t(
+            'Referral commission {{range}} · Creators / group owners / influencers',
+            { range: BUSINESS_REFERRAL_COMMISSION_RANGE }
+          ),
+          href: getLocalizedSitePath(options.language, BUSINESS_REFERRAL_PATH),
+          icon: Megaphone,
+          trackId: 'business_referral',
         },
       ],
     })

@@ -27,10 +27,13 @@ export const INFINITE_CANVAS_URL = 'https://canvas.best/'
  */
 export const BUSINESS_PATH = '/business/'
 export const BUSINESS_ENTERPRISE_PATH = '/business/enterprise/'
+/** Reseller partners (代理合作): downstream API sites using 88API as their upstream. */
 export const BUSINESS_PARTNER_PATH = '/business/partner/'
+/** Referral rewards (推广返佣): creators, group owners and influencers. */
+export const BUSINESS_REFERRAL_PATH = '/business/referral/'
 
-/** Referral commission range shown in the Partner Program menu entry. */
-export const BUSINESS_PARTNER_COMMISSION_RANGE = '5%–15%'
+/** Referral commission range shown in the Referral Rewards menu entry. */
+export const BUSINESS_REFERRAL_COMMISSION_RANGE = '5%–15%'
 
 /**
  * Resolve a website page for the interface language: Simplified Chinese lives

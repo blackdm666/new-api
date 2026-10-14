@@ -7883,6 +7883,10 @@
     "Partner Program": "Партнёрская программа",
     "Hong Kong company contracts · Corporate bank transfer · Enterprise inquiries": "Договор с гонконгской компанией · Безналичная оплата для юрлиц · Консультации для компаний",
     "Referral commission {{range}} · Downstream API sites": "Реферальная комиссия {{range}} · Подключение API-сайтов",
-    "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.": "Ссылки на бизнес-страницы сайта (для компаний и партнёрская программа). Включайте только после публикации этих страниц."
+    "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.": "Ссылки на бизнес-страницы сайта (для компаний и партнёрская программа). Включайте только после публикации этих страниц.",
+    "Reseller Partners": "Реселлерам",
+    "Downstream API site integration": "Подключение API-сайтов",
+    "Referral Rewards": "Реферальная программа",
+    "Referral commission {{range}} · Creators / group owners / influencers": "Комиссия {{range}} · Блогеры / владельцы групп / инфлюенсеры"
   }
 }

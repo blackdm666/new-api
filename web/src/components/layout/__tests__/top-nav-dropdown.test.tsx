@@ -37,10 +37,16 @@ const businessLink: TopNavLink = {
       trackId: 'business_enterprise',
     },
     {
-      title: 'Partner Program',
-      description: 'Referral commission',
+      title: 'Reseller Partners',
+      description: 'Downstream API site integration',
       href: '/business/partner/',
       trackId: 'business_partner',
+    },
+    {
+      title: 'Referral Rewards',
+      description: 'Referral commission',
+      href: '/business/referral/',
+      trackId: 'business_referral',
     },
   ],
 }
@@ -89,8 +95,11 @@ describe('TopNavDropdown', () => {
     expect(enterprise).not.toHaveAttribute('target')
     expect(enterprise).toHaveTextContent('Contracts and bank transfer')
     expect(
-      screen.getByRole('link', { name: /Partner Program/ })
+      screen.getByRole('link', { name: /Reseller Partners/ })
     ).toHaveAttribute('href', '/business/partner/')
+    expect(
+      screen.getByRole('link', { name: /Referral Rewards/ })
+    ).toHaveAttribute('href', '/business/referral/')
     expect(
       screen.getByRole('link', { name: /Business overview/ })
     ).toHaveAttribute('href', '/business/')
@@ -127,13 +136,13 @@ describe('TopNavDropdown', () => {
     fireEvent.keyDown(trigger, { key: 'ArrowDown' })
 
     fireEvent.click(
-      await screen.findByRole('link', { name: /Partner Program/ })
+      await screen.findByRole('link', { name: /Referral Rewards/ })
     )
 
     expect(window.dataLayer).toEqual([
       {
         event: 'nav_click',
-        nav_item: 'business_partner',
+        nav_item: 'business_referral',
         nav_location: 'dropdown',
       },
     ])

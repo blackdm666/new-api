@@ -7883,6 +7883,10 @@
     "Partner Program": "Đại lý & giới thiệu",
     "Hong Kong company contracts · Corporate bank transfer · Enterprise inquiries": "Ký hợp đồng với công ty Hồng Kông · Chuyển khoản doanh nghiệp · Tư vấn doanh nghiệp",
     "Referral commission {{range}} · Downstream API sites": "Hoa hồng giới thiệu {{range}} · Kết nối trang API hạ nguồn",
-    "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.": "Liên kết đến các trang hợp tác kinh doanh trên website (doanh nghiệp và đại lý). Chỉ bật sau khi các trang này đã được xuất bản."
+    "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.": "Liên kết đến các trang hợp tác kinh doanh trên website (doanh nghiệp và đại lý). Chỉ bật sau khi các trang này đã được xuất bản.",
+    "Reseller Partners": "Đại lý API",
+    "Downstream API site integration": "Kết nối trang API hạ nguồn",
+    "Referral Rewards": "Giới thiệu nhận hoa hồng",
+    "Referral commission {{range}} · Creators / group owners / influencers": "Hoa hồng {{range}} · Blogger / chủ nhóm / KOL"
   }
 }

@@ -230,7 +230,8 @@ test('places Business right after Docs as a same-tab website link when enabled',
     business.items?.map((item) => [item.title, item.href, item.trackId]),
     [
       ['Enterprise', '/business/enterprise/', 'business_enterprise'],
-      ['Partner Program', '/business/partner/', 'business_partner'],
+      ['Reseller Partners', '/business/partner/', 'business_partner'],
+      ['Referral Rewards', '/business/referral/', 'business_referral'],
     ]
   )
 })
@@ -283,6 +284,7 @@ test('localizes the Business pages for every interface language', () => {
         `${prefix}/business/`,
         `${prefix}/business/enterprise/`,
         `${prefix}/business/partner/`,
+        `${prefix}/business/referral/`,
       ],
       `language ${String(language)}`
     )

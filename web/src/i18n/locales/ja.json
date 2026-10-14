@@ -7883,6 +7883,10 @@
     "Partner Program": "パートナー制度",
     "Hong Kong company contracts · Corporate bank transfer · Enterprise inquiries": "香港法人と契約 · 法人口座への振込 · 法人向けのご相談",
     "Referral commission {{range}} · Downstream API sites": "紹介報酬 {{range}} · 下流 API サイト連携",
-    "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.": "公式サイトのビジネスページ（法人向け・パートナー制度）へのリンクです。これらのページの公開後に有効にしてください。"
+    "Links to the website business pages (enterprise and partner program). Turn on only after those pages are published.": "公式サイトのビジネスページ（法人向け・パートナー制度）へのリンクです。これらのページの公開後に有効にしてください。",
+    "Reseller Partners": "代理店パートナー",
+    "Downstream API site integration": "下流 API サイト連携",
+    "Referral Rewards": "紹介報酬プログラム",
+    "Referral commission {{range}} · Creators / group owners / influencers": "紹介報酬 {{range}} · ブロガー / グループ管理者 / インフルエンサー"
   }
 }
