@@ -28,6 +28,14 @@ var legacySensitiveLogOtherKeys = []string{
 	"response_model",
 }
 
+// userHiddenLogOtherKeys stay at the stored top level, where admin views and
+// internal readers expect them, but are stripped from user projections: a
+// channel-mapped upstream model can be the provider's internal model name.
+var userHiddenLogOtherKeys = []string{
+	"is_model_mapped",
+	"upstream_model_name",
+}
+
 type logOtherVisibility int
 
 const (
@@ -253,7 +261,7 @@ func formatLogOtherJSON(value string, visibility logOtherVisibility) string {
 				changed = true
 			}
 		}
-		for _, key := range legacySensitiveLogOtherKeys {
+		for _, key := range slices.Concat(legacySensitiveLogOtherKeys, userHiddenLogOtherKeys) {
 			if _, exists := values[key]; exists {
 				delete(values, key)
 				changed = true
