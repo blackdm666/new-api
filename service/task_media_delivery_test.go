@@ -128,7 +128,9 @@ func TestPublicVideoPresentationKeepsSnapshotAndOriginalExpiry(t *testing.T) {
 func TestExpiredUnarchivedPreviewCannotBeRecreated(t *testing.T) {
 	task := deliveryTask(t)
 	task.PrivateData.ResultStorageKey = ""
-	task.FinishTime = time.Now().Add(-31 * 24 * time.Hour).Unix()
+	// Past the default seven-day window but well inside the old 30-day one.
+	t.Setenv("TASK_VIDEO_CACHE_RETENTION_DAYS", "")
+	task.FinishTime = time.Now().Add(-8 * 24 * time.Hour).Unix()
 	previous := taskVideoDirectProbe
 	taskVideoDirectProbe = func(context.Context, string) (bool, error) {
 		t.Fatal("expired preview must not fetch or rearchive")

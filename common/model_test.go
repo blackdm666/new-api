@@ -18,6 +18,8 @@ func TestIsImageGenerationModelRecognizesGPTImageFamily(t *testing.T) {
 		{modelName: "gpt-image-2", want: true},
 		{modelName: "openai/gpt-image-3", want: true},
 		{modelName: "GPT-IMAGE-2", want: true},
+		{modelName: "midjourney-v8.2", want: true},
+		{modelName: "doubao-seedream-5-0-pro", want: true},
 		{modelName: "gpt-5.6-terra", want: false},
 	}
 
@@ -34,6 +36,28 @@ func TestGPTImageFamilyPrefersImageGenerationEndpoint(t *testing.T) {
 		constant.EndpointTypeImageGeneration,
 		constant.EndpointTypeOpenAI,
 	}, endpoints)
+}
+
+func TestIsXinMengImageModel(t *testing.T) {
+	for _, test := range []struct {
+		modelName string
+		want      bool
+	}{
+		{modelName: "midjourney-v8.2", want: true},
+		{modelName: "midjourney-v8.2-turbo", want: true},
+		{modelName: "doubao-seedream-5-0-pro", want: true},
+		{modelName: "gpt-image-2", want: false},
+	} {
+		t.Run(test.modelName, func(t *testing.T) {
+			assert.Equal(t, test.want, IsXinMengImageModel(test.modelName))
+			if test.want {
+				assert.Equal(t, []constant.EndpointType{
+					constant.EndpointTypeImageGeneration,
+					constant.EndpointTypeOpenAI,
+				}, GetEndpointTypesByChannelType(constant.ChannelTypeOpenAI, test.modelName))
+			}
+		})
+	}
 }
 
 func TestVideoTaskModelsUseOpenAIVideoEndpoint(t *testing.T) {

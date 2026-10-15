@@ -14,7 +14,9 @@ var (
 		"dall-e-2",
 		"prefix:dall-e", // Deprecated upstream models; retained for compatible routes.
 		"gpt-image-",
+		"midjourney",
 		"qwen-image",
+		"seedream",
 		"z-image",
 		"wan2.7-image-pro",
 		"wan2.7-image",
@@ -31,6 +33,14 @@ var (
 		"flux.1-",
 	}
 )
+
+// IsXinMengImageModel reports the image families XinMeng serves through its
+// OpenAI-compatible image endpoint with a smaller schema than GPT Image.
+func IsXinMengImageModel(modelName string) bool {
+	modelName = strings.ToLower(modelName)
+	return strings.Contains(modelName, "midjourney") ||
+		strings.Contains(modelName, "seedream")
+}
 
 func IsOpenAIResponseOnlyModel(modelName string) bool {
 	for _, m := range OpenAIResponseOnlyModels {
