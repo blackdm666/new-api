@@ -21,6 +21,7 @@ import { EmailSettingsSection } from '../integrations/email-settings-section'
 import { EmailTemplateSettingsSection } from '../integrations/email-template-section'
 import { InvoiceSettingsSection } from '../integrations/invoice-section'
 import { MonitoringSettingsSection } from '../integrations/monitoring-settings-section'
+import { ReferralApplicationSection } from '../integrations/referral-application-section'
 import { VideoDirectHostsSection } from '../integrations/video-direct-hosts-section'
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
 import { LogSettingsSection } from '../maintenance/log-settings-section'
@@ -172,6 +173,17 @@ const OPERATIONS_SECTIONS = [
           InvoiceFileCOSSecretId: settings.InvoiceFileCOSSecretId,
           InvoiceFileCOSSecretKey: settings.InvoiceFileCOSSecretKey,
           InvoiceFileCOSCustomDomain: settings.InvoiceFileCOSCustomDomain,
+        }}
+      />
+    ),
+  },
+  {
+    id: 'referral-applications',
+    titleKey: 'Referral Applications',
+    build: (settings: OperationsSettings) => (
+      <ReferralApplicationSection
+        defaultValues={{
+          ReferralApplicationRecipient: settings.ReferralApplicationRecipient,
         }}
       />
     ),

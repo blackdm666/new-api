@@ -48,6 +48,8 @@ export type AffiliateSummary = {
   invite_count: number
   effective_invitee_count: number
   commission_record_count: number
+  /** Commission-eligible top-ups per invitee; 0 means unlimited. */
+  invitee_top_up_limit: number
   rate_basis_points: number
   default_rate_basis_points: number
   group_rates: Record<string, number>
@@ -89,15 +91,28 @@ export type AffiliateCommission = {
   invitee_remark?: string
 }
 
+/**
+ * Promoter-facing commission row. The backend masks the invitee username and
+ * omits top-up amounts, order numbers and user ids.
+ */
+export type AffiliateInviterCommission = {
+  /** The promoter's own commission record id, used as a row key. */
+  id: number
+  invitee_username: string
+  commission_cents: number
+  status: AffiliateCommissionStatus
+  reject_reason?: string
+  approved_time: number
+  created_time: number
+}
+
+/** Promoter-facing invitee row with a masked username. */
 export type AffiliateInviteeStats = {
   username: string
-  display_name: string
   created_at: number
   is_new: boolean
-  topup_count: number
-  topup_amount_cents: number
   commission_cents: number
-  last_topup_time: number
+  last_commission_time: number
 }
 
 export type AdminAffiliateInviteRecord = {

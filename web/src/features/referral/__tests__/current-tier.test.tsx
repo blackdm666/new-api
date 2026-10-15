@@ -55,6 +55,7 @@ async function renderTier(tier: string | undefined, rate = 500) {
           invite_count: 36,
           effective_invitee_count: 3,
           commission_record_count: 3,
+          invitee_top_up_limit: 10,
           rate_basis_points: rate,
           default_rate_basis_points: 500,
           group_rates: { default: 500, 高级推广: 1000, 金牌推广: 1500 },

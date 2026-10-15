@@ -159,6 +159,14 @@ var InvoiceRejectedNotifyUserEnabled = true
 var InvoiceExpiredNotifyUserEnabled = true
 var InvoiceAdminEmail = ""
 
+// DefaultReferralApplicationRecipient receives the official site's referral
+// program applications until ReferralApplicationRecipient is configured.
+const DefaultReferralApplicationRecipient = "laohei@88fk.org"
+
+// ReferralApplicationRecipient lists the addresses (comma, semicolon or
+// whitespace separated) that receive referral program applications.
+var ReferralApplicationRecipient = DefaultReferralApplicationRecipient
+
 var GitHubClientId = ""
 var GitHubClientSecret = ""
 var LinuxDOClientId = ""

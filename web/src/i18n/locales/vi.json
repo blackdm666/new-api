@@ -8698,6 +8698,14 @@
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "Upstream từ chối suy nghĩ thích ứng; đã thử lại với tham số suy nghĩ ban đầu",
     "Same channel retry": "Thử lại trên cùng kênh",
     "Text to Image": "Văn bản thành hình ảnh",
-    "Image to Image": "Hình ảnh thành hình ảnh"
+    "Image to Image": "Hình ảnh thành hình ảnh",
+    "Invited users who have reached the {{count}}-top-up commission limit are not listed here. The commission they generated is still included in your totals and commission records.": "Người dùng được mời đã đạt giới hạn {{count}} lần nạp tính hoa hồng sẽ không hiển thị ở đây. Hoa hồng họ tạo ra vẫn được tính vào tổng và lịch sử hoa hồng của bạn.",
+    "Last commission": "Hoa hồng gần nhất",
+    "Referral Applications": "Đơn đăng ký giới thiệu",
+    "Save referral application settings": "Lưu cài đặt đơn đăng ký giới thiệu",
+    "Application recipient email": "Email nhận đơn đăng ký",
+    "Enter one or more valid email addresses separated by commas": "Nhập một hoặc nhiều email hợp lệ, phân tách bằng dấu phẩy",
+    "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.": "Đơn đăng ký chương trình giới thiệu gửi từ trang web chính thức sẽ được gửi đến các địa chỉ này qua hồ sơ SMTP thông báo. Phân tách nhiều địa chỉ bằng dấu phẩy.",
+    "Referral program application": "Đơn đăng ký chương trình giới thiệu"
   }
 }

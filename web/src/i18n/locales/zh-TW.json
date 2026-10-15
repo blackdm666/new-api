@@ -8700,6 +8700,14 @@
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "上游拒絕自適應思考，已用原始思考參數重試",
     "Same channel retry": "同渠道重試",
     "Text to Image": "文生圖",
-    "Image to Image": "圖生圖"
+    "Image to Image": "圖生圖",
+    "Invited users who have reached the {{count}}-top-up commission limit are not listed here. The commission they generated is still included in your totals and commission records.": "已達到每人前 {{count}} 筆計佣上限的受邀用戶不在此列表顯示，他們產生的佣金仍計入你的佣金總額和佣金記錄。",
+    "Last commission": "最近佣金",
+    "Referral Applications": "推廣申請",
+    "Save referral application settings": "儲存推廣申請設定",
+    "Application recipient email": "申請接收信箱",
+    "Enter one or more valid email addresses separated by commas": "請輸入一個或多個有效信箱，以逗號分隔",
+    "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.": "官網推廣返佣頁提交的申請會透過通知 SMTP 寄送到這些信箱。多個信箱以逗號分隔。",
+    "Referral program application": "推廣返佣計畫申請"
   }
 }

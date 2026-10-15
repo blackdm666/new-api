@@ -8792,6 +8792,14 @@
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "Upstream rejected adaptive thinking; retried with the original thinking controls",
     "Same channel retry": "Same channel retry",
     "Text to Image": "Text to Image",
-    "Image to Image": "Image to Image"
+    "Image to Image": "Image to Image",
+    "Invited users who have reached the {{count}}-top-up commission limit are not listed here. The commission they generated is still included in your totals and commission records.": "Invited users who have reached the {{count}}-top-up commission limit are not listed here. The commission they generated is still included in your totals and commission records.",
+    "Last commission": "Last commission",
+    "Referral Applications": "Referral Applications",
+    "Save referral application settings": "Save referral application settings",
+    "Application recipient email": "Application recipient email",
+    "Enter one or more valid email addresses separated by commas": "Enter one or more valid email addresses separated by commas",
+    "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.": "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.",
+    "Referral program application": "Referral program application"
   }
 }

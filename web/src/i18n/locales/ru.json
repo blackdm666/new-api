@@ -8698,6 +8698,14 @@
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "Upstream отклонил адаптивное мышление; повтор с исходными параметрами мышления",
     "Same channel retry": "Повтор на том же канале",
     "Text to Image": "Текст в изображение",
-    "Image to Image": "Изображение в изображение"
+    "Image to Image": "Изображение в изображение",
+    "Invited users who have reached the {{count}}-top-up commission limit are not listed here. The commission they generated is still included in your totals and commission records.": "Приглашённые пользователи, достигшие лимита в {{count}} пополнений с комиссией, здесь не показаны. Начисленная за них комиссия по-прежнему учитывается в ваших итогах и записях о комиссиях.",
+    "Last commission": "Последняя комиссия",
+    "Referral Applications": "Заявки на партнёрскую программу",
+    "Save referral application settings": "Сохранить настройки заявок",
+    "Application recipient email": "Email для получения заявок",
+    "Enter one or more valid email addresses separated by commas": "Введите один или несколько корректных email через запятую",
+    "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.": "Заявки на партнёрскую программу с официального сайта отправляются на эти адреса через SMTP-профиль уведомлений. Несколько адресов разделяйте запятыми.",
+    "Referral program application": "Заявка на партнёрскую программу"
   }
 }

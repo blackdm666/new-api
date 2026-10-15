@@ -255,18 +255,115 @@ func TestAffiliateCommissionTopUpLimitKeepsAnUnrewardedLedgerEntry(t *testing.T)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), summary.CommissionRecordCount)
 	assert.Equal(t, int64(30_000), summary.TotalTopUpCents)
+	assert.Equal(t, 2, summary.InviteeTopUpLimit)
+	assert.Equal(t, int64(1), summary.InviteCount)
+	assert.Equal(t, int64(1), summary.EffectiveInviteeCount)
+	assert.Equal(t, records[0].CommissionCents+records[1].CommissionCents, summary.ApprovedCommissionCents)
 
+	// The capped invitee leaves the invitee lists, but the promoter ledger
+	// still adds up to the summary total.
 	stats, total, err := ListAffiliateInviteeStats(inviter.Id, &common.PageInfo{Page: 1, PageSize: 10})
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), total)
-	require.Len(t, stats, 1)
-	assert.Equal(t, int64(3), stats[0].TopUpCount)
-	assert.Equal(t, int64(30_000), stats[0].TopUpAmountCents)
+	assert.Zero(t, total)
+	assert.Empty(t, stats)
+	invitees, inviteesTotal, err := GetUserInvitees(inviter.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Zero(t, inviteesTotal)
+	assert.Empty(t, invitees)
+
+	ledger, ledgerTotal, err := ListInviterAffiliateCommissions(inviter.Id, 0, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), ledgerTotal)
+	require.Len(t, ledger, 2)
+	ledgerCents := int64(0)
+	for _, row := range ledger {
+		assert.Equal(t, "af***", row.InviteeUsername)
+		ledgerCents += row.CommissionCents
+	}
+	assert.Equal(t, summary.ApprovedCommissionCents+summary.PendingCommissionCents, ledgerCents)
 
 	metrics, err := GetAffiliateUpgradeMetrics(inviter.Id)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), metrics.EffectiveInviteeCount)
 	assert.Equal(t, int64(30_000), metrics.EffectiveTopUpAmountCents)
+}
+
+func TestMaskAffiliateInviteeNameNeverRevealsFullName(t *testing.T) {
+	cases := map[string]string{
+		"":          "",
+		"a":         "***",
+		"ab":        "a***",
+		"abc":       "ab***",
+		"abcdefgh":  "ab***",
+		" alice ":   "al***",
+		"张":         "***",
+		"张三":        "张***",
+		"张三丰":       "张三***",
+		"user@mail": "us***",
+	}
+	for input, expected := range cases {
+		assert.Equal(t, expected, MaskAffiliateInviteeName(input), "input %q", input)
+	}
+}
+
+func TestAffiliateInviterViewsExposeOnlyMaskedNameAndCommission(t *testing.T) {
+	truncateTables(t)
+	enableAffiliateForTest(t)
+	setAffiliateOptionForTest(t, AffiliateCommissionAutoApproveOptionKey, "true")
+	setAffiliateOptionForTest(t, AffiliateCommissionInviteeTopUpLimitOptionKey, "10")
+
+	inviter, invitee, topUp, record := createAffiliateFixture(t, "privacy", 100)
+	require.NoError(t, DB.Model(invitee).Update("display_name", "Real Display Name").Error)
+
+	ledger, total, err := ListInviterAffiliateCommissions(inviter.Id, 0, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, ledger, 1)
+	assert.Equal(t, "af***", ledger[0].InviteeUsername)
+	assert.Equal(t, record.CommissionCents, ledger[0].CommissionCents)
+	assert.Equal(t, AffiliateCommissionStatusApproved, ledger[0].Status)
+	assert.Positive(t, ledger[0].CreatedTime)
+
+	stats, statsTotal, err := ListAffiliateInviteeStats(inviter.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), statsTotal)
+	require.Len(t, stats, 1)
+	assert.Equal(t, "af***", stats[0].Username)
+	assert.Equal(t, record.CommissionCents, stats[0].CommissionCents)
+	assert.Positive(t, stats[0].LastCommissionTime)
+
+	invitees, inviteesTotal, err := GetUserInvitees(inviter.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), inviteesTotal)
+	require.Len(t, invitees, 1)
+	assert.Equal(t, "af***", invitees[0].Username)
+
+	for _, payload := range []any{ledger[0], stats[0], invitees[0]} {
+		encoded, err := common.Marshal(payload)
+		require.NoError(t, err)
+		body := string(encoded)
+		for _, secret := range []string{invitee.Username, invitee.Email, "Real Display Name", topUp.TradeNo} {
+			assert.NotContains(t, body, secret)
+		}
+		for _, field := range []string{`"invitee_id"`, `"inviter_id"`, `"topup_id"`, `"trade_no"`, `"topup_amount_cents"`, `"topup_count"`, `"display_name"`, `"email"`} {
+			assert.NotContains(t, body, field)
+		}
+	}
+
+	for _, payload := range []any{stats[0], invitees[0]} {
+		encoded, err := common.Marshal(payload)
+		require.NoError(t, err)
+		assert.NotContains(t, string(encoded), `"id"`)
+	}
+
+	// Administrators keep the full commission record.
+	adminRows, _, err := ListAffiliateCommissions(AffiliateCommissionQueryOptions{IncludeAdminRemarks: true}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Len(t, adminRows, 1)
+	assert.Equal(t, invitee.Username, adminRows[0].InviteeUsername)
+	assert.Equal(t, topUp.TradeNo, adminRows[0].TradeNo)
+	assert.Equal(t, invitee.Id, adminRows[0].InviteeId)
+	assert.Equal(t, int64(10_000), adminRows[0].TopUpAmountCents)
 }
 
 func TestAffiliateCommissionZeroTopUpLimitRemainsUnlimited(t *testing.T) {

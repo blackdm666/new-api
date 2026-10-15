@@ -27,6 +27,7 @@ import type {
   AffiliateCommission,
   AffiliateCommissionStatus,
   AffiliateInviteeStats,
+  AffiliateInviterCommission,
   AffiliateAlipayPayoutProviderStatus,
   AffiliateAlipayPayoutSettings,
   AffiliatePayout,
@@ -68,11 +69,11 @@ export async function fetchAffiliateCommissions(
   page: number,
   pageSize: number,
   status?: AffiliateCommissionStatus | 'all'
-): Promise<PaginatedResponse<AffiliateCommission>> {
+): Promise<PaginatedResponse<AffiliateInviterCommission>> {
   const query = pageQuery(page, pageSize)
   if (status && status !== 'all') query.set('status', String(status))
   const response = await api.get<
-    ApiResponse<PaginatedResponse<AffiliateCommission>>
+    ApiResponse<PaginatedResponse<AffiliateInviterCommission>>
   >(`/api/user/aff/commissions?${query.toString()}`)
   return unwrap(response.data)
 }

@@ -205,6 +205,20 @@ func UserCriticalRateLimit(scope string) func(c *gin.Context) {
 	)
 }
 
+const (
+	// ReferralApplicationRateLimitNum and ReferralApplicationRateLimitDuration
+	// bound anonymous referral program applications per client IP.
+	ReferralApplicationRateLimitNum      = 5
+	ReferralApplicationRateLimitDuration = 60 * 60
+)
+
+// ReferralApplicationRateLimit limits the public referral application form
+// per client IP. It runs before human verification so rejected requests do
+// not reach the verification provider.
+func ReferralApplicationRateLimit() func(c *gin.Context) {
+	return rateLimitFactory(ReferralApplicationRateLimitNum, ReferralApplicationRateLimitDuration, "RA")
+}
+
 func DownloadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.DownloadRateLimitNum, common.DownloadRateLimitDuration, "DW")
 }

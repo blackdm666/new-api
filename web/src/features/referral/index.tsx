@@ -77,8 +77,8 @@ import {
 import { OverflowNote } from './overflow-note'
 import { AffiliatePayouts } from './payouts-user'
 import type {
-  AffiliateCommission,
   AffiliateInviteeStats,
+  AffiliateInviterCommission,
   AffiliateSummary,
 } from './types'
 
@@ -207,7 +207,9 @@ export function ReferralProgram() {
               <CommissionRecords />
             </TabsContent>
             <TabsContent value='invitees'>
-              <InviteeStats />
+              <InviteeStats
+                inviteeTopUpLimit={summaryQuery.data?.invitee_top_up_limit ?? 0}
+              />
             </TabsContent>
             <TabsContent value='payouts'>
               <AffiliatePayouts />
@@ -417,7 +419,7 @@ export function CurrentTierBadge({ summary }: { summary?: AffiliateSummary }) {
   )
 }
 
-function CommissionRecords() {
+export function CommissionRecords() {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const query = useQuery({
@@ -436,20 +438,16 @@ function CommissionRecords() {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>{t('Order No.')}</TableHead>
             <TableHead>{t('Invited user')}</TableHead>
-            <TableHead className='text-right'>{t('Top-up amount')}</TableHead>
-            <TableHead>{t('Rate')}</TableHead>
-            <TableHead>{t('Promoter tier')}</TableHead>
             <TableHead className='text-right'>{t('Commission')}</TableHead>
             <TableHead>{t('Status')}</TableHead>
             <TableHead>{t('Created at')}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {query.isLoading ? <SkeletonRows columns={8} /> : null}
+          {query.isLoading ? <SkeletonRows columns={4} /> : null}
           {!query.isLoading && items.length === 0 ? (
-            <EmptyRow columns={8} text={t('No commission records')} />
+            <EmptyRow columns={4} text={t('No commission records')} />
           ) : null}
           {!query.isLoading
             ? items.map((item) => <CommissionRow key={item.id} item={item} />)
@@ -460,32 +458,12 @@ function CommissionRecords() {
   )
 }
 
-function CommissionRow({ item }: { item: AffiliateCommission }) {
+function CommissionRow({ item }: { item: AffiliateInviterCommission }) {
   const { t } = useTranslation()
   const meta = AFFILIATE_STATUS_META[item.status]
   return (
     <TableRow>
-      <TableCell className='font-mono text-xs'>{item.trade_no}</TableCell>
-      <TableCell>
-        {item.invitee_display_name ||
-          item.invitee_username ||
-          t('Unavailable user')}
-      </TableCell>
-      <TableCell className='text-right font-medium'>
-        {formatCents(item.topup_amount_cents)}
-      </TableCell>
-      <TableCell>{formatRate(item.rate_basis_points)}</TableCell>
-      <TableCell>
-        <Badge
-          variant='outline'
-          className={cn(
-            'font-normal',
-            promoterTierBadgeClassName(item.tier_name)
-          )}
-        >
-          {t(promoterTierLabelKey(item.tier_name))}
-        </Badge>
-      </TableCell>
+      <TableCell>{item.invitee_username || t('Unavailable user')}</TableCell>
       <TableCell className='text-right font-semibold'>
         {formatCents(item.commission_cents)}
       </TableCell>
@@ -512,7 +490,7 @@ function CommissionRow({ item }: { item: AffiliateCommission }) {
   )
 }
 
-function InviteeStats() {
+export function InviteeStats(props: { inviteeTopUpLimit: number }) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const query = useQuery({
@@ -522,69 +500,70 @@ function InviteeStats() {
   })
   const items = query.data?.items ?? []
   return (
-    <PaginatedTableShell
-      total={query.data?.total ?? 0}
-      page={page}
-      onPageChange={setPage}
-      loading={query.isLoading}
-    >
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t('User')}</TableHead>
-            <TableHead>{t('Registered at')}</TableHead>
-            <TableHead className='text-right'>{t('Top-up count')}</TableHead>
-            <TableHead className='text-right'>
-              {t('Cumulative valid top-up amount')}
-            </TableHead>
-            <TableHead className='text-right'>
-              {t('Generated commission')}
-            </TableHead>
-            <TableHead>{t('Last top-up')}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {query.isLoading ? <SkeletonRows columns={6} /> : null}
-          {!query.isLoading && items.length === 0 ? (
-            <EmptyRow columns={6} text={t('No invitees yet')} />
-          ) : null}
-          {!query.isLoading
-            ? items.map((item) => (
-                <InviteeRow key={item.username} item={item} />
-              ))
-            : null}
-        </TableBody>
-      </Table>
-    </PaginatedTableShell>
+    <div className='space-y-3'>
+      {props.inviteeTopUpLimit > 0 ? (
+        <p className='text-muted-foreground text-xs'>
+          {t(
+            'Invited users who have reached the {{count}}-top-up commission limit are not listed here. The commission they generated is still included in your totals and commission records.',
+            { count: props.inviteeTopUpLimit }
+          )}
+        </p>
+      ) : null}
+      <PaginatedTableShell
+        total={query.data?.total ?? 0}
+        page={page}
+        onPageChange={setPage}
+        loading={query.isLoading}
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('User')}</TableHead>
+              <TableHead>{t('Registered at')}</TableHead>
+              <TableHead className='text-right'>
+                {t('Generated commission')}
+              </TableHead>
+              <TableHead>{t('Last commission')}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {query.isLoading ? <SkeletonRows columns={4} /> : null}
+            {!query.isLoading && items.length === 0 ? (
+              <EmptyRow columns={4} text={t('No invitees yet')} />
+            ) : null}
+            {!query.isLoading
+              ? items.map((item) => (
+                  <InviteeRow
+                    key={`${item.created_at}-${item.username}`}
+                    item={item}
+                  />
+                ))
+              : null}
+          </TableBody>
+        </Table>
+      </PaginatedTableShell>
+    </div>
   )
 }
 
 function InviteeRow({ item }: { item: AffiliateInviteeStats }) {
+  const { t } = useTranslation()
   return (
     <TableRow>
       <TableCell>
-        <span className='block truncate font-medium'>{item.username}</span>
-        {item.display_name && item.display_name !== item.username ? (
-          <div className='text-muted-foreground truncate text-xs'>
-            {item.display_name}
-          </div>
-        ) : null}
+        <span className='block truncate font-medium'>
+          {item.username || t('Unavailable user')}
+        </span>
       </TableCell>
       <TableCell className='text-muted-foreground text-xs'>
         {formatTimestampToDate(item.created_at)}
-      </TableCell>
-      <TableCell className='text-right tabular-nums'>
-        {formatNumber(item.topup_count)}
-      </TableCell>
-      <TableCell className='text-right font-medium'>
-        {formatCents(item.topup_amount_cents)}
       </TableCell>
       <TableCell className='text-right font-semibold'>
         {formatCents(item.commission_cents)}
       </TableCell>
       <TableCell className='text-muted-foreground text-xs'>
-        {item.last_topup_time > 0
-          ? formatTimestampToDate(item.last_topup_time)
+        {item.last_commission_time > 0
+          ? formatTimestampToDate(item.last_commission_time)
           : '-'}
       </TableCell>
     </TableRow>

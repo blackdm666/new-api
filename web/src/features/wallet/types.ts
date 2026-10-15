@@ -259,9 +259,9 @@ export interface UserWalletData {
   group: string
 }
 
+/** Invitee row shown to the inviter; the username is masked by the backend. */
 export interface UserInvitee {
   username: string
-  display_name: string
   created_at: number
   is_new: boolean
 }
