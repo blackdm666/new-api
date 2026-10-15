@@ -23,13 +23,14 @@ func deliveryTask(t *testing.T) *model.Task {
 	}}
 }
 
-func TestTaskArtifactDeliveryMapsOnlyExactSingleVideo(t *testing.T) {
+func TestTaskArtifactDeliveryMapsOnlySingleStoredVideo(t *testing.T) {
 	for _, tc := range []struct {
 		name, kind, source string
 		single, mapped     bool
 	}{
 		{"single", "video", "https://official.example/result.mp4", true, true},
-		{"different-video", "video", "https://untrusted.example/other.mp4", true, false},
+		// Plugins may fetch the same result through an API or storage link.
+		{"different-plugin-link", "video", "https://api.example/v1/videos/abc/content", true, true},
 		{"multiple", "video", "https://official.example/result.mp4", false, false},
 		{"poster", "image", "https://official.example/result.mp4", true, false},
 		{"audio", "audio", "https://official.example/result.mp4", true, false},
@@ -62,10 +63,10 @@ func TestTaskArtifactDeliveryArchivedStringResults(t *testing.T) {
 			want, err := PublicTaskVideoURL(task)
 			require.NoError(t, err)
 			require.Equal(t, want, TaskArtifactDeliveryURL(context.Background(), task, types.TaskArtifact{Key: "video", Type: "video"}, true, source, "capability"))
-			// Keep exact-source and single-video guards; never map another artifact.
+			// Keep the single-video guard; never map one of several outputs.
 			require.Equal(t, "capability", TaskArtifactDeliveryURL(context.Background(), task, types.TaskArtifact{Key: "video", Type: "video"}, false, source, "capability"))
-			source.URL = "https://untrusted.example/other.mp4"
-			require.Equal(t, "capability", TaskArtifactDeliveryURL(context.Background(), task, types.TaskArtifact{Key: "video", Type: "video"}, true, source, "capability"))
+			// A stored copy is delivered without a plugin content link too.
+			require.Equal(t, want, TaskArtifactDeliveryURL(context.Background(), task, types.TaskArtifact{Key: "video", Type: "video"}, true, nil, "capability"))
 			require.Equal(t, data, string(task.Data))
 			require.Equal(t, before, task.PrivateData)
 		})
