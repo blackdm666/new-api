@@ -112,8 +112,7 @@ export function buildTopNavLinks(
 
   if (options.modules.business === true) {
     // Static website pages: a full page load in the current tab, never the SPA router.
-    // Three blocks (2026-10-14): Enterprise (To B), Reseller Partners (downstream
-    // API sites) and Referral Rewards (creators / group owners / influencers).
+    // Three blocks (2026-10-14): Enterprise, Reseller Partners and Referral Rewards.
     links.push({
       title: options.t('Business'),
       href: getLocalizedSitePath(options.language, BUSINESS_PATH),
@@ -143,10 +142,10 @@ export function buildTopNavLinks(
         },
         {
           title: options.t('Referral Rewards'),
-          description: options.t(
-            'Referral commission {{range}} · Creators / group owners / influencers',
-            { range: BUSINESS_REFERRAL_COMMISSION_RANGE }
-          ),
+          // No audience labels in the UI (2026-10-15): describe what it does, not who it is for.
+          description: options.t('Referral commission {{range}}', {
+            range: BUSINESS_REFERRAL_COMMISSION_RANGE,
+          }),
           href: getLocalizedSitePath(options.language, BUSINESS_REFERRAL_PATH),
           icon: Megaphone,
           trackId: 'business_referral',
