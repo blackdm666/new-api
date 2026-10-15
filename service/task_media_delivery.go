@@ -81,9 +81,9 @@ type TaskArtifactDeliverySource struct {
 	Anonymous bool
 }
 
-// TaskArtifactDeliveryURL resolves one explicit artifact. A legacy task-wide
-// video key is usable only when the sole video's source matches the task result.
-// Ambiguous/multiple outputs retain their individual capability links.
+// TaskArtifactDeliveryURL resolves one explicit artifact. A task-wide stored
+// video is used only for the sole video artifact; ambiguous/multiple outputs
+// retain their individual capability links.
 func TaskArtifactDeliveryURL(ctx context.Context, task *model.Task, artifact types.TaskArtifact, singleVideo bool, source *TaskArtifactDeliverySource, fallback string) string {
 	if !TaskMediaPublicEnabled() || task == nil || task.Status != model.TaskStatusSuccess {
 		return fallback
@@ -97,13 +97,16 @@ func TaskArtifactDeliveryURL(ctx context.Context, task *model.Task, artifact typ
 		}
 		return fallback
 	}
-	if source == nil {
-		return fallback
-	}
-	if artifact.Type == "video" && singleVideo && source.URL != "" && source.URL == ResolveTaskVideoResultURL(task, "") {
+	// The stored copy was downloaded from the task result, which is the sole
+	// video. Plugins may fetch it through a different link (an authenticated
+	// API or storage URL), so the stored copy wins regardless of that link.
+	if artifact.Type == "video" && singleVideo {
 		if publicURL, err := PublicTaskVideoURL(task); err == nil {
 			return publicURL
 		}
+	}
+	if source == nil {
+		return fallback
 	}
 	// Generic image/audio storage is not implemented. Never infer their mapping
 	// from a video result, or bypass their original access boundary.
