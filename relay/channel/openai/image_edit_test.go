@@ -17,6 +17,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -314,6 +315,11 @@ func TestXinMengImageResultsAreRehosted(t *testing.T) {
 		assert.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
 		assert.NotContains(t, apiErr.Error(), "getapib")
 		assert.Empty(t, recorder.Body.String())
+		// 502 is in the automatic retry ranges; retrying would make the upstream
+		// generate (and charge for) the images again.
+		decision := service.DecideRelayRetry(c, apiErr, 2)
+		assert.Equal(t, "stop", decision.Action)
+		assert.Equal(t, "non_retryable_error", decision.Reason)
 	})
 }
 

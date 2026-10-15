@@ -49,8 +49,10 @@ func OpenaiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 		clientBody, err = presentXinMengImageResponse(c.Request.Context(), info, responseBody)
 		if err != nil {
 			// The detail can name the upstream image host; keep it server-side.
+			// The upstream already generated and charged for these images, so a
+			// retry would only pay for another generation.
 			logger.LogError(c, common.LogText("XinMeng image result delivery failed: %s", err.Error()))
-			return nil, types.NewOpenAIError(errors.New("failed to deliver generated images"), types.ErrorCodeBadResponse, http.StatusBadGateway)
+			return nil, types.NewOpenAIError(errors.New("failed to deliver generated images"), types.ErrorCodeBadResponse, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
 		}
 	}
 
