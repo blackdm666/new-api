@@ -196,6 +196,10 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, header)
+	if isXinMengImageRequest(info) {
+		// Multipart uploads are converted to JSON for XinMeng.
+		header.Set("Content-Type", "application/json")
+	}
 	if info.ChannelType == constant.ChannelTypeAzure {
 		header.Set("api-key", info.ApiKey)
 		return nil
@@ -523,10 +527,12 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	if isXinMengImageRequest(info) {
+		return convertXinMengImageRequest(c, request)
+	}
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
 		if isJSONRequest(c) {
-			sanitizeXinMengImageRequest(info, &request)
 			return request, nil
 		}
 
@@ -549,7 +555,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		// 写入所有非文件字段
 		if mf != nil {
 			for key, values := range mf.Value {
-				if key == "model" || isXinMengImageRequest(info) && xinMengUnsupportedImageFields[strings.ToLower(key)] {
+				if key == "model" {
 					continue
 				}
 				for _, value := range values {
@@ -653,56 +659,8 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		return &requestBody, nil
 
 	default:
-		sanitizeXinMengImageRequest(info, &request)
 		return request, nil
 	}
-}
-
-// xinMengUnsupportedImageFields are GPT Image fields XinMeng rejects with
-// "property ... should not exist".
-var xinMengUnsupportedImageFields = map[string]bool{
-	"background":         true,
-	"extra_fields":       true,
-	"input_fidelity":     true,
-	"mask":               true,
-	"moderation":         true,
-	"output_compression": true,
-	"output_format":      true,
-	"partial_images":     true,
-	"stream":             true,
-	"style":              true,
-	"user":               true,
-	"user_id":            true,
-	"watermark":          true,
-	"watermark_enabled":  true,
-}
-
-func isXinMengImageRequest(info *relaycommon.RelayInfo) bool {
-	if info == nil {
-		return false
-	}
-	modelName := info.GetUpstreamModelName()
-	return common.IsImageGenerationModel(modelName) && common.IsXinMengImageModel(modelName)
-}
-
-func sanitizeXinMengImageRequest(info *relaycommon.RelayInfo, request *dto.ImageRequest) {
-	if request == nil || !isXinMengImageRequest(info) {
-		return
-	}
-	request.Style = nil
-	request.User = nil
-	request.ExtraFields = nil
-	request.Background = nil
-	request.Moderation = nil
-	request.OutputFormat = nil
-	request.OutputCompression = nil
-	request.PartialImages = nil
-	request.Stream = nil
-	request.Mask = nil
-	request.InputFidelity = nil
-	request.Watermark = nil
-	request.WatermarkEnabled = nil
-	request.UserId = nil
 }
 
 func isJSONRequest(c *gin.Context) bool {
@@ -806,7 +764,7 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
 	if info.RelayMode == relayconstant.RelayModeAudioTranscription ||
 		info.RelayMode == relayconstant.RelayModeAudioTranslation ||
-		(info.RelayMode == relayconstant.RelayModeImagesEdits && !isJSONRequest(c)) {
+		(info.RelayMode == relayconstant.RelayModeImagesEdits && !isJSONRequest(c) && !isXinMengImageRequest(info)) {
 		return channel.DoFormRequest(a, c, info, requestBody)
 	} else if info.RelayMode == relayconstant.RelayModeRealtime {
 		return channel.DoWssRequest(a, c, info, requestBody)

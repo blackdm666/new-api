@@ -2,7 +2,10 @@ package openai
 
 import (
 	"bytes"
+	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -17,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // TestConvertImageEditRequestMultipart verifies that ConvertImageRequest
@@ -100,19 +104,51 @@ func TestConvertImageEditRequestMultipart(t *testing.T) {
 	})
 }
 
+// stubXinMengMedia records reference uploads and serves result downloads
+// without the Worker or the network.
+func stubXinMengMedia(t *testing.T, results map[string][]byte) *[][]byte {
+	t.Helper()
+	var uploads [][]byte
+	previousUpload, previousDownload := uploadXinMengReferenceImage, downloadXinMengResultImage
+	uploadXinMengReferenceImage = func(_ context.Context, image io.ReadSeeker) (string, error) {
+		content, err := io.ReadAll(image)
+		require.NoError(t, err)
+		uploads = append(uploads, content)
+		return fmt.Sprintf("https://assets.example/media/reference-media/%d.png", len(uploads)), nil
+	}
+	downloadXinMengResultImage = func(_ context.Context, sourceURL string) ([]byte, error) {
+		content, ok := results[sourceURL]
+		require.True(t, ok, "unexpected download %s", sourceURL)
+		return content, nil
+	}
+	t.Cleanup(func() {
+		uploadXinMengReferenceImage, downloadXinMengResultImage = previousUpload, previousDownload
+	})
+	return &uploads
+}
+
+func newXinMengJSONContext(path string) *gin.Context {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(`{}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	return c
+}
+
+func xinMengInfo(mode int, model string) *relaycommon.RelayInfo {
+	return &relaycommon.RelayInfo{
+		RelayMode:   mode,
+		RelayFormat: types.RelayFormatOpenAIImage,
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: model},
+	}
+}
+
 // XinMeng (Midjourney / Seedream behind an OpenAI-type channel) rejects GPT
-// Image fields with "property ... should not exist" and has no /images/edits.
+// Image fields with "property ... should not exist", has no /images/edits and
+// reads reference images only by URL.
 func TestXinMengImageRequestsDropGPTOnlyFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	stubXinMengMedia(t, nil)
 	for _, mode := range []int{relayconstant.RelayModeImagesGenerations, relayconstant.RelayModeImagesEdits} {
-		c, _ := gin.CreateTestContext(httptest.NewRecorder())
-		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(`{}`))
-		c.Request.Header.Set("Content-Type", "application/json")
-		info := &relaycommon.RelayInfo{
-			RelayMode:   mode,
-			RelayFormat: types.RelayFormatOpenAIImage,
-			ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "midjourney-v8.2"},
-		}
 		request := dto.ImageRequest{
 			Model:          "midjourney-v8.2",
 			Prompt:         "a cat",
@@ -126,10 +162,10 @@ func TestXinMengImageRequestsDropGPTOnlyFields(t *testing.T) {
 			OutputFormat:   json.RawMessage(`"png"`),
 			PartialImages:  json.RawMessage(`2`),
 			Stream:         common.GetPointer(true),
-			Image:          json.RawMessage(`"data:image/png;base64,abc"`),
+			Image:          json.RawMessage(`"https://88api.ai/cat.png"`),
 		}
 
-		converted, err := (&Adaptor{}).ConvertImageRequest(c, info, request)
+		converted, err := (&Adaptor{}).ConvertImageRequest(newXinMengJSONContext("/v1/images/generations"), xinMengInfo(mode, "midjourney-v8.2"), request)
 		require.NoError(t, err)
 		body, err := common.Marshal(converted)
 		require.NoError(t, err)
@@ -140,46 +176,145 @@ func TestXinMengImageRequestsDropGPTOnlyFields(t *testing.T) {
 			"size":"1024x1024",
 			"quality":"standard",
 			"response_format":"url",
-			"image":"data:image/png;base64,abc"
+			"image":"https://88api.ai/cat.png"
 		}`, string(body), "relay mode %d", mode)
 	}
 }
 
-func TestXinMengMultipartImageEditDropsGPTOnlyFields(t *testing.T) {
+func TestXinMengImageInputsBecomePublicURLs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	png := []byte("\x89PNG\r\n\x1a\nfake image")
+	encoded := base64.StdEncoding.EncodeToString(png)
+
+	for _, tc := range []struct {
+		name, model, image, want string
+		uploads                  int
+	}{
+		{"data URL", "midjourney-v8.2", `"data:image/png;base64,` + encoded + `"`, `"https://assets.example/media/reference-media/1.png"`, 1},
+		{"bare base64", "midjourney-v8.2-fast", `"` + encoded + `"`, `"https://assets.example/media/reference-media/1.png"`, 1},
+		{"URL kept", "midjourney-v8.2", `"https://88api.ai/cat.png"`, `"https://88api.ai/cat.png"`, 0},
+		{"mixed array", "midjourney-v8.2-turbo", `["https://88api.ai/cat.png","data:image/png;base64,` + encoded + `"]`, `["https://88api.ai/cat.png","https://assets.example/media/reference-media/1.png"]`, 1},
+		{"other models untouched", "gpt-image-1", `"data:image/png;base64,` + encoded + `"`, `"data:image/png;base64,` + encoded + `"`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			uploads := stubXinMengMedia(t, nil)
+			request := dto.ImageRequest{Model: tc.model, Prompt: "edit", Image: json.RawMessage(tc.image)}
+
+			converted, err := (&Adaptor{}).ConvertImageRequest(newXinMengJSONContext("/v1/images/edits"), xinMengInfo(relayconstant.RelayModeImagesEdits, tc.model), request)
+			require.NoError(t, err)
+			body, err := common.Marshal(converted)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, gjson.GetBytes(body, "image").Raw)
+			require.Len(t, *uploads, tc.uploads)
+			for _, upload := range *uploads {
+				assert.Equal(t, png, upload)
+			}
+		})
+	}
+
+	t.Run("invalid image is a client error", func(t *testing.T) {
+		uploads := stubXinMengMedia(t, nil)
+		request := dto.ImageRequest{Model: "midjourney-v8.2", Prompt: "edit", Image: json.RawMessage(`"not an image!"`)}
+		_, err := (&Adaptor{}).ConvertImageRequest(newXinMengJSONContext("/v1/images/edits"), xinMengInfo(relayconstant.RelayModeImagesEdits, "midjourney-v8.2"), request)
+		var apiErr *types.NewAPIError
+		require.ErrorAs(t, err, &apiErr)
+		assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+		assert.Empty(t, *uploads)
+	})
+}
+
+func TestXinMengMultipartImageEditBecomesJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	uploads := stubXinMengMedia(t, nil)
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	require.NoError(t, writer.WriteField("model", "midjourney-v8.2"))
 	require.NoError(t, writer.WriteField("prompt", "edit"))
+	require.NoError(t, writer.WriteField("n", "1"))
+	require.NoError(t, writer.WriteField("response_format", "url"))
 	require.NoError(t, writer.WriteField("stream", "true"))
-	require.NoError(t, writer.WriteField("partial_images", "3"))
 	require.NoError(t, writer.WriteField("output_format", "png"))
-	part, err := writer.CreateFormFile("image", "input.png")
-	require.NoError(t, err)
-	_, err = part.Write([]byte("fake image"))
-	require.NoError(t, err)
+	for _, name := range []string{"first.png", "second.png"} {
+		part, err := writer.CreateFormFile("image[]", name)
+		require.NoError(t, err)
+		_, err = part.Write([]byte(name))
+		require.NoError(t, err)
+	}
 	require.NoError(t, writer.Close())
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
 	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
-	info := &relaycommon.RelayInfo{
-		RelayMode:   relayconstant.RelayModeImagesEdits,
-		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "midjourney-v8.2"},
-	}
+	info := xinMengInfo(relayconstant.RelayModeImagesEdits, "midjourney-v8.2")
+	request := dto.ImageRequest{Model: "midjourney-v8.2", Prompt: "edit", N: common.GetPointer(uint(1)), Stream: common.GetPointer(true)}
 
-	converted, err := (&Adaptor{}).ConvertImageRequest(c, info, dto.ImageRequest{Model: "midjourney-v8.2", Prompt: "edit"})
+	converted, err := (&Adaptor{}).ConvertImageRequest(c, info, request)
 	require.NoError(t, err)
-	convertedBody, ok := converted.(*bytes.Buffer)
-	require.True(t, ok)
-	replayed := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(convertedBody.Bytes()))
-	replayed.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
-	require.NoError(t, replayed.ParseMultipartForm(32<<20))
+	_, isMultipart := converted.(*bytes.Buffer)
+	require.False(t, isMultipart)
+	encoded, err := common.Marshal(converted)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"model":"midjourney-v8.2",
+		"prompt":"edit",
+		"n":1,
+		"response_format":"url",
+		"image":["https://assets.example/media/reference-media/1.png","https://assets.example/media/reference-media/2.png"]
+	}`, string(encoded))
+	assert.Equal(t, [][]byte{[]byte("first.png"), []byte("second.png")}, *uploads)
 
-	assert.Equal(t, "edit", replayed.PostForm.Get("prompt"))
-	for _, field := range []string{"stream", "partial_images", "output_format"} {
-		assert.NotContains(t, replayed.PostForm, field)
+	header := http.Header{}
+	require.NoError(t, (&Adaptor{}).SetupRequestHeader(c, &header, info))
+	assert.Equal(t, "application/json", header.Get("Content-Type"))
+}
+
+// XinMeng result links name its private image host, so clients receive our
+// own copy (or inline bytes) while the billed count still follows the payloads.
+func TestXinMengImageResultsAreRehosted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := `{"created":1792057170,"provider":"xinmeng","data":[{"url":"https://getapib.org/image/a.png"},{"url":"https://getapib.org/image/b.png","revised_prompt":"cat"}],"usage":{"total_tokens":1}}`
+	results := map[string][]byte{"https://getapib.org/image/a.png": []byte("first"), "https://getapib.org/image/b.png": []byte("second")}
+
+	for _, tc := range []struct {
+		name, responseFormat, want string
+	}{
+		{"url", "url", `{"created":1792057170,"data":[
+			{"url":"https://assets.example/media/reference-media/1.png","b64_json":"","revised_prompt":""},
+			{"url":"https://assets.example/media/reference-media/2.png","b64_json":"","revised_prompt":"cat"}],"usage":{"total_tokens":1}}`},
+		{"b64_json", "b64_json", `{"created":1792057170,"data":[
+			{"url":"","b64_json":"Zmlyc3Q=","revised_prompt":""},
+			{"url":"","b64_json":"c2Vjb25k","revised_prompt":"cat"}],"usage":{"total_tokens":1}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubXinMengMedia(t, results)
+			c, recorder, resp, info := newImageTestContext(t, upstream, "application/json", false)
+			info.UpstreamModelName = "midjourney-v8.2"
+			info.Request = &dto.ImageRequest{Model: "midjourney-v8.2", ResponseFormat: tc.responseFormat}
+			info.PriceData.UsePrice = true
+			info.PriceData.AddOtherRatio("n", 1)
+
+			_, apiErr := OpenaiImageHandler(c, info, resp)
+			require.Nil(t, apiErr)
+			assert.JSONEq(t, tc.want, recorder.Body.String())
+			assert.NotContains(t, recorder.Body.String(), "getapib")
+			assert.Equal(t, float64(2), info.PriceData.OtherRatios()["n"])
+		})
 	}
-	assert.Len(t, replayed.MultipartForm.File["image"], 1)
+
+	t.Run("delivery failure hides the upstream host", func(t *testing.T) {
+		stubXinMengMedia(t, results)
+		downloadXinMengResultImage = func(_ context.Context, sourceURL string) ([]byte, error) {
+			return nil, fmt.Errorf("Get %q: timeout", sourceURL)
+		}
+		c, recorder, resp, info := newImageTestContext(t, upstream, "application/json", false)
+		info.UpstreamModelName = "midjourney-v8.2"
+		info.Request = &dto.ImageRequest{Model: "midjourney-v8.2"}
+
+		_, apiErr := OpenaiImageHandler(c, info, resp)
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
+		assert.NotContains(t, apiErr.Error(), "getapib")
+		assert.Empty(t, recorder.Body.String())
+	})
 }
 
 func TestImageEditRequestURL(t *testing.T) {

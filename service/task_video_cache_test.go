@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -175,6 +176,46 @@ func TestMediaUploadGrantValidation(t *testing.T) {
 	t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "http://media.example/media")
 	_, err = IssueMediaUpload(valid)
 	assert.Error(t, err)
+}
+
+// UploadReferenceImage follows the same Worker PUT contract clients use:
+// exact length, sniffed MIME and the signed ticket, never the API key.
+func TestUploadReferenceImageUsesWorkerTicket(t *testing.T) {
+	t.Setenv("TASK_MEDIA_PUBLIC_ENABLED", "true")
+	t.Setenv("TASK_MEDIA_PUBLIC_BASE_URL", "https://media.example/media")
+	t.Setenv("TASK_VIDEO_WORKER_SECRET", strings.Repeat("s", 32))
+	png := []byte("\x89PNG\r\n\x1a\nfake image")
+	status := http.StatusCreated
+	var requests []*http.Request
+	var bodies [][]byte
+	previousDo := taskVideoWorkerDo
+	taskVideoWorkerDo = func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		requests, bodies = append(requests, req), append(bodies, body)
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	}
+	t.Cleanup(func() { taskVideoWorkerDo = previousDo })
+
+	publicURL, err := UploadReferenceImage(context.Background(), bytes.NewReader(png))
+	require.NoError(t, err)
+	require.Len(t, requests, 1)
+	assert.Equal(t, http.MethodPut, requests[0].Method)
+	assert.Equal(t, publicURL, requests[0].URL.String())
+	assert.Regexp(t, `^https://media\.example/media/reference-media/[a-f0-9-]{36}\.png$`, publicURL)
+	assert.Equal(t, "image/png", requests[0].Header.Get("Content-Type"))
+	assert.NotEmpty(t, requests[0].Header.Get("X-Media-Upload-Token"))
+	assert.Empty(t, requests[0].Header.Get("Authorization"))
+	assert.Equal(t, int64(len(png)), requests[0].ContentLength)
+	assert.Equal(t, png, bodies[0])
+
+	_, err = UploadReferenceImage(context.Background(), bytes.NewReader([]byte("plain text")))
+	assert.ErrorIs(t, err, ErrUnsupportedReferenceImage)
+	assert.Len(t, requests, 1)
+
+	status = http.StatusUnauthorized
+	_, err = UploadReferenceImage(context.Background(), bytes.NewReader(png))
+	assert.ErrorContains(t, err, "status 401")
 }
 
 func TestPrepareTaskVideoResultKeepsUpstreamR2URLDirect(t *testing.T) {

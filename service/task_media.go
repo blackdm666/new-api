@@ -6,6 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -125,4 +128,61 @@ func IssueMediaUpload(request MediaUploadRequest) (*MediaUploadReceipt, error) {
 		URL: publicURL, UploadURL: publicURL, Method: "PUT", ExpiresAt: expires,
 		Headers: map[string]string{"Content-Type": request.MimeType, "X-Media-Upload-Token": ticket},
 	}, nil
+}
+
+const referenceImageUploadTimeout = 60 * time.Second
+
+var ErrUnsupportedReferenceImage = errors.New("reference image must be PNG, JPEG, WebP or GIF")
+
+// UploadReferenceImage stores a client-supplied PNG, JPEG, WebP or GIF image
+// as public reference media for providers that only fetch inputs by URL. It
+// uses the same write-once ticket and Worker PUT as POST /v1/media/uploads, so
+// the object follows the reference-media size limit and retention window.
+func UploadReferenceImage(ctx context.Context, image io.ReadSeeker) (string, error) {
+	head := make([]byte, 512)
+	n, err := io.ReadFull(image, head)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	mimeType := http.DetectContentType(head[:n])
+	switch mimeType {
+	case "image/png", "image/jpeg", "image/webp", "image/gif":
+	default:
+		return "", ErrUnsupportedReferenceImage
+	}
+	if _, err = image.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	digest := sha256.New()
+	size, err := io.Copy(digest, image)
+	if err != nil {
+		return "", err
+	}
+	receipt, err := IssueMediaUpload(MediaUploadRequest{Size: size, MimeType: mimeType, SHA256: base64.RawURLEncoding.EncodeToString(digest.Sum(nil))})
+	if err != nil {
+		return "", err
+	}
+	if _, err = image.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	uploadCtx, cancel := context.WithTimeout(ctx, referenceImageUploadTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(uploadCtx, receipt.Method, receipt.UploadURL, io.LimitReader(image, size))
+	if err != nil {
+		return "", err
+	}
+	req.ContentLength = size
+	for name, value := range receipt.Headers {
+		req.Header.Set(name, value)
+	}
+	resp, err := taskVideoWorkerDo(req)
+	if err != nil {
+		return "", fmt.Errorf("upload reference image: %w", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("reference image upload returned status %d", resp.StatusCode)
+	}
+	return receipt.URL, nil
 }
