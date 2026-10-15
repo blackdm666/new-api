@@ -5,7 +5,16 @@
   "compatibility_date": "2026-08-27",
   "workers_dev": true,
   "cache": { "enabled": true },
-  "vars": { "PUBLIC_MEDIA_ENABLED": "true" },
+  "routes": [
+    {
+      "pattern": "assets.88api.ai",
+      "custom_domain": true,
+    },
+  ],
+  "vars": {
+    "PUBLIC_MEDIA_ENABLED": "true",
+    "MEDIA_RETENTION_DAYS": "7",
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,

@@ -30,16 +30,18 @@ or provider credentials.
 
 `PUBLIC_MEDIA_ENABLED=true` enables anonymous GET/HEAD (including byte ranges)
 under `/media/task-videos/` and `/media/reference-media/` only. The bucket stays
-private. Objects expire 30 days after their original upload; reads never renew,
-copy or recreate them. Configure separate 30-day R2 lifecycle rules for both
-prefixes; keep the existing incomplete-multipart cleanup rule. Public links are
-bearer capabilities: anyone with a link can read it until deletion/expiry.
+private. `MEDIA_RETENTION_DAYS` declares the public-media expiry window and
+defaults to 7 days; it must match the R2 lifecycle rules for both prefixes.
+Reads never renew, copy or recreate objects. Keep the existing incomplete-
+multipart cleanup rule. Public links are bearer capabilities: anyone with a
+link can read it until deletion/expiry.
 
 Deploy this Worker first, then set the NewAPI Compose environment:
 
 ```ini
 TASK_MEDIA_PUBLIC_ENABLED=true
 TASK_MEDIA_PUBLIC_BASE_URL=https://new-api-video-transfer.guodamao.workers.dev/media
+TASK_VIDEO_CACHE_RETENTION_DAYS=7
 ```
 
 Keep existing `TASK_VIDEO_CACHE_ENABLED=true`, S3/R2 storage, Worker transfer
