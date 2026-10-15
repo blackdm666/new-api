@@ -51,7 +51,6 @@ async function renderTier(tier: string | undefined, rate = 500) {
           total_approved_quota: 0,
           pending_commission_cents: 0,
           approved_commission_cents: 0,
-          total_topup_cents: 27000,
           invite_count: 36,
           effective_invitee_count: 3,
           commission_record_count: 3,
@@ -61,14 +60,10 @@ async function renderTier(tier: string | undefined, rate = 500) {
           group_rates: { default: 500, 高级推广: 1000, 金牌推广: 1500 },
           tier_name: tier,
           upgrade_eligible: true,
+          highest_tier_reached: false,
           next_tier_name: '高级推广',
           next_tier_rate_basis_points: 1000,
-          upgrade_threshold: 50,
-          upgrade_progress: 3,
-          upgrade_progress_ratio: 0.06,
-          upgrade_top_up_amount_threshold_cents: 200000,
-          upgrade_top_up_amount_progress_cents: 27000,
-          upgrade_top_up_amount_progress_ratio: 0.135,
+          upgrade_progress_ratio: 0.135,
         }
   return render(
     <I18nextProvider i18n={i18n}>

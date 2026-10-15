@@ -28,8 +28,8 @@ import {
   RefreshCw,
   TrendingUp,
   UserRoundCheck,
+  Trophy,
   Users,
-  WalletCards,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -73,6 +73,7 @@ import {
   formatRate,
   promoterTierBadgeClassName,
   promoterTierLabelKey,
+  upgradeProgressPercent,
 } from './lib'
 import { OverflowNote } from './overflow-note'
 import { AffiliatePayouts } from './payouts-user'
@@ -240,7 +241,7 @@ export function ReferralProgram() {
   )
 }
 
-function SummaryGrid({
+export function SummaryGrid({
   summary,
   loading,
 }: {
@@ -275,9 +276,9 @@ function SummaryGrid({
       icon: UserRoundCheck,
     },
     {
-      label: t('Invitee top-up amount'),
-      value: formatCents(summary?.total_topup_cents ?? 0),
-      icon: WalletCards,
+      label: t('Upgrade progress'),
+      value: upgradeProgressStatValue(summary, t),
+      icon: Trophy,
     },
   ]
   return (
@@ -313,21 +314,43 @@ function SummaryGrid({
   )
 }
 
-function UpgradeProgress({ summary }: { summary?: AffiliateSummary }) {
+function upgradeProgressStatValue(
+  summary: AffiliateSummary | undefined,
+  t: (key: string) => string
+): string {
+  if (summary?.highest_tier_reached) return t('Highest tier reached')
+  if (!summary?.upgrade_eligible) return '-'
+  return `${upgradeProgressPercent(summary.upgrade_progress_ratio)}%`
+}
+
+export function UpgradeProgress({ summary }: { summary?: AffiliateSummary }) {
   const { t } = useTranslation()
   if (!summary?.upgrade_eligible) {
+    const highest = summary?.highest_tier_reached === true
     return (
       <div className='border-border/70 rounded-xl border p-4'>
         <div className='flex items-center gap-3'>
           <div className='flex size-9 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600'>
-            <UserRoundCheck className='size-4' />
+            {highest ? (
+              <Trophy className='size-4' aria-hidden='true' />
+            ) : (
+              <UserRoundCheck className='size-4' aria-hidden='true' />
+            )}
           </div>
           <div>
-            <p className='text-sm font-medium'>{t('Current tier confirmed')}</p>
+            <p className='text-sm font-medium'>
+              {highest
+                ? t('Highest tier reached')
+                : t('Current tier confirmed')}
+            </p>
             <p className='text-muted-foreground text-xs'>
-              {t(
-                'Your current promoter tier is managed by administrators. Future top-ups use the current tier rate.'
-              )}
+              {highest
+                ? t(
+                    'You are on the highest promoter tier. Future top-ups use the current tier rate.'
+                  )
+                : t(
+                    'Your current promoter tier is managed by administrators. Future top-ups use the current tier rate.'
+                  )}
             </p>
           </div>
         </div>
@@ -335,12 +358,7 @@ function UpgradeProgress({ summary }: { summary?: AffiliateSummary }) {
       </div>
     )
   }
-  const inviteeProgress = Math.round(
-    (summary?.upgrade_progress_ratio ?? 0) * 100
-  )
-  const amountProgress = Math.round(
-    (summary?.upgrade_top_up_amount_progress_ratio ?? 0) * 100
-  )
+  const progress = upgradeProgressPercent(summary.upgrade_progress_ratio)
   return (
     <div className='border-border/70 rounded-xl border p-4'>
       <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
@@ -348,32 +366,23 @@ function UpgradeProgress({ summary }: { summary?: AffiliateSummary }) {
           <p className='text-sm font-medium'>{t('Upgrade progress')}</p>
           <p className='text-muted-foreground text-xs'>
             {t(
-              'Reach either {{count}} effective top-up users or {{amount}} in valid invitee top-ups, then an administrator can approve an upgrade to {{tier}} ({{rate}}).',
+              'Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.',
               {
-                count: summary?.upgrade_threshold ?? 50,
-                amount: formatCents(
-                  summary?.upgrade_top_up_amount_threshold_cents ?? 200000
-                ),
-                tier: summary?.next_tier_name
+                tier: summary.next_tier_name
                   ? t(promoterTierLabelKey(summary.next_tier_name))
                   : t('Advanced promoter'),
-                rate: formatRate(summary?.next_tier_rate_basis_points ?? 1000),
+                rate: formatRate(summary.next_tier_rate_basis_points ?? 1000),
               }
             )}
           </p>
         </div>
       </div>
       <CurrentTierBadge summary={summary} />
-      <div className='mt-3 space-y-3'>
+      <div className='mt-3'>
         <UpgradeCriterion
-          label={t('Effective top-up users')}
-          value={`${summary?.effective_invitee_count ?? 0}/${summary?.upgrade_threshold ?? 50}`}
-          progress={inviteeProgress}
-        />
-        <UpgradeCriterion
-          label={t('Effective top-up amount')}
-          value={`${formatCents(summary?.total_topup_cents ?? 0)}/${formatCents(summary?.upgrade_top_up_amount_threshold_cents ?? 200000)}`}
-          progress={amountProgress}
+          label={t('Upgrade progress')}
+          value={`${progress}%`}
+          progress={progress}
         />
       </div>
     </div>

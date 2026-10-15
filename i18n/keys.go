@@ -381,6 +381,8 @@ const (
 	MsgAffiliateEmailLabelCommission           = "affiliate.email.label.commission"
 	MsgAffiliateEmailLabelStatus               = "affiliate.email.label.status"
 	MsgAffiliateEmailLabelReason               = "affiliate.email.label.reason"
+	MsgAffiliateEmailLabelInvitee              = "affiliate.email.label.invitee"
+	MsgAffiliateEmailLabelProcessedTime        = "affiliate.email.label.processed_time"
 	MsgAffiliateEmailLabelNewGroup             = "affiliate.email.label.new_group"
 	MsgAffiliateEmailLabelPayoutId             = "affiliate.email.label.payout_id"
 	MsgAffiliateEmailLabelAmount               = "affiliate.email.label.amount"

@@ -104,30 +104,32 @@ type AffiliateUpgradeNotice struct {
 }
 
 type AffiliateSummary struct {
-	AutoApprove                      bool           `json:"auto_approve"`
-	AvailableQuota                   int            `json:"available_quota"`
-	AvailableCents                   int64          `json:"available_cents"`
-	TotalApprovedQuota               int            `json:"total_approved_quota"`
-	PendingCommissionCents           int64          `json:"pending_commission_cents"`
-	ApprovedCommissionCents          int64          `json:"approved_commission_cents"`
-	TotalTopUpCents                  int64          `json:"total_topup_cents"`
-	InviteCount                      int64          `json:"invite_count"`
-	EffectiveInviteeCount            int64          `json:"effective_invitee_count"`
-	CommissionRecordCount            int64          `json:"commission_record_count"`
-	InviteeTopUpLimit                int            `json:"invitee_top_up_limit"`
-	RateBasisPoints                  int            `json:"rate_basis_points"`
-	DefaultRateBasisPoints           int            `json:"default_rate_basis_points"`
-	GroupRates                       map[string]int `json:"group_rates"`
-	TierName                         string         `json:"tier_name"`
-	UpgradeEligible                  bool           `json:"upgrade_eligible"`
-	NextTierName                     string         `json:"next_tier_name"`
-	NextTierRateBasisPoints          int            `json:"next_tier_rate_basis_points"`
-	UpgradeThreshold                 int            `json:"upgrade_threshold"`
-	UpgradeProgress                  int64          `json:"upgrade_progress"`
-	UpgradeProgressRatio             float64        `json:"upgrade_progress_ratio"`
-	UpgradeTopUpAmountThresholdCents int64          `json:"upgrade_top_up_amount_threshold_cents"`
-	UpgradeTopUpAmountProgressCents  int64          `json:"upgrade_top_up_amount_progress_cents"`
-	UpgradeTopUpAmountProgressRatio  float64        `json:"upgrade_top_up_amount_progress_ratio"`
+	AutoApprove             bool           `json:"auto_approve"`
+	AvailableQuota          int            `json:"available_quota"`
+	AvailableCents          int64          `json:"available_cents"`
+	TotalApprovedQuota      int            `json:"total_approved_quota"`
+	PendingCommissionCents  int64          `json:"pending_commission_cents"`
+	ApprovedCommissionCents int64          `json:"approved_commission_cents"`
+	InviteCount             int64          `json:"invite_count"`
+	EffectiveInviteeCount   int64          `json:"effective_invitee_count"`
+	CommissionRecordCount   int64          `json:"commission_record_count"`
+	InviteeTopUpLimit       int            `json:"invitee_top_up_limit"`
+	RateBasisPoints         int            `json:"rate_basis_points"`
+	DefaultRateBasisPoints  int            `json:"default_rate_basis_points"`
+	GroupRates              map[string]int `json:"group_rates"`
+	TierName                string         `json:"tier_name"`
+	UpgradeEligible         bool           `json:"upgrade_eligible"`
+	HighestTierReached      bool           `json:"highest_tier_reached"`
+	NextTierName            string         `json:"next_tier_name"`
+	NextTierRateBasisPoints int            `json:"next_tier_rate_basis_points"`
+	// UpgradeProgressRatio is the overall upgrade progress in [0, 1]. Either
+	// rule (effective top-up users or effective top-up amount) qualifies, so
+	// the ratio is the larger of the two, capped at 1. Invitee top-up amounts
+	// and the raw thresholds are not exposed to the promoter.
+	UpgradeProgressRatio float64 `json:"upgrade_progress_ratio"`
+	// Internal policy values kept for server-side checks and tests only.
+	UpgradeThreshold                 int   `json:"-"`
+	UpgradeTopUpAmountThresholdCents int64 `json:"-"`
 }
 
 // AffiliateInviteeStats is the inviter-facing invitee row. A promoter only
@@ -855,7 +857,6 @@ func GetAffiliateSummary(userId int) (*AffiliateSummary, error) {
 	}
 	summary.PendingCommissionCents = row.PendingCents
 	summary.ApprovedCommissionCents = row.ApprovedCents
-	summary.TotalTopUpCents = row.TopUpCents
 	summary.CommissionRecordCount = row.RecordCount
 
 	if err := DB.Model(&AffiliateCommission{}).
@@ -865,16 +866,28 @@ func GetAffiliateSummary(userId int) (*AffiliateSummary, error) {
 		return nil, err
 	}
 	if summary.UpgradeEligible {
-		summary.UpgradeProgress = min(summary.EffectiveInviteeCount, int64(summary.UpgradeThreshold))
-		summary.UpgradeTopUpAmountProgressCents = min(summary.TotalTopUpCents, summary.UpgradeTopUpAmountThresholdCents)
-	}
-	if summary.UpgradeEligible && summary.UpgradeThreshold > 0 {
-		summary.UpgradeProgressRatio = math.Min(1, float64(summary.UpgradeProgress)/float64(summary.UpgradeThreshold))
-	}
-	if summary.UpgradeEligible && summary.UpgradeTopUpAmountThresholdCents > 0 {
-		summary.UpgradeTopUpAmountProgressRatio = math.Min(1, float64(summary.UpgradeTopUpAmountProgressCents)/float64(summary.UpgradeTopUpAmountThresholdCents))
+		summary.UpgradeProgressRatio = affiliateUpgradeProgressRatio(
+			summary.EffectiveInviteeCount, summary.UpgradeThreshold,
+			row.TopUpCents, summary.UpgradeTopUpAmountThresholdCents,
+		)
+	} else if strings.TrimSpace(user.Group) == AffiliatePromoterGroupGold {
+		summary.HighestTierReached = true
+		summary.UpgradeProgressRatio = 1
 	}
 	return summary, nil
+}
+
+// affiliateUpgradeProgressRatio returns the overall upgrade progress: meeting
+// either threshold qualifies, so the larger of the two ratios wins, capped at 1.
+func affiliateUpgradeProgressRatio(effectiveInvitees int64, inviteeThreshold int, topUpCents int64, topUpThresholdCents int64) float64 {
+	ratio := 0.0
+	if inviteeThreshold > 0 {
+		ratio = math.Max(ratio, float64(max(effectiveInvitees, 0))/float64(inviteeThreshold))
+	}
+	if topUpThresholdCents > 0 {
+		ratio = math.Max(ratio, float64(max(topUpCents, 0))/float64(topUpThresholdCents))
+	}
+	return math.Min(1, ratio)
 }
 
 func ListAffiliateCommissions(options AffiliateCommissionQueryOptions, pageInfo *common.PageInfo) ([]*AffiliateCommission, int64, error) {

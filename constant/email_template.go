@@ -277,14 +277,14 @@ func EmailTemplateSpecs() []EmailTemplateSpec {
 		{
 			Key:         EmailTemplateKeyAffiliateCommissionUser,
 			Name:        "返佣审核结果-通知用户",
-			Description: "返佣通过或驳回后，发送给推广员注册邮箱。",
+			Description: "返佣通过或驳回后，发送给推广员注册邮箱。只含打码的受邀用户名，不含订单号与充值金额。",
 			Variables: []EmailTemplateVariable{
 				varSystemName, varServerAddr, varEmailSubject, varHeading,
 				{Name: "intro", Description: "正文开头说明", Sample: "你的返佣已通过审核。"},
-				{Name: "order_number", Description: "充值订单号", Sample: "ORDER-202608-001"},
-				{Name: "topup_amount", Description: "受邀用户充值金额", Sample: "100.00"},
+				{Name: "invitee_username", Description: "受邀用户（打码用户名）", Sample: "al***"},
 				{Name: "commission_amount", Description: "返佣金额", Sample: "5.00"},
 				{Name: "commission_status", Description: "审核状态", Sample: "已通过"},
+				{Name: "processed_time", Description: "处理时间", Sample: "2026-08-14 12:00"},
 				{Name: "reject_reason", Description: "驳回原因", Sample: "订单需要进一步核对"},
 				varInfoTable, varActionURL, varActionLabel,
 			},

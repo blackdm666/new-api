@@ -8800,6 +8800,9 @@
     "Application recipient email": "Application recipient email",
     "Enter one or more valid email addresses separated by commas": "Enter one or more valid email addresses separated by commas",
     "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.": "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.",
-    "Referral program application": "Referral program application"
+    "Referral program application": "Referral program application",
+    "Highest tier reached": "Highest tier reached",
+    "You are on the highest promoter tier. Future top-ups use the current tier rate.": "You are on the highest promoter tier. Future top-ups use the current tier rate.",
+    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer."
   }
 }

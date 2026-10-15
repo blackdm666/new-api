@@ -44,7 +44,6 @@ export type AffiliateSummary = {
   total_approved_quota: number
   pending_commission_cents: number
   approved_commission_cents: number
-  total_topup_cents: number
   invite_count: number
   effective_invitee_count: number
   commission_record_count: number
@@ -55,14 +54,16 @@ export type AffiliateSummary = {
   group_rates: Record<string, number>
   tier_name: string
   upgrade_eligible: boolean
+  /** True when the promoter is already on the top tier. */
+  highest_tier_reached: boolean
   next_tier_name: string
   next_tier_rate_basis_points: number
-  upgrade_threshold: number
-  upgrade_progress: number
+  /**
+   * Overall upgrade progress in [0, 1]: the larger of the effective top-up
+   * user ratio and the effective top-up amount ratio, capped at 1. Invitee
+   * top-up amounts are not exposed to promoters.
+   */
   upgrade_progress_ratio: number
-  upgrade_top_up_amount_threshold_cents: number
-  upgrade_top_up_amount_progress_cents: number
-  upgrade_top_up_amount_progress_ratio: number
 }
 
 export type AffiliateCommission = {

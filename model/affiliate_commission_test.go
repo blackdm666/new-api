@@ -254,7 +254,8 @@ func TestAffiliateCommissionTopUpLimitKeepsAnUnrewardedLedgerEntry(t *testing.T)
 	summary, err := GetAffiliateSummary(inviter.Id)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), summary.CommissionRecordCount)
-	assert.Equal(t, int64(30_000), summary.TotalTopUpCents)
+	// 30,000 of the default 200,000-cent amount threshold beats 1 of 50 users.
+	assert.InDelta(t, 0.15, summary.UpgradeProgressRatio, 1e-9)
 	assert.Equal(t, 2, summary.InviteeTopUpLimit)
 	assert.Equal(t, int64(1), summary.InviteCount)
 	assert.Equal(t, int64(1), summary.EffectiveInviteeCount)
@@ -882,7 +883,8 @@ func TestAffiliateAdvancedPromoterRequiresConfiguredThresholdBeforeGoldReview(t 
 	assert.True(t, summary.UpgradeEligible)
 	assert.Equal(t, AffiliatePromoterGroupGold, summary.NextTierName)
 	assert.Equal(t, 2, summary.UpgradeThreshold)
-	assert.Equal(t, int64(1), summary.UpgradeProgress)
+	assert.InDelta(t, 0.5, summary.UpgradeProgressRatio, 1e-9)
+	assert.False(t, summary.HighestTierReached)
 
 	candidates, total, err := ListAffiliateUpgradeCandidates(&common.PageInfo{Page: 1, PageSize: 10})
 	require.NoError(t, err)
@@ -1026,4 +1028,67 @@ func TestAffiliateAdvancedPromoterSummaryUsesFiveHundredInviteeDefault(t *testin
 	assert.Equal(t, AffiliatePromoterGroupGold, summary.NextTierName)
 	assert.Equal(t, 500, summary.UpgradeThreshold)
 	assert.Equal(t, int64(2000000), summary.UpgradeTopUpAmountThresholdCents)
+}
+
+func TestAffiliateUpgradeProgressRatioUsesLargerCriterionAndCaps(t *testing.T) {
+	assert.InDelta(t, 0.2, affiliateUpgradeProgressRatio(10, 50, 20_000, 200_000), 1e-9)
+	assert.InDelta(t, 0.4, affiliateUpgradeProgressRatio(2, 50, 80_000, 200_000), 1e-9)
+	assert.Equal(t, 1.0, affiliateUpgradeProgressRatio(80, 50, 0, 200_000))
+	assert.Equal(t, 1.0, affiliateUpgradeProgressRatio(0, 50, 900_000, 200_000))
+	assert.Zero(t, affiliateUpgradeProgressRatio(0, 0, 0, 0))
+}
+
+func TestAffiliateSummaryHidesInviteeTopUpAmounts(t *testing.T) {
+	truncateTables(t)
+	enableAffiliateForTest(t)
+	setAffiliateOptionForTest(t, AffiliateUpgradeInviteesThresholdOptionKey, "50")
+	setAffiliateOptionForTest(t, AffiliateUpgradeTopUpAmountThresholdOptionKey, "200000")
+
+	inviter, _, _, _ := createAffiliateFixture(t, "summary-privacy", 600)
+	summary, err := GetAffiliateSummary(inviter.Id)
+	require.NoError(t, err)
+	assert.True(t, summary.UpgradeEligible)
+	assert.False(t, summary.HighestTierReached)
+	assert.Equal(t, AffiliatePromoterGroupAdvanced, summary.NextTierName)
+	// 60,000 of 200,000 cents (30%) beats 1 of 50 users (2%).
+	assert.InDelta(t, 0.3, summary.UpgradeProgressRatio, 1e-9)
+
+	payload, err := common.Marshal(summary)
+	require.NoError(t, err)
+	fields := map[string]any{}
+	require.NoError(t, common.Unmarshal(payload, &fields))
+	for _, hidden := range []string{
+		"total_topup_cents",
+		"upgrade_threshold",
+		"upgrade_progress",
+		"upgrade_top_up_amount_threshold_cents",
+		"upgrade_top_up_amount_progress_cents",
+		"upgrade_top_up_amount_progress_ratio",
+	} {
+		assert.NotContains(t, fields, hidden)
+	}
+	assert.Contains(t, fields, "upgrade_progress_ratio")
+	assert.Contains(t, fields, "next_tier_name")
+	assert.Contains(t, fields, "highest_tier_reached")
+	assert.NotContains(t, string(payload), "60000")
+}
+
+func TestAffiliateSummaryGoldPromoterReachedHighestTier(t *testing.T) {
+	truncateTables(t)
+	enableAffiliateForTest(t)
+	inviter := &User{
+		Username: "affiliate-gold-highest",
+		Email:    "affiliate-gold-highest@example.com",
+		Group:    AffiliatePromoterGroupGold,
+		AffCode:  "affiliate-gold-highest-code",
+		Status:   common.UserStatusEnabled,
+	}
+	require.NoError(t, DB.Create(inviter).Error)
+
+	summary, err := GetAffiliateSummary(inviter.Id)
+	require.NoError(t, err)
+	assert.False(t, summary.UpgradeEligible)
+	assert.True(t, summary.HighestTierReached)
+	assert.Empty(t, summary.NextTierName)
+	assert.Equal(t, 1.0, summary.UpgradeProgressRatio)
 }

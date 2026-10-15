@@ -8801,6 +8801,9 @@
     "Application recipient email": "申请接收邮箱",
     "Enter one or more valid email addresses separated by commas": "请输入一个或多个有效邮箱，用逗号分隔",
     "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.": "官网推广返佣页提交的申请会通过通知 SMTP 发送到这些邮箱。多个邮箱用逗号分隔。",
-    "Referral program application": "推广返佣计划申请"
+    "Referral program application": "推广返佣计划申请",
+    "Highest tier reached": "已达最高档",
+    "You are on the highest promoter tier. Future top-ups use the current tier rate.": "你已是最高推广等级，后续充值按当前等级比例返佣。",
+    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "有效充值人数或有效充值金额任一达标后，管理员审核可升级至{{tier}}（{{rate}}）。进度按更接近达标的一项计算。"
   }
 }
