@@ -27,6 +27,9 @@ var ModelList = []string{
 	"grok-2-image-1212",
 	// video generation model
 	"grok-imagine-video",
+	// voice models (OpenAI /v1/audio/speech and /v1/audio/transcriptions)
+	"grok-tts",
+	"grok-stt",
 }
 
 var ChannelName = "xai"
