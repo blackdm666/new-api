@@ -1,11 +1,13 @@
 package xai
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -20,6 +22,9 @@ import (
 )
 
 type Adaptor struct {
+	audioCodec          string
+	audioSampleRate     int
+	audioResponseFormat string
 }
 
 func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dto.GeminiChatRequest) (any, error) {
@@ -34,8 +39,30 @@ func (a *Adaptor) ConvertClaudeRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
-	//not available
-	return nil, errors.New("not available")
+	switch info.RelayMode {
+	case constant.RelayModeAudioSpeech:
+		payload, codec, sampleRate, err := buildXAITTSRequest(c, request)
+		if err != nil {
+			return nil, err
+		}
+		a.audioCodec = codec
+		a.audioSampleRate = sampleRate
+		data, err := common.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		return bytes.NewReader(data), nil
+	case constant.RelayModeAudioTranscription:
+		body, contentType, err := buildXAISTTRequest(c, request)
+		if err != nil {
+			return nil, err
+		}
+		a.audioResponseFormat = request.ResponseFormat
+		c.Request.Header.Set("Content-Type", contentType)
+		return body, nil
+	default:
+		return nil, badAudioRequest("grok voice does not support audio translations")
+	}
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
@@ -55,7 +82,14 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
-	return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, info.RequestURLPath, info.ChannelType), nil
+	requestPath := info.RequestURLPath
+	switch info.RelayMode {
+	case constant.RelayModeAudioSpeech:
+		requestPath = xaiTTSPath
+	case constant.RelayModeAudioTranscription:
+		requestPath = xaiSTTPath
+	}
+	return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, requestPath, info.ChannelType), nil
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
@@ -113,6 +147,9 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
+	if info.RelayMode == constant.RelayModeAudioTranscription {
+		return channel.DoFormRequest(a, c, info, requestBody)
+	}
 	return channel.DoApiRequest(a, c, info, requestBody)
 }
 
@@ -120,6 +157,10 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	switch info.RelayMode {
 	case constant.RelayModeImagesGenerations, constant.RelayModeImagesEdits:
 		usage, err = openai.OpenaiImageHandler(c, info, resp)
+	case constant.RelayModeAudioSpeech:
+		usage, err = handleXAITTSResponse(c, resp, info, a.audioCodec, a.audioSampleRate)
+	case constant.RelayModeAudioTranscription:
+		usage, err = handleXAISTTResponse(c, resp, info, a.audioResponseFormat)
 	case constant.RelayModeResponses:
 		if info.IsStream {
 			usage, err = openai.OaiResponsesStreamHandler(c, info, resp)
