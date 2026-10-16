@@ -1,7 +1,10 @@
 package vertex
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,11 +13,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
+	"github.com/mewkiz/flac"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -151,9 +156,13 @@ func TestConvertAudioSpeechRequestRejectsUnsupportedFormat(t *testing.T) {
 		Model:          "gemini-2.5-flash-tts",
 		Input:          "Hello",
 		Voice:          "Kore",
-		ResponseFormat: "mp3",
+		ResponseFormat: "opus",
 	})
-	require.EqualError(t, err, `Vertex AI audio speech supports response_format pcm or wav, got "mp3"`)
+	require.EqualError(t, err, `Vertex AI audio speech supports response_format mp3, wav, flac or pcm, got "opus"`)
+	var apiErr *types.NewAPIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+	assert.Equal(t, types.ErrorCodeInvalidRequest, apiErr.GetErrorCode())
 }
 
 func TestVertexAudioSpeechUsesV1Beta1GenerateContentURL(t *testing.T) {
@@ -219,4 +228,86 @@ func TestVertexTTSResponseDecodesPCMAndWrapsWAV(t *testing.T) {
 	assert.Equal(t, "RIFF", recorder.Body.String()[:4])
 	assert.Equal(t, "WAVE", recorder.Body.String()[8:12])
 	assert.Equal(t, pcm, recorder.Body.Bytes()[44:])
+}
+
+func TestVertexTTSResponseEncodesRequestedFormat(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	// 1.5 s of a ramp signal; no candidatesTokenCount, so audio tokens come from
+	// the PCM length: ceil(1.5 s) = 2 s -> 2/60*1000 = 33 tokens for every format.
+	sampleCount := vertexTTSSampleRate * 3 / 2
+	pcm := make([]byte, sampleCount*2)
+	for i := range sampleCount {
+		binary.LittleEndian.PutUint16(pcm[i*2:], uint16(int16(i%2000-1000)))
+	}
+	responseJSON := fmt.Sprintf(`{
+		"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"audio/L16;codec=pcm;rate=24000","data":%q}}]}}],
+		"usageMetadata":{"promptTokenCount":3,"totalTokenCount":3}
+	}`, base64.StdEncoding.EncodeToString(pcm))
+
+	tests := []struct {
+		format      string
+		contentType string
+		check       func(t *testing.T, body []byte)
+	}{
+		{format: "mp3", contentType: "audio/mpeg", check: func(t *testing.T, body []byte) {
+			duration, err := common.GetAudioDuration(context.Background(), bytes.NewReader(body), ".mp3")
+			require.NoError(t, err)
+			// Whole 576-sample frames plus the delay-flush frames: never shorter
+			// than the speech, at most 72 ms longer.
+			assert.GreaterOrEqual(t, duration, 1.5)
+			assert.LessOrEqual(t, duration, 1.572)
+		}},
+		{format: "flac", contentType: "audio/flac", check: func(t *testing.T, body []byte) {
+			stream, err := flac.New(bytes.NewReader(body))
+			require.NoError(t, err)
+			assert.Equal(t, uint32(vertexTTSSampleRate), stream.Info.SampleRate)
+			assert.Equal(t, uint8(vertexTTSChannels), stream.Info.NChannels)
+			assert.Equal(t, uint64(sampleCount), stream.Info.NSamples)
+			decoded := make([]byte, 0, len(pcm))
+			for {
+				audioFrame, err := stream.ParseNext()
+				if err == io.EOF {
+					break
+				}
+				require.NoError(t, err)
+				for _, sample := range audioFrame.Subframes[0].Samples {
+					decoded = binary.LittleEndian.AppendUint16(decoded, uint16(int16(sample)))
+				}
+			}
+			assert.Equal(t, pcm, decoded)
+		}},
+		{format: "wav", contentType: "audio/wav", check: func(t *testing.T, body []byte) {
+			assert.Equal(t, pcm, body[44:])
+		}},
+		{format: "pcm", contentType: "audio/pcm", check: func(t *testing.T, body []byte) {
+			assert.Equal(t, pcm, body)
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.format, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(recorder)
+			context.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(responseJSON)),
+			}
+			info := &relaycommon.RelayInfo{
+				RelayMode:   relayconstant.RelayModeAudioSpeech,
+				ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3.1-flash-tts"},
+			}
+			adaptor := &Adaptor{RequestMode: RequestModeGemini, AudioResponseFormat: tt.format}
+
+			usageValue, apiErr := adaptor.DoResponse(context, resp, info)
+			require.Nil(t, apiErr)
+			usage, ok := usageValue.(*dto.Usage)
+			require.True(t, ok)
+			assert.Equal(t, 33, usage.CompletionTokens)
+			assert.Equal(t, 33, usage.CompletionTokenDetails.AudioTokens)
+			assert.Equal(t, tt.contentType, recorder.Header().Get("Content-Type"))
+			tt.check(t, recorder.Body.Bytes())
+		})
+	}
 }

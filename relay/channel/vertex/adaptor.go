@@ -147,8 +147,8 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 	if responseFormat == "" {
 		responseFormat = "wav"
 	}
-	if responseFormat != "pcm" && responseFormat != "wav" {
-		return nil, fmt.Errorf("Vertex AI audio speech supports response_format pcm or wav, got %q", responseFormat)
+	if responseFormat != "mp3" && responseFormat != "wav" && responseFormat != "flac" && responseFormat != "pcm" {
+		return nil, types.NewErrorWithStatusCode(fmt.Errorf("Vertex AI audio speech supports response_format mp3, wav, flac or pcm, got %q", responseFormat), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	a.AudioResponseFormat = responseFormat
 
