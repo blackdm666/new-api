@@ -31,6 +31,7 @@ const EMAIL_CATEGORY_LABELS: Record<string, string> = {
   affiliate_upgrade_user: 'Promoter tier upgrade notification',
   affiliate_commission_user: 'Commission review result notification',
   affiliate_payout_user: 'Commission payout status notification',
+  referral_application_admin: 'Referral program application',
   marketing_custom: 'Custom campaign',
   marketing_registration_no_first_call:
     'Registration without first API request',

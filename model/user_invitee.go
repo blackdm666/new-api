@@ -9,13 +9,13 @@ import (
 	"github.com/QuantumNous/new-api/common"
 )
 
-// UserInvitee is the minimal invitee view exposed to an inviter.
+// UserInvitee is the minimal invitee view exposed to an inviter: a masked
+// username and the registration time.
 type UserInvitee struct {
-	Id          int    `json:"-"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	CreatedAt   int64  `json:"created_at"`
-	IsNew       bool   `json:"is_new" gorm:"-"`
+	Id        int    `json:"-"`
+	Username  string `json:"username"`
+	CreatedAt int64  `json:"created_at"`
+	IsNew     bool   `json:"is_new" gorm:"-"`
 }
 
 // AdminAffiliateInviteRecord is the global invitation relationship view used
@@ -50,20 +50,21 @@ func CountUserInvitees(inviterId int) (int64, error) {
 	return total, err
 }
 
-// GetUserInvitees returns display names and registration times. Deleted
-// users remain in the inviter's historical count, matching aff_count semantics.
+// GetUserInvitees returns masked usernames and registration times. Deleted
+// users remain listed, while invitees that reached the commission top-up
+// limit are hidden in the same way as ListAffiliateInviteeStats.
 func GetUserInvitees(inviterId int, pageInfo *common.PageInfo) (invitees []*UserInvitee, total int64, err error) {
 	if inviterId <= 0 {
 		return nil, 0, errors.New("invalid inviter id")
 	}
 
-	if total, err = CountUserInvitees(inviterId); err != nil {
+	limit := getAffiliatePolicy().InviteeTopUpLimit
+	query := excludeAffiliateCappedInvitees(DB.Unscoped().Model(&User{}).Where("inviter_id = ?", inviterId), "id", limit)
+	if err = query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-
-	query := DB.Unscoped().Model(&User{}).Where("inviter_id = ?", inviterId)
 	err = query.
-		Select("id", "username", "display_name", "created_at").
+		Select("id", "username", "created_at").
 		Order("created_at DESC").
 		Order("id DESC").
 		Limit(pageInfo.GetPageSize()).
@@ -77,6 +78,7 @@ func GetUserInvitees(inviterId int, pageInfo *common.PageInfo) (invitees []*User
 	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	startOfTomorrow := startOfToday.AddDate(0, 0, 1)
 	for _, invitee := range invitees {
+		invitee.Username = MaskAffiliateInviteeName(invitee.Username)
 		invitee.IsNew = invitee.CreatedAt >= startOfToday.Unix() && invitee.CreatedAt < startOfTomorrow.Unix()
 	}
 	return invitees, total, nil

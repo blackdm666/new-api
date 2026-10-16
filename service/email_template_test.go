@@ -3,7 +3,9 @@ package service
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -76,7 +78,7 @@ func TestPreviewAffiliateEmailTemplatesUseLocalizedConfiguredRates(t *testing.T)
 			key:             constant.EmailTemplateKeyAffiliateCommissionUser,
 			lang:            "en",
 			subjectContains: "Commission approved",
-			bodyContains:    []string{"ORDER-202608-001", "5.00", "Approved", "/referral"},
+			bodyContains:    []string{"Invited user", "al***", "5.00", "Approved", "Processed at", "/referral"},
 		},
 		{
 			name:            "upgrade-user-zh",
@@ -106,4 +108,82 @@ func TestPreviewAffiliateEmailTemplatesUseLocalizedConfiguredRates(t *testing.T)
 			}
 		})
 	}
+}
+
+func TestAffiliateCommissionResultEmailShowsOnlyMaskedInviteeAndCommission(t *testing.T) {
+	tests := []struct {
+		name         string
+		record       *model.AffiliateCommission
+		inviteeName  string
+		lang         string
+		wantMode     string
+		bodyContains []string
+		bodyExcludes []string
+	}{
+		{
+			name: "approved-zh",
+			record: &model.AffiliateCommission{
+				TradeNo: "ORDER-SECRET-APPROVED", TopUpAmountCents: 123456, CommissionCents: 6173,
+				Status: model.AffiliateCommissionStatusApproved, ApprovedTime: 1792000000,
+			},
+			inviteeName:  "alice-buyer",
+			lang:         "zh-CN",
+			wantMode:     "approved",
+			bodyContains: []string{"受邀用户", "al***", "61.73", "已通过", "处理时间"},
+			bodyExcludes: []string{"alice-buyer", "ORDER-SECRET-APPROVED", "1234.56", "充值金额", "充值订单"},
+		},
+		{
+			name: "rejected-en-keeps-reason",
+			record: &model.AffiliateCommission{
+				TradeNo: "ORDER-SECRET-REJECTED", TopUpAmountCents: 50000, CommissionCents: 2500,
+				Status: model.AffiliateCommissionStatusRejected, RejectReason: "risk review rejected", UpdatedTime: 1792000000,
+			},
+			inviteeName:  "bob",
+			lang:         "en",
+			wantMode:     "rejected",
+			bodyContains: []string{"Invited user", "bo***", "25.00", "Rejected", "risk review rejected", "Processed at"},
+			bodyExcludes: []string{"ORDER-SECRET-REJECTED", "500.00", "Top-up amount"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mode, subject, body := buildAffiliateCommissionResultEmail(test.record, test.inviteeName, test.lang)
+			assert.Equal(t, test.wantMode, mode)
+			assert.NotEmpty(t, subject)
+			assert.NotContains(t, body, "{{")
+			for _, expected := range test.bodyContains {
+				assert.Contains(t, body, expected)
+			}
+			for _, hidden := range test.bodyExcludes {
+				assert.NotContains(t, body, hidden)
+			}
+		})
+	}
+}
+
+func TestAffiliateCommissionResultEmailBlanksRetiredTemplateVariables(t *testing.T) {
+	key := constant.EmailTemplateBodyLangKey(constant.EmailTemplateKeyAffiliateCommissionUser, "zh-CN")
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = map[string]string{}
+	}
+	previous, existed := common.OptionMap[key]
+	common.OptionMap[key] = "order=[{{order_number}}] topup=[{{topup_amount}}] invitee=[{{invitee_username}}]"
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		defer common.OptionMapRWMutex.Unlock()
+		if existed {
+			common.OptionMap[key] = previous
+			return
+		}
+		delete(common.OptionMap, key)
+	})
+
+	record := &model.AffiliateCommission{
+		TradeNo: "ORDER-SECRET-CUSTOM", TopUpAmountCents: 10000, CommissionCents: 500,
+		Status: model.AffiliateCommissionStatusApproved, ApprovedTime: 1792000000,
+	}
+	_, _, body := buildAffiliateCommissionResultEmail(record, "carol", "zh-CN")
+	require.Equal(t, "order=[] topup=[] invitee=[ca***]", body)
 }

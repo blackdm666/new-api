@@ -204,39 +204,11 @@ func QueueAffiliateCommissionResult(commissionId int) {
 	if lang == "" {
 		lang = appI18n.LangZhCN
 	}
-	statusKey := "affiliate.email.status.approved"
-	mode := "approved"
-	if record.Status == model.AffiliateCommissionStatusRejected {
-		statusKey = "affiliate.email.status.rejected"
-		mode = "rejected"
+	inviteeName := ""
+	if invitee, inviteeErr := model.GetUserById(record.InviteeId, false); inviteeErr == nil {
+		inviteeName = invitee.Username
 	}
-	statusLabel := affiliateEmailText(lang, statusKey)
-	rows := []common.EmailTemplateRow{
-		{Label: affiliateEmailText(lang, "affiliate.email.label.order"), Value: html.EscapeString(record.TradeNo)},
-		{Label: affiliateEmailText(lang, "affiliate.email.label.topup_amount"), Value: fmt.Sprintf("%.2f", float64(record.TopUpAmountCents)/100)},
-		{Label: affiliateEmailText(lang, "affiliate.email.label.commission"), Value: fmt.Sprintf("%.2f", float64(record.CommissionCents)/100)},
-		{Label: affiliateEmailText(lang, "affiliate.email.label.status"), Value: html.EscapeString(statusLabel)},
-	}
-	if mode == "rejected" && record.RejectReason != "" {
-		rows = append(rows, common.EmailTemplateRow{Label: affiliateEmailText(lang, "affiliate.email.label.reason"), Value: html.EscapeString(record.RejectReason)})
-	}
-	actionURL := strings.TrimRight(system_setting.ServerAddress, "/") + "/referral"
-	vars := map[string]string{
-		"email_subject":     html.EscapeString(affiliateEmailText(lang, "affiliate.email.commission."+mode+".subject")),
-		"system_name":       html.EscapeString(common.SystemNameOrDefault()),
-		"server_address":    html.EscapeString(strings.TrimRight(system_setting.ServerAddress, "/")),
-		"heading":           html.EscapeString(affiliateEmailText(lang, "affiliate.email.commission."+mode+".heading")),
-		"intro":             html.EscapeString(affiliateEmailText(lang, "affiliate.email.commission."+mode+".intro")),
-		"order_number":      html.EscapeString(record.TradeNo),
-		"topup_amount":      fmt.Sprintf("%.2f", float64(record.TopUpAmountCents)/100),
-		"commission_amount": fmt.Sprintf("%.2f", float64(record.CommissionCents)/100),
-		"commission_status": html.EscapeString(statusLabel),
-		"reject_reason":     html.EscapeString(record.RejectReason),
-		"info_table":        common.RenderInfoTableHTML(rows),
-		"action_url":        html.EscapeString(actionURL),
-		"action_label":      html.EscapeString(affiliateEmailText(lang, "affiliate.email.commission.action")),
-	}
-	subject, body := RenderEmailByKeyForLang(constant.EmailTemplateKeyAffiliateCommissionUser, lang, vars)
+	mode, subject, body := buildAffiliateCommissionResultEmail(record, inviteeName, lang)
 	if _, err := QueueSystemEmail(
 		fmt.Sprintf("affiliate-commission:%d:%s", commissionId, mode),
 		"affiliate_commission_user",
@@ -249,6 +221,62 @@ func QueueAffiliateCommissionResult(commissionId int) {
 	); err != nil {
 		common.SysError(fmt.Sprintf("failed to queue affiliate commission notification %d: %s", commissionId, err.Error()))
 	}
+}
+
+// buildAffiliateCommissionResultEmail renders the review result sent to the
+// promoter. Like the referral page it only shows the masked invitee name, the
+// commission, the review status and time and, when rejected, the reason; the
+// invitee's order number and top-up amount are never included.
+func buildAffiliateCommissionResultEmail(record *model.AffiliateCommission, inviteeName string, lang string) (mode string, subject string, body string) {
+	statusKey := "affiliate.email.status.approved"
+	mode = "approved"
+	processedTime := record.ApprovedTime
+	if record.Status == model.AffiliateCommissionStatusRejected {
+		statusKey = "affiliate.email.status.rejected"
+		mode = "rejected"
+		processedTime = record.UpdatedTime
+	}
+	if processedTime <= 0 {
+		processedTime = common.GetTimestamp()
+	}
+	processedLabel := time.Unix(processedTime, 0).In(affiliatePayoutEmailLocation()).Format("2006-01-02 15:04")
+	statusLabel := affiliateEmailText(lang, statusKey)
+	commissionAmount := fmt.Sprintf("%.2f", float64(record.CommissionCents)/100)
+	maskedInvitee := model.MaskAffiliateInviteeName(inviteeName)
+	rows := []common.EmailTemplateRow{}
+	if maskedInvitee != "" {
+		rows = append(rows, common.EmailTemplateRow{Label: affiliateEmailText(lang, "affiliate.email.label.invitee"), Value: html.EscapeString(maskedInvitee)})
+	}
+	rows = append(rows,
+		common.EmailTemplateRow{Label: affiliateEmailText(lang, "affiliate.email.label.commission"), Value: commissionAmount},
+		common.EmailTemplateRow{Label: affiliateEmailText(lang, "affiliate.email.label.status"), Value: html.EscapeString(statusLabel)},
+		common.EmailTemplateRow{Label: affiliateEmailText(lang, "affiliate.email.label.processed_time"), Value: processedLabel},
+	)
+	if mode == "rejected" && record.RejectReason != "" {
+		rows = append(rows, common.EmailTemplateRow{Label: affiliateEmailText(lang, "affiliate.email.label.reason"), Value: html.EscapeString(record.RejectReason)})
+	}
+	actionURL := strings.TrimRight(system_setting.ServerAddress, "/") + "/referral"
+	vars := map[string]string{
+		"email_subject":     html.EscapeString(affiliateEmailText(lang, "affiliate.email.commission."+mode+".subject")),
+		"system_name":       html.EscapeString(common.SystemNameOrDefault()),
+		"server_address":    html.EscapeString(strings.TrimRight(system_setting.ServerAddress, "/")),
+		"heading":           html.EscapeString(affiliateEmailText(lang, "affiliate.email.commission."+mode+".heading")),
+		"intro":             html.EscapeString(affiliateEmailText(lang, "affiliate.email.commission."+mode+".intro")),
+		"invitee_username":  html.EscapeString(maskedInvitee),
+		"commission_amount": commissionAmount,
+		"commission_status": html.EscapeString(statusLabel),
+		"processed_time":    processedLabel,
+		"reject_reason":     html.EscapeString(record.RejectReason),
+		"info_table":        common.RenderInfoTableHTML(rows),
+		"action_url":        html.EscapeString(actionURL),
+		"action_label":      html.EscapeString(affiliateEmailText(lang, "affiliate.email.commission.action")),
+		// Retired variables: older customised templates may still reference
+		// them, so they render empty instead of exposing the invitee's order.
+		"order_number": "",
+		"topup_amount": "",
+	}
+	subject, body = RenderEmailByKeyForLang(constant.EmailTemplateKeyAffiliateCommissionUser, lang, vars)
+	return mode, subject, body
 }
 
 func QueueAffiliateUpgradeApproved(userId int, group string) {

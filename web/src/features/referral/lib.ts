@@ -91,6 +91,18 @@ export function formatRate(rateBasisPoints: number): string {
     .replace(/(\.\d)0$/, '$1')}%`
 }
 
+/**
+ * Whole-number upgrade progress for display. Floors so a promoter never sees
+ * 100% before the server considers a threshold met, and clamps to [0, 100].
+ */
+export function upgradeProgressPercent(
+  ratio: number | null | undefined
+): number {
+  if (ratio == null || !Number.isFinite(ratio)) return 0
+  // The epsilon absorbs float error such as 0.29 * 100 = 28.999999999999996.
+  return Math.min(100, Math.max(0, Math.floor(ratio * 100 + 1e-9)))
+}
+
 export function promoterTierLabelKey(tier: string | null | undefined): string {
   switch (tier?.trim()) {
     case 'default':

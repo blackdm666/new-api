@@ -236,9 +236,10 @@ func applyAffiliateTemplatePreviewSamples(key string, lang string, vars map[stri
 	vars["action_url"] = baseURL + "/referral"
 	vars["action_label"] = affiliateEmailText(lang, "affiliate.email.commission.action")
 	vars["info_table"] = common.RenderInfoTableHTML([]common.EmailTemplateRow{
-		{Label: affiliateEmailText(lang, "affiliate.email.label.order"), Value: "ORDER-202608-001"},
+		{Label: affiliateEmailText(lang, "affiliate.email.label.invitee"), Value: "al***"},
 		{Label: affiliateEmailText(lang, "affiliate.email.label.commission"), Value: "5.00"},
 		{Label: affiliateEmailText(lang, "affiliate.email.label.status"), Value: affiliateEmailText(lang, "affiliate.email.status.approved")},
+		{Label: affiliateEmailText(lang, "affiliate.email.label.processed_time"), Value: "2026-08-14 12:00"},
 	})
 }
 

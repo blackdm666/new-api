@@ -28,8 +28,8 @@ import {
   RefreshCw,
   TrendingUp,
   UserRoundCheck,
+  Trophy,
   Users,
-  WalletCards,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -73,12 +73,13 @@ import {
   formatRate,
   promoterTierBadgeClassName,
   promoterTierLabelKey,
+  upgradeProgressPercent,
 } from './lib'
 import { OverflowNote } from './overflow-note'
 import { AffiliatePayouts } from './payouts-user'
 import type {
-  AffiliateCommission,
   AffiliateInviteeStats,
+  AffiliateInviterCommission,
   AffiliateSummary,
 } from './types'
 
@@ -207,7 +208,9 @@ export function ReferralProgram() {
               <CommissionRecords />
             </TabsContent>
             <TabsContent value='invitees'>
-              <InviteeStats />
+              <InviteeStats
+                inviteeTopUpLimit={summaryQuery.data?.invitee_top_up_limit ?? 0}
+              />
             </TabsContent>
             <TabsContent value='payouts'>
               <AffiliatePayouts />
@@ -238,7 +241,7 @@ export function ReferralProgram() {
   )
 }
 
-function SummaryGrid({
+export function SummaryGrid({
   summary,
   loading,
 }: {
@@ -273,9 +276,9 @@ function SummaryGrid({
       icon: UserRoundCheck,
     },
     {
-      label: t('Invitee top-up amount'),
-      value: formatCents(summary?.total_topup_cents ?? 0),
-      icon: WalletCards,
+      label: t('Upgrade progress'),
+      value: upgradeProgressStatValue(summary, t),
+      icon: Trophy,
     },
   ]
   return (
@@ -311,21 +314,43 @@ function SummaryGrid({
   )
 }
 
-function UpgradeProgress({ summary }: { summary?: AffiliateSummary }) {
+function upgradeProgressStatValue(
+  summary: AffiliateSummary | undefined,
+  t: (key: string) => string
+): string {
+  if (summary?.highest_tier_reached) return t('Highest tier reached')
+  if (!summary?.upgrade_eligible) return '-'
+  return `${upgradeProgressPercent(summary.upgrade_progress_ratio)}%`
+}
+
+export function UpgradeProgress({ summary }: { summary?: AffiliateSummary }) {
   const { t } = useTranslation()
   if (!summary?.upgrade_eligible) {
+    const highest = summary?.highest_tier_reached === true
     return (
       <div className='border-border/70 rounded-xl border p-4'>
         <div className='flex items-center gap-3'>
           <div className='flex size-9 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600'>
-            <UserRoundCheck className='size-4' />
+            {highest ? (
+              <Trophy className='size-4' aria-hidden='true' />
+            ) : (
+              <UserRoundCheck className='size-4' aria-hidden='true' />
+            )}
           </div>
           <div>
-            <p className='text-sm font-medium'>{t('Current tier confirmed')}</p>
+            <p className='text-sm font-medium'>
+              {highest
+                ? t('Highest tier reached')
+                : t('Current tier confirmed')}
+            </p>
             <p className='text-muted-foreground text-xs'>
-              {t(
-                'Your current promoter tier is managed by administrators. Future top-ups use the current tier rate.'
-              )}
+              {highest
+                ? t(
+                    'You are on the highest promoter tier. Future top-ups use the current tier rate.'
+                  )
+                : t(
+                    'Your current promoter tier is managed by administrators. Future top-ups use the current tier rate.'
+                  )}
             </p>
           </div>
         </div>
@@ -333,12 +358,7 @@ function UpgradeProgress({ summary }: { summary?: AffiliateSummary }) {
       </div>
     )
   }
-  const inviteeProgress = Math.round(
-    (summary?.upgrade_progress_ratio ?? 0) * 100
-  )
-  const amountProgress = Math.round(
-    (summary?.upgrade_top_up_amount_progress_ratio ?? 0) * 100
-  )
+  const progress = upgradeProgressPercent(summary.upgrade_progress_ratio)
   return (
     <div className='border-border/70 rounded-xl border p-4'>
       <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
@@ -346,32 +366,23 @@ function UpgradeProgress({ summary }: { summary?: AffiliateSummary }) {
           <p className='text-sm font-medium'>{t('Upgrade progress')}</p>
           <p className='text-muted-foreground text-xs'>
             {t(
-              'Reach either {{count}} effective top-up users or {{amount}} in valid invitee top-ups, then an administrator can approve an upgrade to {{tier}} ({{rate}}).',
+              'Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.',
               {
-                count: summary?.upgrade_threshold ?? 50,
-                amount: formatCents(
-                  summary?.upgrade_top_up_amount_threshold_cents ?? 200000
-                ),
-                tier: summary?.next_tier_name
+                tier: summary.next_tier_name
                   ? t(promoterTierLabelKey(summary.next_tier_name))
                   : t('Advanced promoter'),
-                rate: formatRate(summary?.next_tier_rate_basis_points ?? 1000),
+                rate: formatRate(summary.next_tier_rate_basis_points ?? 1000),
               }
             )}
           </p>
         </div>
       </div>
       <CurrentTierBadge summary={summary} />
-      <div className='mt-3 space-y-3'>
+      <div className='mt-3'>
         <UpgradeCriterion
-          label={t('Effective top-up users')}
-          value={`${summary?.effective_invitee_count ?? 0}/${summary?.upgrade_threshold ?? 50}`}
-          progress={inviteeProgress}
-        />
-        <UpgradeCriterion
-          label={t('Effective top-up amount')}
-          value={`${formatCents(summary?.total_topup_cents ?? 0)}/${formatCents(summary?.upgrade_top_up_amount_threshold_cents ?? 200000)}`}
-          progress={amountProgress}
+          label={t('Upgrade progress')}
+          value={`${progress}%`}
+          progress={progress}
         />
       </div>
     </div>
@@ -417,7 +428,7 @@ export function CurrentTierBadge({ summary }: { summary?: AffiliateSummary }) {
   )
 }
 
-function CommissionRecords() {
+export function CommissionRecords() {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const query = useQuery({
@@ -436,20 +447,16 @@ function CommissionRecords() {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>{t('Order No.')}</TableHead>
             <TableHead>{t('Invited user')}</TableHead>
-            <TableHead className='text-right'>{t('Top-up amount')}</TableHead>
-            <TableHead>{t('Rate')}</TableHead>
-            <TableHead>{t('Promoter tier')}</TableHead>
             <TableHead className='text-right'>{t('Commission')}</TableHead>
             <TableHead>{t('Status')}</TableHead>
             <TableHead>{t('Created at')}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {query.isLoading ? <SkeletonRows columns={8} /> : null}
+          {query.isLoading ? <SkeletonRows columns={4} /> : null}
           {!query.isLoading && items.length === 0 ? (
-            <EmptyRow columns={8} text={t('No commission records')} />
+            <EmptyRow columns={4} text={t('No commission records')} />
           ) : null}
           {!query.isLoading
             ? items.map((item) => <CommissionRow key={item.id} item={item} />)
@@ -460,32 +467,12 @@ function CommissionRecords() {
   )
 }
 
-function CommissionRow({ item }: { item: AffiliateCommission }) {
+function CommissionRow({ item }: { item: AffiliateInviterCommission }) {
   const { t } = useTranslation()
   const meta = AFFILIATE_STATUS_META[item.status]
   return (
     <TableRow>
-      <TableCell className='font-mono text-xs'>{item.trade_no}</TableCell>
-      <TableCell>
-        {item.invitee_display_name ||
-          item.invitee_username ||
-          t('Unavailable user')}
-      </TableCell>
-      <TableCell className='text-right font-medium'>
-        {formatCents(item.topup_amount_cents)}
-      </TableCell>
-      <TableCell>{formatRate(item.rate_basis_points)}</TableCell>
-      <TableCell>
-        <Badge
-          variant='outline'
-          className={cn(
-            'font-normal',
-            promoterTierBadgeClassName(item.tier_name)
-          )}
-        >
-          {t(promoterTierLabelKey(item.tier_name))}
-        </Badge>
-      </TableCell>
+      <TableCell>{item.invitee_username || t('Unavailable user')}</TableCell>
       <TableCell className='text-right font-semibold'>
         {formatCents(item.commission_cents)}
       </TableCell>
@@ -512,7 +499,7 @@ function CommissionRow({ item }: { item: AffiliateCommission }) {
   )
 }
 
-function InviteeStats() {
+export function InviteeStats(props: { inviteeTopUpLimit: number }) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const query = useQuery({
@@ -522,69 +509,70 @@ function InviteeStats() {
   })
   const items = query.data?.items ?? []
   return (
-    <PaginatedTableShell
-      total={query.data?.total ?? 0}
-      page={page}
-      onPageChange={setPage}
-      loading={query.isLoading}
-    >
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t('User')}</TableHead>
-            <TableHead>{t('Registered at')}</TableHead>
-            <TableHead className='text-right'>{t('Top-up count')}</TableHead>
-            <TableHead className='text-right'>
-              {t('Cumulative valid top-up amount')}
-            </TableHead>
-            <TableHead className='text-right'>
-              {t('Generated commission')}
-            </TableHead>
-            <TableHead>{t('Last top-up')}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {query.isLoading ? <SkeletonRows columns={6} /> : null}
-          {!query.isLoading && items.length === 0 ? (
-            <EmptyRow columns={6} text={t('No invitees yet')} />
-          ) : null}
-          {!query.isLoading
-            ? items.map((item) => (
-                <InviteeRow key={item.username} item={item} />
-              ))
-            : null}
-        </TableBody>
-      </Table>
-    </PaginatedTableShell>
+    <div className='space-y-3'>
+      {props.inviteeTopUpLimit > 0 ? (
+        <p className='text-muted-foreground text-xs'>
+          {t(
+            'Invited users who have reached the {{count}}-top-up commission limit are not listed here. The commission they generated is still included in your totals and commission records.',
+            { count: props.inviteeTopUpLimit }
+          )}
+        </p>
+      ) : null}
+      <PaginatedTableShell
+        total={query.data?.total ?? 0}
+        page={page}
+        onPageChange={setPage}
+        loading={query.isLoading}
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('User')}</TableHead>
+              <TableHead>{t('Registered at')}</TableHead>
+              <TableHead className='text-right'>
+                {t('Generated commission')}
+              </TableHead>
+              <TableHead>{t('Last commission')}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {query.isLoading ? <SkeletonRows columns={4} /> : null}
+            {!query.isLoading && items.length === 0 ? (
+              <EmptyRow columns={4} text={t('No invitees yet')} />
+            ) : null}
+            {!query.isLoading
+              ? items.map((item) => (
+                  <InviteeRow
+                    key={`${item.created_at}-${item.username}`}
+                    item={item}
+                  />
+                ))
+              : null}
+          </TableBody>
+        </Table>
+      </PaginatedTableShell>
+    </div>
   )
 }
 
 function InviteeRow({ item }: { item: AffiliateInviteeStats }) {
+  const { t } = useTranslation()
   return (
     <TableRow>
       <TableCell>
-        <span className='block truncate font-medium'>{item.username}</span>
-        {item.display_name && item.display_name !== item.username ? (
-          <div className='text-muted-foreground truncate text-xs'>
-            {item.display_name}
-          </div>
-        ) : null}
+        <span className='block truncate font-medium'>
+          {item.username || t('Unavailable user')}
+        </span>
       </TableCell>
       <TableCell className='text-muted-foreground text-xs'>
         {formatTimestampToDate(item.created_at)}
-      </TableCell>
-      <TableCell className='text-right tabular-nums'>
-        {formatNumber(item.topup_count)}
-      </TableCell>
-      <TableCell className='text-right font-medium'>
-        {formatCents(item.topup_amount_cents)}
       </TableCell>
       <TableCell className='text-right font-semibold'>
         {formatCents(item.commission_cents)}
       </TableCell>
       <TableCell className='text-muted-foreground text-xs'>
-        {item.last_topup_time > 0
-          ? formatTimestampToDate(item.last_topup_time)
+        {item.last_commission_time > 0
+          ? formatTimestampToDate(item.last_commission_time)
           : '-'}
       </TableCell>
     </TableRow>

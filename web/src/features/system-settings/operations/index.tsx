@@ -83,6 +83,7 @@ const defaultOperationsSettings: OperationsSettings = {
   InvoiceWechatAutoIssueEnabled: false,
   InvoiceWechatInboundTokenConfigured: false,
   InvoiceAdminEmail: '',
+  ReferralApplicationRecipient: 'laohei@88fk.org',
   InvoiceMinimumAmountCents: '50000',
   InvoiceTaxRateBasisPoints: '300',
   InvoiceDataRetentionDays: '0',

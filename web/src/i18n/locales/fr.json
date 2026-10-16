@@ -8698,6 +8698,17 @@
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "L'amont a refusé la réflexion adaptative ; nouvel essai avec les paramètres de réflexion d'origine",
     "Same channel retry": "Nouvel essai sur le même canal",
     "Text to Image": "Texte vers image",
-    "Image to Image": "Image vers image"
+    "Image to Image": "Image vers image",
+    "Invited users who have reached the {{count}}-top-up commission limit are not listed here. The commission they generated is still included in your totals and commission records.": "Les utilisateurs invités ayant atteint la limite de {{count}} recharges commissionnées ne sont pas listés ici. La commission qu’ils ont générée reste incluse dans vos totaux et vos enregistrements de commission.",
+    "Last commission": "Dernière commission",
+    "Referral Applications": "Candidatures de parrainage",
+    "Save referral application settings": "Enregistrer les paramètres des candidatures de parrainage",
+    "Application recipient email": "E-mail de réception des candidatures",
+    "Enter one or more valid email addresses separated by commas": "Saisissez une ou plusieurs adresses e-mail valides séparées par des virgules",
+    "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.": "Les candidatures au programme de parrainage envoyées depuis le site officiel sont transmises à ces adresses via le profil SMTP de notification. Séparez plusieurs adresses par des virgules.",
+    "Referral program application": "Candidature au programme de parrainage",
+    "Highest tier reached": "Niveau maximal atteint",
+    "You are on the highest promoter tier. Future top-ups use the current tier rate.": "Vous êtes au niveau de promoteur le plus élevé. Les prochaines recharges utilisent le taux du niveau actuel.",
+    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "Atteignez soit l’objectif d’utilisateurs ayant rechargé, soit l’objectif de montant de recharges valides ; un administrateur pourra alors approuver le passage à {{tier}} ({{rate}}). La progression suit l’objectif le plus proche."
   }
 }

@@ -254,19 +254,117 @@ func TestAffiliateCommissionTopUpLimitKeepsAnUnrewardedLedgerEntry(t *testing.T)
 	summary, err := GetAffiliateSummary(inviter.Id)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), summary.CommissionRecordCount)
-	assert.Equal(t, int64(30_000), summary.TotalTopUpCents)
+	// 30,000 of the default 200,000-cent amount threshold beats 1 of 50 users.
+	assert.InDelta(t, 0.15, summary.UpgradeProgressRatio, 1e-9)
+	assert.Equal(t, 2, summary.InviteeTopUpLimit)
+	assert.Equal(t, int64(1), summary.InviteCount)
+	assert.Equal(t, int64(1), summary.EffectiveInviteeCount)
+	assert.Equal(t, records[0].CommissionCents+records[1].CommissionCents, summary.ApprovedCommissionCents)
 
+	// The capped invitee leaves the invitee lists, but the promoter ledger
+	// still adds up to the summary total.
 	stats, total, err := ListAffiliateInviteeStats(inviter.Id, &common.PageInfo{Page: 1, PageSize: 10})
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), total)
-	require.Len(t, stats, 1)
-	assert.Equal(t, int64(3), stats[0].TopUpCount)
-	assert.Equal(t, int64(30_000), stats[0].TopUpAmountCents)
+	assert.Zero(t, total)
+	assert.Empty(t, stats)
+	invitees, inviteesTotal, err := GetUserInvitees(inviter.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Zero(t, inviteesTotal)
+	assert.Empty(t, invitees)
+
+	ledger, ledgerTotal, err := ListInviterAffiliateCommissions(inviter.Id, 0, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), ledgerTotal)
+	require.Len(t, ledger, 2)
+	ledgerCents := int64(0)
+	for _, row := range ledger {
+		assert.Equal(t, "af***", row.InviteeUsername)
+		ledgerCents += row.CommissionCents
+	}
+	assert.Equal(t, summary.ApprovedCommissionCents+summary.PendingCommissionCents, ledgerCents)
 
 	metrics, err := GetAffiliateUpgradeMetrics(inviter.Id)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), metrics.EffectiveInviteeCount)
 	assert.Equal(t, int64(30_000), metrics.EffectiveTopUpAmountCents)
+}
+
+func TestMaskAffiliateInviteeNameNeverRevealsFullName(t *testing.T) {
+	cases := map[string]string{
+		"":          "",
+		"a":         "***",
+		"ab":        "a***",
+		"abc":       "ab***",
+		"abcdefgh":  "ab***",
+		" alice ":   "al***",
+		"张":         "***",
+		"张三":        "张***",
+		"张三丰":       "张三***",
+		"user@mail": "us***",
+	}
+	for input, expected := range cases {
+		assert.Equal(t, expected, MaskAffiliateInviteeName(input), "input %q", input)
+	}
+}
+
+func TestAffiliateInviterViewsExposeOnlyMaskedNameAndCommission(t *testing.T) {
+	truncateTables(t)
+	enableAffiliateForTest(t)
+	setAffiliateOptionForTest(t, AffiliateCommissionAutoApproveOptionKey, "true")
+	setAffiliateOptionForTest(t, AffiliateCommissionInviteeTopUpLimitOptionKey, "10")
+
+	inviter, invitee, topUp, record := createAffiliateFixture(t, "privacy", 100)
+	require.NoError(t, DB.Model(invitee).Update("display_name", "Real Display Name").Error)
+
+	ledger, total, err := ListInviterAffiliateCommissions(inviter.Id, 0, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, ledger, 1)
+	assert.Equal(t, "af***", ledger[0].InviteeUsername)
+	assert.Equal(t, record.CommissionCents, ledger[0].CommissionCents)
+	assert.Equal(t, AffiliateCommissionStatusApproved, ledger[0].Status)
+	assert.Positive(t, ledger[0].CreatedTime)
+
+	stats, statsTotal, err := ListAffiliateInviteeStats(inviter.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), statsTotal)
+	require.Len(t, stats, 1)
+	assert.Equal(t, "af***", stats[0].Username)
+	assert.Equal(t, record.CommissionCents, stats[0].CommissionCents)
+	assert.Positive(t, stats[0].LastCommissionTime)
+
+	invitees, inviteesTotal, err := GetUserInvitees(inviter.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), inviteesTotal)
+	require.Len(t, invitees, 1)
+	assert.Equal(t, "af***", invitees[0].Username)
+
+	for _, payload := range []any{ledger[0], stats[0], invitees[0]} {
+		encoded, err := common.Marshal(payload)
+		require.NoError(t, err)
+		body := string(encoded)
+		for _, secret := range []string{invitee.Username, invitee.Email, "Real Display Name", topUp.TradeNo} {
+			assert.NotContains(t, body, secret)
+		}
+		for _, field := range []string{`"invitee_id"`, `"inviter_id"`, `"topup_id"`, `"trade_no"`, `"topup_amount_cents"`, `"topup_count"`, `"display_name"`, `"email"`} {
+			assert.NotContains(t, body, field)
+		}
+	}
+
+	for _, payload := range []any{stats[0], invitees[0]} {
+		encoded, err := common.Marshal(payload)
+		require.NoError(t, err)
+		assert.NotContains(t, string(encoded), `"id"`)
+	}
+
+	// Administrators keep the full commission record.
+	adminRows, _, err := ListAffiliateCommissions(AffiliateCommissionQueryOptions{IncludeAdminRemarks: true}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Len(t, adminRows, 1)
+	assert.Equal(t, invitee.Username, adminRows[0].InviteeUsername)
+	assert.Equal(t, topUp.TradeNo, adminRows[0].TradeNo)
+	assert.Equal(t, invitee.Id, adminRows[0].InviteeId)
+	assert.Equal(t, int64(10_000), adminRows[0].TopUpAmountCents)
 }
 
 func TestAffiliateCommissionZeroTopUpLimitRemainsUnlimited(t *testing.T) {
@@ -785,7 +883,8 @@ func TestAffiliateAdvancedPromoterRequiresConfiguredThresholdBeforeGoldReview(t 
 	assert.True(t, summary.UpgradeEligible)
 	assert.Equal(t, AffiliatePromoterGroupGold, summary.NextTierName)
 	assert.Equal(t, 2, summary.UpgradeThreshold)
-	assert.Equal(t, int64(1), summary.UpgradeProgress)
+	assert.InDelta(t, 0.5, summary.UpgradeProgressRatio, 1e-9)
+	assert.False(t, summary.HighestTierReached)
 
 	candidates, total, err := ListAffiliateUpgradeCandidates(&common.PageInfo{Page: 1, PageSize: 10})
 	require.NoError(t, err)
@@ -929,4 +1028,67 @@ func TestAffiliateAdvancedPromoterSummaryUsesFiveHundredInviteeDefault(t *testin
 	assert.Equal(t, AffiliatePromoterGroupGold, summary.NextTierName)
 	assert.Equal(t, 500, summary.UpgradeThreshold)
 	assert.Equal(t, int64(2000000), summary.UpgradeTopUpAmountThresholdCents)
+}
+
+func TestAffiliateUpgradeProgressRatioUsesLargerCriterionAndCaps(t *testing.T) {
+	assert.InDelta(t, 0.2, affiliateUpgradeProgressRatio(10, 50, 20_000, 200_000), 1e-9)
+	assert.InDelta(t, 0.4, affiliateUpgradeProgressRatio(2, 50, 80_000, 200_000), 1e-9)
+	assert.Equal(t, 1.0, affiliateUpgradeProgressRatio(80, 50, 0, 200_000))
+	assert.Equal(t, 1.0, affiliateUpgradeProgressRatio(0, 50, 900_000, 200_000))
+	assert.Zero(t, affiliateUpgradeProgressRatio(0, 0, 0, 0))
+}
+
+func TestAffiliateSummaryHidesInviteeTopUpAmounts(t *testing.T) {
+	truncateTables(t)
+	enableAffiliateForTest(t)
+	setAffiliateOptionForTest(t, AffiliateUpgradeInviteesThresholdOptionKey, "50")
+	setAffiliateOptionForTest(t, AffiliateUpgradeTopUpAmountThresholdOptionKey, "200000")
+
+	inviter, _, _, _ := createAffiliateFixture(t, "summary-privacy", 600)
+	summary, err := GetAffiliateSummary(inviter.Id)
+	require.NoError(t, err)
+	assert.True(t, summary.UpgradeEligible)
+	assert.False(t, summary.HighestTierReached)
+	assert.Equal(t, AffiliatePromoterGroupAdvanced, summary.NextTierName)
+	// 60,000 of 200,000 cents (30%) beats 1 of 50 users (2%).
+	assert.InDelta(t, 0.3, summary.UpgradeProgressRatio, 1e-9)
+
+	payload, err := common.Marshal(summary)
+	require.NoError(t, err)
+	fields := map[string]any{}
+	require.NoError(t, common.Unmarshal(payload, &fields))
+	for _, hidden := range []string{
+		"total_topup_cents",
+		"upgrade_threshold",
+		"upgrade_progress",
+		"upgrade_top_up_amount_threshold_cents",
+		"upgrade_top_up_amount_progress_cents",
+		"upgrade_top_up_amount_progress_ratio",
+	} {
+		assert.NotContains(t, fields, hidden)
+	}
+	assert.Contains(t, fields, "upgrade_progress_ratio")
+	assert.Contains(t, fields, "next_tier_name")
+	assert.Contains(t, fields, "highest_tier_reached")
+	assert.NotContains(t, string(payload), "60000")
+}
+
+func TestAffiliateSummaryGoldPromoterReachedHighestTier(t *testing.T) {
+	truncateTables(t)
+	enableAffiliateForTest(t)
+	inviter := &User{
+		Username: "affiliate-gold-highest",
+		Email:    "affiliate-gold-highest@example.com",
+		Group:    AffiliatePromoterGroupGold,
+		AffCode:  "affiliate-gold-highest-code",
+		Status:   common.UserStatusEnabled,
+	}
+	require.NoError(t, DB.Create(inviter).Error)
+
+	summary, err := GetAffiliateSummary(inviter.Id)
+	require.NoError(t, err)
+	assert.False(t, summary.UpgradeEligible)
+	assert.True(t, summary.HighestTierReached)
+	assert.Empty(t, summary.NextTierName)
+	assert.Equal(t, 1.0, summary.UpgradeProgressRatio)
 }

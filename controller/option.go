@@ -264,6 +264,13 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	}
+	if option.Key == "ReferralApplicationRecipient" {
+		if err := service.ValidateReferralApplicationRecipients(option.Value.(string)); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		option.Value = strings.TrimSpace(option.Value.(string))
+	}
 	if option.Key == "TaskPublicAddress" && option.Value.(string) != "" {
 		if err := service.ValidateTaskArtifactBaseURL(option.Value.(string)); err != nil {
 			common.ApiError(c, err)

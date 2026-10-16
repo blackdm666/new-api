@@ -96,11 +96,7 @@ func GetAffiliateSummary(c *gin.Context) {
 func GetAffiliateCommissions(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	status, _ := strconv.Atoi(c.Query("status"))
-	records, total, err := model.ListAffiliateCommissions(model.AffiliateCommissionQueryOptions{
-		ExcludeLimitReached: true,
-		InviterId:           c.GetInt("id"),
-		Status:              status,
-	}, pageInfo)
+	records, total, err := model.ListInviterAffiliateCommissions(c.GetInt("id"), status, pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
 		return

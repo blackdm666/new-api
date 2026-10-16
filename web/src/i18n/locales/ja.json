@@ -8698,6 +8698,17 @@
     "Upstream rejected adaptive thinking; retried with the original thinking controls": "上流がアダプティブ思考を拒否したため、元の思考パラメータで再試行しました",
     "Same channel retry": "同一チャネルで再試行",
     "Text to Image": "テキストから画像",
-    "Image to Image": "画像から画像"
+    "Image to Image": "画像から画像",
+    "Invited users who have reached the {{count}}-top-up commission limit are not listed here. The commission they generated is still included in your totals and commission records.": "コミッション対象となるチャージ {{count}} 回の上限に達した招待ユーザーはここに表示されません。そのユーザーが生み出したコミッションは、合計とコミッション記録に引き続き含まれます。",
+    "Last commission": "最新のコミッション",
+    "Referral Applications": "紹介プログラム申請",
+    "Save referral application settings": "紹介申請設定を保存",
+    "Application recipient email": "申請受信メールアドレス",
+    "Enter one or more valid email addresses separated by commas": "有効なメールアドレスを 1 つ以上、カンマ区切りで入力してください",
+    "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.": "公式サイトから送信された紹介プログラムの申請は、通知用 SMTP プロファイルでこれらのアドレスに送信されます。複数のアドレスはカンマで区切ってください。",
+    "Referral program application": "紹介プログラム申請",
+    "Highest tier reached": "最上位ランクに到達",
+    "You are on the highest promoter tier. Future top-ups use the current tier rate.": "すでに最上位の紹介ランクです。今後のチャージには現在のランクの料率が適用されます。",
+    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "有効チャージ人数または有効チャージ金額のいずれかが目標に達すると、管理者の承認で{{tier}}（{{rate}}）に昇格できます。進捗は目標により近い方で表示されます。"
   }
 }

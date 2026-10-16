@@ -564,6 +564,7 @@ export type OperationsSettings = {
   InvoiceWechatAutoIssueEnabled: boolean
   InvoiceWechatInboundTokenConfigured: boolean
   InvoiceAdminEmail: string
+  ReferralApplicationRecipient: string
   InvoiceMinimumAmountCents: string
   InvoiceTaxRateBasisPoints: string
   InvoiceDataRetentionDays: string

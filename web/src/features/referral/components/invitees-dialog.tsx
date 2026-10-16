@@ -175,15 +175,9 @@ export function InviteesDialog(props: InviteesDialogProps) {
             </TableHeader>
             <TableBody>
               {invitees.map((invitee) => (
-                <TableRow key={invitee.username}>
+                <TableRow key={`${invitee.created_at}-${invitee.username}`}>
                   <TableCell className='max-w-64 font-medium'>
                     <span className='block truncate'>{invitee.username}</span>
-                    {invitee.display_name &&
-                    invitee.display_name !== invitee.username ? (
-                      <div className='text-muted-foreground truncate text-xs font-normal'>
-                        {invitee.display_name}
-                      </div>
-                    ) : null}
                   </TableCell>
                   <TableCell className='text-muted-foreground'>
                     {formatTimestampToDate(invitee.created_at)}

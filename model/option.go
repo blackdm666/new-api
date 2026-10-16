@@ -117,6 +117,7 @@ func InitOptionMap() {
 	common.OptionMap["InvoiceRejectedNotifyUserEnabled"] = strconv.FormatBool(common.InvoiceRejectedNotifyUserEnabled)
 	common.OptionMap["InvoiceExpiredNotifyUserEnabled"] = strconv.FormatBool(common.InvoiceExpiredNotifyUserEnabled)
 	common.OptionMap["InvoiceAdminEmail"] = common.InvoiceAdminEmail
+	common.OptionMap["ReferralApplicationRecipient"] = common.ReferralApplicationRecipient
 	common.OptionMap[AffiliateCommissionEnabledOptionKey] = "false"
 	common.OptionMap[AffiliateCommissionAutoApproveOptionKey] = "false"
 	common.OptionMap[AffiliateCommissionDefaultRateOptionKey] = strconv.Itoa(affiliateCommissionDefaultRateBasisPoints)
@@ -982,6 +983,8 @@ func updateOptionMap(key string, value string) (err error) {
 		err = setting.UpdateEmailDeliveryRulesByJSONString(value)
 	case "InvoiceAdminEmail":
 		common.InvoiceAdminEmail = value
+	case "ReferralApplicationRecipient":
+		common.ReferralApplicationRecipient = value
 	case "InvoiceFileMaxSize":
 		if v, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil && v > 0 {
 			setting.InvoiceFileMaxSize = v

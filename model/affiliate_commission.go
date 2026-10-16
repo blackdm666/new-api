@@ -104,41 +104,57 @@ type AffiliateUpgradeNotice struct {
 }
 
 type AffiliateSummary struct {
-	AutoApprove                      bool           `json:"auto_approve"`
-	AvailableQuota                   int            `json:"available_quota"`
-	AvailableCents                   int64          `json:"available_cents"`
-	TotalApprovedQuota               int            `json:"total_approved_quota"`
-	PendingCommissionCents           int64          `json:"pending_commission_cents"`
-	ApprovedCommissionCents          int64          `json:"approved_commission_cents"`
-	TotalTopUpCents                  int64          `json:"total_topup_cents"`
-	InviteCount                      int64          `json:"invite_count"`
-	EffectiveInviteeCount            int64          `json:"effective_invitee_count"`
-	CommissionRecordCount            int64          `json:"commission_record_count"`
-	RateBasisPoints                  int            `json:"rate_basis_points"`
-	DefaultRateBasisPoints           int            `json:"default_rate_basis_points"`
-	GroupRates                       map[string]int `json:"group_rates"`
-	TierName                         string         `json:"tier_name"`
-	UpgradeEligible                  bool           `json:"upgrade_eligible"`
-	NextTierName                     string         `json:"next_tier_name"`
-	NextTierRateBasisPoints          int            `json:"next_tier_rate_basis_points"`
-	UpgradeThreshold                 int            `json:"upgrade_threshold"`
-	UpgradeProgress                  int64          `json:"upgrade_progress"`
-	UpgradeProgressRatio             float64        `json:"upgrade_progress_ratio"`
-	UpgradeTopUpAmountThresholdCents int64          `json:"upgrade_top_up_amount_threshold_cents"`
-	UpgradeTopUpAmountProgressCents  int64          `json:"upgrade_top_up_amount_progress_cents"`
-	UpgradeTopUpAmountProgressRatio  float64        `json:"upgrade_top_up_amount_progress_ratio"`
+	AutoApprove             bool           `json:"auto_approve"`
+	AvailableQuota          int            `json:"available_quota"`
+	AvailableCents          int64          `json:"available_cents"`
+	TotalApprovedQuota      int            `json:"total_approved_quota"`
+	PendingCommissionCents  int64          `json:"pending_commission_cents"`
+	ApprovedCommissionCents int64          `json:"approved_commission_cents"`
+	InviteCount             int64          `json:"invite_count"`
+	EffectiveInviteeCount   int64          `json:"effective_invitee_count"`
+	CommissionRecordCount   int64          `json:"commission_record_count"`
+	InviteeTopUpLimit       int            `json:"invitee_top_up_limit"`
+	RateBasisPoints         int            `json:"rate_basis_points"`
+	DefaultRateBasisPoints  int            `json:"default_rate_basis_points"`
+	GroupRates              map[string]int `json:"group_rates"`
+	TierName                string         `json:"tier_name"`
+	UpgradeEligible         bool           `json:"upgrade_eligible"`
+	HighestTierReached      bool           `json:"highest_tier_reached"`
+	NextTierName            string         `json:"next_tier_name"`
+	NextTierRateBasisPoints int            `json:"next_tier_rate_basis_points"`
+	// UpgradeProgressRatio is the overall upgrade progress in [0, 1]. Either
+	// rule (effective top-up users or effective top-up amount) qualifies, so
+	// the ratio is the larger of the two, capped at 1. Invitee top-up amounts
+	// and the raw thresholds are not exposed to the promoter.
+	UpgradeProgressRatio float64 `json:"upgrade_progress_ratio"`
+	// Internal policy values kept for server-side checks and tests only.
+	UpgradeThreshold                 int   `json:"-"`
+	UpgradeTopUpAmountThresholdCents int64 `json:"-"`
 }
 
+// AffiliateInviteeStats is the inviter-facing invitee row. A promoter only
+// sees a masked username, the registration time and the commission the
+// invitee generated; top-up amounts, order numbers and user ids stay private.
 type AffiliateInviteeStats struct {
-	Id               int    `json:"-"`
-	Username         string `json:"username"`
-	DisplayName      string `json:"display_name"`
-	CreatedAt        int64  `json:"created_at"`
-	IsNew            bool   `json:"is_new"`
-	TopUpCount       int64  `json:"topup_count"`
-	TopUpAmountCents int64  `json:"topup_amount_cents"`
-	CommissionCents  int64  `json:"commission_cents"`
-	LastTopUpTime    int64  `json:"last_topup_time"`
+	Id                 int    `json:"-"`
+	Username           string `json:"username"`
+	CreatedAt          int64  `json:"created_at"`
+	IsNew              bool   `json:"is_new"`
+	CommissionCents    int64  `json:"commission_cents"`
+	LastCommissionTime int64  `json:"last_commission_time"`
+}
+
+// AffiliateInviterCommission is the inviter-facing commission ledger row. It
+// keeps the commission amount and lifecycle fields needed to reconcile the
+// promoter's totals without exposing the invitee's payment details.
+type AffiliateInviterCommission struct {
+	Id              int    `json:"id"`
+	InviteeUsername string `json:"invitee_username"`
+	CommissionCents int64  `json:"commission_cents"`
+	Status          int    `json:"status"`
+	RejectReason    string `json:"reject_reason,omitempty"`
+	ApprovedTime    int64  `json:"approved_time"`
+	CreatedTime     int64  `json:"created_time"`
 }
 
 type AffiliateCommissionQueryOptions struct {
@@ -804,6 +820,7 @@ func GetAffiliateSummary(userId int) (*AffiliateSummary, error) {
 		AvailableCents:         account.AvailableCents,
 		TotalApprovedQuota:     totalApprovedQuota,
 		InviteCount:            inviteCount,
+		InviteeTopUpLimit:      policy.InviteeTopUpLimit,
 		RateBasisPoints:        affiliateRateBasisPointsForPolicy(policy, user.Group),
 		DefaultRateBasisPoints: policy.DefaultRateBasisPoints,
 		GroupRates:             policy.GroupRates,
@@ -840,7 +857,6 @@ func GetAffiliateSummary(userId int) (*AffiliateSummary, error) {
 	}
 	summary.PendingCommissionCents = row.PendingCents
 	summary.ApprovedCommissionCents = row.ApprovedCents
-	summary.TotalTopUpCents = row.TopUpCents
 	summary.CommissionRecordCount = row.RecordCount
 
 	if err := DB.Model(&AffiliateCommission{}).
@@ -850,16 +866,28 @@ func GetAffiliateSummary(userId int) (*AffiliateSummary, error) {
 		return nil, err
 	}
 	if summary.UpgradeEligible {
-		summary.UpgradeProgress = min(summary.EffectiveInviteeCount, int64(summary.UpgradeThreshold))
-		summary.UpgradeTopUpAmountProgressCents = min(summary.TotalTopUpCents, summary.UpgradeTopUpAmountThresholdCents)
-	}
-	if summary.UpgradeEligible && summary.UpgradeThreshold > 0 {
-		summary.UpgradeProgressRatio = math.Min(1, float64(summary.UpgradeProgress)/float64(summary.UpgradeThreshold))
-	}
-	if summary.UpgradeEligible && summary.UpgradeTopUpAmountThresholdCents > 0 {
-		summary.UpgradeTopUpAmountProgressRatio = math.Min(1, float64(summary.UpgradeTopUpAmountProgressCents)/float64(summary.UpgradeTopUpAmountThresholdCents))
+		summary.UpgradeProgressRatio = affiliateUpgradeProgressRatio(
+			summary.EffectiveInviteeCount, summary.UpgradeThreshold,
+			row.TopUpCents, summary.UpgradeTopUpAmountThresholdCents,
+		)
+	} else if strings.TrimSpace(user.Group) == AffiliatePromoterGroupGold {
+		summary.HighestTierReached = true
+		summary.UpgradeProgressRatio = 1
 	}
 	return summary, nil
+}
+
+// affiliateUpgradeProgressRatio returns the overall upgrade progress: meeting
+// either threshold qualifies, so the larger of the two ratios wins, capped at 1.
+func affiliateUpgradeProgressRatio(effectiveInvitees int64, inviteeThreshold int, topUpCents int64, topUpThresholdCents int64) float64 {
+	ratio := 0.0
+	if inviteeThreshold > 0 {
+		ratio = math.Max(ratio, float64(max(effectiveInvitees, 0))/float64(inviteeThreshold))
+	}
+	if topUpThresholdCents > 0 {
+		ratio = math.Max(ratio, float64(max(topUpCents, 0))/float64(topUpThresholdCents))
+	}
+	return math.Min(1, ratio)
 }
 
 func ListAffiliateCommissions(options AffiliateCommissionQueryOptions, pageInfo *common.PageInfo) ([]*AffiliateCommission, int64, error) {
@@ -900,22 +928,82 @@ func ListAffiliateCommissions(options AffiliateCommissionQueryOptions, pageInfo 
 	return records, total, nil
 }
 
+// MaskAffiliateInviteeName hides an invitee username from the inviter. It
+// keeps at most two leading characters and always hides at least one, so a
+// short name is never shown in full.
+func MaskAffiliateInviteeName(name string) string {
+	runes := []rune(strings.TrimSpace(name))
+	if len(runes) == 0 {
+		return ""
+	}
+	visible := min(2, len(runes)-1)
+	return string(runes[:visible]) + "***"
+}
+
+// excludeAffiliateCappedInvitees removes invitees that already used every
+// commission-eligible top-up allowed by the invitee top-up limit. It mirrors
+// the limit check in createAffiliateCommissionForTopUpTx: once an invitee has
+// limit commission rows, later top-ups no longer earn commission. Their ledger
+// rows and account credits are untouched; only invitee lists use this filter.
+func excludeAffiliateCappedInvitees(query *gorm.DB, userIdColumn string, limit int) *gorm.DB {
+	if limit <= 0 {
+		return query
+	}
+	capped := DB.Model(&AffiliateCommission{}).
+		Select("invitee_id").
+		Group("invitee_id").
+		Having("COUNT(*) >= ?", limit)
+	return query.Where(userIdColumn+" NOT IN (?)", capped)
+}
+
+// ListInviterAffiliateCommissions returns the promoter's own commission ledger
+// with masked invitee names. Rows of capped invitees stay listed so the
+// ledger still adds up to the summary totals; zero-amount limit markers are
+// omitted.
+func ListInviterAffiliateCommissions(inviterId int, status int, pageInfo *common.PageInfo) ([]*AffiliateInviterCommission, int64, error) {
+	records, total, err := ListAffiliateCommissions(AffiliateCommissionQueryOptions{
+		ExcludeLimitReached: true,
+		InviterId:           inviterId,
+		Status:              status,
+	}, pageInfo)
+	if err != nil {
+		return nil, 0, err
+	}
+	rows := make([]*AffiliateInviterCommission, 0, len(records))
+	for _, record := range records {
+		rows = append(rows, &AffiliateInviterCommission{
+			Id:              record.Id,
+			InviteeUsername: MaskAffiliateInviteeName(record.InviteeUsername),
+			CommissionCents: record.CommissionCents,
+			Status:          record.Status,
+			RejectReason:    record.RejectReason,
+			ApprovedTime:    record.ApprovedTime,
+			CreatedTime:     record.CreatedTime,
+		})
+	}
+	return rows, total, nil
+}
+
+// ListAffiliateInviteeStats lists the inviter's invitees with masked names.
+// Invitees that reached the commission top-up limit are hidden; their
+// commission remains in the summary totals and the commission ledger.
 func ListAffiliateInviteeStats(inviterId int, pageInfo *common.PageInfo) ([]*AffiliateInviteeStats, int64, error) {
+	limit := getAffiliatePolicy().InviteeTopUpLimit
 	var total int64
-	if err := DB.Unscoped().Model(&User{}).Where("inviter_id = ?", inviterId).Count(&total).Error; err != nil {
+	countQuery := excludeAffiliateCappedInvitees(DB.Unscoped().Model(&User{}).Where("inviter_id = ?", inviterId), "id", limit)
+	if err := countQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	rows := []*AffiliateInviteeStats{}
-	err := DB.Unscoped().Table("users").
-		Select("users.id, users.username, users.display_name, users.created_at, COALESCE(SUM(CASE WHEN affiliate_commissions.status IN (?, ?, ?) THEN 1 ELSE 0 END), 0) AS top_up_count, COALESCE(SUM(CASE WHEN affiliate_commissions.status IN (?, ?, ?) THEN affiliate_commissions.top_up_amount_cents ELSE 0 END), 0) AS top_up_amount_cents, COALESCE(SUM(CASE WHEN affiliate_commissions.status IN (?, ?, ?) THEN affiliate_commissions.commission_cents ELSE 0 END), 0) AS commission_cents, COALESCE(MAX(CASE WHEN affiliate_commissions.status IN (?, ?, ?) THEN affiliate_commissions.created_time ELSE 0 END), 0) AS last_top_up_time",
-			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached,
-			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached,
-			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached,
-			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved, AffiliateCommissionStatusLimitReached,
+	query := DB.Unscoped().Table("users").
+		Select("users.id, users.username, users.created_at, COALESCE(SUM(CASE WHEN affiliate_commissions.status IN (?, ?) THEN affiliate_commissions.commission_cents ELSE 0 END), 0) AS commission_cents, COALESCE(MAX(CASE WHEN affiliate_commissions.status IN (?, ?) THEN affiliate_commissions.created_time ELSE 0 END), 0) AS last_commission_time",
+			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved,
+			AffiliateCommissionStatusPending, AffiliateCommissionStatusApproved,
 		).
 		Joins("LEFT JOIN affiliate_commissions ON affiliate_commissions.invitee_id = users.id AND affiliate_commissions.inviter_id = ?", inviterId).
-		Where("users.inviter_id = ?", inviterId).
-		Group("users.id, users.username, users.display_name, users.created_at").
+		Where("users.inviter_id = ?", inviterId)
+	err := excludeAffiliateCappedInvitees(query, "users.id", limit).
+		Group("users.id, users.username, users.created_at").
 		Order("users.id DESC").
 		Limit(pageInfo.GetPageSize()).
 		Offset(pageInfo.GetStartIdx()).
@@ -927,6 +1015,7 @@ func ListAffiliateInviteeStats(inviterId int, pageInfo *common.PageInfo) ([]*Aff
 	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	startOfTomorrow := startOfToday.AddDate(0, 0, 1)
 	for _, row := range rows {
+		row.Username = MaskAffiliateInviteeName(row.Username)
 		row.IsNew = row.CreatedAt >= startOfToday.Unix() && row.CreatedAt < startOfTomorrow.Unix()
 	}
 	return rows, total, nil
