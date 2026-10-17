@@ -45,6 +45,9 @@ func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayIn
 			}
 		}
 	}
+	if strings.Contains(info.UpstreamModelName, "gemini-3.8-") && strings.Contains(info.UpstreamModelName, "-tts") {
+		splitGemini38SpeakerTurns(request)
+	}
 	return request, nil
 }
 

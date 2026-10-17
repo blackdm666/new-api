@@ -10,7 +10,10 @@ import (
 	"math"
 	"mime/multipart"
 	"net/http"
+	"net/url"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -73,16 +76,74 @@ var xaiTTSCodecs = map[string]string{
 // OpenAI /v1/audio/speech 的内置音色，xAI 都不认。
 var openAIBuiltinVoices = []string{"alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse", "marin", "cedar"}
 
-// xaiBuiltinVoices 是 xAI 官方音色（GET /v1/tts/voices，2026-10-17 共 28 个），只用于错误提示。
-const xaiBuiltinVoices = "altair, ara, atlas, aurora, carina, castor, celeste, cosmo, eve, helios, helix, iris, kepler, leo, liora, lumen, luna, lux, naksh, orion, perseus, rex, rigel, sal, sirius, ursa, zagan, zenith"
+// xaiBuiltinVoices 是 xAI 官方音色（GET /v1/tts/voices，2026-10-17 共 28 个）。
+var xaiBuiltinVoices = []string{"altair", "ara", "atlas", "aurora", "carina", "castor", "celeste", "cosmo", "eve", "helios", "helix", "iris", "kepler", "leo", "liora", "lumen", "luna", "lux", "naksh", "orion", "perseus", "rex", "rigel", "sal", "sirius", "ursa", "zagan", "zenith"}
 
-// openAIVoiceError 提示客户把 OpenAI 音色名换成 xAI 官方音色或自定义音色 ID。
-func openAIVoiceError(voice string) error {
-	return badAudioRequest("voice %q is an OpenAI voice and is not available for grok tts, use %s or a custom voice id", voice, xaiBuiltinVoices)
+// xAI 自定义音色 ID 是 8 位小写字母或数字（官方示例 nlbqfwie、abc123xy）。
+var xaiCustomVoicePattern = regexp.MustCompile(`^[a-z0-9]{8}$`)
+
+// checkXAIVoice 在连上游前拒绝 xAI 不认的音色：上游对未知音色要等文字发完才报错（流式 TTS）或直接忽略（实时语音）。
+// 官方音色不区分大小写，也可带 session.created 里出现的 xai_ 前缀；空值表示用上游默认音色。
+func checkXAIVoice(voice string, product string) error {
+	name := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(voice)), "xai_")
+	if name == "" || slices.Contains(xaiBuiltinVoices, name) || xaiCustomVoicePattern.MatchString(name) {
+		return nil
+	}
+	voices := strings.Join(xaiBuiltinVoices, ", ")
+	if slices.Contains(openAIBuiltinVoices, name) {
+		return badAudioRequest("voice %q is an OpenAI voice and is not available for %s, use %s or a custom voice id", voice, product, voices)
+	}
+	return badAudioRequest("voice %q is not available for %s, use %s or a custom voice id", voice, product, voices)
 }
 
 // xAI 支持的采样率；同时用于界定 pcm/mulaw/alaw 的时长换算。
 var xaiTTSSampleRates = []int{8000, 16000, 22050, 24000, 44100, 48000}
+
+// 流式 TTS 连接参数的取值（https://docs.x.ai/developers/model-capabilities/audio/text-to-speech）。
+// 上游对这些参数只回握手失败，sub2api 再转成 502，客户看不到原因，所以在 new-api 侧先校验。
+// optimize_streaming_latency 上游超出 0–2 也接受，不校验。
+var (
+	xaiTTSStreamCodecs   = []string{"mp3", "wav", "pcm", "mulaw", "ulaw", "alaw"}
+	xaiTTSBitRates       = []int{32000, 64000, 96000, 128000, 192000}
+	xaiTTSStreamBooleans = []string{"true", "false"}
+)
+
+const (
+	xaiTTSMinSpeed = 0.7
+	xaiTTSMaxSpeed = 1.5
+)
+
+// ValidateTTSStreamQuery 校验流式 TTS（GET /v1/tts）的连接参数；控制器在升级 WebSocket 之前调用，
+// 不合法时直接回 HTTP 400。没传的参数用上游默认值。
+func ValidateTTSStreamQuery(query url.Values) error {
+	if err := checkXAIVoice(query.Get("voice"), "grok tts"); err != nil {
+		return err
+	}
+	if codec := query.Get("codec"); codec != "" && !slices.Contains(xaiTTSStreamCodecs, codec) {
+		return badAudioRequest("codec %q is not supported by grok tts, use %s", codec, strings.Join(xaiTTSStreamCodecs, ", "))
+	}
+	if raw := query.Get("sample_rate"); raw != "" {
+		if rate, err := strconv.Atoi(raw); err != nil || !slices.Contains(xaiTTSSampleRates, rate) {
+			return badAudioRequest("sample_rate must be one of 8000, 16000, 22050, 24000, 44100, 48000")
+		}
+	}
+	if raw := query.Get("bit_rate"); raw != "" {
+		if rate, err := strconv.Atoi(raw); err != nil || !slices.Contains(xaiTTSBitRates, rate) {
+			return badAudioRequest("bit_rate must be one of 32000, 64000, 96000, 128000, 192000")
+		}
+	}
+	if raw := query.Get("speed"); raw != "" {
+		if speed, err := strconv.ParseFloat(raw, 64); err != nil || !(speed >= xaiTTSMinSpeed && speed <= xaiTTSMaxSpeed) {
+			return badAudioRequest("speed must be between %.1f and %.1f", xaiTTSMinSpeed, xaiTTSMaxSpeed)
+		}
+	}
+	for _, field := range []string{"text_normalization", "with_timestamps"} {
+		if raw := query.Get(field); raw != "" && !slices.Contains(xaiTTSStreamBooleans, raw) {
+			return badAudioRequest("%s must be true or false", field)
+		}
+	}
+	return nil
+}
 
 // 透传给 xAI 的 TTS 原生字段（OpenAI 请求体里没有的部分）。
 var xaiTTSPassthroughFields = []string{"text_normalization", "replace", "optimize_streaming_latency"}
@@ -161,8 +222,8 @@ func buildXAITTSRequest(c *gin.Context, request dto.AudioRequest) (map[string]an
 		voice = xaiDefaultVoice
 	}
 	// OpenAI SDK 示例默认用 alloy 等 OpenAI 音色；xAI 对未知音色只回 404，这里先给出明确提示。
-	if slices.Contains(openAIBuiltinVoices, strings.ToLower(voice)) {
-		return nil, "", 0, openAIVoiceError(voice)
+	if err := checkXAIVoice(voice, "grok tts"); err != nil {
+		return nil, "", 0, err
 	}
 	language := audioLanguage(request.Language)
 	if language == "" {

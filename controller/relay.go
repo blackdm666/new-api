@@ -20,6 +20,7 @@ import (
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
+	"github.com/QuantumNous/new-api/relay/channel/xai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -79,6 +80,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	)
 
 	if relayFormat == types.RelayFormatOpenAIRealtime {
+		// 流式 TTS 的连接参数在升级 WebSocket 之前校验，不合法直接回 HTTP 400，客户端握手时就能看到原因。
+		if relayconstant.Path2RelayMode(c.Request.URL.Path) == relayconstant.RelayModeAudioSpeechStream {
+			if err := xai.ValidateTTSStreamQuery(c.Request.URL.Query()); err != nil {
+				queryError := types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithStatusCode(http.StatusBadRequest), types.ErrOptionWithSkipRetry())
+				queryError.SetMessage(common.MessageWithRequestId(queryError.Error(), requestId))
+				c.JSON(queryError.StatusCode, gin.H{"error": queryError.ToOpenAIError()})
+				return
+			}
+		}
 		var err error
 		ws, err = upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {

@@ -343,6 +343,8 @@ type GeminiPart struct {
 	FileData            *GeminiFileData                `json:"fileData,omitempty"`
 	ExecutableCode      *GeminiPartExecutableCode      `json:"executableCode,omitempty"`
 	CodeExecutionResult *GeminiPartCodeExecutionResult `json:"codeExecutionResult,omitempty"`
+	// Optional. Speaker (and delivery style) of this turn for multi-speaker TTS, e.g. {"speaker":"Joe"}.
+	SpeechMetadata json.RawMessage `json:"speechMetadata,omitempty"`
 }
 
 // UnmarshalJSON custom unmarshaler for GeminiPart to support snake_case and camelCase for InlineData
@@ -351,7 +353,8 @@ func (p *GeminiPart) UnmarshalJSON(data []byte) error {
 	type Alias GeminiPart
 	var aux struct {
 		Alias
-		InlineDataSnake *GeminiInlineData `json:"inline_data,omitempty"` // snake_case variant
+		InlineDataSnake     *GeminiInlineData `json:"inline_data,omitempty"` // snake_case variant
+		SpeechMetadataSnake json.RawMessage   `json:"speech_metadata,omitempty"`
 	}
 
 	if err := kitutil.Unmarshal(data, &aux); err != nil {
@@ -366,6 +369,9 @@ func (p *GeminiPart) UnmarshalJSON(data []byte) error {
 		p.InlineData = aux.InlineDataSnake
 	} else if aux.InlineData != nil { // Fallback to camelCase from Alias
 		p.InlineData = aux.InlineData
+	}
+	if len(aux.SpeechMetadataSnake) > 0 {
+		p.SpeechMetadata = aux.SpeechMetadataSnake
 	}
 	// Other fields like Text, FunctionCall etc. are already populated via aux.Alias
 

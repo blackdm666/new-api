@@ -410,14 +410,27 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 	targetConn, resp, err := dialer.DialContext(c.Request.Context(), fullRequestURL, targetHeader)
 	if err != nil {
-		statusCode := http.StatusInternalServerError
-		if resp != nil {
-			statusCode = resp.StatusCode
-			if resp.Body != nil {
-				_ = resp.Body.Close()
+		// 上游地址和连接参数只写日志：返回给客户的报错会原样发到客户端，不能带内部主机名或查询串。
+		if resp == nil {
+			logger.LogError(c, fmt.Sprintf("websocket dial failed to %s: %s", common.SanitizeURLForLog(fullRequestURL), err.Error()))
+			return nil, types.NewErrorWithStatusCode(errors.New("failed to connect to upstream websocket"), types.ErrorCodeDoRequestFailed, http.StatusBadGateway)
+		}
+		var body []byte
+		if resp.Body != nil {
+			body, _ = io.ReadAll(io.LimitReader(resp.Body, 2048))
+			_ = resp.Body.Close()
+		}
+		logger.LogError(c, fmt.Sprintf("websocket handshake to %s failed with status %d: %s", common.SanitizeURLForLog(fullRequestURL), resp.StatusCode, common2.LocalLogPreview(string(body))))
+		var ops []types.NewAPIErrorOptions
+		// 握手被拒绝的 4xx 是请求本身的问题，换渠道也一样；鉴权和限流（401/403/429）只关乎当前渠道，照常重试。
+		switch resp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+		default:
+			if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+				ops = append(ops, types.ErrOptionWithSkipRetry())
 			}
 		}
-		return nil, types.NewErrorWithStatusCode(fmt.Errorf("dial failed to %s: %w", common.SanitizeURLForLog(fullRequestURL), err), types.ErrorCodeDoRequestFailed, statusCode)
+		return nil, types.NewErrorWithStatusCode(fmt.Errorf("upstream websocket handshake failed with status %d", resp.StatusCode), types.ErrorCodeDoRequestFailed, resp.StatusCode, ops...)
 	}
 	return targetConn, nil
 }
