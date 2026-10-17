@@ -90,6 +90,7 @@ func TestXAIConvertTTSRequestDefaultsAndRejects(t *testing.T) {
 		{name: "empty_input", body: `{}`, request: dto.AudioRequest{Input: " "}, message: "input is required"},
 		{name: "stream", body: `{}`, request: dto.AudioRequest{Input: "hi", StreamFormat: "sse"}, message: "streaming"},
 		{name: "sample_rate", body: `{"sample_rate":999999999}`, request: dto.AudioRequest{Input: "hi"}, message: "sample_rate"},
+		{name: "openai_voice", body: `{}`, request: dto.AudioRequest{Input: "hi", Voice: "Alloy"}, message: `voice "Alloy" is an OpenAI voice and is not available for grok tts, use eve, ara, rex, sal, leo or a custom voice id`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
