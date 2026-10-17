@@ -12,9 +12,11 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -213,4 +215,44 @@ func TestXAIConvertSTTRequestRejectsSubtitleFormats(t *testing.T) {
 	_, err := (&Adaptor{}).ConvertAudioRequest(c, newAudioRelayInfo(constant.RelayModeAudioTranscription, &request), request)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "response_format")
+}
+
+func TestXAIRejectsVoiceModelsOnChatEndpoints(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	tests := []struct {
+		model   string
+		wantErr string
+	}{
+		{model: "grok-tts", wantErr: "POST /v1/audio/speech"},
+		{model: "grok-stt", wantErr: "POST /v1/audio/transcriptions"},
+		{model: "grok-4.7"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			c, _ := newAudioTestContext(t, nil, "application/json")
+			info := &relaycommon.RelayInfo{
+				OriginModelName: tt.model,
+				ChannelMeta:     &relaycommon.ChannelMeta{UpstreamModelName: tt.model},
+			}
+			adaptor := &Adaptor{}
+			_, chatErr := adaptor.ConvertOpenAIRequest(c, info, &dto.GeneralOpenAIRequest{Model: tt.model})
+			_, responsesErr := adaptor.ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{Model: tt.model})
+			_, claudeErr := adaptor.ConvertClaudeRequest(c, info, &dto.ClaudeRequest{Model: tt.model})
+			if tt.wantErr == "" {
+				require.NoError(t, chatErr)
+				require.NoError(t, responsesErr)
+				// xAI 渠道本来就不支持 Claude 格式，普通模型保持原来的 not available。
+				assert.EqualError(t, claudeErr, "not available")
+				return
+			}
+			for _, err := range []error{chatErr, responsesErr, claudeErr} {
+				var apiErr *types.NewAPIError
+				require.ErrorAs(t, err, &apiErr)
+				assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+				assert.Equal(t, types.ErrorCodeInvalidRequest, apiErr.GetErrorCode())
+				assert.Contains(t, err.Error(), tt.model)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			}
+		})
+	}
 }

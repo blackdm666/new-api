@@ -32,7 +32,10 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 	return nil, errors.New("not implemented")
 }
 
-func (a *Adaptor) ConvertClaudeRequest(*gin.Context, *relaycommon.RelayInfo, *dto.ClaudeRequest) (any, error) {
+func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, _ *dto.ClaudeRequest) (any, error) {
+	if err := rejectVoiceModelChat(c, info); err != nil {
+		return nil, err
+	}
 	//TODO implement me
 	//panic("implement me")
 	return nil, errors.New("not available")
@@ -102,6 +105,9 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
+	if err := rejectVoiceModelChat(c, info); err != nil {
+		return nil, err
+	}
 	if strings.HasSuffix(info.UpstreamModelName, "-search") {
 		info.UpstreamModelName = strings.TrimSuffix(info.UpstreamModelName, "-search")
 		request.Model = info.UpstreamModelName
@@ -140,6 +146,9 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.Rela
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
+	if err := rejectVoiceModelChat(c, info); err != nil {
+		return nil, err
+	}
 	if request.Model == "" && info != nil {
 		request.Model = info.UpstreamModelName
 	}

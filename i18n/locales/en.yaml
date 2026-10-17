@@ -23,6 +23,7 @@ tts.voice_unsupported: "Voice \"{{.Voice}}\" is not supported by {{.Model}}; Ope
 tts.speed_out_of_range: "speed must be between 0.25 and 4, got {{.Speed}}."
 tts.stream_unsupported: "{{.Model}} does not support streaming. Remove stream or stream_format=sse; the complete audio is returned in one response."
 tts.chat_endpoint_unsupported: "{{.Model}} is a text-to-speech model and cannot be called through the chat endpoint. Use POST /v1/audio/speech (OpenAI-compatible) instead."
+stt.chat_endpoint_unsupported: "{{.Model}} is a speech-to-text model and cannot be called through the chat endpoint. Use POST /v1/audio/transcriptions (OpenAI-compatible) instead."
 tts.no_audio: "The model returned no audio (finishReason={{.Reason}}). This is usually temporary, please retry. If it keeps happening, check that the text is not too short or made of symbols only."
 distributor.invalid_request: "Invalid request: {{.Error}}"
 distributor.invalid_channel_id: "Invalid channel ID"
