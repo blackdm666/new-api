@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/claude"
 	"github.com/QuantumNous/new-api/relay/channel/gemini"
@@ -131,31 +133,36 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 		return nil, errors.New("Vertex AI audio speech requires a Gemini TTS model")
 	}
 	if info.IsStream || request.StreamFormat == "sse" {
-		return nil, errors.New("Vertex AI audio speech streaming is not supported")
+		return nil, invalidTTSRequest(c, i18n.MsgTTSStreamUnsupported, map[string]any{"Model": info.OriginModelName})
 	}
 
 	input := strings.TrimSpace(request.Input)
 	if input == "" {
-		return nil, errors.New("input is required")
+		return nil, invalidTTSRequest(c, i18n.MsgTTSInputRequired, nil)
 	}
 	voice := strings.TrimSpace(request.Voice)
 	if voice == "" {
-		return nil, errors.New("voice is required")
+		return nil, invalidTTSRequest(c, i18n.MsgTTSVoiceRequired, map[string]any{"Voices": strings.Join(geminiTTSVoices, ", ")})
 	}
+	voiceIndex := slices.IndexFunc(geminiTTSVoices, func(name string) bool { return strings.EqualFold(name, voice) })
+	if voiceIndex < 0 {
+		return nil, invalidTTSRequest(c, i18n.MsgTTSVoiceUnsupported, map[string]any{"Model": info.OriginModelName, "Voice": voice, "Voices": strings.Join(geminiTTSVoices, ", ")})
+	}
+	voice = geminiTTSVoices[voiceIndex]
 
 	responseFormat := strings.ToLower(strings.TrimSpace(request.ResponseFormat))
 	if responseFormat == "" {
 		responseFormat = "wav"
 	}
 	if responseFormat != "mp3" && responseFormat != "wav" && responseFormat != "flac" && responseFormat != "pcm" {
-		return nil, types.NewErrorWithStatusCode(fmt.Errorf("Vertex AI audio speech supports response_format mp3, wav, flac or pcm, got %q", responseFormat), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		return nil, invalidTTSRequest(c, i18n.MsgTTSResponseFormatUnsupported, map[string]any{"Model": info.OriginModelName, "Format": responseFormat})
 	}
 	a.AudioResponseFormat = responseFormat
 
 	instructions := strings.TrimSpace(request.Instructions)
 	if request.Speed != nil {
 		if *request.Speed < 0.25 || *request.Speed > 4 {
-			return nil, fmt.Errorf("speed must be between 0.25 and 4, got %g", *request.Speed)
+			return nil, invalidTTSRequest(c, i18n.MsgTTSSpeedOutOfRange, map[string]any{"Speed": fmt.Sprintf("%g", *request.Speed)})
 		}
 		if *request.Speed != 1 {
 			speedInstruction := fmt.Sprintf("Speak at %gx normal speed", *request.Speed)
@@ -171,8 +178,8 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 	if instructions != "" {
 		prompt = instructions + ": " + input
 	}
-	if len([]byte(prompt)) > 8000 {
-		return nil, errors.New("Vertex AI audio speech input and instructions must not exceed 8000 bytes")
+	if len(prompt) > 8000 {
+		return nil, invalidTTSRequest(c, i18n.MsgTTSInputTooLong, map[string]any{"Bytes": len(prompt)})
 	}
 
 	speechConfig, err := common.Marshal(VertexSpeechConfig{
@@ -315,6 +322,11 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) (any, error) {
 	if request == nil {
 		return nil, errors.New("request is nil")
+	}
+	// Vertex rejects chat requests to Gemini TTS models with "invalid argument";
+	// tell the client which endpoint serves them instead.
+	if a.RequestMode == RequestModeGemini && strings.Contains(info.UpstreamModelName, "-tts") {
+		return nil, invalidTTSRequest(c, i18n.MsgTTSChatEndpointUnsupported, map[string]any{"Model": info.OriginModelName})
 	}
 	if a.RequestMode == RequestModeGemini && strings.HasPrefix(info.UpstreamModelName, "imagen") {
 		prompt := ""

@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -130,7 +131,7 @@ func TestConvertAudioSpeechRequestToVertexGeminiTTS(t *testing.T) {
 	body, err := adaptor.ConvertAudioRequest(nil, info, dto.AudioRequest{
 		Model:        "gemini-2.5-flash-tts",
 		Input:        "Hello from NewAPI.",
-		Voice:        "Kore",
+		Voice:        "kore",
 		Instructions: "Speak warmly",
 		Speed:        &speed,
 	})
@@ -148,21 +149,85 @@ func TestConvertAudioSpeechRequestToVertexGeminiTTS(t *testing.T) {
 	assert.JSONEq(t, `{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Kore"}}}`, string(converted.GenerationConfig.SpeechConfig))
 }
 
-func TestConvertAudioSpeechRequestRejectsUnsupportedFormat(t *testing.T) {
-	adaptor := &Adaptor{RequestMode: RequestModeGemini}
-	info := &relaycommon.RelayInfo{RelayMode: relayconstant.RelayModeAudioSpeech}
+// Clients often send OpenAI defaults (mp3, alloy) or call the TTS model through
+// chat. Every client mistake is a 400 that names the fix in the client's language.
+func TestVertexTTSClientErrorsExplainTheFix(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	common.DefaultLanguage = i18n.LangZhCN
+	t.Cleanup(func() { common.DefaultLanguage = "" })
 
-	_, err := adaptor.ConvertAudioRequest(nil, info, dto.AudioRequest{
-		Model:          "gemini-2.5-flash-tts",
-		Input:          "Hello",
-		Voice:          "Kore",
-		ResponseFormat: "opus",
+	speed := 5.0
+	tests := []struct {
+		name    string
+		request dto.AudioRequest
+		stream  bool
+		want    string
+	}{
+		{name: "format", request: dto.AudioRequest{Input: "你好", Voice: "Kore", ResponseFormat: "opus"},
+			want: "gemini-3.1-tts 不支持 response_format「opus」，可选 mp3、wav、flac、pcm，不传默认 wav"},
+		{name: "openai voice", request: dto.AudioRequest{Input: "你好", Voice: "alloy"},
+			want: "gemini-3.1-tts 不支持音色「alloy」，OpenAI 的 alloy、nova 等音色名不能使用。可用音色：" + strings.Join(geminiTTSVoices, ", ")},
+		{name: "missing voice", request: dto.AudioRequest{Input: "你好"},
+			want: "缺少 voice：请指定 Gemini 预设音色，例如 Kore。可用音色：" + strings.Join(geminiTTSVoices, ", ")},
+		{name: "missing input", request: dto.AudioRequest{Input: "  ", Voice: "Kore"},
+			want: "缺少 input：请传入要合成的文本"},
+		{name: "speed", request: dto.AudioRequest{Input: "你好", Voice: "Kore", Speed: &speed},
+			want: "speed 取值范围为 0.25–4，当前为 5"},
+		{name: "too long", request: dto.AudioRequest{Input: strings.Repeat("a", 8001), Voice: "Kore"},
+			want: "input、instructions 和 speed 生成的语速指令合计不能超过 8000 字节（中文约 2600 字），当前 8001 字节，请分段合成"},
+		{name: "stream", request: dto.AudioRequest{Input: "你好", Voice: "Kore", StreamFormat: "sse"},
+			want: "gemini-3.1-tts 不支持流式输出，请去掉 stream 或 stream_format=sse，接口会一次性返回完整音频"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adaptor := &Adaptor{RequestMode: RequestModeGemini}
+			// By conversion time the request carries the mapped upstream model;
+			// messages must name the model the client asked for.
+			info := &relaycommon.RelayInfo{RelayMode: relayconstant.RelayModeAudioSpeech, IsStream: tt.stream, OriginModelName: "gemini-3.1-tts"}
+			tt.request.Model = "gemini-3.1-flash-tts-preview"
+
+			_, err := adaptor.ConvertAudioRequest(nil, info, tt.request)
+			require.EqualError(t, err, tt.want)
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+			assert.Equal(t, types.ErrorCodeInvalidRequest, apiErr.GetErrorCode())
+		})
+	}
+
+	t.Run("chat endpoint", func(t *testing.T) {
+		adaptor := &Adaptor{RequestMode: RequestModeGemini}
+		info := &relaycommon.RelayInfo{
+			OriginModelName: "gemini-3.1-tts",
+			ChannelMeta:     &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3.1-flash-tts-preview"},
+		}
+		_, err := adaptor.ConvertOpenAIRequest(nil, info, &dto.GeneralOpenAIRequest{Model: "gemini-3.1-tts"})
+		require.EqualError(t, err, "gemini-3.1-tts 是语音合成模型，不能用对话接口调用，请改用 POST /v1/audio/speech（OpenAI 兼容）")
+		var apiErr *types.NewAPIError
+		require.ErrorAs(t, err, &apiErr)
+		assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
 	})
-	require.EqualError(t, err, `Vertex AI audio speech supports response_format mp3, wav, flac or pcm, got "opus"`)
-	var apiErr *types.NewAPIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
-	assert.Equal(t, types.ErrorCodeInvalidRequest, apiErr.GetErrorCode())
+
+	t.Run("no audio", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"OTHER"}]}`)),
+		}
+		info := &relaycommon.RelayInfo{
+			RelayMode:   relayconstant.RelayModeAudioSpeech,
+			ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3.1-flash-tts-preview"},
+		}
+		adaptor := &Adaptor{RequestMode: RequestModeGemini, AudioResponseFormat: "mp3"}
+
+		_, apiErr := adaptor.DoResponse(context, resp, info)
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusInternalServerError, apiErr.StatusCode)
+		assert.Equal(t, "模型没有返回音频（finishReason=OTHER），通常是偶发情况，请稍后重试；如果反复出现，请检查文本是否过短或只有符号", apiErr.Error())
+	})
 }
 
 func TestVertexAudioSpeechUsesV1Beta1GenerateContentURL(t *testing.T) {

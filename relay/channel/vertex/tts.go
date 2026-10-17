@@ -13,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	rootconstant "github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
@@ -30,6 +31,20 @@ const (
 	vertexTTSChannels      = 1
 	vertexTTSBitsPerSample = 16
 )
+
+// geminiTTSVoices are the Gemini-TTS prebuilt voices; Vertex AI rejects any
+// other voice name with "No matching speaker voice found".
+var geminiTTSVoices = []string{
+	"Achernar", "Achird", "Algenib", "Algieba", "Alnilam", "Aoede", "Autonoe", "Callirrhoe", "Charon", "Despina",
+	"Enceladus", "Erinome", "Fenrir", "Gacrux", "Iapetus", "Kore", "Laomedeia", "Leda", "Orus", "Puck",
+	"Pulcherrima", "Rasalgethi", "Sadachbia", "Sadaltager", "Schedar", "Sulafat", "Umbriel", "Vindemiatrix", "Zephyr", "Zubenelgenubi",
+}
+
+// invalidTTSRequest is a client error in a speech request: 400, not retried on
+// another channel, with the message in the client's language.
+func invalidTTSRequest(c *gin.Context, key string, args map[string]any) error {
+	return types.NewErrorWithStatusCode(errors.New(i18n.T(c, key, args)), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+}
 
 func handleVertexTTSResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, responseFormat string) (*dto.Usage, *types.NewAPIError) {
 	responseBody, err := io.ReadAll(resp.Body)
@@ -66,7 +81,14 @@ func handleVertexTTSResponse(c *gin.Context, resp *http.Response, info *relaycom
 			common.SetContextKey(c, rootconstant.ContextKeyAdminRejectReason, "gemini_block_reason="+reason)
 			return nil, types.NewOpenAIError(errors.New("request blocked by Vertex AI: "+reason), types.ErrorCodePromptBlocked, http.StatusBadRequest)
 		}
-		return nil, types.NewOpenAIError(errors.New("Vertex AI TTS response did not contain audio data"), types.ErrorCodeEmptyResponse, http.StatusInternalServerError)
+		finishReason := "unknown"
+		for _, candidate := range geminiResponse.Candidates {
+			if candidate.FinishReason != nil && *candidate.FinishReason != "" {
+				finishReason = *candidate.FinishReason
+				break
+			}
+		}
+		return nil, types.NewOpenAIError(errors.New(i18n.T(c, i18n.MsgTTSNoAudio, map[string]any{"Reason": finishReason})), types.ErrorCodeEmptyResponse, http.StatusInternalServerError)
 	}
 
 	normalizedMIME := strings.ToLower(strings.TrimSpace(mimeType))
