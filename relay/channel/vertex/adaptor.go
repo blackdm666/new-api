@@ -1,7 +1,6 @@
 package vertex
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -130,75 +129,12 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 	if a.RequestMode != RequestModeGemini {
 		return nil, errors.New("Vertex AI audio speech requires a Gemini TTS model")
 	}
-	if info.IsStream || request.StreamFormat == "sse" {
-		return nil, errors.New("Vertex AI audio speech streaming is not supported")
-	}
-
-	input := strings.TrimSpace(request.Input)
-	if input == "" {
-		return nil, errors.New("input is required")
-	}
-	voice := strings.TrimSpace(request.Voice)
-	if voice == "" {
-		return nil, errors.New("voice is required")
-	}
-
-	responseFormat := strings.ToLower(strings.TrimSpace(request.ResponseFormat))
-	if responseFormat == "" {
-		responseFormat = "wav"
-	}
-	if responseFormat != "pcm" && responseFormat != "wav" {
-		return nil, fmt.Errorf("Vertex AI audio speech supports response_format pcm or wav, got %q", responseFormat)
+	body, responseFormat, err := gemini.ConvertSpeechRequest(c, info, request)
+	if err != nil {
+		return nil, err
 	}
 	a.AudioResponseFormat = responseFormat
-
-	instructions := strings.TrimSpace(request.Instructions)
-	if request.Speed != nil {
-		if *request.Speed < 0.25 || *request.Speed > 4 {
-			return nil, fmt.Errorf("speed must be between 0.25 and 4, got %g", *request.Speed)
-		}
-		if *request.Speed != 1 {
-			speedInstruction := fmt.Sprintf("Speak at %gx normal speed", *request.Speed)
-			if instructions == "" {
-				instructions = speedInstruction
-			} else {
-				instructions += ". " + speedInstruction
-			}
-		}
-	}
-
-	prompt := input
-	if instructions != "" {
-		prompt = instructions + ": " + input
-	}
-	if len([]byte(prompt)) > 8000 {
-		return nil, errors.New("Vertex AI audio speech input and instructions must not exceed 8000 bytes")
-	}
-
-	speechConfig, err := common.Marshal(VertexSpeechConfig{
-		VoiceConfig: VertexVoiceConfig{
-			PrebuiltVoiceConfig: VertexPrebuiltVoiceConfig{VoiceName: voice},
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal Vertex AI speech config: %w", err)
-	}
-
-	vertexRequest := dto.GeminiChatRequest{
-		Contents: []dto.GeminiChatContent{{
-			Role:  "user",
-			Parts: []dto.GeminiPart{{Text: prompt}},
-		}},
-		GenerationConfig: dto.GeminiChatGenerationConfig{
-			ResponseModalities: []string{"AUDIO"},
-			SpeechConfig:       speechConfig,
-		},
-	}
-	jsonData, err := common.Marshal(vertexRequest)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal Vertex AI audio speech request: %w", err)
-	}
-	return bytes.NewReader(jsonData), nil
+	return body, nil
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
@@ -316,6 +252,11 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
+	if a.RequestMode == RequestModeGemini {
+		if err := gemini.RejectTTSModelChat(c, info); err != nil {
+			return nil, err
+		}
+	}
 	if a.RequestMode == RequestModeGemini && strings.HasPrefix(info.UpstreamModelName, "imagen") {
 		prompt := ""
 		for _, m := range request.Messages {
@@ -426,7 +367,7 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		if a.RequestMode != RequestModeGemini {
 			return nil, types.NewOpenAIError(errors.New("Vertex AI audio speech requires a Gemini TTS model"), types.ErrorCodeBadResponse, http.StatusBadRequest)
 		}
-		return handleVertexTTSResponse(c, resp, info, a.AudioResponseFormat)
+		return gemini.SpeechHandler(c, resp, info, a.AudioResponseFormat)
 	}
 
 	claudeAdaptor := claude.Adaptor{}

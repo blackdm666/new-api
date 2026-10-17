@@ -188,6 +188,7 @@ require (
 	github.com/aliyun/aliyun-oss-go-sdk v3.0.2+incompatible
 	github.com/aws/aws-sdk-go-v2/config v1.32.16
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.99.1
+	github.com/braheezy/shine-mp3 v0.2.0
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.73
 )
 

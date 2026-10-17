@@ -20,6 +20,7 @@ Transitive dependencies should be audited before a final external release.
 | backend  | production  | Go        | `github.com/aws/aws-sdk-go-v2/credentials`            | `v1.19.10`                           | Apache-2.0                                         |
 | backend  | production  | Go        | `github.com/aws/aws-sdk-go-v2/service/bedrockruntime` | `v1.50.4`                            | Apache-2.0                                         |
 | backend  | production  | Go        | `github.com/aws/smithy-go`                            | `v1.24.2`                            | Apache-2.0                                         |
+| backend  | production  | Go        | `github.com/braheezy/shine-mp3`                       | `v0.2.0`                             | LGPL-2.0                                           |
 | backend  | production  | Go        | `github.com/bytedance/gopkg`                          | `v0.1.3`                             | Apache-2.0                                         |
 | backend  | production  | Go        | `github.com/gin-contrib/cors`                         | `v1.7.2`                             | MIT                                                |
 | backend  | production  | Go        | `github.com/gin-contrib/gzip`                         | `v0.0.6`                             | MIT                                                |
@@ -274,6 +275,17 @@ INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
 LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
 OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
+
+### LGPL-2.0
+
+GNU Library General Public License, Version 2, June 1991. The full license
+text is available at:
+https://www.gnu.org/licenses/old-licenses/lgpl-2.0.html
+
+The LGPL-2.0 component is statically linked into the Go binary. The complete
+corresponding source of this project and of the component is published, so
+recipients can modify the component and relink the binary as the license
+requires.
 
 ### MIT
 

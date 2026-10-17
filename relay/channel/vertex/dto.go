@@ -23,18 +23,6 @@ type VertexAIClaudeRequest struct {
 	//Metadata         json.RawMessage     `json:"metadata,omitempty"`
 }
 
-type VertexSpeechConfig struct {
-	VoiceConfig VertexVoiceConfig `json:"voiceConfig"`
-}
-
-type VertexVoiceConfig struct {
-	PrebuiltVoiceConfig VertexPrebuiltVoiceConfig `json:"prebuiltVoiceConfig"`
-}
-
-type VertexPrebuiltVoiceConfig struct {
-	VoiceName string `json:"voiceName"`
-}
-
 func copyRequest(req *dto.ClaudeRequest, version string) *VertexAIClaudeRequest {
 	return &VertexAIClaudeRequest{
 		AnthropicVersion: version,

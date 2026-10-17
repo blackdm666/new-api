@@ -125,7 +125,7 @@ func TestConvertAudioSpeechRequestToVertexGeminiTTS(t *testing.T) {
 	body, err := adaptor.ConvertAudioRequest(nil, info, dto.AudioRequest{
 		Model:        "gemini-2.5-flash-tts",
 		Input:        "Hello from NewAPI.",
-		Voice:        "Kore",
+		Voice:        "kore",
 		Instructions: "Speak warmly",
 		Speed:        &speed,
 	})
@@ -141,19 +141,6 @@ func TestConvertAudioSpeechRequestToVertexGeminiTTS(t *testing.T) {
 	assert.Equal(t, "Speak warmly. Speak at 1.25x normal speed: Hello from NewAPI.", converted.Contents[0].Parts[0].Text)
 	assert.Equal(t, []string{"AUDIO"}, converted.GenerationConfig.ResponseModalities)
 	assert.JSONEq(t, `{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Kore"}}}`, string(converted.GenerationConfig.SpeechConfig))
-}
-
-func TestConvertAudioSpeechRequestRejectsUnsupportedFormat(t *testing.T) {
-	adaptor := &Adaptor{RequestMode: RequestModeGemini}
-	info := &relaycommon.RelayInfo{RelayMode: relayconstant.RelayModeAudioSpeech}
-
-	_, err := adaptor.ConvertAudioRequest(nil, info, dto.AudioRequest{
-		Model:          "gemini-2.5-flash-tts",
-		Input:          "Hello",
-		Voice:          "Kore",
-		ResponseFormat: "mp3",
-	})
-	require.EqualError(t, err, `Vertex AI audio speech supports response_format pcm or wav, got "mp3"`)
 }
 
 func TestVertexAudioSpeechUsesV1Beta1GenerateContentURL(t *testing.T) {

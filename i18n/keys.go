@@ -23,6 +23,16 @@ const (
 	MsgRateLimitTotalReached              = "rate_limit.total_reached"
 	MsgOmniReferenceVideoDurationExceeded = "video.omni.reference_duration_exceeded"
 
+	MsgTTSResponseFormatUnsupported = "tts.response_format_unsupported"
+	MsgTTSInputRequired             = "tts.input_required"
+	MsgTTSInputTooLong              = "tts.input_too_long"
+	MsgTTSVoiceRequired             = "tts.voice_required"
+	MsgTTSVoiceUnsupported          = "tts.voice_unsupported"
+	MsgTTSSpeedOutOfRange           = "tts.speed_out_of_range"
+	MsgTTSStreamUnsupported         = "tts.stream_unsupported"
+	MsgTTSChatEndpointUnsupported   = "tts.chat_endpoint_unsupported"
+	MsgTTSNoAudio                   = "tts.no_audio"
+
 	MsgDistributorInvalidRequest               = "distributor.invalid_request"
 	MsgDistributorInvalidChannelId             = "distributor.invalid_channel_id"
 	MsgDistributorChannelDisabled              = "distributor.channel_disabled"
