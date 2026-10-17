@@ -53,6 +53,7 @@ type Adaptor struct {
 	RequestMode         int
 	AccountCredentials  Credentials
 	AudioResponseFormat string
+	Transcription       *gemini.Transcription
 }
 
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
@@ -123,11 +124,16 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 	if info == nil {
 		return nil, errors.New("relay info is nil")
 	}
-	if info.RelayMode != constant.RelayModeAudioSpeech {
-		return nil, errors.New("Vertex AI only supports audio speech requests")
-	}
 	if a.RequestMode != RequestModeGemini {
-		return nil, errors.New("Vertex AI audio speech requires a Gemini TTS model")
+		return nil, errors.New("Vertex AI audio requires a Gemini model")
+	}
+	if info.RelayMode != constant.RelayModeAudioSpeech {
+		body, transcription, err := gemini.ConvertTranscriptionRequest(c, info, request)
+		if err != nil {
+			return nil, err
+		}
+		a.Transcription = transcription
+		return body, nil
 	}
 	body, responseFormat, err := gemini.ConvertSpeechRequest(c, info, request)
 	if err != nil {
@@ -232,6 +238,10 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, req)
+	if info.RelayMode == constant.RelayModeAudioTranscription {
+		// The client sent multipart; the upstream request is JSON.
+		req.Set("Content-Type", "application/json")
+	}
 	if info.ChannelOtherSettings.VertexKeyType != dto.VertexKeyTypeAPIKey {
 		accessToken, err := getAccessToken(a, info)
 		if err != nil {
@@ -368,6 +378,9 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 			return nil, types.NewOpenAIError(errors.New("Vertex AI audio speech requires a Gemini TTS model"), types.ErrorCodeBadResponse, http.StatusBadRequest)
 		}
 		return gemini.SpeechHandler(c, resp, info, a.AudioResponseFormat)
+	}
+	if info.RelayMode == constant.RelayModeAudioTranscription {
+		return gemini.TranscriptionHandler(c, resp, info, a.Transcription)
 	}
 
 	claudeAdaptor := claude.Adaptor{}
