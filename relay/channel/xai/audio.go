@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -33,7 +34,28 @@ const (
 
 	xaiDefaultVoice    = "eve"
 	xaiDefaultLanguage = "auto"
+
+	xaiTTSModel = "grok-tts"
+	xaiSTTModel = "grok-stt"
 )
+
+// rejectVoiceModelChat 是用对话 / Responses 接口调 grok-tts、grok-stt 时的客户端错误：
+// 上游只认 /v1/tts、/v1/stt，对话请求只会得到「没有账号支持该模型」的 404。其他模型返回 nil。
+func rejectVoiceModelChat(c *gin.Context, info *relaycommon.RelayInfo) error {
+	if info == nil {
+		return nil
+	}
+	var key string
+	switch info.UpstreamModelName {
+	case xaiTTSModel:
+		key = i18n.MsgTTSChatEndpointUnsupported
+	case xaiSTTModel:
+		key = i18n.MsgSTTChatEndpointUnsupported
+	default:
+		return nil
+	}
+	return types.NewErrorWithStatusCode(errors.New(i18n.T(c, key, map[string]any{"Model": info.OriginModelName})), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+}
 
 // OpenAI response_format → xAI output_format.codec；opus/aac/flac xAI 不支持。
 var xaiTTSCodecs = map[string]string{

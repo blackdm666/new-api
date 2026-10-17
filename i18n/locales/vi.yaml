@@ -202,4 +202,5 @@ tts.voice_unsupported: "{{.Model}} không hỗ trợ giọng \"{{.Voice}}\"; kh�
 tts.speed_out_of_range: "speed phải nằm trong khoảng 0.25 đến 4, hiện là {{.Speed}}."
 tts.stream_unsupported: "{{.Model}} không hỗ trợ phát trực tuyến. Hãy bỏ stream hoặc stream_format=sse; toàn bộ âm thanh được trả về trong một phản hồi."
 tts.chat_endpoint_unsupported: "{{.Model}} là mô hình chuyển văn bản thành giọng nói, không thể gọi qua endpoint chat. Hãy dùng POST /v1/audio/speech (tương thích OpenAI)."
+stt.chat_endpoint_unsupported: "{{.Model}} là mô hình chuyển giọng nói thành văn bản, không thể gọi qua endpoint chat. Hãy dùng POST /v1/audio/transcriptions (tương thích OpenAI)."
 tts.no_audio: "Mô hình không trả về âm thanh (finishReason={{.Reason}}). Thường chỉ là tạm thời, hãy thử lại. Nếu lặp lại, hãy kiểm tra văn bản có quá ngắn hoặc chỉ gồm ký hiệu không."

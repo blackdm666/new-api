@@ -202,4 +202,5 @@ tts.voice_unsupported: "{{.Model}} не поддерживает голос \"{{
 tts.speed_out_of_range: "speed должен быть от 0.25 до 4, получено {{.Speed}}."
 tts.stream_unsupported: "{{.Model}} не поддерживает потоковый вывод. Уберите stream или stream_format=sse — аудио возвращается целиком одним ответом."
 tts.chat_endpoint_unsupported: "{{.Model}} — модель синтеза речи, её нельзя вызывать через чат-эндпоинт. Используйте POST /v1/audio/speech (совместим с OpenAI)."
+stt.chat_endpoint_unsupported: "{{.Model}} — модель распознавания речи, её нельзя вызывать через чат-эндпоинт. Используйте POST /v1/audio/transcriptions (совместим с OpenAI)."
 tts.no_audio: "Модель не вернула аудио (finishReason={{.Reason}}). Обычно это временно, повторите запрос. Если ошибка повторяется, проверьте, что текст не слишком короткий и не состоит только из символов."
