@@ -21,6 +21,7 @@ import (
 )
 
 type Adaptor struct {
+	AudioResponseFormat string
 }
 
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
@@ -59,8 +60,15 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 }
 
 func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
-	//TODO implement me
-	return nil, errors.New("not implemented")
+	if info.RelayMode != constant.RelayModeAudioSpeech {
+		return nil, errors.New("not implemented")
+	}
+	body, responseFormat, err := ConvertSpeechRequest(c, info, request)
+	if err != nil {
+		return nil, err
+	}
+	a.AudioResponseFormat = responseFormat
+	return body, nil
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
@@ -179,6 +187,9 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
+	if err := RejectTTSModelChat(c, info); err != nil {
+		return nil, err
+	}
 	result, err := service.ConvertRequest(c, info, types.RelayFormatGemini, request)
 	if err != nil {
 		return nil, err
@@ -251,6 +262,10 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+	if info.RelayMode == constant.RelayModeAudioSpeech {
+		return SpeechHandler(c, resp, info, a.AudioResponseFormat)
+	}
+
 	if info.RelayMode == constant.RelayModeResponses {
 		if info.IsStream {
 			return GeminiResponsesStreamHandler(c, info, resp)

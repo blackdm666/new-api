@@ -1,4 +1,4 @@
-package vertex
+package gemini
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -27,14 +28,14 @@ import (
 )
 
 const (
-	vertexTTSSampleRate    = 24000
-	vertexTTSChannels      = 1
-	vertexTTSBitsPerSample = 16
+	ttsSampleRate    = 24000
+	ttsChannels      = 1
+	ttsBitsPerSample = 16
 )
 
-// geminiTTSVoices are the Gemini-TTS prebuilt voices; Vertex AI rejects any
-// other voice name with "No matching speaker voice found".
-var geminiTTSVoices = []string{
+// ttsVoices are the Gemini-TTS prebuilt voices; Gemini rejects any other
+// voice name with "No matching speaker voice found".
+var ttsVoices = []string{
 	"Achernar", "Achird", "Algenib", "Algieba", "Alnilam", "Aoede", "Autonoe", "Callirrhoe", "Charon", "Despina",
 	"Enceladus", "Erinome", "Fenrir", "Gacrux", "Iapetus", "Kore", "Laomedeia", "Leda", "Orus", "Puck",
 	"Pulcherrima", "Rasalgethi", "Sadachbia", "Sadaltager", "Schedar", "Sulafat", "Umbriel", "Vindemiatrix", "Zephyr", "Zubenelgenubi",
@@ -46,7 +47,98 @@ func invalidTTSRequest(c *gin.Context, key string, args map[string]any) error {
 	return types.NewErrorWithStatusCode(errors.New(i18n.T(c, key, args)), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 }
 
-func handleVertexTTSResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, responseFormat string) (*dto.Usage, *types.NewAPIError) {
+// ConvertSpeechRequest turns an OpenAI /v1/audio/speech request into a Gemini
+// TTS generateContent request. It returns the body and the normalized
+// response_format that SpeechHandler must produce.
+func ConvertSpeechRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, string, error) {
+	if info.IsStream || request.StreamFormat == "sse" {
+		return nil, "", invalidTTSRequest(c, i18n.MsgTTSStreamUnsupported, map[string]any{"Model": info.OriginModelName})
+	}
+
+	input := strings.TrimSpace(request.Input)
+	if input == "" {
+		return nil, "", invalidTTSRequest(c, i18n.MsgTTSInputRequired, nil)
+	}
+	voice := strings.TrimSpace(request.Voice)
+	if voice == "" {
+		return nil, "", invalidTTSRequest(c, i18n.MsgTTSVoiceRequired, map[string]any{"Voices": strings.Join(ttsVoices, ", ")})
+	}
+	voiceIndex := slices.IndexFunc(ttsVoices, func(name string) bool { return strings.EqualFold(name, voice) })
+	if voiceIndex < 0 {
+		return nil, "", invalidTTSRequest(c, i18n.MsgTTSVoiceUnsupported, map[string]any{"Model": info.OriginModelName, "Voice": voice, "Voices": strings.Join(ttsVoices, ", ")})
+	}
+	voice = ttsVoices[voiceIndex]
+
+	responseFormat := strings.ToLower(strings.TrimSpace(request.ResponseFormat))
+	if responseFormat == "" {
+		responseFormat = "wav"
+	}
+	if responseFormat != "mp3" && responseFormat != "wav" && responseFormat != "flac" && responseFormat != "pcm" {
+		return nil, "", invalidTTSRequest(c, i18n.MsgTTSResponseFormatUnsupported, map[string]any{"Model": info.OriginModelName, "Format": responseFormat})
+	}
+
+	instructions := strings.TrimSpace(request.Instructions)
+	if request.Speed != nil {
+		if *request.Speed < 0.25 || *request.Speed > 4 {
+			return nil, "", invalidTTSRequest(c, i18n.MsgTTSSpeedOutOfRange, map[string]any{"Speed": fmt.Sprintf("%g", *request.Speed)})
+		}
+		if *request.Speed != 1 {
+			speedInstruction := fmt.Sprintf("Speak at %gx normal speed", *request.Speed)
+			if instructions == "" {
+				instructions = speedInstruction
+			} else {
+				instructions += ". " + speedInstruction
+			}
+		}
+	}
+
+	prompt := input
+	if instructions != "" {
+		prompt = instructions + ": " + input
+	}
+	if len(prompt) > 8000 {
+		return nil, "", invalidTTSRequest(c, i18n.MsgTTSInputTooLong, map[string]any{"Bytes": len(prompt)})
+	}
+
+	speechConfig, err := common.Marshal(map[string]any{
+		"voiceConfig": map[string]any{"prebuiltVoiceConfig": map[string]any{"voiceName": voice}},
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to marshal Gemini speech config: %w", err)
+	}
+
+	geminiRequest := dto.GeminiChatRequest{
+		Contents: []dto.GeminiChatContent{{
+			Role:  "user",
+			Parts: []dto.GeminiPart{{Text: prompt}},
+		}},
+		GenerationConfig: dto.GeminiChatGenerationConfig{
+			ResponseModalities: []string{"AUDIO"},
+			SpeechConfig:       speechConfig,
+		},
+	}
+	jsonData, err := common.Marshal(geminiRequest)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to marshal Gemini audio speech request: %w", err)
+	}
+	return bytes.NewReader(jsonData), responseFormat, nil
+}
+
+// RejectTTSModelChat is the client error for a chat request sent to a Gemini
+// TTS model, which upstream only answers with "invalid argument"; nil for any
+// other model.
+func RejectTTSModelChat(c *gin.Context, info *relaycommon.RelayInfo) error {
+	if !strings.Contains(info.UpstreamModelName, "-tts") {
+		return nil
+	}
+	return invalidTTSRequest(c, i18n.MsgTTSChatEndpointUnsupported, map[string]any{"Model": info.OriginModelName})
+}
+
+// SpeechHandler answers an OpenAI /v1/audio/speech request from a Gemini TTS
+// generateContent response: Gemini returns raw 24 kHz 16-bit mono PCM, which is
+// sent as-is or encoded into responseFormat. Audio tokens come from usage
+// metadata, or from the PCM length when upstream reports none.
+func SpeechHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, responseFormat string) (*dto.Usage, *types.NewAPIError) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -55,7 +147,7 @@ func handleVertexTTSResponse(c *gin.Context, resp *http.Response, info *relaycom
 
 	var geminiResponse dto.GeminiChatResponse
 	if err = common.Unmarshal(responseBody, &geminiResponse); err != nil {
-		return nil, types.NewOpenAIError(fmt.Errorf("failed to decode Vertex AI TTS response: %w", err), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		return nil, types.NewOpenAIError(fmt.Errorf("failed to decode Gemini TTS response: %w", err), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
 	var pcm []byte
@@ -67,7 +159,7 @@ func handleVertexTTSResponse(c *gin.Context, resp *http.Response, info *relaycom
 			}
 			chunk, decodeErr := base64.StdEncoding.DecodeString(part.InlineData.Data)
 			if decodeErr != nil {
-				return nil, types.NewOpenAIError(fmt.Errorf("failed to decode Vertex AI TTS audio: %w", decodeErr), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+				return nil, types.NewOpenAIError(fmt.Errorf("failed to decode Gemini TTS audio: %w", decodeErr), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 			}
 			if mimeType == "" {
 				mimeType = part.InlineData.MimeType
@@ -79,7 +171,7 @@ func handleVertexTTSResponse(c *gin.Context, resp *http.Response, info *relaycom
 		if geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
 			reason := *geminiResponse.PromptFeedback.BlockReason
 			common.SetContextKey(c, rootconstant.ContextKeyAdminRejectReason, "gemini_block_reason="+reason)
-			return nil, types.NewOpenAIError(errors.New("request blocked by Vertex AI: "+reason), types.ErrorCodePromptBlocked, http.StatusBadRequest)
+			return nil, types.NewOpenAIError(errors.New("request blocked by Gemini: "+reason), types.ErrorCodePromptBlocked, http.StatusBadRequest)
 		}
 		finishReason := "unknown"
 		for _, candidate := range geminiResponse.Candidates {
@@ -94,7 +186,7 @@ func handleVertexTTSResponse(c *gin.Context, resp *http.Response, info *relaycom
 	normalizedMIME := strings.ToLower(strings.TrimSpace(mimeType))
 	isPCM := normalizedMIME == "" || strings.Contains(normalizedMIME, "l16") || strings.Contains(normalizedMIME, "pcm")
 	if !isPCM && !(responseFormat == "wav" && strings.Contains(normalizedMIME, "wav")) {
-		return nil, types.NewOpenAIError(fmt.Errorf("expected PCM audio from Vertex AI TTS, got %q", mimeType), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		return nil, types.NewOpenAIError(fmt.Errorf("expected PCM audio from Gemini TTS, got %q", mimeType), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
 	contentType := "audio/pcm"
@@ -102,15 +194,15 @@ func handleVertexTTSResponse(c *gin.Context, resp *http.Response, info *relaycom
 	switch {
 	case responseFormat == "wav" && isPCM:
 		contentType = "audio/wav"
-		audioData, err = wrapVertexPCMAsWAV(pcm)
+		audioData, err = wrapPCMAsWAV(pcm)
 	case responseFormat == "wav":
 		contentType = "audio/wav"
 	case responseFormat == "mp3":
 		contentType = "audio/mpeg"
-		audioData, err = encodeVertexPCMAsMP3(pcm)
+		audioData, err = encodePCMAsMP3(pcm)
 	case responseFormat == "flac":
 		contentType = "audio/flac"
-		audioData, err = encodeVertexPCMAsFLAC(pcm)
+		audioData, err = encodePCMAsFLAC(pcm)
 	}
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -127,7 +219,7 @@ func handleVertexTTSResponse(c *gin.Context, resp *http.Response, info *relaycom
 		if usage.CompletionTokens > 0 {
 			usage.CompletionTokenDetails.AudioTokens = usage.CompletionTokens
 		} else {
-			bytesPerSecond := vertexTTSSampleRate * vertexTTSChannels * vertexTTSBitsPerSample / 8
+			bytesPerSecond := ttsSampleRate * ttsChannels * ttsBitsPerSample / 8
 			duration := float64(len(pcm)) / float64(bytesPerSecond)
 			audioTokens := common.QuotaRound(math.Ceil(duration) / 60 * 1000)
 			usage.CompletionTokens = audioTokens
@@ -142,9 +234,9 @@ func handleVertexTTSResponse(c *gin.Context, resp *http.Response, info *relaycom
 	return usage, nil
 }
 
-func wrapVertexPCMAsWAV(pcm []byte) ([]byte, error) {
+func wrapPCMAsWAV(pcm []byte) ([]byte, error) {
 	if uint64(len(pcm)) > uint64(^uint32(0))-36 {
-		return nil, errors.New("Vertex AI TTS audio is too large for a WAV container")
+		return nil, errors.New("Gemini TTS audio is too large for a WAV container")
 	}
 
 	wav := make([]byte, 44+len(pcm))
@@ -154,22 +246,22 @@ func wrapVertexPCMAsWAV(pcm []byte) ([]byte, error) {
 	copy(wav[12:16], "fmt ")
 	binary.LittleEndian.PutUint32(wav[16:20], 16)
 	binary.LittleEndian.PutUint16(wav[20:22], 1)
-	binary.LittleEndian.PutUint16(wav[22:24], vertexTTSChannels)
-	binary.LittleEndian.PutUint32(wav[24:28], vertexTTSSampleRate)
-	bytesPerSecond := vertexTTSSampleRate * vertexTTSChannels * vertexTTSBitsPerSample / 8
+	binary.LittleEndian.PutUint16(wav[22:24], ttsChannels)
+	binary.LittleEndian.PutUint32(wav[24:28], ttsSampleRate)
+	bytesPerSecond := ttsSampleRate * ttsChannels * ttsBitsPerSample / 8
 	binary.LittleEndian.PutUint32(wav[28:32], uint32(bytesPerSecond))
-	binary.LittleEndian.PutUint16(wav[32:34], vertexTTSChannels*vertexTTSBitsPerSample/8)
-	binary.LittleEndian.PutUint16(wav[34:36], vertexTTSBitsPerSample)
+	binary.LittleEndian.PutUint16(wav[32:34], ttsChannels*ttsBitsPerSample/8)
+	binary.LittleEndian.PutUint16(wav[34:36], ttsBitsPerSample)
 	copy(wav[36:40], "data")
 	binary.LittleEndian.PutUint32(wav[40:44], uint32(len(pcm)))
 	copy(wav[44:], pcm)
 	return wav, nil
 }
 
-// encodeVertexPCMAsMP3 encodes the PCM as constant 128 kbps MPEG-2 Layer III.
+// encodePCMAsMP3 encodes the PCM as constant 128 kbps MPEG-2 Layer III.
 // The encoder only takes whole 576-sample frames, so the tail is padded with
 // silence, plus two extra frames to flush the ~44 ms encoder/decoder delay.
-func encodeVertexPCMAsMP3(pcm []byte) ([]byte, error) {
+func encodePCMAsMP3(pcm []byte) ([]byte, error) {
 	const frameSamples = 576
 	sampleCount := len(pcm) / 2
 	samples := make([]int16, (sampleCount/frameSamples+3)*frameSamples)
@@ -179,13 +271,13 @@ func encodeVertexPCMAsMP3(pcm []byte) ([]byte, error) {
 
 	var buf bytes.Buffer
 	buf.Grow(len(samples) * 2 / 3) // 128 kbps at 24 kHz is 2/3 byte per sample
-	if err := mp3.NewEncoder(vertexTTSSampleRate, vertexTTSChannels).Write(&buf, samples); err != nil {
-		return nil, fmt.Errorf("failed to encode Vertex AI TTS audio as MP3: %w", err)
+	if err := mp3.NewEncoder(ttsSampleRate, ttsChannels).Write(&buf, samples); err != nil {
+		return nil, fmt.Errorf("failed to encode Gemini TTS audio as MP3: %w", err)
 	}
 	return buf.Bytes(), nil
 }
 
-func encodeVertexPCMAsFLAC(pcm []byte) ([]byte, error) {
+func encodePCMAsFLAC(pcm []byte) ([]byte, error) {
 	const blockSize = 4096
 	sampleCount := len(pcm) / 2
 
@@ -193,13 +285,13 @@ func encodeVertexPCMAsFLAC(pcm []byte) ([]byte, error) {
 	encoder, err := flac.NewEncoder(&buf, &meta.StreamInfo{
 		BlockSizeMin:  blockSize,
 		BlockSizeMax:  blockSize,
-		SampleRate:    vertexTTSSampleRate,
-		NChannels:     vertexTTSChannels,
-		BitsPerSample: vertexTTSBitsPerSample,
+		SampleRate:    ttsSampleRate,
+		NChannels:     ttsChannels,
+		BitsPerSample: ttsBitsPerSample,
 		NSamples:      uint64(sampleCount),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to encode Vertex AI TTS audio as FLAC: %w", err)
+		return nil, fmt.Errorf("failed to encode Gemini TTS audio as FLAC: %w", err)
 	}
 	for frameIndex, start := 0, 0; start < sampleCount; frameIndex, start = frameIndex+1, start+blockSize {
 		samples := make([]int32, min(blockSize, sampleCount-start))
@@ -210,9 +302,9 @@ func encodeVertexPCMAsFLAC(pcm []byte) ([]byte, error) {
 			Header: frame.Header{
 				HasFixedBlockSize: true,
 				BlockSize:         uint16(len(samples)),
-				SampleRate:        vertexTTSSampleRate,
+				SampleRate:        ttsSampleRate,
 				Channels:          frame.ChannelsMono,
-				BitsPerSample:     vertexTTSBitsPerSample,
+				BitsPerSample:     ttsBitsPerSample,
 				Num:               uint64(frameIndex),
 			},
 			Subframes: []*frame.Subframe{{
@@ -222,11 +314,11 @@ func encodeVertexPCMAsFLAC(pcm []byte) ([]byte, error) {
 			}},
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to encode Vertex AI TTS audio as FLAC: %w", err)
+			return nil, fmt.Errorf("failed to encode Gemini TTS audio as FLAC: %w", err)
 		}
 	}
 	if err = encoder.Close(); err != nil {
-		return nil, fmt.Errorf("failed to encode Vertex AI TTS audio as FLAC: %w", err)
+		return nil, fmt.Errorf("failed to encode Gemini TTS audio as FLAC: %w", err)
 	}
 	return buf.Bytes(), nil
 }
