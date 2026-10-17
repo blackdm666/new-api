@@ -203,4 +203,5 @@ tts.speed_out_of_range: "speed は 0.25～4 の範囲で指定してください
 tts.stream_unsupported: "{{.Model}} はストリーミング出力に対応していません。stream または stream_format=sse を外してください。音声は一度にまとめて返されます。"
 tts.chat_endpoint_unsupported: "{{.Model}} は音声合成モデルのため、チャット API では呼び出せません。POST /v1/audio/speech（OpenAI 互換）を使ってください。"
 stt.chat_endpoint_unsupported: "{{.Model}} は音声認識モデルのため、チャット API では呼び出せません。POST /v1/audio/transcriptions（OpenAI 互換）を使ってください。"
+realtime.endpoint_unsupported: "{{.Model}} はリアルタイム音声モデルのため、WebSocket エンドポイント /v1/realtime からのみ利用できます。"
 tts.no_audio: "モデルが音声を返しませんでした（finishReason={{.Reason}}）。通常は一時的なものなので再試行してください。繰り返し発生する場合は、テキストが短すぎないか、記号だけになっていないか確認してください。"

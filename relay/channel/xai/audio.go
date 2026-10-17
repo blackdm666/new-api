@@ -39,8 +39,9 @@ const (
 	xaiSTTModel = "grok-stt"
 )
 
-// rejectVoiceModelChat 是用对话 / Responses 接口调 grok-tts、grok-stt 时的客户端错误：
-// 上游只认 /v1/tts、/v1/stt，对话请求只会得到「没有账号支持该模型」的 404。其他模型返回 nil。
+// rejectVoiceModelChat 是用对话 / Responses 接口调 grok-tts、grok-stt、grok-voice-* 时的客户端错误：
+// 上游只认 /v1/tts、/v1/stt、/v1/realtime，对话请求只会得到「没有账号支持该模型」的 404。其他模型返回 nil。
+// grok-voice-* 按会话时长计价，也不能走 /v1/audio/*，否则会按字符或时长 token 套用实时价格。
 func rejectVoiceModelChat(c *gin.Context, info *relaycommon.RelayInfo) error {
 	if info == nil {
 		return nil
@@ -52,7 +53,10 @@ func rejectVoiceModelChat(c *gin.Context, info *relaycommon.RelayInfo) error {
 	case xaiSTTModel:
 		key = i18n.MsgSTTChatEndpointUnsupported
 	default:
-		return nil
+		if !isXAIRealtimeModel(info.UpstreamModelName) {
+			return nil
+		}
+		key = i18n.MsgRealtimeEndpointUnsupported
 	}
 	return types.NewErrorWithStatusCode(errors.New(i18n.T(c, key, map[string]any{"Model": info.OriginModelName})), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 }

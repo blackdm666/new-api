@@ -30,6 +30,9 @@ var ModelList = []string{
 	// voice models (OpenAI /v1/audio/speech and /v1/audio/transcriptions)
 	"grok-tts",
 	"grok-stt",
+	// realtime voice models (WebSocket /v1/realtime)
+	"grok-voice-latest",
+	"grok-voice-3.0",
 }
 
 var ChannelName = "xai"

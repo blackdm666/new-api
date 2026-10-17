@@ -88,6 +88,10 @@ func SetRelayRouter(router *gin.Engine) {
 		wsRouter.GET("/realtime", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatOpenAIRealtime)
 		})
+		// xAI streaming TTS (wss://api.x.ai/v1/tts); shares the realtime WebSocket relay.
+		wsRouter.GET("/tts", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIRealtime)
+		})
 	}
 	{
 		//http router

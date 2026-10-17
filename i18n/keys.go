@@ -32,6 +32,7 @@ const (
 	MsgTTSStreamUnsupported         = "tts.stream_unsupported"
 	MsgTTSChatEndpointUnsupported   = "tts.chat_endpoint_unsupported"
 	MsgSTTChatEndpointUnsupported   = "stt.chat_endpoint_unsupported"
+	MsgRealtimeEndpointUnsupported  = "realtime.endpoint_unsupported"
 	MsgTTSNoAudio                   = "tts.no_audio"
 
 	MsgDistributorInvalidRequest               = "distributor.invalid_request"

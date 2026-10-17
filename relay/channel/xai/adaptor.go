@@ -42,6 +42,9 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 }
 
 func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
+	if isXAIRealtimeModel(info.UpstreamModelName) {
+		return nil, rejectVoiceModelChat(c, info)
+	}
 	switch info.RelayMode {
 	case constant.RelayModeAudioSpeech:
 		payload, codec, sampleRate, err := buildXAITTSRequest(c, request)
@@ -87,6 +90,8 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	requestPath := info.RequestURLPath
 	switch info.RelayMode {
+	case constant.RelayModeRealtime, constant.RelayModeAudioSpeechStream:
+		return xaiWebSocketURL(info)
 	case constant.RelayModeAudioSpeech:
 		requestPath = xaiTTSPath
 	case constant.RelayModeAudioTranscription:
@@ -156,14 +161,27 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
-	if info.RelayMode == constant.RelayModeAudioTranscription {
+	switch info.RelayMode {
+	case constant.RelayModeAudioTranscription:
 		return channel.DoFormRequest(a, c, info, requestBody)
+	case constant.RelayModeRealtime:
+		if _, err := xaiWebSocketURL(info); err != nil {
+			return nil, err
+		}
+		if err := reserveXAIRealtimeStart(info); err != nil {
+			return nil, err
+		}
+		return channel.DoWssRequest(a, c, info, requestBody)
+	case constant.RelayModeAudioSpeechStream:
+		return channel.DoWssRequest(a, c, info, requestBody)
 	}
 	return channel.DoApiRequest(a, c, info, requestBody)
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
 	switch info.RelayMode {
+	case constant.RelayModeRealtime, constant.RelayModeAudioSpeechStream:
+		usage, err = xaiWebSocketHandler(c, info)
 	case constant.RelayModeImagesGenerations, constant.RelayModeImagesEdits:
 		usage, err = openai.OpenaiImageHandler(c, info, resp)
 	case constant.RelayModeAudioSpeech:
