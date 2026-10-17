@@ -97,7 +97,7 @@ func redactChannelBalanceQuerySecret(channel *model.Channel) {
 	changed := false
 	if config.Auth != nil {
 		value := strings.TrimSpace(config.Auth.Value)
-		if value != "" && !strings.Contains(value, "{api_key}") {
+		if value != "" && !channelBalanceQueryTemplateValue(value) {
 			config.AuthConfigured = true
 			config.AuthMasked = maskChannelBalanceQuerySecret(value)
 			config.Auth.Value = ""
@@ -106,7 +106,7 @@ func redactChannelBalanceQuerySecret(channel *model.Channel) {
 	}
 	for index := range config.Headers {
 		value := strings.TrimSpace(config.Headers[index].Value)
-		if value == "" || strings.Contains(value, "{api_key}") {
+		if value == "" || channelBalanceQueryTemplateValue(value) {
 			continue
 		}
 		config.Headers[index].Configured = true
@@ -114,9 +114,22 @@ func redactChannelBalanceQuerySecret(channel *model.Channel) {
 		config.Headers[index].Value = ""
 		changed = true
 	}
+	if config.Login != nil {
+		config.Login.PasswordConfigured = config.Login.PasswordCiphertext != "" || config.Login.Password != ""
+		config.Login.Password = ""
+		config.Login.PasswordCiphertext = ""
+		changed = true
+	}
 	if changed {
 		channel.SetOtherSettings(settings)
 	}
+}
+
+// channelBalanceQueryTemplateValue reports whether a balance query credential
+// is only a placeholder template filled in at request time, and therefore not
+// a secret that needs redaction.
+func channelBalanceQueryTemplateValue(value string) bool {
+	return strings.Contains(value, "{api_key}") || strings.Contains(value, dto.ChannelBalanceLoginPlaceholder)
 }
 
 func restoreChannelBalanceQuerySecret(channel *model.Channel, origin *model.Channel, requestData map[string]any) error {
@@ -189,6 +202,20 @@ func restoreChannelBalanceQuerySecret(channel *model.Channel, origin *model.Chan
 		}
 		header.Configured = false
 		header.Masked = ""
+	}
+	if config.Login != nil {
+		var originLogin *dto.ChannelBalanceLoginConfig
+		if config.Login.Password == "" {
+			if err := loadOrigin(); err != nil {
+				return err
+			}
+			if originSettings.BalanceQuery != nil {
+				originLogin = originSettings.BalanceQuery.Login
+			}
+		}
+		if err := sealChannelBalanceLoginPassword(config.Login, originLogin); err != nil {
+			return err
+		}
 	}
 	config.AuthConfigured = false
 	config.AuthMasked = ""
@@ -653,7 +680,7 @@ func channelBalanceQueryToken(channel *model.Channel) (string, error) {
 		return "", errors.New("balance query access token is not configured")
 	}
 	token := strings.TrimSpace(config.Auth.Value)
-	if token == "" || strings.Contains(token, "{api_key}") {
+	if token == "" || channelBalanceQueryTemplateValue(token) {
 		return "", errors.New("balance query access token is not configured")
 	}
 	return token, nil
@@ -938,6 +965,13 @@ func AddChannel(c *gin.Context) {
 	if err := validateChannel(addChannelRequest.Channel, true); err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if addSettings := addChannelRequest.Channel.GetOtherSettings(); addSettings.BalanceQuery != nil && addSettings.BalanceQuery.Login != nil {
+		if err := sealChannelBalanceLoginPassword(addSettings.BalanceQuery.Login, nil); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		addChannelRequest.Channel.SetOtherSettings(addSettings)
 	}
 
 	addChannelRequest.Channel.CreatedTime = common.GetTimestamp()

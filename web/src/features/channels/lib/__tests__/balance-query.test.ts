@@ -11,6 +11,7 @@ import { describe, expect, test } from 'vitest'
 import {
   BALANCE_QUERY_MODE_OPTIONS,
   buildBalanceQueryPreviewURL,
+  createBalanceLoginConfig,
   createBalanceQueryConfig,
   DEFAULT_LOW_BALANCE_THRESHOLD,
   getEffectiveBalanceQueryPath,
@@ -167,6 +168,57 @@ describe('channel balance query configuration', () => {
     expect(stringifyBalanceQueryConfig({ mode: 'auto' })).toContain(
       '"mode": "auto"'
     )
+  })
+
+  test('validates a console sign-in and keeps a stored password write-only', () => {
+    const custom = createBalanceQueryConfig('custom')
+    custom.url = 'https://upstream.example/api/v1/user/wallet'
+    custom.auth = {
+      type: 'header',
+      name: 'Authorization',
+      value: 'Bearer {login_token}',
+    }
+    custom.response = { remaining_path: 'balance' }
+    custom.login = {
+      ...createBalanceLoginConfig(),
+      url: 'https://upstream.example/api/v1/auth/login',
+      username: ' balance-bot ',
+      password: ' pass with spaces ',
+    }
+    expect(validateBalanceQueryConfig(custom)).toBeNull()
+    const normalized = normalizeBalanceQueryConfig(custom)
+    expect(normalized.login?.username).toBe('balance-bot')
+    expect(normalized.login?.password).toBe(' pass with spaces ')
+
+    const redacted = {
+      ...custom,
+      login: { ...custom.login, password: '', password_configured: true },
+    }
+    expect(validateBalanceQueryConfig(redacted)).toBeNull()
+    expect(
+      validateBalanceQueryConfig({
+        ...redacted,
+        login: { ...redacted.login, password_configured: false },
+      })
+    ).toBe('Sign-in password is required')
+    expect(
+      validateBalanceQueryConfig({
+        ...custom,
+        login: { ...custom.login, url: 'http://upstream.example/login' },
+      })
+    ).toBe('Sign-in URL must be an absolute HTTPS URL')
+    expect(
+      validateBalanceQueryConfig({
+        ...custom,
+        auth: { type: 'header', name: 'Authorization', value: 'Bearer fixed' },
+      })
+    ).toContain('{login_token}')
+    expect(
+      validateBalanceQueryConfig({
+        ...custom,
+        login: { ...custom.login, body: '{"username":"{username}"}' },
+      })
+    ).toContain('{password}')
   })
 
   test('defaults unconfigured channels to disabled and validates automatic alerts', () => {

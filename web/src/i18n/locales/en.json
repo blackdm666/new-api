@@ -8803,6 +8803,23 @@
     "Referral program application": "Referral program application",
     "Highest tier reached": "Highest tier reached",
     "You are on the highest promoter tier. Future top-ups use the current tier rate.": "You are on the highest promoter tier. Future top-ups use the current tier rate.",
-    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer."
+    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.",
+    "Sign in before querying": "Sign in before querying",
+    "For upstreams whose balance endpoint accepts only a console sign-in token. Use a dedicated upstream account; the password is stored encrypted and never shown again.": "For upstreams whose balance endpoint accepts only a console sign-in token. Use a dedicated upstream account; the password is stored encrypted and never shown again.",
+    "Sign-in URL": "Sign-in URL",
+    "Sign-in username": "Sign-in username",
+    "Sign-in password": "Sign-in password",
+    "Configured; leave blank to keep the current password": "Configured; leave blank to keep the current password",
+    "Token JSON path": "Token JSON path",
+    "Where the sign-in response returns the token, such as token or data.token.": "Where the sign-in response returns the token, such as token or data.token.",
+    "Sign-in request body": "Sign-in request body",
+    "Sent as a JSON POST. {username} and {password} are inserted as JSON string content.": "Sent as a JSON POST. {username} and {password} are inserted as JSON string content.",
+    "Use {login_token} in the authentication value, a header, or the request body. The token is reused until it expires; a failed sign-in is retried after 10 minutes.": "Use {login_token} in the authentication value, a header, or the request body. The token is reused until it expires; a failed sign-in is retried after 10 minutes.",
+    "Sign-in URL must be an absolute HTTPS URL": "Sign-in URL must be an absolute HTTPS URL",
+    "Sign-in username is required": "Sign-in username is required",
+    "Sign-in password is required": "Sign-in password is required",
+    "Token JSON path is required": "Token JSON path is required",
+    "Sign-in request body must be valid JSON and contain {password}": "Sign-in request body must be valid JSON and contain {password}",
+    "Insert {login_token} into the authentication value, a header, or the request body": "Insert {login_token} into the authentication value, a header, or the request body"
   }
 }

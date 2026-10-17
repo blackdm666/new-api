@@ -265,6 +265,64 @@ describe('balance query editor dialog', () => {
     expect(screen.getByLabelText('Low balance threshold')).toHaveValue('10')
   })
 
+  test('signs in before a custom query and saves the password write-only', () => {
+    const onSave = vi.fn()
+    render(
+      <I18nextProvider i18n={i18n}>
+        <BalanceQueryEditorDialog
+          open
+          onOpenChange={() => undefined}
+          value={{
+            mode: 'custom',
+            url: 'https://upstream.example/api/v1/user/wallet',
+            auth: { type: 'header', name: 'Authorization', value: '' },
+            response: { remaining_path: 'balance' },
+          }}
+          channelType={24}
+          baseURL='https://upstream.example'
+          onSave={onSave}
+        />
+      </I18nextProvider>
+    )
+
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Sign in before querying' })
+    )
+    expect(screen.getByLabelText('Authentication value')).toHaveValue(
+      'Bearer {login_token}'
+    )
+    expect(screen.getByLabelText('Token JSON path')).toHaveValue('token')
+    expect(screen.getByLabelText('Sign-in password')).toHaveAttribute(
+      'type',
+      'password'
+    )
+    const save = screen.getByRole('button', { name: 'Save balance query' })
+    expect(save).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('Sign-in URL'), {
+      target: { value: 'https://upstream.example/api/v1/auth/login' },
+    })
+    fireEvent.change(screen.getByLabelText('Sign-in username'), {
+      target: { value: 'balance-bot' },
+    })
+    fireEvent.change(screen.getByLabelText('Sign-in password'), {
+      target: { value: 'secret' },
+    })
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        auth: expect.objectContaining({ value: 'Bearer {login_token}' }),
+        login: expect.objectContaining({
+          url: 'https://upstream.example/api/v1/auth/login',
+          username: 'balance-bot',
+          password: 'secret',
+          token_path: 'token',
+        }),
+      })
+    )
+  })
+
   test('shows the Vertex trial credit activation steps and derived table', () => {
     render(
       <I18nextProvider i18n={i18n}>

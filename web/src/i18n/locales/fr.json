@@ -8709,6 +8709,23 @@
     "Referral program application": "Candidature au programme de parrainage",
     "Highest tier reached": "Niveau maximal atteint",
     "You are on the highest promoter tier. Future top-ups use the current tier rate.": "Vous êtes au niveau de promoteur le plus élevé. Les prochaines recharges utilisent le taux du niveau actuel.",
-    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "Atteignez soit l’objectif d’utilisateurs ayant rechargé, soit l’objectif de montant de recharges valides ; un administrateur pourra alors approuver le passage à {{tier}} ({{rate}}). La progression suit l’objectif le plus proche."
+    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "Atteignez soit l’objectif d’utilisateurs ayant rechargé, soit l’objectif de montant de recharges valides ; un administrateur pourra alors approuver le passage à {{tier}} ({{rate}}). La progression suit l’objectif le plus proche.",
+    "Sign in before querying": "Se connecter avant la requête",
+    "For upstreams whose balance endpoint accepts only a console sign-in token. Use a dedicated upstream account; the password is stored encrypted and never shown again.": "Pour les amonts dont l'endpoint de solde n'accepte qu'un jeton de connexion à la console. Utilisez un compte amont dédié ; le mot de passe est chiffré et n'est plus jamais affiché.",
+    "Sign-in URL": "URL de connexion",
+    "Sign-in username": "Nom d'utilisateur de connexion",
+    "Sign-in password": "Mot de passe de connexion",
+    "Configured; leave blank to keep the current password": "Configuré ; laissez vide pour conserver le mot de passe actuel",
+    "Token JSON path": "Chemin JSON du jeton",
+    "Where the sign-in response returns the token, such as token or data.token.": "Emplacement du jeton dans la réponse de connexion, par exemple token ou data.token.",
+    "Sign-in request body": "Corps de la requête de connexion",
+    "Sent as a JSON POST. {username} and {password} are inserted as JSON string content.": "Envoyé en POST JSON. {username} et {password} sont insérés comme contenu de chaîne JSON.",
+    "Use {login_token} in the authentication value, a header, or the request body. The token is reused until it expires; a failed sign-in is retried after 10 minutes.": "Utilisez {login_token} dans la valeur d'authentification, un en-tête ou le corps de la requête. Le jeton est réutilisé jusqu'à son expiration ; une connexion échouée est retentée après 10 minutes.",
+    "Sign-in URL must be an absolute HTTPS URL": "L'URL de connexion doit être une URL HTTPS absolue",
+    "Sign-in username is required": "Le nom d'utilisateur de connexion est obligatoire",
+    "Sign-in password is required": "Le mot de passe de connexion est obligatoire",
+    "Token JSON path is required": "Le chemin JSON du jeton est obligatoire",
+    "Sign-in request body must be valid JSON and contain {password}": "Le corps de la requête de connexion doit être un JSON valide contenant {password}",
+    "Insert {login_token} into the authentication value, a header, or the request body": "Insérez {login_token} dans la valeur d'authentification, un en-tête ou le corps de la requête"
   }
 }

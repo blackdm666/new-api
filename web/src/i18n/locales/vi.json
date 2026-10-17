@@ -8709,6 +8709,23 @@
     "Referral program application": "Đơn đăng ký chương trình giới thiệu",
     "Highest tier reached": "Đã đạt hạng cao nhất",
     "You are on the highest promoter tier. Future top-ups use the current tier rate.": "Bạn đã ở hạng đối tác cao nhất. Các lần nạp tiếp theo dùng tỷ lệ của hạng hiện tại.",
-    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "Đạt một trong hai mục tiêu: số người nạp hợp lệ hoặc số tiền nạp hợp lệ, sau đó quản trị viên có thể duyệt nâng lên {{tier}} ({{rate}}). Tiến độ tính theo mục tiêu gần đạt hơn."
+    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "Đạt một trong hai mục tiêu: số người nạp hợp lệ hoặc số tiền nạp hợp lệ, sau đó quản trị viên có thể duyệt nâng lên {{tier}} ({{rate}}). Tiến độ tính theo mục tiêu gần đạt hơn.",
+    "Sign in before querying": "Đăng nhập trước khi truy vấn",
+    "For upstreams whose balance endpoint accepts only a console sign-in token. Use a dedicated upstream account; the password is stored encrypted and never shown again.": "Dành cho upstream có endpoint số dư chỉ chấp nhận token đăng nhập bảng điều khiển. Hãy dùng tài khoản upstream riêng; mật khẩu được lưu mã hóa và không hiển thị lại.",
+    "Sign-in URL": "URL đăng nhập",
+    "Sign-in username": "Tên đăng nhập",
+    "Sign-in password": "Mật khẩu đăng nhập",
+    "Configured; leave blank to keep the current password": "Đã cấu hình; để trống để giữ mật khẩu hiện tại",
+    "Token JSON path": "Đường dẫn JSON của token",
+    "Where the sign-in response returns the token, such as token or data.token.": "Vị trí token trong phản hồi đăng nhập, ví dụ token hoặc data.token.",
+    "Sign-in request body": "Nội dung yêu cầu đăng nhập",
+    "Sent as a JSON POST. {username} and {password} are inserted as JSON string content.": "Gửi dưới dạng JSON POST. {username} và {password} được chèn dưới dạng nội dung chuỗi JSON.",
+    "Use {login_token} in the authentication value, a header, or the request body. The token is reused until it expires; a failed sign-in is retried after 10 minutes.": "Dùng {login_token} trong giá trị xác thực, header hoặc nội dung yêu cầu. Token được dùng lại cho đến khi hết hạn; đăng nhập thất bại sẽ thử lại sau 10 phút.",
+    "Sign-in URL must be an absolute HTTPS URL": "URL đăng nhập phải là URL HTTPS đầy đủ",
+    "Sign-in username is required": "Cần nhập tên đăng nhập",
+    "Sign-in password is required": "Cần nhập mật khẩu đăng nhập",
+    "Token JSON path is required": "Cần nhập đường dẫn JSON của token",
+    "Sign-in request body must be valid JSON and contain {password}": "Nội dung yêu cầu đăng nhập phải là JSON hợp lệ và chứa {password}",
+    "Insert {login_token} into the authentication value, a header, or the request body": "Hãy chèn {login_token} vào giá trị xác thực, header hoặc nội dung yêu cầu"
   }
 }

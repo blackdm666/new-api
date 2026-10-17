@@ -1,10 +1,14 @@
 package controller
 
 import (
+	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -58,7 +62,7 @@ func TestCustomBalanceRequestUsesVersionedPathAndChannelKeyPlaceholder(t *testin
 		},
 		Response: dto.ChannelBalanceResponseConfig{RemainingPath: "balance"},
 	}
-	headers, path, requestBody, err := buildCustomBalanceRequest(config, "sk-test")
+	headers, path, requestBody, err := buildCustomBalanceRequest(config, "sk-test", "")
 	require.NoError(t, err)
 	channel := &model.Channel{BaseURL: &server.URL, Key: "sk-test"}
 
@@ -91,7 +95,7 @@ func TestCustomBalanceRequestUsesManualAbsoluteURL(t *testing.T) {
 		},
 		Response: dto.ChannelBalanceResponseConfig{RemainingPath: "data.remaining"},
 	}
-	headers, target, requestBody, err := buildCustomBalanceRequest(config, "sk-test")
+	headers, target, requestBody, err := buildCustomBalanceRequest(config, "sk-test", "")
 	require.NoError(t, err)
 	channel := &model.Channel{Key: "sk-test"}
 	body, err := requestBalanceJSONURLWithMethod(channel, target, headers, config.Method, requestBody)
@@ -196,7 +200,7 @@ func TestCustomBalancePOSTSupportsBodyHeadersAndSuccessCondition(t *testing.T) {
 		MetricKind: dto.ChannelBalanceMetricWallet,
 	}
 
-	info, legacy, _, err := queryChannelCustomBalance(&model.Channel{}, config)
+	info, legacy, _, err := queryChannelCustomBalance(&model.Channel{}, config, false)
 	require.NoError(t, err)
 	require.NotNil(t, legacy)
 	assert.Equal(t, "42", info.Remaining)
@@ -460,4 +464,213 @@ func TestParseSub2APIBalancePreservesQuotaSubscriptionAndRateLimitMeaning(t *tes
 		assert.Equal(t, "50", info.Total)
 		assert.Equal(t, "48", info.Used)
 	})
+}
+
+func testBalanceLoginJWT(expiresAt time.Time, nonce string) string {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"exp":%d,"jti":"%s"}`, expiresAt.Unix(), nonce)))
+	return "eyJhbGciOiJIUzI1NiJ9." + payload + ".signature"
+}
+
+func newBalanceLoginTestConfig(t *testing.T, serverURL string, password string) *dto.ChannelBalanceQueryConfig {
+	t.Helper()
+	login := &dto.ChannelBalanceLoginConfig{
+		URL:       serverURL + "/api/v1/auth/login",
+		Body:      `{"username":"{username}","password":"{password}","login_type":"password"}`,
+		Username:  "balance-bot",
+		Password:  password,
+		TokenPath: "token",
+	}
+	require.NoError(t, sealChannelBalanceLoginPassword(login, nil))
+	return &dto.ChannelBalanceQueryConfig{
+		Mode:   dto.ChannelBalanceQueryModeCustom,
+		URL:    serverURL + "/api/v1/user/wallet",
+		Method: http.MethodGet,
+		Auth: &dto.AdvancedCustomRouteAuth{
+			Type:  dto.AdvancedCustomAuthTypeHeader,
+			Name:  "Authorization",
+			Value: "Bearer {login_token}",
+		},
+		Login:    login,
+		Response: dto.ChannelBalanceResponseConfig{RemainingPath: "balance", UsedPath: "spent"},
+		Unit:     dto.ChannelBalanceUnitMoney,
+		Currency: "CNY",
+	}
+}
+
+func TestCustomBalanceSignsInReusesTokenAndSignsInAgainWhenRejected(t *testing.T) {
+	t.Parallel()
+
+	const password = `pa"ss\word`
+	var logins atomic.Int32
+	var validToken atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/api/v1/auth/login":
+			assert.Equal(t, http.MethodPost, request.Method)
+			var credentials struct {
+				Username  string `json:"username"`
+				Password  string `json:"password"`
+				LoginType string `json:"login_type"`
+			}
+			assert.NoError(t, common.DecodeJson(request.Body, &credentials))
+			assert.Equal(t, "balance-bot", credentials.Username)
+			assert.Equal(t, password, credentials.Password)
+			assert.Equal(t, "password", credentials.LoginType)
+			token := testBalanceLoginJWT(time.Now().Add(7*24*time.Hour), fmt.Sprint(logins.Add(1)))
+			validToken.Store(token)
+			_, _ = fmt.Fprintf(w, `{"token":%q,"user":{"id":"1"}}`, token)
+		case "/api/v1/user/wallet":
+			if request.Header.Get("Authorization") != "Bearer "+validToken.Load().(string) {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"Authentication required"},"success":false}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"balance":500.5,"spent":24.5}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	config := newBalanceLoginTestConfig(t, server.URL, password)
+	require.NoError(t, config.Validate())
+	channel := &model.Channel{Id: 990001}
+	t.Cleanup(func() { channelBalanceLoginSessions.Delete(channel.Id) })
+
+	info, _, _, err := queryChannelCustomBalance(channel, config, true)
+	require.NoError(t, err)
+	assert.Equal(t, "500.5", info.Remaining)
+	assert.Equal(t, "24.5", info.Used)
+	assert.Equal(t, int32(1), logins.Load())
+
+	_, _, _, err = queryChannelCustomBalance(channel, config, true)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), logins.Load(), "a cached token must be reused until it expires")
+
+	// The upstream revokes the cached token, e.g. after the account signed
+	// in elsewhere: the query signs in once more and succeeds.
+	validToken.Store("revoked")
+	info, _, _, err = queryChannelCustomBalance(channel, config, true)
+	require.NoError(t, err)
+	assert.Equal(t, "500.5", info.Remaining)
+	assert.Equal(t, int32(2), logins.Load())
+
+	// A test from the editor never reuses the cached session.
+	_, _, _, err = queryChannelCustomBalance(channel, config, false)
+	require.NoError(t, err)
+	assert.Equal(t, int32(3), logins.Load())
+}
+
+func TestCustomBalanceFailedSignInWaitsForCooldownUnlessConfigChanges(t *testing.T) {
+	t.Parallel()
+
+	var logins atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		logins.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"invalid username or password"}`))
+	}))
+	defer server.Close()
+
+	config := newBalanceLoginTestConfig(t, server.URL, "wrong-password")
+	channel := &model.Channel{Id: 990002}
+	t.Cleanup(func() { channelBalanceLoginSessions.Delete(channel.Id) })
+
+	_, _, _, err := queryChannelCustomBalance(channel, config, true)
+	require.ErrorContains(t, err, "invalid username or password")
+	assert.NotContains(t, err.Error(), "wrong-password")
+	_, _, _, err = queryChannelCustomBalance(channel, config, true)
+	require.ErrorContains(t, err, "next sign-in attempt after")
+	assert.Equal(t, int32(1), logins.Load(), "automatic refreshes must not repeat a failed sign-in during the cooldown")
+
+	// Saving a corrected password changes the ciphertext and signs in at once.
+	corrected := newBalanceLoginTestConfig(t, server.URL, "corrected-password")
+	_, _, _, err = queryChannelCustomBalance(channel, corrected, true)
+	require.Error(t, err)
+	assert.Equal(t, int32(2), logins.Load())
+}
+
+func TestChannelBalanceLoginPasswordIsEncryptedRedactedAndKept(t *testing.T) {
+	t.Parallel()
+
+	origin := &model.Channel{Id: 990003}
+	config := newBalanceLoginTestConfig(t, "https://upstream.example", "s3cret-password")
+	assert.Empty(t, config.Login.Password)
+	assert.NotContains(t, config.Login.PasswordCiphertext, "s3cret-password")
+	origin.SetOtherSettings(dto.ChannelOtherSettings{BalanceQuery: config})
+	assert.NotContains(t, origin.OtherSettings, "s3cret-password")
+
+	response := *origin
+	redactChannelBalanceQuerySecret(&response)
+	redacted := response.GetOtherSettings().BalanceQuery
+	require.NotNil(t, redacted.Login)
+	assert.True(t, redacted.Login.PasswordConfigured)
+	assert.Empty(t, redacted.Login.PasswordCiphertext)
+	assert.NotContains(t, response.OtherSettings, config.Login.PasswordCiphertext)
+	assert.Equal(t, "Bearer {login_token}", redacted.Auth.Value, "the token placeholder is not a secret")
+	assert.False(t, redacted.AuthConfigured)
+
+	// Saving the redacted form keeps the stored password, and a ciphertext
+	// sent by the client is ignored.
+	redacted.Login.PasswordCiphertext = "v1:forged"
+	response.SetOtherSettings(dto.ChannelOtherSettings{BalanceQuery: redacted})
+	require.NoError(t, restoreChannelBalanceQuerySecret(&response, origin, map[string]any{"settings": response.OtherSettings}))
+	kept := response.GetOtherSettings().BalanceQuery
+	assert.Equal(t, config.Login.PasswordCiphertext, kept.Login.PasswordCiphertext)
+	assert.False(t, kept.Login.PasswordConfigured)
+	require.NoError(t, kept.Validate())
+
+	// Moving the sign-in to another host requires the password again, so an
+	// editor cannot redirect the stored password to a host they control.
+	moved := *kept
+	movedLogin := *kept.Login
+	movedLogin.URL = "https://collector.example/api/v1/auth/login"
+	moved.Login = &movedLogin
+	response.SetOtherSettings(dto.ChannelOtherSettings{BalanceQuery: &moved})
+	require.ErrorContains(t, restoreChannelBalanceQuerySecret(&response, origin, map[string]any{"settings": response.OtherSettings}), "password again")
+
+	// A new password replaces the stored one.
+	kept.Login.Password = "new-password"
+	response.SetOtherSettings(dto.ChannelOtherSettings{BalanceQuery: kept})
+	require.NoError(t, restoreChannelBalanceQuerySecret(&response, origin, map[string]any{"settings": response.OtherSettings}))
+	plaintext, err := common.DecryptSensitiveValue(channelBalanceLoginPasswordPurpose, response.GetOtherSettings().BalanceQuery.Login.PasswordCiphertext)
+	require.NoError(t, err)
+	assert.Equal(t, "new-password", string(plaintext))
+
+	// A channel without a stored password cannot keep one it never had.
+	require.ErrorContains(t, sealChannelBalanceLoginPassword(&dto.ChannelBalanceLoginConfig{PasswordConfigured: true}, nil), "password is required")
+}
+
+func TestChannelBalanceLoginValidation(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, newBalanceLoginTestConfig(t, "https://upstream.example", "password").Validate())
+
+	cases := map[string]func(*dto.ChannelBalanceQueryConfig){
+		"plain HTTP sign-in to a remote host": func(config *dto.ChannelBalanceQueryConfig) {
+			config.Login.URL = "http://upstream.example/api/v1/auth/login"
+		},
+		"token placeholder unused": func(config *dto.ChannelBalanceQueryConfig) {
+			config.Auth.Value = "Bearer fixed"
+		},
+		"login outside custom mode": func(config *dto.ChannelBalanceQueryConfig) {
+			config.Mode = dto.ChannelBalanceQueryModeNewAPI
+		},
+		"missing token path": func(config *dto.ChannelBalanceQueryConfig) {
+			config.Login.TokenPath = ""
+		},
+		"body without password": func(config *dto.ChannelBalanceQueryConfig) {
+			config.Login.Body = `{"username":"{username}"}`
+		},
+		"missing password": func(config *dto.ChannelBalanceQueryConfig) {
+			config.Login.PasswordCiphertext = ""
+		},
+	}
+	for name, mutate := range cases {
+		config := newBalanceLoginTestConfig(t, "https://upstream.example", "password")
+		mutate(config)
+		assert.Error(t, config.Validate(), name)
+	}
 }

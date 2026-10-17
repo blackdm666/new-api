@@ -8709,6 +8709,23 @@
     "Referral program application": "Заявка на партнёрскую программу",
     "Highest tier reached": "Достигнут высший уровень",
     "You are on the highest promoter tier. Future top-ups use the current tier rate.": "У вас высший уровень партнёра. Для следующих пополнений действует ставка текущего уровня.",
-    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "Выполните цель по числу пользователей с пополнением или по сумме действительных пополнений — после этого администратор сможет повысить вас до уровня {{tier}} ({{rate}}). Прогресс показывается по цели, которая ближе к выполнению."
+    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "Выполните цель по числу пользователей с пополнением или по сумме действительных пополнений — после этого администратор сможет повысить вас до уровня {{tier}} ({{rate}}). Прогресс показывается по цели, которая ближе к выполнению.",
+    "Sign in before querying": "Входить перед запросом",
+    "For upstreams whose balance endpoint accepts only a console sign-in token. Use a dedicated upstream account; the password is stored encrypted and never shown again.": "Для вышестоящих сервисов, чей эндпоинт баланса принимает только токен входа в консоль. Используйте отдельную учётную запись; пароль хранится в зашифрованном виде и больше не показывается.",
+    "Sign-in URL": "URL входа",
+    "Sign-in username": "Имя пользователя для входа",
+    "Sign-in password": "Пароль для входа",
+    "Configured; leave blank to keep the current password": "Настроено; оставьте пустым, чтобы сохранить текущий пароль",
+    "Token JSON path": "JSON-путь к токену",
+    "Where the sign-in response returns the token, such as token or data.token.": "Где ответ на вход возвращает токен, например token или data.token.",
+    "Sign-in request body": "Тело запроса входа",
+    "Sent as a JSON POST. {username} and {password} are inserted as JSON string content.": "Отправляется как JSON POST. {username} и {password} подставляются как содержимое JSON-строки.",
+    "Use {login_token} in the authentication value, a header, or the request body. The token is reused until it expires; a failed sign-in is retried after 10 minutes.": "Используйте {login_token} в значении аутентификации, заголовке или теле запроса. Токен используется повторно до истечения срока; неудачный вход повторяется через 10 минут.",
+    "Sign-in URL must be an absolute HTTPS URL": "URL входа должен быть абсолютным HTTPS-адресом",
+    "Sign-in username is required": "Укажите имя пользователя для входа",
+    "Sign-in password is required": "Укажите пароль для входа",
+    "Token JSON path is required": "Укажите JSON-путь к токену",
+    "Sign-in request body must be valid JSON and contain {password}": "Тело запроса входа должно быть корректным JSON и содержать {password}",
+    "Insert {login_token} into the authentication value, a header, or the request body": "Вставьте {login_token} в значение аутентификации, заголовок или тело запроса"
   }
 }

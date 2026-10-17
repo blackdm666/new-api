@@ -57,7 +57,7 @@ func TestChannelBalanceQuery(c *gin.Context) {
 		return
 	}
 	config := candidate.GetOtherSettings().BalanceQuery
-	info, legacyBalance, raw, err := queryChannelCustomBalance(&candidate.Channel, config)
+	info, legacyBalance, raw, err := queryChannelCustomBalance(&candidate.Channel, config, false)
 	if err != nil {
 		if len(raw) > 0 {
 			formatted, formatErr := common.IndentJson(raw)
@@ -476,7 +476,7 @@ func parseSub2APIRateLimit(raw json.RawMessage) (decimal.Decimal, decimal.Decima
 }
 
 func updateChannelCustomBalance(channel *model.Channel, config *dto.ChannelBalanceQueryConfig) (channelBalanceResult, error) {
-	info, legacyBalance, responseBody, err := queryChannelCustomBalance(channel, config)
+	info, legacyBalance, responseBody, err := queryChannelCustomBalance(channel, config, true)
 	if err != nil {
 		if errors.Is(err, errBalanceAccountInactive) {
 			return channelBalanceResult{}, err
@@ -493,26 +493,46 @@ func updateChannelCustomBalance(channel *model.Channel, config *dto.ChannelBalan
 	return balanceResult(info, legacyBalance), nil
 }
 
-func queryChannelCustomBalance(channel *model.Channel, config *dto.ChannelBalanceQueryConfig) (model.ChannelBalanceInfo, *float64, []byte, error) {
+// queryChannelCustomBalance sends the configured balance request. With a
+// sign-in configured, reuseLoginSession reuses the cached console token and
+// signs in again once when the upstream rejects a cached token with 401 or 403.
+func queryChannelCustomBalance(channel *model.Channel, config *dto.ChannelBalanceQueryConfig, reuseLoginSession bool) (model.ChannelBalanceInfo, *float64, []byte, error) {
 	if err := config.Validate(); err != nil {
 		return model.ChannelBalanceInfo{}, nil, nil, err
 	}
-	headers, path, requestBody, err := buildCustomBalanceRequest(config, channel.Key)
-	if err != nil {
-		return model.ChannelBalanceInfo{}, nil, nil, err
-	}
 	var responseBody []byte
-	if strings.TrimSpace(config.URL) != "" {
-		responseBody, err = requestBalanceJSONURLWithMethod(channel, path, headers, config.Method, requestBody)
-	} else {
-		requestURL, buildErr := buildChannelManagementURL(channel.GetBaseURL(), path)
-		if buildErr != nil {
-			return model.ChannelBalanceInfo{}, nil, nil, buildErr
+	for attempt := range 2 {
+		loginToken := ""
+		cachedLoginToken := false
+		if config.Login != nil {
+			var err error
+			loginToken, cachedLoginToken, err = channelBalanceLoginToken(channel, config.Login, reuseLoginSession)
+			if err != nil {
+				return model.ChannelBalanceInfo{}, nil, nil, err
+			}
+		}
+		headers, path, requestBody, err := buildCustomBalanceRequest(config, channel.Key, loginToken)
+		if err != nil {
+			return model.ChannelBalanceInfo{}, nil, nil, err
+		}
+		requestURL := path
+		if strings.TrimSpace(config.URL) == "" {
+			requestURL, err = buildChannelManagementURL(channel.GetBaseURL(), path)
+			if err != nil {
+				return model.ChannelBalanceInfo{}, nil, nil, err
+			}
 		}
 		responseBody, err = requestBalanceJSONURLWithMethod(channel, requestURL, headers, config.Method, requestBody)
-	}
-	if err != nil {
-		return model.ChannelBalanceInfo{}, nil, responseBody, err
+		var statusErr *balanceStatusError
+		if attempt == 0 && cachedLoginToken && errors.As(err, &statusErr) &&
+			(statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden) {
+			channelBalanceLoginSessions.Delete(channel.Id)
+			continue
+		}
+		if err != nil {
+			return model.ChannelBalanceInfo{}, nil, responseBody, err
+		}
+		break
 	}
 	info, legacyBalance, err := parseCustomBalance(responseBody, config)
 	if err != nil {
@@ -521,7 +541,7 @@ func queryChannelCustomBalance(channel *model.Channel, config *dto.ChannelBalanc
 	return info, legacyBalance, responseBody, nil
 }
 
-func buildCustomBalanceRequest(config *dto.ChannelBalanceQueryConfig, key string) (http.Header, string, string, error) {
+func buildCustomBalanceRequest(config *dto.ChannelBalanceQueryConfig, key string, loginToken string) (http.Header, string, string, error) {
 	headers := http.Header{}
 	path := strings.TrimSpace(config.URL)
 	if path == "" {
@@ -531,7 +551,7 @@ func buildCustomBalanceRequest(config *dto.ChannelBalanceQueryConfig, key string
 	if auth == nil {
 		headers.Set("Authorization", "Bearer "+key)
 	} else {
-		value := replaceBalanceQueryKey(auth.Value, key)
+		value := replaceBalanceQueryPlaceholders(auth.Value, key, loginToken)
 		switch strings.TrimSpace(auth.Type) {
 		case "", dto.AdvancedCustomAuthTypeNone:
 		case dto.AdvancedCustomAuthTypeHeader:
@@ -559,13 +579,13 @@ func buildCustomBalanceRequest(config *dto.ChannelBalanceQueryConfig, key string
 	}
 	for _, header := range config.Headers {
 		name := strings.TrimSpace(header.Name)
-		value := replaceBalanceQueryKey(header.Value, key)
+		value := replaceBalanceQueryPlaceholders(header.Value, key, loginToken)
 		if name == "" || strings.ContainsAny(name, " \t\r\n:") || strings.ContainsAny(value, "\r\n") {
 			return nil, "", "", errors.New("invalid balance query additional header")
 		}
 		headers.Set(name, value)
 	}
-	requestBody := replaceBalanceQueryKey(config.Body, key)
+	requestBody := replaceBalanceQueryPlaceholders(config.Body, key, loginToken)
 	if strings.EqualFold(strings.TrimSpace(config.Method), http.MethodPost) && strings.TrimSpace(requestBody) != "" {
 		var validatedBody json.RawMessage
 		if err := common.Unmarshal([]byte(requestBody), &validatedBody); err != nil {
@@ -575,8 +595,25 @@ func buildCustomBalanceRequest(config *dto.ChannelBalanceQueryConfig, key string
 	return headers, path, requestBody, nil
 }
 
-func replaceBalanceQueryKey(value, key string) string {
-	return strings.ReplaceAll(value, "{api_key}", strings.TrimSpace(key))
+func replaceBalanceQueryPlaceholders(value, key, loginToken string) string {
+	return strings.NewReplacer(
+		"{api_key}", strings.TrimSpace(key),
+		dto.ChannelBalanceLoginPlaceholder, loginToken,
+	).Replace(value)
+}
+
+// balanceStatusError keeps the upstream status code so a rejected console
+// token can be told apart from other balance query failures.
+type balanceStatusError struct {
+	StatusCode int
+	Message    string
+}
+
+func (err *balanceStatusError) Error() string {
+	if err.Message != "" {
+		return fmt.Sprintf("balance query returned status code %d: %s", err.StatusCode, err.Message)
+	}
+	return fmt.Sprintf("balance query returned status code %d", err.StatusCode)
 }
 
 func parseCustomBalance(body []byte, config *dto.ChannelBalanceQueryConfig) (model.ChannelBalanceInfo, *float64, error) {
@@ -779,10 +816,7 @@ func requestBalanceJSONURLWithMethod(channel *model.Channel, requestURL string, 
 		return nil, fmt.Errorf("balance response exceeds %d bytes", maxChannelBalanceResponseBytes)
 	}
 	if response.StatusCode != http.StatusOK {
-		if message := balanceResponseErrorMessage(responseBody); message != "" {
-			return nil, fmt.Errorf("balance query returned status code %d: %s", response.StatusCode, message)
-		}
-		return nil, fmt.Errorf("balance query returned status code %d", response.StatusCode)
+		return nil, &balanceStatusError{StatusCode: response.StatusCode, Message: balanceResponseErrorMessage(responseBody)}
 	}
 	var validated json.RawMessage
 	if err := common.Unmarshal(responseBody, &validated); err != nil {

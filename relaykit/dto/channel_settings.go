@@ -186,6 +186,7 @@ type ChannelBalanceQueryConfig struct {
 	AuthConfigured      bool                          `json:"auth_configured,omitempty" gorm:"-"`
 	AuthMasked          string                        `json:"auth_masked,omitempty" gorm:"-"`
 	AccountUserID       string                        `json:"account_user_id,omitempty"`
+	Login               *ChannelBalanceLoginConfig    `json:"login,omitempty"`
 	GCPTrial            *ChannelBalanceGCPTrialConfig `json:"gcp_trial,omitempty"`
 	Response            ChannelBalanceResponseConfig  `json:"response,omitempty"`
 	Unit                string                        `json:"unit,omitempty"`
@@ -205,6 +206,50 @@ type ChannelBalanceRequestHeader struct {
 	Value      string `json:"value,omitempty"`
 	Configured bool   `json:"configured,omitempty" gorm:"-"`
 	Masked     string `json:"masked,omitempty" gorm:"-"`
+}
+
+// ChannelBalanceLoginPlaceholder inserts the token returned by the upstream
+// console sign-in into custom balance query authentication, headers or body.
+const ChannelBalanceLoginPlaceholder = "{login_token}"
+
+// ChannelBalanceLoginConfig signs in to an upstream console with a dedicated
+// account before a custom balance query, for upstreams whose balance endpoint
+// accepts only a console session token. Password is write-only input; the
+// host stores it as PasswordCiphertext and never returns either field.
+type ChannelBalanceLoginConfig struct {
+	URL                string `json:"url,omitempty"`
+	Body               string `json:"body,omitempty"`
+	Username           string `json:"username,omitempty"`
+	Password           string `json:"password,omitempty"`
+	PasswordCiphertext string `json:"password_ciphertext,omitempty"`
+	PasswordConfigured bool   `json:"password_configured,omitempty"`
+	TokenPath          string `json:"token_path,omitempty"`
+}
+
+func (login *ChannelBalanceLoginConfig) validate() error {
+	parsedURL, err := url.Parse(strings.TrimSpace(login.URL))
+	if err != nil || parsedURL.Host == "" || parsedURL.User != nil || parsedURL.Fragment != "" {
+		return fmt.Errorf("balance query login URL must be an absolute HTTPS URL")
+	}
+	// The password travels in this request, so plain HTTP is accepted only for
+	// a loopback upstream.
+	loopback := parsedURL.Hostname() == "localhost" || parsedURL.Hostname() == "127.0.0.1" || parsedURL.Hostname() == "::1"
+	if parsedURL.Scheme != "https" && !(parsedURL.Scheme == "http" && loopback) {
+		return fmt.Errorf("balance query login URL must be an absolute HTTPS URL")
+	}
+	if strings.TrimSpace(login.Username) == "" {
+		return fmt.Errorf("balance query login username is required")
+	}
+	if login.Password == "" && login.PasswordCiphertext == "" && !login.PasswordConfigured {
+		return fmt.Errorf("balance query login password is required")
+	}
+	if strings.TrimSpace(login.TokenPath) == "" {
+		return fmt.Errorf("balance query login token path is required")
+	}
+	if body := strings.TrimSpace(login.Body); body != "" && !strings.Contains(body, "{password}") {
+		return fmt.Errorf("balance query login body must contain {password}")
+	}
+	return nil
 }
 
 // ChannelBalanceGCPTrialConfig tracks a fixed Google Cloud promotional credit
@@ -257,6 +302,9 @@ func (config *ChannelBalanceQueryConfig) Validate() error {
 		if err != nil || threshold <= 0 || math.IsNaN(threshold) || math.IsInf(threshold, 0) {
 			return fmt.Errorf("low balance alert threshold must be a positive number")
 		}
+	}
+	if config.Login != nil && mode != ChannelBalanceQueryModeCustom {
+		return fmt.Errorf("balance query login is supported only by custom balance queries")
 	}
 	switch mode {
 	case ChannelBalanceQueryModeAuto:
@@ -403,6 +451,17 @@ func (config *ChannelBalanceQueryConfig) Validate() error {
 		if strings.TrimSpace(header.Value) == "" && !header.Configured {
 			return fmt.Errorf("balance query additional header value is required: %s", name)
 		}
+	}
+	if config.Login != nil {
+		tokenUsed := strings.Contains(config.Body, ChannelBalanceLoginPlaceholder) ||
+			(config.Auth != nil && strings.Contains(config.Auth.Value, ChannelBalanceLoginPlaceholder))
+		for _, header := range config.Headers {
+			tokenUsed = tokenUsed || strings.Contains(header.Value, ChannelBalanceLoginPlaceholder)
+		}
+		if !tokenUsed {
+			return fmt.Errorf("balance query login token must be inserted with %s into the authentication value, a header or the body", ChannelBalanceLoginPlaceholder)
+		}
+		return config.Login.validate()
 	}
 	return nil
 }

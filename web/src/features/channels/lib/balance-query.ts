@@ -8,6 +8,7 @@ License, or (at your option) any later version.
 */
 import type {
   AdvancedCustomAuthType,
+  ChannelBalanceLoginConfig,
   ChannelBalanceMetricKind,
   ChannelBalanceQueryConfig,
   ChannelBalanceQueryMode,
@@ -17,6 +18,9 @@ import type {
 export const CHANNEL_TYPE_SUB2_API = 59
 export const CHANNEL_TYPE_NEW_API = 60
 export const DEFAULT_LOW_BALANCE_THRESHOLD = '10'
+export const BALANCE_QUERY_LOGIN_TOKEN = '{login_token}'
+export const DEFAULT_BALANCE_LOGIN_BODY =
+  '{\n  "username": "{username}",\n  "password": "{password}"\n}'
 
 export const BALANCE_QUERY_MODE_OPTIONS: Array<{
   value: ChannelBalanceQueryMode
@@ -156,6 +160,16 @@ export function createBalanceQueryConfig(
   return { mode }
 }
 
+export function createBalanceLoginConfig(): ChannelBalanceLoginConfig {
+  return {
+    url: '',
+    body: DEFAULT_BALANCE_LOGIN_BODY,
+    username: '',
+    password: '',
+    token_path: 'token',
+  }
+}
+
 export function parseBalanceQueryConfig(
   value: string | undefined
 ): ChannelBalanceQueryConfig {
@@ -284,6 +298,17 @@ export function normalizeBalanceQueryConfig(
     auth_configured: config.auth_configured === true,
     auth_masked:
       config.auth_configured === true ? config.auth_masked?.trim() || '' : '',
+    // Passwords are sent as typed: surrounding spaces may be part of them.
+    login: config.login
+      ? {
+          url: config.login.url?.trim() || '',
+          body: config.login.body || '',
+          username: config.login.username?.trim() || '',
+          password: config.login.password || '',
+          password_configured: config.login.password_configured === true,
+          token_path: config.login.token_path?.trim() || '',
+        }
+      : undefined,
     unit: config.unit || 'money',
     currency: config.currency?.trim().toUpperCase() || '',
     display_unit: config.display_unit?.trim() || '',
@@ -453,6 +478,67 @@ export function validateBalanceQueryConfig(
     if (/[\r\n]/.test(header.value || '')) {
       return 'Additional header value is invalid'
     }
+  }
+  if (normalized.login) {
+    return validateBalanceLoginConfig(normalized)
+  }
+  return null
+}
+
+function validateBalanceLoginConfig(
+  config: ChannelBalanceQueryConfig
+): string | null {
+  const login = config.login || {}
+  try {
+    const parsed = new URL(login.url || '')
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(
+      parsed.hostname
+    )
+    if (
+      !parsed.hostname ||
+      parsed.username ||
+      parsed.password ||
+      parsed.hash ||
+      !(
+        parsed.protocol === 'https:' ||
+        (parsed.protocol === 'http:' && loopback)
+      )
+    ) {
+      return 'Sign-in URL must be an absolute HTTPS URL'
+    }
+  } catch {
+    return 'Sign-in URL must be an absolute HTTPS URL'
+  }
+  if (!login.username) {
+    return 'Sign-in username is required'
+  }
+  if (!login.password && login.password_configured !== true) {
+    return 'Sign-in password is required'
+  }
+  if (!login.token_path) {
+    return 'Token JSON path is required'
+  }
+  const body = login.body?.trim() || ''
+  if (body) {
+    if (!body.includes('{password}')) {
+      return 'Sign-in request body must be valid JSON and contain {password}'
+    }
+    try {
+      JSON.parse(
+        body.replaceAll('{username}', 'x').replaceAll('{password}', 'x')
+      )
+    } catch {
+      return 'Sign-in request body must be valid JSON and contain {password}'
+    }
+  }
+  const tokenUsed =
+    config.auth?.value?.includes(BALANCE_QUERY_LOGIN_TOKEN) ||
+    config.body?.includes(BALANCE_QUERY_LOGIN_TOKEN) ||
+    (config.headers || []).some((header) =>
+      header.value?.includes(BALANCE_QUERY_LOGIN_TOKEN)
+    )
+  if (!tokenUsed) {
+    return 'Insert {login_token} into the authentication value, a header, or the request body'
   }
   return null
 }

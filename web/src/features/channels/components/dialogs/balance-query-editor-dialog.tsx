@@ -38,10 +38,12 @@ import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { testChannelBalanceQuery } from '../../api'
 import {
   BALANCE_QUERY_AUTH_OPTIONS,
+  BALANCE_QUERY_LOGIN_TOKEN,
   BALANCE_QUERY_METRIC_OPTIONS,
   BALANCE_QUERY_MODE_OPTIONS,
   BALANCE_QUERY_UNIT_OPTIONS,
   buildBalanceQueryPreviewURL,
+  createBalanceLoginConfig,
   createBalanceQueryConfig,
   getEffectiveBalanceQueryPath,
   getGCPTrialBillingTable,
@@ -50,6 +52,7 @@ import {
 } from '../../lib/balance-query'
 import type {
   AdvancedCustomAuthType,
+  ChannelBalanceLoginConfig,
   ChannelBalanceMetricKind,
   ChannelBalanceQueryConfig,
   ChannelBalanceQueryMode,
@@ -197,6 +200,37 @@ export function BalanceQueryEditorDialog(props: BalanceQueryEditorDialogProps) {
               value: current.auth?.value || '',
             },
     }))
+  }
+
+  const updateLogin = (
+    field: keyof ChannelBalanceLoginConfig,
+    value: string
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      login: { ...current.login, [field]: value },
+    }))
+  }
+
+  // Turning sign-in on fills an empty Authorization header with the token
+  // placeholder, which is what console-session upstreams expect.
+  const handleLoginToggle = (checked: boolean) => {
+    setDraft((current) => {
+      if (!checked) return { ...current, login: undefined }
+      const authEmpty = !current.auth_configured && !current.auth?.value?.trim()
+      return {
+        ...current,
+        login: createBalanceLoginConfig(),
+        auth:
+          authEmpty && (current.auth?.type || 'header') === 'header'
+            ? {
+                type: 'header',
+                name: current.auth?.name?.trim() || 'Authorization',
+                value: `Bearer ${BALANCE_QUERY_LOGIN_TOKEN}`,
+              }
+            : current.auth,
+      }
+    })
   }
 
   const handleSave = () => {
@@ -1006,6 +1040,115 @@ export function BalanceQueryEditorDialog(props: BalanceQueryEditorDialogProps) {
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className='space-y-4 rounded-lg border p-4'>
+            <div className='flex items-center justify-between gap-4'>
+              <div>
+                <Label htmlFor='balance-login-enabled'>
+                  {t('Sign in before querying')}
+                </Label>
+                <p className='text-muted-foreground text-xs'>
+                  {t(
+                    'For upstreams whose balance endpoint accepts only a console sign-in token. Use a dedicated upstream account; the password is stored encrypted and never shown again.'
+                  )}
+                </p>
+              </div>
+              <Switch
+                id='balance-login-enabled'
+                checked={Boolean(draft.login)}
+                onCheckedChange={handleLoginToggle}
+              />
+            </div>
+
+            {draft.login && (
+              <div className='grid gap-4 sm:grid-cols-2'>
+                <div className='space-y-2 sm:col-span-2'>
+                  <Label htmlFor='balance-login-url'>{t('Sign-in URL')}</Label>
+                  <Input
+                    id='balance-login-url'
+                    placeholder='https://upstream.example/api/v1/auth/login'
+                    value={draft.login.url || ''}
+                    onChange={(event) => updateLogin('url', event.target.value)}
+                  />
+                </div>
+                <div className='space-y-2'>
+                  <Label htmlFor='balance-login-username'>
+                    {t('Sign-in username')}
+                  </Label>
+                  <Input
+                    id='balance-login-username'
+                    autoComplete='off'
+                    value={draft.login.username || ''}
+                    onChange={(event) =>
+                      updateLogin('username', event.target.value)
+                    }
+                  />
+                </div>
+                <div className='space-y-2'>
+                  <Label htmlFor='balance-login-password'>
+                    {t('Sign-in password')}
+                  </Label>
+                  <Input
+                    id='balance-login-password'
+                    type='password'
+                    autoComplete='new-password'
+                    placeholder={
+                      draft.login.password_configured
+                        ? t(
+                            'Configured; leave blank to keep the current password'
+                          )
+                        : ''
+                    }
+                    value={draft.login.password || ''}
+                    onChange={(event) =>
+                      updateLogin('password', event.target.value)
+                    }
+                  />
+                </div>
+                <div className='space-y-2 sm:col-span-2'>
+                  <Label htmlFor='balance-login-token-path'>
+                    {t('Token JSON path')}
+                  </Label>
+                  <Input
+                    id='balance-login-token-path'
+                    placeholder='token'
+                    value={draft.login.token_path || ''}
+                    onChange={(event) =>
+                      updateLogin('token_path', event.target.value)
+                    }
+                  />
+                  <p className='text-muted-foreground text-xs'>
+                    {t(
+                      'Where the sign-in response returns the token, such as token or data.token.'
+                    )}
+                  </p>
+                </div>
+                <div className='space-y-2 sm:col-span-2'>
+                  <Label htmlFor='balance-login-body'>
+                    {t('Sign-in request body')}
+                  </Label>
+                  <Textarea
+                    id='balance-login-body'
+                    className='min-h-28 font-mono'
+                    value={draft.login.body || ''}
+                    onChange={(event) =>
+                      updateLogin('body', event.target.value)
+                    }
+                  />
+                  <p className='text-muted-foreground text-xs'>
+                    {t(
+                      'Sent as a JSON POST. {username} and {password} are inserted as JSON string content.'
+                    )}
+                  </p>
+                </div>
+                <p className='text-muted-foreground text-xs sm:col-span-2'>
+                  {t(
+                    'Use {login_token} in the authentication value, a header, or the request body. The token is reused until it expires; a failed sign-in is retried after 10 minutes.'
+                  )}
+                </p>
+              </div>
+            )}
           </div>
 
           <div className='space-y-3 rounded-lg border p-4'>

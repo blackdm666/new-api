@@ -8804,6 +8804,23 @@
     "Referral program application": "推广返佣计划申请",
     "Highest tier reached": "已达最高档",
     "You are on the highest promoter tier. Future top-ups use the current tier rate.": "你已是最高推广等级，后续充值按当前等级比例返佣。",
-    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "有效充值人数或有效充值金额任一达标后，管理员审核可升级至{{tier}}（{{rate}}）。进度按更接近达标的一项计算。"
+    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "有效充值人数或有效充值金额任一达标后，管理员审核可升级至{{tier}}（{{rate}}）。进度按更接近达标的一项计算。",
+    "Sign in before querying": "查询前先登录",
+    "For upstreams whose balance endpoint accepts only a console sign-in token. Use a dedicated upstream account; the password is stored encrypted and never shown again.": "用于余额接口只认控制台登录令牌的上游。请使用上游的专用账号；密码加密保存，保存后不再显示。",
+    "Sign-in URL": "登录地址",
+    "Sign-in username": "登录账号",
+    "Sign-in password": "登录密码",
+    "Configured; leave blank to keep the current password": "已配置；留空则保留当前密码",
+    "Token JSON path": "令牌 JSON 路径",
+    "Where the sign-in response returns the token, such as token or data.token.": "登录响应中令牌所在的位置，例如 token 或 data.token。",
+    "Sign-in request body": "登录请求体",
+    "Sent as a JSON POST. {username} and {password} are inserted as JSON string content.": "以 JSON POST 发送。{username} 和 {password} 会作为 JSON 字符串内容填入。",
+    "Use {login_token} in the authentication value, a header, or the request body. The token is reused until it expires; a failed sign-in is retried after 10 minutes.": "在认证值、请求头或请求体中用 {login_token} 填入登录令牌。令牌到期前会重复使用；登录失败后 10 分钟再重试。",
+    "Sign-in URL must be an absolute HTTPS URL": "登录地址必须是完整的 HTTPS 地址",
+    "Sign-in username is required": "请填写登录账号",
+    "Sign-in password is required": "请填写登录密码",
+    "Token JSON path is required": "请填写令牌 JSON 路径",
+    "Sign-in request body must be valid JSON and contain {password}": "登录请求体必须是有效 JSON，且包含 {password}",
+    "Insert {login_token} into the authentication value, a header, or the request body": "请在认证值、请求头或请求体中填入 {login_token}"
   }
 }
