@@ -284,9 +284,9 @@ func TestGeminiChannelServesAudioTranscription(t *testing.T) {
 		assert.JSONEq(t, fmt.Sprintf(`{
 			"contents":[{"role":"user","parts":[
 				{"inlineData":{"mimeType":"audio/wav","data":%q}},
-				{"text":"Transcribe the speech in this audio verbatim, in the language it is spoken. Do not translate or summarize, and do not add timestamps, speaker labels or notes. If there is no speech, the transcript is empty.\nThe audio language is \"zh\" (ISO-639-1).\nContext for spelling and style only, it is not part of the audio: 88API, Gemini\nOutput only the transcript text."}
+				{"text":"Transcribe the speech in this audio into text, in the language it is spoken. Write it with the normal spacing and punctuation of that language. Do not translate or summarize, and do not add timestamps, speaker labels or notes. If there is no speech, the transcript is empty.\nThe audio language is \"zh\" (ISO-639-1).\nContext for spelling and style only, it is not part of the audio: 88API, Gemini\nReturn JSON: text is the transcript, language is the spoken language as a lowercase English name such as english or chinese."}
 			]}],
-			"generationConfig":{}
+			"generationConfig":{"responseMimeType":"application/json","responseSchema":{"type":"OBJECT","properties":{"language":{"type":"STRING"},"text":{"type":"STRING"}},"required":["language","text"]}}
 		}`, base64.StdEncoding.EncodeToString(wav)), string(payload))
 
 		requestURL, err := adaptor.GetRequestURL(info)
@@ -298,17 +298,25 @@ func TestGeminiChannelServesAudioTranscription(t *testing.T) {
 		assert.Equal(t, "pool-key", header.Get("x-goog-api-key"))
 	})
 
-	t.Run("verbose_json asks for the language and measures the duration", func(t *testing.T) {
-		ctx, _ := transcriptionContext(t, "/v1/audio/transcriptions", map[string]string{"model": "gemini-3-stt"}, "voice.wav", wav)
-		adaptor := &Adaptor{}
-		body, err := adaptor.ConvertAudioRequest(ctx, info, dto.AudioRequest{ResponseFormat: "verbose_json"})
-		require.NoError(t, err)
-		assert.Equal(t, &Transcription{ResponseFormat: "verbose_json", Duration: 1.5}, adaptor.Transcription)
-		payload, err := io.ReadAll(body)
-		require.NoError(t, err)
-		assert.JSONEq(t, `{"responseMimeType":"application/json","responseSchema":{"type":"OBJECT","properties":{"language":{"type":"STRING"},"text":{"type":"STRING"}},"required":["language","text"]}}`,
-			gjson.GetBytes(payload, "generationConfig").Raw)
-	})
+	// Regression: as plain text Gemini returned Chinese as "欢 迎 使 用 8 8 A P I …"
+	// for json and text, while verbose_json (structured output) stayed clean.
+	// Every format must ask for the same structured output.
+	for _, format := range []string{"json", "text", "verbose_json"} {
+		t.Run(format+" asks for structured output", func(t *testing.T) {
+			ctx, _ := transcriptionContext(t, "/v1/audio/transcriptions", map[string]string{"model": "gemini-3-stt"}, "voice.wav", wav)
+			adaptor := &Adaptor{}
+			body, err := adaptor.ConvertAudioRequest(ctx, info, dto.AudioRequest{ResponseFormat: format})
+			require.NoError(t, err)
+			payload, err := io.ReadAll(body)
+			require.NoError(t, err)
+			assert.JSONEq(t, `{"responseMimeType":"application/json","responseSchema":{"type":"OBJECT","properties":{"language":{"type":"STRING"},"text":{"type":"STRING"}},"required":["language","text"]}}`,
+				gjson.GetBytes(payload, "generationConfig").Raw)
+			assert.NotContains(t, gjson.GetBytes(payload, "contents.0.parts.1.text").String(), "verbatim")
+			if format == "verbose_json" {
+				assert.Equal(t, &Transcription{ResponseFormat: "verbose_json", Duration: 1.5}, adaptor.Transcription)
+			}
+		})
+	}
 }
 
 func TestTranscriptionAudioMIME(t *testing.T) {
@@ -348,9 +356,11 @@ func TestTranscriptionHandlerFormats(t *testing.T) {
 		contentType   string
 		want          string
 	}{
-		{name: "json", transcription: Transcription{ResponseFormat: "json"}, modelText: " 大家好，会议三点半开始。\n",
+		{name: "json", transcription: Transcription{ResponseFormat: "json"}, modelText: `{"language":"chinese","text":" 大家好，会议三点半开始。\n"}`,
 			contentType: "application/json", want: `{"text":"大家好，会议三点半开始。"}`},
-		{name: "text", transcription: Transcription{ResponseFormat: "text"}, modelText: "Good morning everyone.\n",
+		{name: "text", transcription: Transcription{ResponseFormat: "text"}, modelText: `{"language":"english","text":"Good morning everyone."}`,
+			contentType: "text/plain; charset=utf-8", want: "Good morning everyone."},
+		{name: "text keeps a plain-text answer", transcription: Transcription{ResponseFormat: "text"}, modelText: "Good morning everyone.\n",
 			contentType: "text/plain; charset=utf-8", want: "Good morning everyone."},
 		{name: "verbose_json", transcription: Transcription{ResponseFormat: "verbose_json", Duration: 11.46},
 			modelText:   `{"language":"Chinese","text":"大家好，会议三点半开始。"}`,

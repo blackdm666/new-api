@@ -136,36 +136,37 @@ func ConvertTranscriptionRequest(c *gin.Context, info *relaycommon.RelayInfo, re
 	if language := form.Value["language"]; len(language) > 0 {
 		transcription.Language = strings.TrimSpace(language[0])
 	}
+	// Every format asks for structured JSON: as plain text, Gemini often writes
+	// Chinese with a space between every character or word, which JSON output
+	// does not do.
 	var instruction strings.Builder
-	instruction.WriteString("Transcribe the speech in this audio verbatim, in the language it is spoken. Do not translate or summarize, and do not add timestamps, speaker labels or notes. If there is no speech, the transcript is empty.")
+	instruction.WriteString("Transcribe the speech in this audio into text, in the language it is spoken. Write it with the normal spacing and punctuation of that language. Do not translate or summarize, and do not add timestamps, speaker labels or notes. If there is no speech, the transcript is empty.")
 	if transcription.Language != "" {
 		fmt.Fprintf(&instruction, "\nThe audio language is %q (ISO-639-1).", transcription.Language)
 	}
 	if prompt := form.Value["prompt"]; len(prompt) > 0 && strings.TrimSpace(prompt[0]) != "" {
 		fmt.Fprintf(&instruction, "\nContext for spelling and style only, it is not part of the audio: %s", strings.TrimSpace(prompt[0]))
 	}
-
-	var generationConfig dto.GeminiChatGenerationConfig
-	if responseFormat == "verbose_json" {
-		instruction.WriteString("\nReturn JSON: text is the transcript, language is the spoken language as a lowercase English name such as english or chinese.")
-		generationConfig.ResponseMimeType = "application/json"
-		generationConfig.ResponseSchema = map[string]any{
+	instruction.WriteString("\nReturn JSON: text is the transcript, language is the spoken language as a lowercase English name such as english or chinese.")
+	generationConfig := dto.GeminiChatGenerationConfig{
+		ResponseMimeType: "application/json",
+		ResponseSchema: map[string]any{
 			"type": "OBJECT",
 			"properties": map[string]any{
 				"language": map[string]any{"type": "STRING"},
 				"text":     map[string]any{"type": "STRING"},
 			},
 			"required": []string{"language", "text"},
-		}
-		// Display only: billing uses Gemini's token counts, never this value.
+		},
+	}
+	// Display only: billing uses Gemini's token counts, never this value.
+	if responseFormat == "verbose_json" {
 		if ext := filepath.Ext(fileHeader.Filename); ext != "" {
 			seconds, durationErr := common.GetAudioDuration(c.Request.Context(), bytes.NewReader(audio), ext)
 			if durationErr == nil && seconds > 0 && !math.IsInf(seconds, 0) {
 				transcription.Duration = math.Round(seconds*100) / 100
 			}
 		}
-	} else {
-		instruction.WriteString("\nOutput only the transcript text.")
 	}
 
 	geminiRequest := dto.GeminiChatRequest{
@@ -216,6 +217,18 @@ func TranscriptionHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		}
 	}
 	text := strings.TrimSpace(transcript.String())
+	language := transcription.Language
+	// The model answers {"language","text"}; anything else is kept as the transcript.
+	var result struct {
+		Language string `json:"language"`
+		Text     string `json:"text"`
+	}
+	if common.UnmarshalJsonStr(text, &result) == nil {
+		text = strings.TrimSpace(result.Text)
+		if detected := strings.ToLower(strings.TrimSpace(result.Language)); detected != "" {
+			language = detected
+		}
+	}
 
 	var body []byte
 	contentType := "application/json"
@@ -226,23 +239,12 @@ func TranscriptionHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	case "verbose_json":
 		// Gemini returns no timing, so segments and words are left out rather
 		// than invented.
-		verbose := struct {
+		body, err = common.Marshal(struct {
 			Task     string  `json:"task"`
 			Language string  `json:"language"`
 			Duration float64 `json:"duration,omitempty"`
 			Text     string  `json:"text"`
-		}{Task: "transcribe", Language: transcription.Language, Duration: transcription.Duration, Text: text}
-		var result struct {
-			Language string `json:"language"`
-			Text     string `json:"text"`
-		}
-		if common.UnmarshalJsonStr(text, &result) == nil {
-			verbose.Text = strings.TrimSpace(result.Text)
-			if language := strings.ToLower(strings.TrimSpace(result.Language)); language != "" {
-				verbose.Language = language
-			}
-		}
-		body, err = common.Marshal(verbose)
+		}{Task: "transcribe", Language: language, Duration: transcription.Duration, Text: text})
 	default:
 		body, err = common.Marshal(dto.AudioResponse{Text: text})
 	}
