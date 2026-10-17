@@ -20,6 +20,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// audioEstimateBytesPerSecond 是 16 kbps，常见语音编码的低端码率，按它估算的时长偏长。
+// 上游返回用量的渠道（grok-stt、Gemini）结算时按实际用量多退少补；
+// 上游不返回用量的渠道会直接按这个估算计费。
+const audioEstimateBytesPerSecond = 2000
+
 func getImageToken(c *gin.Context, fileMeta *types.FileMeta, model string, stream bool) (int, error) {
 	if fileMeta == nil || fileMeta.Source == nil {
 		return 0, fmt.Errorf("image_url_is_nil")
@@ -89,7 +94,9 @@ func CountRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *relayco
 			ext := filepath.Ext(fileHeader.Filename)
 			duration, err := common.GetAudioDuration(c.Request.Context(), file, ext)
 			if err != nil {
-				return 0, fmt.Errorf("error getting audio duration: %v", err)
+				// webm 等本地解析不了时长的文件不再拒绝请求，改按文件大小估算。
+				duration = float64(fileHeader.Size) / audioEstimateBytesPerSecond
+				logger.LogWarn(c, common.LogText("audio duration unavailable (%s: %v), estimating %.0f seconds from file size", ext, err, duration))
 			}
 			// duration 来自用户上传文件的元数据，可被伪造成天文数字或负数。
 			// 负值会让 token 估算变成负数（低估预扣费），先钳到 0 再转换。

@@ -44,6 +44,9 @@ var xaiTTSCodecs = map[string]string{
 	"alaw":  "alaw",
 }
 
+// OpenAI /v1/audio/speech 的内置音色，xAI 都不认。
+var openAIBuiltinVoices = []string{"alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse", "marin", "cedar"}
+
 // xAI 支持的采样率；同时用于界定 pcm/mulaw/alaw 的时长换算。
 var xaiTTSSampleRates = []int{8000, 16000, 22050, 24000, 44100, 48000}
 
@@ -122,6 +125,10 @@ func buildXAITTSRequest(c *gin.Context, request dto.AudioRequest) (map[string]an
 	voice := strings.TrimSpace(request.Voice)
 	if voice == "" {
 		voice = xaiDefaultVoice
+	}
+	// OpenAI SDK 示例默认用 alloy 等 OpenAI 音色；xAI 对未知音色只回 404，这里先给出明确提示。
+	if slices.Contains(openAIBuiltinVoices, strings.ToLower(voice)) {
+		return nil, "", 0, badAudioRequest("voice %q is an OpenAI voice and is not available for grok tts, use eve, ara, rex, sal, leo or a custom voice id", voice)
 	}
 	language := audioLanguage(request.Language)
 	if language == "" {

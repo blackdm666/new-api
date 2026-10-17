@@ -342,6 +342,7 @@
   "admin subscription deletion": "管理员删除订阅",
   "admin subscription update": "管理员修改订阅",
   "api_version not found, using default: %s": "未找到 api_version，使用默认值: %s",
+  "audio duration unavailable (%s: %v), estimating %.0f seconds from file size": "无法解析音频时长（%s: %v），按文件大小估算为 %.0f 秒",
   "audit actor role unavailable (request_id=%s, actor_role=%d)": "无法识别审计日志的操作者角色 (request_id=%s, actor_role=%d)",
   "audit log write failed (request_id=%s): %v": "审计日志写入失败 (request_id=%s): %v",
   "audit log write failed (request_id=%s): log database unavailable": "审计日志写入失败 (request_id=%s): 日志数据库不可用",
