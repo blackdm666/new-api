@@ -87,3 +87,19 @@ func TestGeminiChatGenerationConfigPreservesExplicitZeroValuesSnakeCase(t *testi
 	assert.Equal(t, float64(0), generationConfig["seed"])
 	assert.Equal(t, false, generationConfig["responseLogprobs"])
 }
+
+// Native requests to a Transcribe model carry audioTranscriptionConfig; it must
+// reach upstream in either spelling, or diarization and timestamps are lost.
+func TestGeminiChatGenerationConfigKeepsAudioTranscriptionConfig(t *testing.T) {
+	for _, key := range []string{"audioTranscriptionConfig", "audio_transcription_config"} {
+		t.Run(key, func(t *testing.T) {
+			raw := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"` + key + `":{"languageCodes":["zh-CN"],"diarization":true}}}`)
+			var req GeminiChatRequest
+			require.NoError(t, kitutil.Unmarshal(raw, &req))
+
+			encoded, err := kitutil.Marshal(req.GenerationConfig)
+			require.NoError(t, err)
+			assert.JSONEq(t, `{"audioTranscriptionConfig":{"languageCodes":["zh-CN"],"diarization":true}}`, string(encoded))
+		})
+	}
+}

@@ -61,6 +61,16 @@ func TestGeminiChannelServesAudioSpeech(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "http://sub2api:8080/v1beta/models/gemini-3.1-flash-tts-preview:generateContent", requestURL)
 
+	// Gemini 3.8 would read the instructions aloud; the speed prefix it follows.
+	speed := 1.5
+	body, err = adaptor.ConvertAudioRequest(nil, info, dto.AudioRequest{
+		Model: "gemini-3.8-flash-tts", Input: "你好", Voice: "Kore", Instructions: "用开心的语气说", Speed: &speed,
+	})
+	require.NoError(t, err)
+	payload, err = io.ReadAll(body)
+	require.NoError(t, err)
+	assert.Equal(t, "Speak at 1.5x normal speed: 你好", gjson.GetBytes(payload, "contents.0.parts.0.text").String())
+
 	context, _ := gin.CreateTestContext(httptest.NewRecorder())
 	context.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
 	header := http.Header{}
@@ -158,10 +168,19 @@ func TestSpeechHandlerEncodesRequestedFormat(t *testing.T) {
 	for i := range sampleCount {
 		binary.LittleEndian.PutUint16(pcm[i*2:], uint16(int16(i%2000-1000)))
 	}
-	responseJSON := fmt.Sprintf(`{
-		"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"audio/L16;codec=pcm;rate=24000","data":%q}}]}}],
-		"usageMetadata":{"promptTokenCount":3,"totalTokenCount":3}
-	}`, base64.StdEncoding.EncodeToString(pcm))
+	wav, err := wrapPCMAsWAV(pcm)
+	require.NoError(t, err)
+	// Gemini 3.1/2.5 return headerless PCM, Gemini 3.8 a WAV file of the same samples.
+	upstreams := map[string]string{
+		"pcm": fmt.Sprintf(`{
+			"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"audio/L16;codec=pcm;rate=24000","data":%q}}]}}],
+			"usageMetadata":{"promptTokenCount":3,"totalTokenCount":3}
+		}`, base64.StdEncoding.EncodeToString(pcm)),
+		"wav": fmt.Sprintf(`{
+			"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"audio/wav","data":%q}}]}}],
+			"usageMetadata":{"promptTokenCount":3,"totalTokenCount":3}
+		}`, base64.StdEncoding.EncodeToString(wav)),
+	}
 
 	tests := []struct {
 		format      string
@@ -203,32 +222,51 @@ func TestSpeechHandlerEncodesRequestedFormat(t *testing.T) {
 		}},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.format, func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-			context, _ := gin.CreateTestContext(recorder)
-			context.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
-			resp := &http.Response{
-				StatusCode: http.StatusOK,
-				Header:     make(http.Header),
-				Body:       io.NopCloser(strings.NewReader(responseJSON)),
-			}
-			info := &relaycommon.RelayInfo{
-				RelayMode:   relayconstant.RelayModeAudioSpeech,
-				ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3.1-flash-tts"},
-			}
-			adaptor := &Adaptor{AudioResponseFormat: tt.format}
+	for upstream, responseJSON := range upstreams {
+		for _, tt := range tests {
+			t.Run(upstream+" to "+tt.format, func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				context, _ := gin.CreateTestContext(recorder)
+				context.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
+				resp := &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(responseJSON)),
+				}
+				info := &relaycommon.RelayInfo{
+					RelayMode:   relayconstant.RelayModeAudioSpeech,
+					ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3.1-flash-tts"},
+				}
+				adaptor := &Adaptor{AudioResponseFormat: tt.format}
 
-			usageValue, apiErr := adaptor.DoResponse(context, resp, info)
-			require.Nil(t, apiErr)
-			usage, ok := usageValue.(*dto.Usage)
-			require.True(t, ok)
-			assert.Equal(t, 33, usage.CompletionTokens)
-			assert.Equal(t, 33, usage.CompletionTokenDetails.AudioTokens)
-			assert.Equal(t, tt.contentType, recorder.Header().Get("Content-Type"))
-			tt.check(t, recorder.Body.Bytes())
-		})
+				usageValue, apiErr := adaptor.DoResponse(context, resp, info)
+				require.Nil(t, apiErr)
+				usage, ok := usageValue.(*dto.Usage)
+				require.True(t, ok)
+				assert.Equal(t, 33, usage.CompletionTokens)
+				assert.Equal(t, 33, usage.CompletionTokenDetails.AudioTokens)
+				assert.Equal(t, tt.contentType, recorder.Header().Get("Content-Type"))
+				tt.check(t, recorder.Body.Bytes())
+			})
+		}
 	}
+
+	// A WAV in another layout would be re-encoded at the wrong speed or pitch.
+	t.Run("wav in another layout", func(t *testing.T) {
+		other := bytes.Clone(wav)
+		binary.LittleEndian.PutUint32(other[24:28], 16000)
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/speech", nil)
+		resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(fmt.Sprintf(
+			`{"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"audio/wav","data":%q}}]}}]}`, base64.StdEncoding.EncodeToString(other))))}
+		info := &relaycommon.RelayInfo{RelayMode: relayconstant.RelayModeAudioSpeech, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3.8-flash-tts"}}
+
+		_, apiErr := (&Adaptor{AudioResponseFormat: "mp3"}).DoResponse(context, resp, info)
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusInternalServerError, apiErr.StatusCode)
+		assert.Contains(t, apiErr.Error(), "16000 Hz")
+	})
 }
 
 // transcriptionContext is a multipart /v1/audio/transcriptions request as an
@@ -298,6 +336,29 @@ func TestGeminiChannelServesAudioTranscription(t *testing.T) {
 		assert.Equal(t, "pool-key", header.Get("x-goog-api-key"))
 	})
 
+	// gemini-3.5-transcribe rejects instructions and JSON output: it gets the
+	// audio alone, the language as a BCP-47 code, and an output cap from the
+	// audio length (ceil(1.5 s) * 15 + 1024 tokens) against looping.
+	t.Run("transcribe model", func(t *testing.T) {
+		transcribeInfo := &relaycommon.RelayInfo{
+			RelayMode:       relayconstant.RelayModeAudioTranscription,
+			OriginModelName: "gemini-3.5-transcribe",
+			ChannelMeta:     &relaycommon.ChannelMeta{ChannelBaseUrl: "http://sub2api:8080", UpstreamModelName: "gemini-3.5-transcribe"},
+		}
+		ctx, _ := transcriptionContext(t, "/v1/audio/transcriptions",
+			map[string]string{"model": "gemini-3.5-transcribe", "language": "zh", "prompt": "88API"}, "voice.wav", wav)
+		adaptor := &Adaptor{}
+		body, err := adaptor.ConvertAudioRequest(ctx, transcribeInfo, dto.AudioRequest{ResponseFormat: "text"})
+		require.NoError(t, err)
+		assert.Equal(t, &Transcription{ResponseFormat: "text", Language: "zh", Duration: 1.5, PlainText: true}, adaptor.Transcription)
+		payload, err := io.ReadAll(body)
+		require.NoError(t, err)
+		assert.JSONEq(t, fmt.Sprintf(`{
+			"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"audio/wav","data":%q}}]}],
+			"generationConfig":{"maxOutputTokens":1054,"audioTranscriptionConfig":{"languageCodes":["zh"]}}
+		}`, base64.StdEncoding.EncodeToString(wav)), string(payload))
+	})
+
 	// Regression: as plain text Gemini returned Chinese as "欢 迎 使 用 8 8 A P I …"
 	// for json and text, while verbose_json (structured output) stayed clean.
 	// Every format must ask for the same structured output.
@@ -365,6 +426,8 @@ func TestTranscriptionHandlerFormats(t *testing.T) {
 		{name: "verbose_json", transcription: Transcription{ResponseFormat: "verbose_json", Duration: 11.46},
 			modelText:   `{"language":"Chinese","text":"大家好，会议三点半开始。"}`,
 			contentType: "application/json", want: `{"task":"transcribe","language":"chinese","duration":11.46,"text":"大家好，会议三点半开始。"}`},
+		{name: "transcribe model text is never parsed as JSON", transcription: Transcription{ResponseFormat: "json", PlainText: true},
+			modelText: `{"text":"read aloud"}`, contentType: "application/json", want: `{"text":"{\"text\":\"read aloud\"}"}`},
 		{name: "verbose_json keeps the client language when the model returns plain text", transcription: Transcription{ResponseFormat: "verbose_json", Language: "en"},
 			modelText:   "Good morning everyone.",
 			contentType: "application/json", want: `{"task":"transcribe","language":"en","text":"Good morning everyone."}`},

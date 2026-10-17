@@ -55,6 +55,9 @@ type Transcription struct {
 	// Duration is the audio length in seconds parsed from the file for
 	// verbose_json, 0 when unknown.
 	Duration float64
+	// PlainText marks a Transcribe model, which answers with the bare
+	// transcript instead of {"language","text"} JSON.
+	PlainText bool
 }
 
 // transcriptionAudioMIME detects the audio container from the file header and
@@ -87,7 +90,8 @@ func transcriptionAudioMIME(audio []byte, filename string) string {
 
 // ConvertTranscriptionRequest turns an OpenAI /v1/audio/transcriptions
 // multipart request into a Gemini generateContent request with the audio
-// inline. language and prompt become hints in the instruction.
+// inline. language and prompt become hints in the instruction; a Transcribe
+// model gets the audio alone.
 func ConvertTranscriptionRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, *Transcription, error) {
 	if info.RelayMode == constant.RelayModeAudioTranslation {
 		return nil, nil, invalidAudioRequest(c, i18n.MsgSTTTranslationUnsupported, map[string]any{"Model": info.OriginModelName})
@@ -136,31 +140,10 @@ func ConvertTranscriptionRequest(c *gin.Context, info *relaycommon.RelayInfo, re
 	if language := form.Value["language"]; len(language) > 0 {
 		transcription.Language = strings.TrimSpace(language[0])
 	}
-	// Every format asks for structured JSON: as plain text, Gemini often writes
-	// Chinese with a space between every character or word, which JSON output
-	// does not do.
-	var instruction strings.Builder
-	instruction.WriteString("Transcribe the speech in this audio into text, in the language it is spoken. Write it with the normal spacing and punctuation of that language. Do not translate or summarize, and do not add timestamps, speaker labels or notes. If there is no speech, the transcript is empty.")
-	if transcription.Language != "" {
-		fmt.Fprintf(&instruction, "\nThe audio language is %q (ISO-639-1).", transcription.Language)
-	}
-	if prompt := form.Value["prompt"]; len(prompt) > 0 && strings.TrimSpace(prompt[0]) != "" {
-		fmt.Fprintf(&instruction, "\nContext for spelling and style only, it is not part of the audio: %s", strings.TrimSpace(prompt[0]))
-	}
-	instruction.WriteString("\nReturn JSON: text is the transcript, language is the spoken language as a lowercase English name such as english or chinese.")
-	generationConfig := dto.GeminiChatGenerationConfig{
-		ResponseMimeType: "application/json",
-		ResponseSchema: map[string]any{
-			"type": "OBJECT",
-			"properties": map[string]any{
-				"language": map[string]any{"type": "STRING"},
-				"text":     map[string]any{"type": "STRING"},
-			},
-			"required": []string{"language", "text"},
-		},
-	}
-	// Display only: billing uses Gemini's token counts, never this value.
-	if responseFormat == "verbose_json" {
+	transcribeModel := isTranscribeModel(info.UpstreamModelName)
+	// Shown in verbose_json and used to cap a Transcribe model's output; billing
+	// uses Gemini's token counts, never this value.
+	if responseFormat == "verbose_json" || transcribeModel {
 		if ext := filepath.Ext(fileHeader.Filename); ext != "" {
 			seconds, durationErr := common.GetAudioDuration(c.Request.Context(), bytes.NewReader(audio), ext)
 			if durationErr == nil && seconds > 0 && !math.IsInf(seconds, 0) {
@@ -169,15 +152,52 @@ func ConvertTranscriptionRequest(c *gin.Context, info *relaycommon.RelayInfo, re
 		}
 	}
 
+	audioPart := dto.GeminiPart{InlineData: &dto.GeminiInlineData{MimeType: mimeType, Data: base64.StdEncoding.EncodeToString(audio)}}
 	geminiRequest := dto.GeminiChatRequest{
-		Contents: []dto.GeminiChatContent{{
-			Role: "user",
-			Parts: []dto.GeminiPart{
-				{InlineData: &dto.GeminiInlineData{MimeType: mimeType, Data: base64.StdEncoding.EncodeToString(audio)}},
-				{Text: instruction.String()},
+		Contents: []dto.GeminiChatContent{{Role: "user", Parts: []dto.GeminiPart{audioPart}}},
+	}
+	if transcribeModel {
+		// A Transcribe model takes the audio alone: the language hint goes in
+		// audioTranscriptionConfig, and the prompt has no equivalent.
+		transcription.PlainText = true
+		if transcription.Language != "" {
+			config, err := common.Marshal(map[string]any{"languageCodes": []string{transcription.Language}})
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to marshal Gemini transcription config: %w", err)
+			}
+			geminiRequest.GenerationConfig.AudioTranscriptionConfig = config
+		}
+		if transcription.Duration > 0 {
+			// The duration comes from the file header, so it is bounded first.
+			seconds := uint(math.Ceil(min(transcription.Duration, transcribeMaxSeconds)))
+			maxTokens := seconds*transcribeOutputTokensPerSecond + 1024
+			geminiRequest.GenerationConfig.MaxOutputTokens = &maxTokens
+		}
+	} else {
+		// Every format asks for structured JSON: as plain text, Gemini often
+		// writes Chinese with a space between every character or word, which
+		// JSON output does not do.
+		var instruction strings.Builder
+		instruction.WriteString("Transcribe the speech in this audio into text, in the language it is spoken. Write it with the normal spacing and punctuation of that language. Do not translate or summarize, and do not add timestamps, speaker labels or notes. If there is no speech, the transcript is empty.")
+		if transcription.Language != "" {
+			fmt.Fprintf(&instruction, "\nThe audio language is %q (ISO-639-1).", transcription.Language)
+		}
+		if prompt := form.Value["prompt"]; len(prompt) > 0 && strings.TrimSpace(prompt[0]) != "" {
+			fmt.Fprintf(&instruction, "\nContext for spelling and style only, it is not part of the audio: %s", strings.TrimSpace(prompt[0]))
+		}
+		instruction.WriteString("\nReturn JSON: text is the transcript, language is the spoken language as a lowercase English name such as english or chinese.")
+		geminiRequest.Contents[0].Parts = append(geminiRequest.Contents[0].Parts, dto.GeminiPart{Text: instruction.String()})
+		geminiRequest.GenerationConfig = dto.GeminiChatGenerationConfig{
+			ResponseMimeType: "application/json",
+			ResponseSchema: map[string]any{
+				"type": "OBJECT",
+				"properties": map[string]any{
+					"language": map[string]any{"type": "STRING"},
+					"text":     map[string]any{"type": "STRING"},
+				},
+				"required": []string{"language", "text"},
 			},
-		}},
-		GenerationConfig: generationConfig,
+		}
 	}
 	body, err := common.Marshal(geminiRequest)
 	if err != nil {
@@ -185,6 +205,22 @@ func ConvertTranscriptionRequest(c *gin.Context, info *relaycommon.RelayInfo, re
 	}
 	return bytes.NewReader(body), transcription, nil
 }
+
+// isTranscribeModel reports a dedicated speech-to-text model such as
+// gemini-3.5-transcribe, which answers audio alone with its transcript and
+// rejects instructions, JSON output and thinking.
+func isTranscribeModel(upstreamModel string) bool {
+	return strings.Contains(strings.ToLower(upstreamModel), "transcribe")
+}
+
+// A Transcribe model's output is capped by the audio length: speech is at most
+// about 5 text tokens a second, while repetitive audio can make the model loop
+// until its 32k-token output limit and bill for it. Gemini transcribes at most
+// an hour of audio per request.
+const (
+	transcribeOutputTokensPerSecond = 15
+	transcribeMaxSeconds            = 3600
+)
 
 // TranscriptionHandler answers an OpenAI /v1/audio/transcriptions request from
 // a Gemini generateContent response. Usage is Gemini's usageMetadata, the same
@@ -223,7 +259,7 @@ func TranscriptionHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		Language string `json:"language"`
 		Text     string `json:"text"`
 	}
-	if common.UnmarshalJsonStr(text, &result) == nil {
+	if !transcription.PlainText && common.UnmarshalJsonStr(text, &result) == nil {
 		text = strings.TrimSpace(result.Text)
 		if detected := strings.ToLower(strings.TrimSpace(result.Language)); detected != "" {
 			language = detected

@@ -78,6 +78,13 @@ func ConvertSpeechRequest(c *gin.Context, info *relaycommon.RelayInfo, request d
 	}
 
 	instructions := strings.TrimSpace(request.Instructions)
+	// Gemini 3.8 TTS takes the text as a verbatim transcript and generateContent
+	// has no field for delivery notes: a free-form instruction prefix is often
+	// spoken aloud (every time when written in Chinese), so it is dropped. The
+	// speed prefix below is still followed without being spoken.
+	if strings.Contains(request.Model, "gemini-3.8-") {
+		instructions = ""
+	}
 	if request.Speed != nil {
 		if *request.Speed < 0.25 || *request.Speed > 4 {
 			return nil, "", invalidAudioRequest(c, i18n.MsgTTSSpeedOutOfRange, map[string]any{"Speed": fmt.Sprintf("%g", *request.Speed)})
@@ -135,9 +142,10 @@ func RejectTTSModelChat(c *gin.Context, info *relaycommon.RelayInfo) error {
 }
 
 // SpeechHandler answers an OpenAI /v1/audio/speech request from a Gemini TTS
-// generateContent response: Gemini returns raw 24 kHz 16-bit mono PCM, which is
-// sent as-is or encoded into responseFormat. Audio tokens come from usage
-// metadata, or from the PCM length when upstream reports none.
+// generateContent response: Gemini returns 24 kHz 16-bit mono PCM, headerless
+// or (Gemini 3.8) inside a WAV file, which is sent as-is or encoded into
+// responseFormat. Audio tokens come from usage metadata, or from the PCM
+// length when upstream reports none.
 func SpeechHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, responseFormat string) (*dto.Usage, *types.NewAPIError) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -151,7 +159,6 @@ func SpeechHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 	}
 
 	var pcm []byte
-	mimeType := ""
 	for _, candidate := range geminiResponse.Candidates {
 		for _, part := range candidate.Content.Parts {
 			if part.InlineData == nil || part.InlineData.Data == "" {
@@ -161,8 +168,15 @@ func SpeechHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 			if decodeErr != nil {
 				return nil, types.NewOpenAIError(fmt.Errorf("failed to decode Gemini TTS audio: %w", decodeErr), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 			}
-			if mimeType == "" {
-				mimeType = part.InlineData.MimeType
+			partMIME := strings.ToLower(strings.TrimSpace(part.InlineData.MimeType))
+			switch {
+			case strings.Contains(partMIME, "wav"):
+				// Gemini 3.8 TTS answers with a WAV file instead of headerless PCM.
+				if chunk, err = pcmFromWAV(chunk); err != nil {
+					return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+				}
+			case partMIME != "" && !strings.Contains(partMIME, "l16") && !strings.Contains(partMIME, "pcm"):
+				return nil, types.NewOpenAIError(fmt.Errorf("expected PCM or WAV audio from Gemini TTS, got %q", part.InlineData.MimeType), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 			}
 			pcm = append(pcm, chunk...)
 		}
@@ -183,20 +197,12 @@ func SpeechHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 		return nil, types.NewOpenAIError(errors.New(i18n.T(c, i18n.MsgTTSNoAudio, map[string]any{"Reason": finishReason})), types.ErrorCodeEmptyResponse, http.StatusInternalServerError)
 	}
 
-	normalizedMIME := strings.ToLower(strings.TrimSpace(mimeType))
-	isPCM := normalizedMIME == "" || strings.Contains(normalizedMIME, "l16") || strings.Contains(normalizedMIME, "pcm")
-	if !isPCM && !(responseFormat == "wav" && strings.Contains(normalizedMIME, "wav")) {
-		return nil, types.NewOpenAIError(fmt.Errorf("expected PCM audio from Gemini TTS, got %q", mimeType), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
-	}
-
 	contentType := "audio/pcm"
 	audioData := pcm
 	switch {
-	case responseFormat == "wav" && isPCM:
-		contentType = "audio/wav"
-		audioData, err = wrapPCMAsWAV(pcm)
 	case responseFormat == "wav":
 		contentType = "audio/wav"
+		audioData, err = wrapPCMAsWAV(pcm)
 	case responseFormat == "mp3":
 		contentType = "audio/mpeg"
 		audioData, err = encodePCMAsMP3(pcm)
@@ -232,6 +238,50 @@ func SpeechHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 
 	c.Data(resp.StatusCode, contentType, audioData)
 	return usage, nil
+}
+
+// pcmFromWAV returns the samples of a WAV file, which must be in the same
+// 24 kHz 16-bit mono PCM layout as the headerless audio, so every output
+// format is encoded the same way.
+func pcmFromWAV(wav []byte) ([]byte, error) {
+	if len(wav) < 12 || string(wav[0:4]) != "RIFF" || string(wav[8:12]) != "WAVE" {
+		return nil, errors.New("Gemini TTS returned a malformed WAV file")
+	}
+	formatChecked := false
+	for offset := 12; offset+8 <= len(wav); {
+		id := string(wav[offset : offset+4])
+		size := int(binary.LittleEndian.Uint32(wav[offset+4 : offset+8]))
+		body := offset + 8
+		switch id {
+		case "fmt ":
+			if size < 16 || body+16 > len(wav) {
+				return nil, errors.New("Gemini TTS returned a malformed WAV file")
+			}
+			format := binary.LittleEndian.Uint16(wav[body:])
+			channels := binary.LittleEndian.Uint16(wav[body+2:])
+			sampleRate := binary.LittleEndian.Uint32(wav[body+4:])
+			bits := binary.LittleEndian.Uint16(wav[body+14:])
+			if format != 1 || channels != ttsChannels || sampleRate != ttsSampleRate || bits != ttsBitsPerSample {
+				return nil, fmt.Errorf("unexpected Gemini TTS WAV format: format %d, %d channels, %d Hz, %d bits", format, channels, sampleRate, bits)
+			}
+			formatChecked = true
+		case "data":
+			if !formatChecked {
+				return nil, errors.New("Gemini TTS returned a WAV file without a format chunk")
+			}
+			// A streamed WAV may carry a placeholder size; the data runs to the end.
+			end := body + size
+			if size < 0 || end > len(wav) || end < body {
+				end = len(wav)
+			}
+			return wav[body:end], nil
+		}
+		offset = body + size + size%2
+		if offset < body {
+			break
+		}
+	}
+	return nil, errors.New("Gemini TTS returned a WAV file without audio data")
 }
 
 func wrapPCMAsWAV(pcm []byte) ([]byte, error) {
