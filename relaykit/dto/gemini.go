@@ -416,6 +416,9 @@ type GeminiChatGenerationConfig struct {
 	ThinkingConfig             *GeminiThinkingConfig `json:"thinkingConfig,omitempty"`
 	SpeechConfig               json.RawMessage       `json:"speechConfig,omitempty"` // RawMessage to allow flexible speech config
 	ImageConfig                json.RawMessage       `json:"imageConfig,omitempty"`  // RawMessage to allow flexible image config
+	// AudioTranscriptionConfig drives Gemini Transcribe models (language codes,
+	// vocabulary, diarization, word timestamps, mode).
+	AudioTranscriptionConfig json.RawMessage `json:"audioTranscriptionConfig,omitempty"`
 }
 
 // UnmarshalJSON allows GeminiChatGenerationConfig to accept both snake_case and camelCase fields.
@@ -440,6 +443,7 @@ func (c *GeminiChatGenerationConfig) UnmarshalJSON(data []byte) error {
 		ThinkingConfigSnake             *GeminiThinkingConfig `json:"thinking_config,omitempty"`
 		SpeechConfigSnake               json.RawMessage       `json:"speech_config,omitempty"`
 		ImageConfigSnake                json.RawMessage       `json:"image_config,omitempty"`
+		AudioTranscriptionConfigSnake   json.RawMessage       `json:"audio_transcription_config,omitempty"`
 	}
 
 	if err := kitutil.Unmarshal(data, &aux); err != nil {
@@ -499,6 +503,9 @@ func (c *GeminiChatGenerationConfig) UnmarshalJSON(data []byte) error {
 	}
 	if len(aux.ImageConfigSnake) > 0 {
 		c.ImageConfig = aux.ImageConfigSnake
+	}
+	if len(aux.AudioTranscriptionConfigSnake) > 0 {
+		c.AudioTranscriptionConfig = aux.AudioTranscriptionConfigSnake
 	}
 
 	return nil
