@@ -97,7 +97,7 @@ func TestXAIConvertTTSRequestDefaultsAndRejects(t *testing.T) {
 		{name: "empty_input", body: `{}`, request: dto.AudioRequest{Input: " "}, message: "input is required"},
 		{name: "stream", body: `{}`, request: dto.AudioRequest{Input: "hi", StreamFormat: "sse"}, message: "streaming"},
 		{name: "sample_rate", body: `{"sample_rate":999999999}`, request: dto.AudioRequest{Input: "hi"}, message: "sample_rate"},
-		{name: "openai_voice", body: `{}`, request: dto.AudioRequest{Input: "hi", Voice: "Alloy"}, message: `voice "Alloy" is an OpenAI voice and is not available for grok tts, use eve, ara, rex, sal, leo or a custom voice id`},
+		{name: "openai_voice", body: `{}`, request: dto.AudioRequest{Input: "hi", Voice: "Alloy"}, message: `voice "Alloy" is an OpenAI voice and is not available for grok tts, use altair, ara, atlas, aurora, carina, castor, celeste, cosmo, eve, helios, helix, iris, kepler, leo, liora, lumen, luna, lux, naksh, orion, perseus, rex, rigel, sal, sirius, ursa, zagan, zenith or a custom voice id`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -182,7 +182,8 @@ func TestXAIConvertSTTRequestKeepsXAIFieldsAndPutsFileLast(t *testing.T) {
 }
 
 func TestXAISTTResponseFormats(t *testing.T) {
-	upstream := `{"text":"你好","language":"zh-cn","duration":61.2,"words":[{"text":"你","start":0.1,"end":0.2},{"text":"好","start":0.3,"end":0.5}]}`
+	// diarize=true 时 xAI 在每个词上带 speaker；第二个词带 0 号说话人，第一个没带（未开 diarize 的形状）。
+	upstream := `{"text":"你好","language":"zh-cn","duration":61.2,"words":[{"text":"你","start":0.1,"end":0.2},{"text":"好","start":0.3,"end":0.5,"speaker":0}]}`
 	tests := []struct {
 		format      string
 		contentType string
@@ -198,6 +199,9 @@ func TestXAISTTResponseFormats(t *testing.T) {
 			assert.Equal(t, "transcribe", gjson.Get(body, "task").String())
 			assert.Equal(t, 61.2, gjson.Get(body, "duration").Float())
 			assert.Equal(t, "好", gjson.Get(body, "words.1.word").String())
+			assert.False(t, gjson.Get(body, "words.0.speaker").Exists(), "speaker is omitted when upstream did not diarize")
+			assert.Equal(t, gjson.Number, gjson.Get(body, "words.1.speaker").Type, "speaker 0 must survive omitempty")
+			assert.Equal(t, int64(0), gjson.Get(body, "words.1.speaker").Int())
 		}},
 	}
 	for _, tt := range tests {

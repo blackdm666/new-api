@@ -67,7 +67,7 @@ func xaiWebSocketURL(info *relaycommon.RelayInfo) (string, error) {
 		fields = xaiTTSStreamQueryFields
 		voice := strings.TrimSpace(clientQuery.Get("voice"))
 		if slices.Contains(openAIBuiltinVoices, strings.ToLower(voice)) {
-			return "", badAudioRequest("voice %q is an OpenAI voice and is not available for grok tts, use eve, ara, rex, sal, leo or a custom voice id", voice)
+			return "", openAIVoiceError(voice)
 		}
 	} else {
 		if !isXAIRealtimeModel(info.UpstreamModelName) {
