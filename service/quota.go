@@ -167,6 +167,50 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	return nil
 }
 
+// ReserveWssQuota raises a WebSocket session's reservation to the charge for
+// the usage so far, so sessions priced by duration or characters stop once the
+// balance cannot cover them. Settlement still happens in PostWssConsumeQuota.
+func ReserveWssQuota(relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage) error {
+	if relayInfo.Billing == nil || usage == nil {
+		return nil
+	}
+	quota := 0
+	if ok, tieredQuota, _ := TryTieredSettle(relayInfo, billingexpr.TokenParams{
+		P:   float64(usage.InputTokens),
+		C:   float64(usage.OutputTokens),
+		Len: float64(usage.InputTokens),
+	}); ok {
+		quota = tieredQuota
+	} else {
+		quota, _ = calculateAudioQuota(buildAudioQuotaInfo(
+			TokenDetails{TextTokens: usage.InputTokenDetails.TextTokens, AudioTokens: usage.InputTokenDetails.AudioTokens},
+			TokenDetails{TextTokens: usage.OutputTokenDetails.TextTokens, AudioTokens: usage.OutputTokenDetails.AudioTokens},
+			relayInfo.UpstreamModelName,
+			relayInfo.PriceData,
+		))
+	}
+	// Trusted sessions reserve nothing, so the unreserved part of the charge
+	// is what the wallet still has to cover.
+	unreserved := quota - relayInfo.Billing.GetPreConsumedQuota()
+	if unreserved <= 0 {
+		return nil
+	}
+	if relayInfo.BillingSource != BillingSourceSubscription {
+		userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
+		if err != nil {
+			return err
+		}
+		if userQuota < unreserved {
+			return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(unreserved))
+		}
+	}
+	if err := relayInfo.Billing.Reserve(quota); err != nil {
+		return err
+	}
+	relayInfo.FinalPreConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()
+	return nil
+}
+
 func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, modelName string,
 	usage *dto.RealtimeUsage, extraContent []*common.Message) {
 

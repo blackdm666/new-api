@@ -51,7 +51,7 @@ func ApplyUpstreamBodyMetadata(req *http.Request, body io.Reader) {
 func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Header) {
 	if info.RelayMode == constant.RelayModeAudioTranscription || info.RelayMode == constant.RelayModeAudioTranslation {
 		// multipart/form-data
-	} else if info.RelayMode == constant.RelayModeRealtime {
+	} else if info.RelayMode == constant.RelayModeRealtime || info.RelayMode == constant.RelayModeAudioSpeechStream {
 		// websocket
 	} else {
 		req.Set("Content-Type", c.Request.Header.Get("Content-Type"))

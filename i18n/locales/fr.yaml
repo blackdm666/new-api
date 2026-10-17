@@ -203,6 +203,7 @@ tts.speed_out_of_range: "speed doit être compris entre 0.25 et 4, reçu {{.Spee
 tts.stream_unsupported: "{{.Model}} ne prend pas en charge le streaming. Retirez stream ou stream_format=sse ; l’audio complet est renvoyé en une seule réponse."
 tts.chat_endpoint_unsupported: "{{.Model}} est un modèle de synthèse vocale et ne peut pas être appelé via l’endpoint de chat. Utilisez POST /v1/audio/speech (compatible OpenAI)."
 stt.chat_endpoint_unsupported: "{{.Model}} est un modèle de transcription vocale et ne peut pas être appelé via l’endpoint de chat. Utilisez POST /v1/audio/transcriptions (compatible OpenAI)."
+realtime.endpoint_unsupported: "{{.Model}} est un modèle vocal en temps réel et ne peut être utilisé que via l’endpoint WebSocket /v1/realtime."
 tts.no_audio: "Le modèle n’a renvoyé aucun audio (finishReason={{.Reason}}). C’est généralement temporaire, réessayez. Si cela se répète, vérifiez que le texte n’est pas trop court ou composé uniquement de symboles."
 stt.translation_unsupported: "{{.Model}} ne prend pas en charge /v1/audio/translations (traduction en anglais). Utilisez POST /v1/audio/transcriptions pour transcrire la langue d’origine."
 stt.response_format_unsupported: "response_format « {{.Format}} » n’est pas pris en charge par {{.Model}}. Utilisez json, text ou verbose_json (par défaut : json) ; les sous-titres srt et vtt ne sont pas pris en charge."

@@ -481,6 +481,10 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		//wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01
 		modelRequest.Model = c.Query("model")
 	}
+	if c.Request.URL.Path == "/v1/tts" {
+		// xAI streaming TTS has no model parameter; grok-tts is its only model.
+		modelRequest.Model = common.GetStringIfEmpty(c.Query("model"), "grok-tts")
+	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/moderations") {
 		if modelRequest.Model == "" {
 			modelRequest.Model = "text-moderation-stable"

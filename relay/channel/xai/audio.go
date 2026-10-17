@@ -39,8 +39,9 @@ const (
 	xaiSTTModel = "grok-stt"
 )
 
-// rejectVoiceModelChat 是用对话 / Responses 接口调 grok-tts、grok-stt 时的客户端错误：
-// 上游只认 /v1/tts、/v1/stt，对话请求只会得到「没有账号支持该模型」的 404。其他模型返回 nil。
+// rejectVoiceModelChat 是用对话 / Responses 接口调 grok-tts、grok-stt、grok-voice-* 时的客户端错误：
+// 上游只认 /v1/tts、/v1/stt、/v1/realtime，对话请求只会得到「没有账号支持该模型」的 404。其他模型返回 nil。
+// grok-voice-* 按会话时长计价，也不能走 /v1/audio/*，否则会按字符或时长 token 套用实时价格。
 func rejectVoiceModelChat(c *gin.Context, info *relaycommon.RelayInfo) error {
 	if info == nil {
 		return nil
@@ -52,7 +53,10 @@ func rejectVoiceModelChat(c *gin.Context, info *relaycommon.RelayInfo) error {
 	case xaiSTTModel:
 		key = i18n.MsgSTTChatEndpointUnsupported
 	default:
-		return nil
+		if !isXAIRealtimeModel(info.UpstreamModelName) {
+			return nil
+		}
+		key = i18n.MsgRealtimeEndpointUnsupported
 	}
 	return types.NewErrorWithStatusCode(errors.New(i18n.T(c, key, map[string]any{"Model": info.OriginModelName})), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 }
@@ -68,6 +72,14 @@ var xaiTTSCodecs = map[string]string{
 
 // OpenAI /v1/audio/speech 的内置音色，xAI 都不认。
 var openAIBuiltinVoices = []string{"alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse", "marin", "cedar"}
+
+// xaiBuiltinVoices 是 xAI 官方音色（GET /v1/tts/voices，2026-10-17 共 28 个），只用于错误提示。
+const xaiBuiltinVoices = "altair, ara, atlas, aurora, carina, castor, celeste, cosmo, eve, helios, helix, iris, kepler, leo, liora, lumen, luna, lux, naksh, orion, perseus, rex, rigel, sal, sirius, ursa, zagan, zenith"
+
+// openAIVoiceError 提示客户把 OpenAI 音色名换成 xAI 官方音色或自定义音色 ID。
+func openAIVoiceError(voice string) error {
+	return badAudioRequest("voice %q is an OpenAI voice and is not available for grok tts, use %s or a custom voice id", voice, xaiBuiltinVoices)
+}
 
 // xAI 支持的采样率；同时用于界定 pcm/mulaw/alaw 的时长换算。
 var xaiTTSSampleRates = []int{8000, 16000, 22050, 24000, 44100, 48000}
@@ -150,7 +162,7 @@ func buildXAITTSRequest(c *gin.Context, request dto.AudioRequest) (map[string]an
 	}
 	// OpenAI SDK 示例默认用 alloy 等 OpenAI 音色；xAI 对未知音色只回 404，这里先给出明确提示。
 	if slices.Contains(openAIBuiltinVoices, strings.ToLower(voice)) {
-		return nil, "", 0, badAudioRequest("voice %q is an OpenAI voice and is not available for grok tts, use eve, ara, rex, sal, leo or a custom voice id", voice)
+		return nil, "", 0, openAIVoiceError(voice)
 	}
 	language := audioLanguage(request.Language)
 	if language == "" {
@@ -335,6 +347,8 @@ type openAIVerboseWord struct {
 	Word  string  `json:"word"`
 	Start float64 `json:"start"`
 	End   float64 `json:"end"`
+	// Speaker 是 diarize=true 时 xAI 返回的说话人序号（从 0 开始）；上游没给时省略。
+	Speaker *int64 `json:"speaker,omitempty"`
 }
 
 // handleXAISTTResponse 把 xAI STT 结果转成 OpenAI transcription 格式。
@@ -358,11 +372,16 @@ func handleXAISTTResponse(c *gin.Context, resp *http.Response, info *relaycommon
 	case "verbose_json":
 		words := make([]openAIVerboseWord, 0)
 		for _, w := range gjson.GetBytes(body, "words").Array() {
-			words = append(words, openAIVerboseWord{
+			word := openAIVerboseWord{
 				Word:  w.Get("text").String(),
 				Start: w.Get("start").Float(),
 				End:   w.Get("end").Float(),
-			})
+			}
+			if speaker := w.Get("speaker"); speaker.Type == gjson.Number {
+				index := speaker.Int()
+				word.Speaker = &index
+			}
+			words = append(words, word)
 		}
 		out := map[string]any{
 			"task":     "transcribe",

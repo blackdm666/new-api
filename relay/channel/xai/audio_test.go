@@ -3,21 +3,26 @@ package xai
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"io"
+	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -92,7 +97,7 @@ func TestXAIConvertTTSRequestDefaultsAndRejects(t *testing.T) {
 		{name: "empty_input", body: `{}`, request: dto.AudioRequest{Input: " "}, message: "input is required"},
 		{name: "stream", body: `{}`, request: dto.AudioRequest{Input: "hi", StreamFormat: "sse"}, message: "streaming"},
 		{name: "sample_rate", body: `{"sample_rate":999999999}`, request: dto.AudioRequest{Input: "hi"}, message: "sample_rate"},
-		{name: "openai_voice", body: `{}`, request: dto.AudioRequest{Input: "hi", Voice: "Alloy"}, message: `voice "Alloy" is an OpenAI voice and is not available for grok tts, use eve, ara, rex, sal, leo or a custom voice id`},
+		{name: "openai_voice", body: `{}`, request: dto.AudioRequest{Input: "hi", Voice: "Alloy"}, message: `voice "Alloy" is an OpenAI voice and is not available for grok tts, use altair, ara, atlas, aurora, carina, castor, celeste, cosmo, eve, helios, helix, iris, kepler, leo, liora, lumen, luna, lux, naksh, orion, perseus, rex, rigel, sal, sirius, ursa, zagan, zenith or a custom voice id`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -177,7 +182,8 @@ func TestXAIConvertSTTRequestKeepsXAIFieldsAndPutsFileLast(t *testing.T) {
 }
 
 func TestXAISTTResponseFormats(t *testing.T) {
-	upstream := `{"text":"你好","language":"zh-cn","duration":61.2,"words":[{"text":"你","start":0.1,"end":0.2},{"text":"好","start":0.3,"end":0.5}]}`
+	// diarize=true 时 xAI 在每个词上带 speaker；第二个词带 0 号说话人，第一个没带（未开 diarize 的形状）。
+	upstream := `{"text":"你好","language":"zh-cn","duration":61.2,"words":[{"text":"你","start":0.1,"end":0.2},{"text":"好","start":0.3,"end":0.5,"speaker":0}]}`
 	tests := []struct {
 		format      string
 		contentType string
@@ -193,6 +199,9 @@ func TestXAISTTResponseFormats(t *testing.T) {
 			assert.Equal(t, "transcribe", gjson.Get(body, "task").String())
 			assert.Equal(t, 61.2, gjson.Get(body, "duration").Float())
 			assert.Equal(t, "好", gjson.Get(body, "words.1.word").String())
+			assert.False(t, gjson.Get(body, "words.0.speaker").Exists(), "speaker is omitted when upstream did not diarize")
+			assert.Equal(t, gjson.Number, gjson.Get(body, "words.1.speaker").Type, "speaker 0 must survive omitempty")
+			assert.Equal(t, int64(0), gjson.Get(body, "words.1.speaker").Int())
 		}},
 	}
 	for _, tt := range tests {
@@ -225,6 +234,7 @@ func TestXAIRejectsVoiceModelsOnChatEndpoints(t *testing.T) {
 	}{
 		{model: "grok-tts", wantErr: "POST /v1/audio/speech"},
 		{model: "grok-stt", wantErr: "POST /v1/audio/transcriptions"},
+		{model: "grok-voice-latest", wantErr: "/v1/realtime"},
 		{model: "grok-4.7"},
 	}
 	for _, tt := range tests {
@@ -255,4 +265,285 @@ func TestXAIRejectsVoiceModelsOnChatEndpoints(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestXAIRealtimeModelsRejectedOnAudioEndpoints(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	for _, mode := range []int{constant.RelayModeAudioSpeech, constant.RelayModeAudioTranscription} {
+		c, _ := newAudioTestContext(t, []byte(`{"model":"grok-voice-latest","input":"hi"}`), "application/json")
+		request := dto.AudioRequest{Model: "grok-voice-latest", Input: "hi"}
+		info := newAudioRelayInfo(mode, &request)
+		info.OriginModelName = "grok-voice-latest"
+		info.UpstreamModelName = "grok-voice-latest"
+
+		_, err := (&Adaptor{}).ConvertAudioRequest(c, info, request)
+		var apiErr *types.NewAPIError
+		require.ErrorAs(t, err, &apiErr)
+		assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+		assert.Contains(t, err.Error(), "/v1/realtime")
+	}
+}
+
+func TestXAIWebSocketURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		mode    int
+		model   string
+		path    string
+		want    string
+		wantErr string
+	}{
+		{
+			name:  "realtime forwards mapped model and session params only",
+			mode:  constant.RelayModeRealtime,
+			model: "grok-voice-latest",
+			path:  "/v1/realtime?model=my-voice&conversation_id=conv_1&reasoning.effort=none&key=sk-secret",
+			want:  "http://sub2api:8080/v1/realtime?conversation_id=conv_1&model=grok-voice-latest&reasoning.effort=none",
+		},
+		{
+			name:    "realtime rejects cheaper models",
+			mode:    constant.RelayModeRealtime,
+			model:   "grok-tts",
+			path:    "/v1/realtime?model=grok-tts",
+			wantErr: "does not support realtime",
+		},
+		{
+			name:  "streaming tts forwards synthesis params and defaults language",
+			mode:  constant.RelayModeAudioSpeechStream,
+			model: "grok-tts",
+			path:  "/v1/tts?voice=ara&codec=pcm&sample_rate=16000&model=grok-tts&api_key=sk-secret",
+			want:  "http://sub2api:8080/v1/tts?codec=pcm&language=auto&sample_rate=16000&voice=ara",
+		},
+		{
+			name:    "streaming tts rejects OpenAI voices",
+			mode:    constant.RelayModeAudioSpeechStream,
+			model:   "grok-tts",
+			path:    "/v1/tts?voice=alloy",
+			wantErr: "OpenAI voice",
+		},
+		{
+			name:    "streaming tts rejects other models",
+			mode:    constant.RelayModeAudioSpeechStream,
+			model:   "grok-voice-latest",
+			path:    "/v1/tts",
+			wantErr: "does not support streaming tts",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := newAudioRelayInfo(tt.mode, nil)
+			info.RequestURLPath = tt.path
+			info.OriginModelName = tt.model
+			info.UpstreamModelName = tt.model
+			got, err := (&Adaptor{}).GetRequestURL(info)
+			if tt.wantErr != "" {
+				var apiErr *types.NewAPIError
+				require.ErrorAs(t, err, &apiErr)
+				assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// fakeWssBilling records reservation targets and refuses targets above limit.
+type fakeWssBilling struct {
+	mu      sync.Mutex
+	limit   int
+	targets []int
+}
+
+func (b *fakeWssBilling) Settle(int) error         { return nil }
+func (b *fakeWssBilling) Refund(*gin.Context)      {}
+func (b *fakeWssBilling) NeedsRefund() bool        { return false }
+func (b *fakeWssBilling) GetPreConsumedQuota() int { return 0 }
+func (b *fakeWssBilling) Reserve(target int) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.targets = append(b.targets, target)
+	if target > b.limit {
+		return errors.New("insufficient quota")
+	}
+	return nil
+}
+
+type wsFrame struct {
+	messageType int
+	data        []byte
+}
+
+// runXAIWebSocketSession wires client <-> xaiWebSocketHandler <-> fake upstream and
+// returns the client connection, the frames upstream received and the session usage.
+func runXAIWebSocketSession(t *testing.T, mode int, model, expr string, billing *fakeWssBilling, upstream func(*websocket.Conn)) (*websocket.Conn, <-chan []wsFrame, <-chan *dto.RealtimeUsage) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	upgrader := websocket.Upgrader{}
+	received := make(chan []wsFrame, 1)
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		upstream(conn)
+		var frames []wsFrame
+		for {
+			messageType, data, err := conn.ReadMessage()
+			if err != nil {
+				break
+			}
+			frames = append(frames, wsFrame{messageType, data})
+		}
+		received <- frames
+	}))
+	t.Cleanup(upstreamServer.Close)
+
+	result := make(chan *dto.RealtimeUsage, 1)
+	gatewayServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clientWs, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer clientWs.Close()
+		targetWs, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(upstreamServer.URL, "http"), nil)
+		if err != nil {
+			result <- nil
+			return
+		}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = r
+		info := &relaycommon.RelayInfo{
+			RelayMode:     mode,
+			ClientWs:      clientWs,
+			TargetWs:      targetWs,
+			Billing:       billing,
+			BillingSource: "subscription",
+			ChannelMeta:   &relaycommon.ChannelMeta{UpstreamModelName: model},
+			TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+				BillingMode:  "tiered_expr",
+				ExprString:   expr,
+				ExprHash:     billingexpr.ExprHashString(expr),
+				GroupRatio:   0.3,
+				QuotaPerUnit: 500000,
+			},
+		}
+		usage, apiErr := xaiWebSocketHandler(c, info)
+		targetWs.Close()
+		if apiErr != nil {
+			usage = nil
+		}
+		result <- usage
+	}))
+	t.Cleanup(gatewayServer.Close)
+
+	client, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(gatewayServer.URL, "http"), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { client.Close() })
+	return client, received, result
+}
+
+func closeClient(t *testing.T, client *websocket.Conn) {
+	t.Helper()
+	require.NoError(t, client.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")))
+}
+
+func TestXAIRealtimeSessionRelaysFramesAndBillsDuration(t *testing.T) {
+	billing := &fakeWssBilling{limit: math.MaxInt32}
+	client, received, result := runXAIWebSocketSession(t, constant.RelayModeRealtime, "grok-voice-latest", `tier("base", p * 560)`, billing, func(conn *websocket.Conn) {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.done","response":{"usage":{}}}`))
+		_ = conn.WriteMessage(websocket.BinaryMessage, []byte{1, 2, 3})
+	})
+
+	userText := []byte(`{"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}`)
+	seedText := []byte(`{"type":"conversation.item.create","item":{"type":"message","role":"assistant","content":[{"type":"text","text":"earlier"}]}}`)
+	require.NoError(t, client.WriteMessage(websocket.TextMessage, userText))
+	require.NoError(t, client.WriteMessage(websocket.TextMessage, seedText))
+	require.NoError(t, client.WriteMessage(websocket.BinaryMessage, []byte{9, 9}))
+
+	messageType, data, err := client.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.TextMessage, messageType)
+	assert.Equal(t, "response.done", gjson.GetBytes(data, "type").String())
+	messageType, data, err = client.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, websocket.BinaryMessage, messageType)
+	assert.Equal(t, []byte{1, 2, 3}, data)
+	closeClient(t, client)
+
+	usage := <-result
+	require.NotNil(t, usage)
+	// 一条用户文字输入 50 tokens；不到 1 秒的会话按 1 秒计（17 tokens）。
+	assert.Equal(t, 50, usage.InputTokenDetails.TextTokens)
+	assert.Equal(t, 17, usage.InputTokenDetails.AudioTokens)
+	assert.Equal(t, 67, usage.InputTokens)
+
+	frames := <-received
+	require.Len(t, frames, 3)
+	assert.Equal(t, userText, frames[0].data)
+	assert.Equal(t, seedText, frames[1].data)
+	assert.Equal(t, wsFrame{websocket.BinaryMessage, []byte{9, 9}}, frames[2])
+
+	// 文字输入转发前按「已用 + 1 分钟 + 50 tokens」续留，每 token $560/1M × 500000 × 组倍率 0.3 = 0.084。
+	// 已用时长不足 1 秒按 1 秒计（1017 tokens）；时钟精度下已用为 0 时恰好 1 分钟（1000 tokens）。
+	billing.mu.Lock()
+	defer billing.mu.Unlock()
+	require.NotEmpty(t, billing.targets)
+	assert.Contains(t, []int{(1000 + 50) * 84, (1017 + 50) * 84}, billing.targets[0])
+}
+
+func TestXAIRealtimeSessionStopsBeforeUnaffordableTextInput(t *testing.T) {
+	billing := &fakeWssBilling{limit: 0}
+	client, received, result := runXAIWebSocketSession(t, constant.RelayModeRealtime, "grok-voice-latest", `tier("base", p * 560)`, billing, func(*websocket.Conn) {})
+
+	require.NoError(t, client.WriteMessage(websocket.TextMessage, []byte(`{"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}`)))
+
+	_, data, err := client.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, "error", gjson.GetBytes(data, "type").String())
+	assert.Equal(t, string(types.ErrorCodeInsufficientUserQuota), gjson.GetBytes(data, "error.code").String())
+	_, _, err = client.ReadMessage()
+	var closeErr *websocket.CloseError
+	require.ErrorAs(t, err, &closeErr)
+	assert.Equal(t, websocket.ClosePolicyViolation, closeErr.Code)
+
+	usage := <-result
+	require.NotNil(t, usage)
+	assert.Zero(t, usage.InputTokenDetails.TextTokens, "a rejected text input is not billed")
+	assert.Empty(t, <-received, "a rejected text input never reaches upstream")
+}
+
+func TestXAITTSStreamBillsTextDeltaCharacters(t *testing.T) {
+	billing := &fakeWssBilling{limit: math.MaxInt32}
+	client, received, result := runXAIWebSocketSession(t, constant.RelayModeAudioSpeechStream, "grok-tts", `tier("base", p * 105)`, billing, func(conn *websocket.Conn) {
+		for range 2 {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"audio.delta","delta":"AAAA"}`))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"audio.done"}`))
+	})
+
+	require.NoError(t, client.WriteMessage(websocket.TextMessage, []byte(`{"type":"text.delta","delta":"你好，world"}`)))
+	require.NoError(t, client.WriteMessage(websocket.TextMessage, []byte(`{"type":"text.done"}`)))
+	for _, want := range []string{"audio.delta", "audio.done"} {
+		_, data, err := client.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, want, gjson.GetBytes(data, "type").String())
+	}
+	closeClient(t, client)
+
+	usage := <-result
+	require.NotNil(t, usage)
+	assert.Equal(t, 8, usage.InputTokens)
+	assert.Equal(t, 8, usage.InputTokenDetails.TextTokens)
+	<-received
+
+	// 8 字符 × $105/1M × 500000 × 0.3 = 126，在转发 text.delta 之前预留。
+	billing.mu.Lock()
+	defer billing.mu.Unlock()
+	assert.Equal(t, []int{126}, billing.targets)
 }
