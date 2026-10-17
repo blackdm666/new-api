@@ -171,6 +171,7 @@ export interface ChannelBalanceQueryConfig {
   auth_configured?: boolean
   auth_masked?: string
   account_user_id?: string
+  login?: ChannelBalanceLoginConfig
   gcp_trial?: ChannelBalanceGCPTrialConfig
   response?: ChannelBalanceResponseConfig
   unit?: ChannelBalanceUnit
@@ -190,6 +191,18 @@ export interface ChannelBalanceRequestHeader {
   value?: string
   configured?: boolean
   masked?: string
+}
+
+// Upstream console sign-in for custom balance queries. password is
+// write-only: the server stores it encrypted and only reports
+// password_configured.
+export interface ChannelBalanceLoginConfig {
+  url?: string
+  body?: string
+  username?: string
+  password?: string
+  password_configured?: boolean
+  token_path?: string
 }
 
 export interface ChannelBalanceGCPTrialConfig {

@@ -8709,6 +8709,23 @@
     "Referral program application": "紹介プログラム申請",
     "Highest tier reached": "最上位ランクに到達",
     "You are on the highest promoter tier. Future top-ups use the current tier rate.": "すでに最上位の紹介ランクです。今後のチャージには現在のランクの料率が適用されます。",
-    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "有効チャージ人数または有効チャージ金額のいずれかが目標に達すると、管理者の承認で{{tier}}（{{rate}}）に昇格できます。進捗は目標により近い方で表示されます。"
+    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "有効チャージ人数または有効チャージ金額のいずれかが目標に達すると、管理者の承認で{{tier}}（{{rate}}）に昇格できます。進捗は目標により近い方で表示されます。",
+    "Sign in before querying": "照会前にサインインする",
+    "For upstreams whose balance endpoint accepts only a console sign-in token. Use a dedicated upstream account; the password is stored encrypted and never shown again.": "残高エンドポイントがコンソールのサインイントークンしか受け付けないアップストリーム向けです。専用のアップストリームアカウントを使用してください。パスワードは暗号化して保存され、再表示されません。",
+    "Sign-in URL": "サインイン URL",
+    "Sign-in username": "サインインユーザー名",
+    "Sign-in password": "サインインパスワード",
+    "Configured; leave blank to keep the current password": "設定済み。空欄のままにすると現在のパスワードを保持します",
+    "Token JSON path": "トークンの JSON パス",
+    "Where the sign-in response returns the token, such as token or data.token.": "サインイン応答でトークンが返される場所（例：token、data.token）。",
+    "Sign-in request body": "サインインリクエスト本文",
+    "Sent as a JSON POST. {username} and {password} are inserted as JSON string content.": "JSON の POST で送信します。{username} と {password} は JSON 文字列の内容として挿入されます。",
+    "Use {login_token} in the authentication value, a header, or the request body. The token is reused until it expires; a failed sign-in is retried after 10 minutes.": "認証値、ヘッダー、またはリクエスト本文で {login_token} を使用してください。トークンは有効期限まで再利用され、サインインに失敗した場合は 10 分後に再試行します。",
+    "Sign-in URL must be an absolute HTTPS URL": "サインイン URL は完全な HTTPS URL である必要があります",
+    "Sign-in username is required": "サインインユーザー名は必須です",
+    "Sign-in password is required": "サインインパスワードは必須です",
+    "Token JSON path is required": "トークンの JSON パスは必須です",
+    "Sign-in request body must be valid JSON and contain {password}": "サインインリクエスト本文は {password} を含む有効な JSON である必要があります",
+    "Insert {login_token} into the authentication value, a header, or the request body": "認証値、ヘッダー、またはリクエスト本文に {login_token} を挿入してください"
   }
 }

@@ -8711,6 +8711,23 @@
     "Referral program application": "推廣返佣計畫申請",
     "Highest tier reached": "已達最高檔",
     "You are on the highest promoter tier. Future top-ups use the current tier rate.": "你已是最高推廣等級，後續儲值按目前等級比例返佣。",
-    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "有效儲值人數或有效儲值金額任一達標後，管理員審核可升級至{{tier}}（{{rate}}）。進度按更接近達標的一項計算。"
+    "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "有效儲值人數或有效儲值金額任一達標後，管理員審核可升級至{{tier}}（{{rate}}）。進度按更接近達標的一項計算。",
+    "Sign in before querying": "查詢前先登入",
+    "For upstreams whose balance endpoint accepts only a console sign-in token. Use a dedicated upstream account; the password is stored encrypted and never shown again.": "用於餘額介面只接受控制台登入權杖的上游。請使用上游的專用帳號；密碼加密儲存，儲存後不再顯示。",
+    "Sign-in URL": "登入網址",
+    "Sign-in username": "登入帳號",
+    "Sign-in password": "登入密碼",
+    "Configured; leave blank to keep the current password": "已設定；留空則保留目前密碼",
+    "Token JSON path": "權杖 JSON 路徑",
+    "Where the sign-in response returns the token, such as token or data.token.": "登入回應中權杖所在的位置，例如 token 或 data.token。",
+    "Sign-in request body": "登入請求本文",
+    "Sent as a JSON POST. {username} and {password} are inserted as JSON string content.": "以 JSON POST 傳送。{username} 與 {password} 會作為 JSON 字串內容填入。",
+    "Use {login_token} in the authentication value, a header, or the request body. The token is reused until it expires; a failed sign-in is retried after 10 minutes.": "在認證值、請求標頭或請求本文中以 {login_token} 填入登入權杖。權杖到期前會重複使用；登入失敗後 10 分鐘再重試。",
+    "Sign-in URL must be an absolute HTTPS URL": "登入網址必須是完整的 HTTPS 網址",
+    "Sign-in username is required": "請填寫登入帳號",
+    "Sign-in password is required": "請填寫登入密碼",
+    "Token JSON path is required": "請填寫權杖 JSON 路徑",
+    "Sign-in request body must be valid JSON and contain {password}": "登入請求本文必須是有效 JSON，且包含 {password}",
+    "Insert {login_token} into the authentication value, a header, or the request body": "請在認證值、請求標頭或請求本文中填入 {login_token}"
   }
 }
