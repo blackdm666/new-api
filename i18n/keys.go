@@ -33,6 +33,12 @@ const (
 	MsgTTSChatEndpointUnsupported   = "tts.chat_endpoint_unsupported"
 	MsgSTTChatEndpointUnsupported   = "stt.chat_endpoint_unsupported"
 	MsgTTSNoAudio                   = "tts.no_audio"
+	MsgSTTTranslationUnsupported    = "stt.translation_unsupported"
+	MsgSTTResponseFormatUnsupported = "stt.response_format_unsupported"
+	MsgSTTStreamUnsupported         = "stt.stream_unsupported"
+	MsgSTTFileRequired              = "stt.file_required"
+	MsgSTTFileTooLarge              = "stt.file_too_large"
+	MsgSTTFileFormatUnsupported     = "stt.file_format_unsupported"
 
 	MsgDistributorInvalidRequest               = "distributor.invalid_request"
 	MsgDistributorInvalidChannelId             = "distributor.invalid_channel_id"

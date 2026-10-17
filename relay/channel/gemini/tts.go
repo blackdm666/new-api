@@ -41,9 +41,9 @@ var ttsVoices = []string{
 	"Pulcherrima", "Rasalgethi", "Sadachbia", "Sadaltager", "Schedar", "Sulafat", "Umbriel", "Vindemiatrix", "Zephyr", "Zubenelgenubi",
 }
 
-// invalidTTSRequest is a client error in a speech request: 400, not retried on
-// another channel, with the message in the client's language.
-func invalidTTSRequest(c *gin.Context, key string, args map[string]any) error {
+// invalidAudioRequest is a client error in a speech or transcription request: 400,
+// not retried on another channel, with the message in the client's language.
+func invalidAudioRequest(c *gin.Context, key string, args map[string]any) error {
 	return types.NewErrorWithStatusCode(errors.New(i18n.T(c, key, args)), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 }
 
@@ -52,20 +52,20 @@ func invalidTTSRequest(c *gin.Context, key string, args map[string]any) error {
 // response_format that SpeechHandler must produce.
 func ConvertSpeechRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, string, error) {
 	if info.IsStream || request.StreamFormat == "sse" {
-		return nil, "", invalidTTSRequest(c, i18n.MsgTTSStreamUnsupported, map[string]any{"Model": info.OriginModelName})
+		return nil, "", invalidAudioRequest(c, i18n.MsgTTSStreamUnsupported, map[string]any{"Model": info.OriginModelName})
 	}
 
 	input := strings.TrimSpace(request.Input)
 	if input == "" {
-		return nil, "", invalidTTSRequest(c, i18n.MsgTTSInputRequired, nil)
+		return nil, "", invalidAudioRequest(c, i18n.MsgTTSInputRequired, nil)
 	}
 	voice := strings.TrimSpace(request.Voice)
 	if voice == "" {
-		return nil, "", invalidTTSRequest(c, i18n.MsgTTSVoiceRequired, map[string]any{"Voices": strings.Join(ttsVoices, ", ")})
+		return nil, "", invalidAudioRequest(c, i18n.MsgTTSVoiceRequired, map[string]any{"Voices": strings.Join(ttsVoices, ", ")})
 	}
 	voiceIndex := slices.IndexFunc(ttsVoices, func(name string) bool { return strings.EqualFold(name, voice) })
 	if voiceIndex < 0 {
-		return nil, "", invalidTTSRequest(c, i18n.MsgTTSVoiceUnsupported, map[string]any{"Model": info.OriginModelName, "Voice": voice, "Voices": strings.Join(ttsVoices, ", ")})
+		return nil, "", invalidAudioRequest(c, i18n.MsgTTSVoiceUnsupported, map[string]any{"Model": info.OriginModelName, "Voice": voice, "Voices": strings.Join(ttsVoices, ", ")})
 	}
 	voice = ttsVoices[voiceIndex]
 
@@ -74,13 +74,13 @@ func ConvertSpeechRequest(c *gin.Context, info *relaycommon.RelayInfo, request d
 		responseFormat = "wav"
 	}
 	if responseFormat != "mp3" && responseFormat != "wav" && responseFormat != "flac" && responseFormat != "pcm" {
-		return nil, "", invalidTTSRequest(c, i18n.MsgTTSResponseFormatUnsupported, map[string]any{"Model": info.OriginModelName, "Format": responseFormat})
+		return nil, "", invalidAudioRequest(c, i18n.MsgTTSResponseFormatUnsupported, map[string]any{"Model": info.OriginModelName, "Format": responseFormat})
 	}
 
 	instructions := strings.TrimSpace(request.Instructions)
 	if request.Speed != nil {
 		if *request.Speed < 0.25 || *request.Speed > 4 {
-			return nil, "", invalidTTSRequest(c, i18n.MsgTTSSpeedOutOfRange, map[string]any{"Speed": fmt.Sprintf("%g", *request.Speed)})
+			return nil, "", invalidAudioRequest(c, i18n.MsgTTSSpeedOutOfRange, map[string]any{"Speed": fmt.Sprintf("%g", *request.Speed)})
 		}
 		if *request.Speed != 1 {
 			speedInstruction := fmt.Sprintf("Speak at %gx normal speed", *request.Speed)
@@ -97,7 +97,7 @@ func ConvertSpeechRequest(c *gin.Context, info *relaycommon.RelayInfo, request d
 		prompt = instructions + ": " + input
 	}
 	if len(prompt) > 8000 {
-		return nil, "", invalidTTSRequest(c, i18n.MsgTTSInputTooLong, map[string]any{"Bytes": len(prompt)})
+		return nil, "", invalidAudioRequest(c, i18n.MsgTTSInputTooLong, map[string]any{"Bytes": len(prompt)})
 	}
 
 	speechConfig, err := common.Marshal(map[string]any{
@@ -131,7 +131,7 @@ func RejectTTSModelChat(c *gin.Context, info *relaycommon.RelayInfo) error {
 	if !strings.Contains(info.UpstreamModelName, "-tts") {
 		return nil
 	}
-	return invalidTTSRequest(c, i18n.MsgTTSChatEndpointUnsupported, map[string]any{"Model": info.OriginModelName})
+	return invalidAudioRequest(c, i18n.MsgTTSChatEndpointUnsupported, map[string]any{"Model": info.OriginModelName})
 }
 
 // SpeechHandler answers an OpenAI /v1/audio/speech request from a Gemini TTS

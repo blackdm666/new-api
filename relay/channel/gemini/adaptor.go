@@ -22,6 +22,7 @@ import (
 
 type Adaptor struct {
 	AudioResponseFormat string
+	Transcription       *Transcription
 }
 
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
@@ -61,7 +62,12 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 
 func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
 	if info.RelayMode != constant.RelayModeAudioSpeech {
-		return nil, errors.New("not implemented")
+		body, transcription, err := ConvertTranscriptionRequest(c, info, request)
+		if err != nil {
+			return nil, err
+		}
+		a.Transcription = transcription
+		return body, nil
 	}
 	body, responseFormat, err := ConvertSpeechRequest(c, info, request)
 	if err != nil {
@@ -179,6 +185,10 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, req)
+	if info.RelayMode == constant.RelayModeAudioTranscription {
+		// The client sent multipart; the upstream request is JSON.
+		req.Set("Content-Type", "application/json")
+	}
 	req.Set("x-goog-api-key", info.ApiKey)
 	return nil
 }
@@ -264,6 +274,9 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
 	if info.RelayMode == constant.RelayModeAudioSpeech {
 		return SpeechHandler(c, resp, info, a.AudioResponseFormat)
+	}
+	if info.RelayMode == constant.RelayModeAudioTranscription {
+		return TranscriptionHandler(c, resp, info, a.Transcription)
 	}
 
 	if info.RelayMode == constant.RelayModeResponses {
