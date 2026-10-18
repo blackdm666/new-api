@@ -16,8 +16,10 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestChannelMatchesExpectedTaskPluginUsesGenericChannelSetting(t *testing.T) {
@@ -188,6 +190,15 @@ func TestDistributeHidesTaskPluginDetailsButLogsDiagnostics(t *testing.T) {
 	t.Cleanup(func() { common.MemoryCacheEnabled = previousCacheEnabled })
 
 	const group = "private-plugin-error-test-group"
+	// The group lists the model, but its only channel is disabled: the 503
+	// stays, unlike a group that does not list the model at all.
+	previousDB := model.DB
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(&model.Ability{}))
+	require.NoError(t, database.Create(&model.Ability{Group: group, Model: "task-model", ChannelId: 1, Enabled: false}).Error)
+	model.DB = database
+	t.Cleanup(func() { model.DB = previousDB })
 	for _, locale := range []struct{ language, message string }{
 		{"en", "No available channel for model task-model under group " + group + ": the model is claimed by a task plugin, which has no enabled channel serving it (distributor)"},
 		{"zh-CN", "分组 " + group + " 下模型 task-model 无可用渠道：该模型由任务插件认领，但当前没有启用的渠道可服务此模型（distributor）"},

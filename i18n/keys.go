@@ -53,10 +53,13 @@ const (
 	MsgDistributorNoAvailableChannel           = "distributor.no_available_channel"
 	MsgDistributorNoAvailableChannelTaskPlugin = "distributor.no_available_channel_task_plugin"
 	MsgDistributorInvalidParseModel            = "distributor.invalid_request_parse_model"
+	MsgDistributorModelNotInGroup              = "distributor.model_not_in_group"
+	MsgDistributorModelNotInGroupSuggest       = "distributor.model_not_in_group_suggest"
 
 	MsgQuotaUserInsufficient             = "quota.user_insufficient"
 	MsgQuotaPreConsumeInsufficient       = "quota.pre_consume_insufficient"
 	MsgQuotaSubscriptionInsufficient     = "quota.subscription_insufficient"
+	MsgQuotaTokenInsufficient            = "quota.token_insufficient"
 	MsgRelayModelPriceNotConfigured      = "relay.model_price_not_configured"
 	MsgRelayModelPriceNotConfiguredAdmin = "relay.model_price_not_configured_admin"
 	MsgRelayTaskChannelDisabled          = "relay.task_channel_disabled"

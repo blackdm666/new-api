@@ -526,10 +526,11 @@ const (
 // Provider responses that mean our account there cannot pay for the task.
 // The phrases match provider text. new-api providers from v1.0.0-rc.43 on
 // translate their quota errors (English by default, zh-CN or zh-TW otherwise),
-// so all three wordings are listed.
+// so all three wordings are listed, as are the 88API wordings ("余额不足",
+// "Insufficient balance", "Insufficient token quota").
 var (
 	upstreamQuotaErrorCodes   = []string{"insufficient_user_quota", "insufficient_quota", "insufficient_balance", "insufficient_credit", "insufficient_credits"}
-	upstreamQuotaErrorPhrases = []string{"预扣费额度失败", "额度不足", "額度不足", "余额不足", "积分不足", "token quota is not enough", "insufficient user quota", "not enough quota to pre-consume", "subscription quota is insufficient", "credit balance is too low", "exceeded your current quota", "insufficient balance", "insufficient credit", "insufficient quota"}
+	upstreamQuotaErrorPhrases = []string{"预扣费额度失败", "额度不足", "額度不足", "余额不足", "餘額不足", "积分不足", "token quota is not enough", "insufficient token quota", "insufficient user quota", "not enough quota to pre-consume", "subscription quota is insufficient", "credit balance is too low", "exceeded your current quota", "insufficient balance", "insufficient credit", "insufficient quota"}
 )
 
 // modelPriceTaskError hides pricing internals (model names, expressions and

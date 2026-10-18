@@ -154,7 +154,7 @@ func applyCoreEmailTemplatePreviewSamples(key string, lang string, vars map[stri
 		vars["heading"] = vars["email_subject"]
 		vars["intro"] = coreEmailText(lang, "core_email.quota_warning.intro")
 		vars["message_body"] = coreEmailText(lang, "core_email.quota_warning.preview_body", map[string]any{
-			"Amount": formatQuotaForEmail(int(5 * common.QuotaPerUnit)),
+			"Amount": formatCustomerQuota(int(5 * common.QuotaPerUnit)),
 		})
 		vars["notification_type"] = "quota_exceed"
 		vars["security_note"] = coreEmailText(lang, "core_email.system_alert.security")

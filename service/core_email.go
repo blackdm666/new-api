@@ -24,7 +24,11 @@ func systemEmailSiteURL() string {
 	return strings.TrimRight(strings.TrimSpace(system_setting.ServerAddress), "/")
 }
 
-func formatQuotaForEmail(quota int) string {
+// formatCustomerQuota formats an amount for customers (emails, balance and
+// token quota errors) in the site display currency with two decimals; an
+// amount under 0.01 keeps four so it does not read as zero. Server logs keep
+// logger.FormatQuota.
+func formatCustomerQuota(quota int) string {
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		return fmt.Sprintf("%d", quota)
 	}
