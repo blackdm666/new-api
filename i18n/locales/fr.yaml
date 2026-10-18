@@ -231,3 +231,10 @@ stt.stream_unsupported: "{{.Model}} ne prend pas en charge la transcription en s
 stt.file_required: "file est requis : envoyez l’audio en multipart/form-data dans un champ nommé file."
 stt.file_too_large: "Le fichier audio fait {{.Size}} Mo, au-delà de la limite de {{.Limit}} Mo. Compressez-le (par exemple en mp3 mono 16 kHz) ou découpez-le avant la transcription."
 stt.file_format_unsupported: "Le format de l’audio envoyé n’est pas reconnu. Formats pris en charge : mp3, wav, ogg/opus, flac, m4a/mp4, aac, webm, aiff."
+
+# Relay errors: token group without the model, balance and token quota
+distributor.model_not_in_group: "Le groupe du jeton « {{.Group}} » ne propose pas le modèle « {{.Model}} ». Vérifiez le nom du modèle, ou modifiez le jeton sur la page « Clés API » de la console pour choisir un groupe qui propose ce modèle."
+distributor.model_not_in_group_suggest: "Le groupe du jeton « {{.Group}} » ne propose pas le modèle « {{.Model}} ». Modifiez le jeton sur la page « Clés API » de la console pour choisir un groupe qui propose ce modèle : {{.Groups}}."
+quota.user_insufficient: "Solde insuffisant : votre solde est de {{.Remaining}}. Rechargez votre compte puis réessayez."
+quota.pre_consume_insufficient: "Solde insuffisant : votre solde est de {{.Remaining}} et cette requête nécessite une réserve de {{.Required}} (estimation d’après les paramètres de la requête ; après exécution, seule la consommation réelle est facturée et la différence est remboursée ou prélevée). Rechargez votre compte puis réessayez."
+quota.token_insufficient: "Quota du jeton insuffisant : il reste {{.Remaining}} sur ce jeton et cette requête nécessite une réserve de {{.Required}}. Augmentez le quota du jeton ou passez-le en quota illimité sur la page « Clés API » de la console."

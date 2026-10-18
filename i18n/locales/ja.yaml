@@ -231,3 +231,10 @@ stt.stream_unsupported: "{{.Model}} はストリーミング文字起こしに�
 stt.file_required: "file がありません。音声ファイルを multipart/form-data の file フィールドでアップロードしてください。"
 stt.file_too_large: "音声ファイルは {{.Size}} MB で、上限の {{.Limit}} MB を超えています。圧縮する（例：16 kHz モノラル mp3 に変換）か、分割してから文字起こししてください。"
 stt.file_format_unsupported: "アップロードされた音声の形式を認識できません。対応形式：mp3、wav、ogg/opus、flac、m4a/mp4、aac、webm、aiff"
+
+# Relay errors: token group without the model, balance and token quota
+distributor.model_not_in_group: "トークングループ「{{.Group}}」ではモデル「{{.Model}}」を利用できません。モデル名を確認するか、コンソールの「APIキー」ページでこのトークンを編集し、このモデルを含むグループに変更してください。"
+distributor.model_not_in_group_suggest: "トークングループ「{{.Group}}」ではモデル「{{.Model}}」を利用できません。コンソールの「APIキー」ページでこのトークンを編集し、このモデルを含むグループに変更してください：{{.Groups}}。"
+quota.user_insufficient: "残高不足：現在の残高は {{.Remaining}} です。チャージしてから再度お試しください。"
+quota.pre_consume_insufficient: "残高不足：現在の残高は {{.Remaining}} で、今回のリクエストには {{.Required}} の確保が必要です（リクエストのパラメーターからの見積もりです。完了後は実際の使用量で精算し、差額は返金または追加請求されます）。チャージしてから再度お試しください。"
+quota.token_insufficient: "トークンのクォータ不足：このトークンの残りは {{.Remaining}} で、今回のリクエストには {{.Required}} の確保が必要です。コンソールの「APIキー」ページで、このトークンのクォータを増やすか無制限のクォータに変更してください。"

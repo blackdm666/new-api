@@ -152,7 +152,7 @@ func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {
 func TestTaskErrorFromAPIErrorKeepsPreConsumeFailureLocal(t *testing.T) {
 	t.Parallel()
 
-	quotaErr := fmt.Errorf("预扣费额度失败, 用户剩余额度: 1, 需要预扣费额度: 4")
+	quotaErr := fmt.Errorf("余额不足：当前余额 ¥0.01，本次需要预留 ¥0.04（按请求参数预估，完成后按实际用量多退少补）。请充值后重试。")
 	apiErr := types.NewErrorWithStatusCode(
 		quotaErr,
 		types.ErrorCodeInsufficientUserQuota,

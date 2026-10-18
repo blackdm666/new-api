@@ -231,3 +231,10 @@ stt.stream_unsupported: "{{.Model}} không hỗ trợ chép lời dạng streami
 stt.file_required: "Thiếu file: hãy tải âm thanh lên bằng multipart/form-data trong trường file."
 stt.file_too_large: "Tệp âm thanh {{.Size}} MB, vượt giới hạn {{.Limit}} MB. Hãy nén lại (ví dụ sang mp3 mono 16 kHz) hoặc chia nhỏ trước khi chép lời."
 stt.file_format_unsupported: "Không nhận dạng được định dạng của âm thanh đã tải lên. Hỗ trợ: mp3, wav, ogg/opus, flac, m4a/mp4, aac, webm, aiff."
+
+# Relay errors: token group without the model, balance and token quota
+distributor.model_not_in_group: "Nhóm của token \"{{.Group}}\" không cung cấp mô hình \"{{.Model}}\". Hãy kiểm tra tên mô hình, hoặc sửa token trên trang \"Khóa API\" của bảng điều khiển để đổi sang nhóm có mô hình này."
+distributor.model_not_in_group_suggest: "Nhóm của token \"{{.Group}}\" không cung cấp mô hình \"{{.Model}}\". Hãy sửa token trên trang \"Khóa API\" của bảng điều khiển để đổi sang nhóm có mô hình này: {{.Groups}}."
+quota.user_insufficient: "Số dư không đủ: số dư hiện tại là {{.Remaining}}. Vui lòng nạp tiền rồi thử lại."
+quota.pre_consume_insufficient: "Số dư không đủ: số dư hiện tại là {{.Remaining}}, yêu cầu này cần tạm giữ {{.Required}} (ước tính theo tham số yêu cầu; sau khi hoàn tất sẽ tính theo mức dùng thực tế, phần chênh lệch được hoàn lại hoặc thu thêm). Vui lòng nạp tiền rồi thử lại."
+quota.token_insufficient: "Hạn mức token không đủ: token này còn {{.Remaining}}, yêu cầu này cần tạm giữ {{.Required}}. Hãy tăng hạn mức của token hoặc đặt thành hạn mức không giới hạn trên trang \"Khóa API\" của bảng điều khiển."

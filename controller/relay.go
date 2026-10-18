@@ -815,6 +815,11 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 }
 
 func respondTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError) {
+	// The access log only has the status; keep the reason (insufficient
+	// balance, token quota, group without the model, ...) next to it. The
+	// message is the customer-facing text, masked in case it echoes a URL.
+	logger.LogWarn(c, common.LogText("task submission rejected: status=%d code=%s local=%t message=%s",
+		taskErr.StatusCode, taskErr.Code, taskErr.LocalError, common.MaskSensitiveInfo(common.LocalLogPreview(taskErr.Message))))
 	service.RecordRequestPolicyTermination(c, taskSubmissionAPIError(taskErr))
 	newTaskPluginSubmitDiagnostics(c).presentError(taskErr)
 	if middleware.RespondTaskPluginError(c, taskErr) {

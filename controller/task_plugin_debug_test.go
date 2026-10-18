@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -85,4 +86,38 @@ func TestTaskPluginSubmitDiagnosticsArePluginOnlyAndDoNotLogPayloads(t *testing.
 	} {
 		assert.NotContains(t, logOutput, secret)
 	}
+}
+
+// The access log line of a rejected submission only has the status; the
+// reason is logged next to it, with URLs in the message masked.
+func TestRespondTaskSubmissionErrorLogsReason(t *testing.T) {
+	var output bytes.Buffer
+	common.LogWriterMu.Lock()
+	previousWriter := gin.DefaultErrorWriter
+	gin.DefaultErrorWriter = &output
+	common.LogWriterMu.Unlock()
+	t.Cleanup(func() {
+		common.LogWriterMu.Lock()
+		gin.DefaultErrorWriter = previousWriter
+		common.LogWriterMu.Unlock()
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Set(common.RequestIdKey, "rejected-submit-request")
+	respondTaskSubmissionError(c, &taskdto.TaskError{
+		Code:       "insufficient_user_quota",
+		Message:    "余额不足：当前余额 ¥0.00，请充值后重试。 https://private-upstream.invalid/v1/videos?key=hidden-canary",
+		StatusCode: http.StatusForbidden,
+		LocalError: true,
+	})
+
+	assert.Equal(t, http.StatusForbidden, recorder.Code)
+	logs := output.String()
+	assert.Contains(t, logs, "rejected-submit-request")
+	assert.Contains(t, logs, "status=403 code=insufficient_user_quota local=true")
+	assert.Contains(t, logs, "余额不足：当前余额 ¥0.00")
+	assert.NotContains(t, logs, "hidden-canary")
+	assert.NotContains(t, logs, "private-upstream.invalid")
 }

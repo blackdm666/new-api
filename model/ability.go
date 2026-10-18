@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -45,6 +46,25 @@ func GetGroupEnabledModels(group string) []string {
 	// Find distinct models
 	DB.Table("abilities").Where(commonGroupCol+" = ? and enabled = ?", group, true).Distinct("model").Pluck("model", &models)
 	return models
+}
+
+// GetModelGroupAvailability maps each group whose abilities list the model, or
+// its routing-normalized name, to whether any of those abilities is enabled.
+// Disabled abilities count as listed: their channels may come back.
+func GetModelGroupAvailability(modelName string) (map[string]bool, error) {
+	names := []string{modelName}
+	if normalized := ratio_setting.RoutingMatchModelName(modelName); normalized != modelName {
+		names = append(names, normalized)
+	}
+	var abilities []Ability
+	if err := DB.Where("model IN ?", names).Find(&abilities).Error; err != nil {
+		return nil, err
+	}
+	availability := make(map[string]bool)
+	for _, ability := range abilities {
+		availability[ability.Group] = availability[ability.Group] || ability.Enabled
+	}
+	return availability, nil
 }
 
 func GetEnabledModels() []string {

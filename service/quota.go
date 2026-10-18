@@ -456,7 +456,10 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	relayInfo.PerformanceOutputTokens = int64(usage.CompletionTokens)
 }
 
-func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
+// PreConsumeTokenQuota reserves quota on the request's token. A token without
+// enough quota left fails with a customer message in lang (the language the
+// request stated, "" for the site default).
+func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int, lang string) error {
 	if quota < 0 {
 		return errors.New("quota cannot be negative")
 	}
@@ -473,7 +476,7 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 		if token, tokenErr := model.GetTokenByKey(relayInfo.TokenKey, false); tokenErr == nil && token != nil {
 			remainQuota = token.RemainQuota
 		}
-		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(remainQuota), logger.FormatQuota(quota))
+		return errors.New(appI18n.Translate(lang, appI18n.MsgQuotaTokenInsufficient, map[string]any{"Remaining": formatCustomerQuota(remainQuota), "Required": formatCustomerQuota(quota)}))
 	}
 	return nil
 }
@@ -636,7 +639,7 @@ func buildQuotaWarningNotification(userSetting dto.UserSetting, remainingQuota i
 	}
 	title := coreEmailText(lang, "core_email.quota_warning.preview_subject")
 	content := coreEmailText(lang, "core_email.quota_warning.preview_body", map[string]any{
-		"Amount": formatQuotaForEmail(remainingQuota),
+		"Amount": formatCustomerQuota(remainingQuota),
 	})
 
 	notifyType := userSetting.NotifyType

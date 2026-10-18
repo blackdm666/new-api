@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -388,6 +390,9 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 			}
 		}
 		if channel == nil {
+			if notInGroup := modelNotInGroupError(c, usingGroup, modelName); notInGroup != nil {
+				return nil, selectGroup, notInGroup
+			}
 			return nil, selectGroup, &ChannelSelectError{
 				StatusCode: http.StatusServiceUnavailable, Code: types.ErrorCodeModelNotFound, MessageID: i18n.MsgDistributorNoAvailableChannel,
 				Params: map[string]any{"Group": usingGroup, "Model": modelName}, NoAvailableChannel: true,
@@ -402,6 +407,48 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 		}
 	}
 	return channel, selectGroup, nil
+}
+
+// modelNotInGroupError reports a token group that does not list the model at
+// all; for auto, none of the token's candidate groups does. A group whose
+// channels for the model are only disabled still lists it and keeps the 503.
+// The token's configuration has to change, so it is a 400 a client does not
+// retry, and it names the groups the user may switch the token to that serve
+// the model now. It returns nil when the group lists the model or the lookup
+// fails.
+func modelNotInGroupError(c *gin.Context, usingGroup, modelName string) *ChannelSelectError {
+	availability, err := model.GetModelGroupAvailability(modelName)
+	if err != nil {
+		logger.LogWarn(c, common.LogText("model group lookup failed: %s", err.Error()))
+		return nil
+	}
+	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	candidates := []string{usingGroup}
+	if usingGroup == "auto" {
+		candidates = GetRequestAutoGroups(c, userGroup)
+	}
+	for _, group := range candidates {
+		if _, listed := availability[group]; listed {
+			return nil
+		}
+	}
+	var suggested []string
+	for group, enabled := range availability {
+		if enabled && IsUserSelectableGroup(userGroup, group) {
+			suggested = append(suggested, group)
+		}
+	}
+	slices.Sort(suggested)
+	logger.LogInfo(c, common.LogText("model %q is not offered by token group %q, suggested groups: %q", modelName, usingGroup, suggested))
+	selectErr := &ChannelSelectError{
+		StatusCode: http.StatusBadRequest, Code: types.ErrorCodeModelNotInGroup, MessageID: i18n.MsgDistributorModelNotInGroup,
+		Params: map[string]any{"Group": usingGroup, "Model": modelName},
+	}
+	if len(suggested) > 0 {
+		selectErr.MessageID = i18n.MsgDistributorModelNotInGroupSuggest
+		selectErr.Params["Groups"] = strings.Join(suggested, ", ")
+	}
+	return selectErr
 }
 
 // Origin-task pins report a fixed code so task polling can tell a retired
