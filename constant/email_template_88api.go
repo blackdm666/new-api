@@ -32,3 +32,49 @@ func cyberGuardBanEmailTemplateSpec() EmailTemplateSpec {
 		DefaultBody:    cyberGuardBanDefaultBody,
 	}
 }
+
+// 88api referral: the confirmation sent to the applicant of the official
+// site's referral program form. The program needs no manual approval, so the
+// email tells the applicant where to find the referral link.
+const EmailTemplateKeyReferralApplicationUser = "referral_application_user"
+
+const referralApplicationUserDefaultBody = defaultEmailShellStart + `
+    <h1 style="margin:0 0 8px;font-size:24px;font-weight:650;letter-spacing:-0.01em;color:#172033;">{{heading}}</h1>
+    <p style="margin:0 0 24px;font-size:14px;color:#66728f;">{{intro}}</p>
+    {{info_table}}
+    <p style="margin:24px 0 8px;font-size:15px;font-weight:650;color:#172033;">{{steps_title}}</p>
+    {{next_steps}}
+    <div style="margin:28px 0 20px;text-align:center;">
+      <a href="{{action_url}}" style="display:inline-block;padding:11px 24px;background-color:#4f46e5;background-image:linear-gradient(135deg,#0891b2 0%,#4f46e5 58%,#7c3aed 100%);color:#ffffff;text-decoration:none;border-radius:11px;box-shadow:0 8px 18px rgba(79,70,229,0.22);font-size:14px;font-weight:650;letter-spacing:0.01em;">{{action_label}}</a>
+    </div>
+    <p style="margin:0 0 8px;font-size:13px;color:#66728f;">{{support_note}}</p>
+    <p style="margin:0 0 8px;font-size:13px;color:#66728f;">{{rules_note}}</p>
+    <p style="margin:0;font-size:13px;color:#66728f;">{{security_note}}</p>` + defaultEmailShellEnd
+
+func referralApplicationUserEmailTemplateSpec() EmailTemplateSpec {
+	return EmailTemplateSpec{
+		Key:         EmailTemplateKeyReferralApplicationUser,
+		Name:        "推广返佣申请已通过-通知申请人",
+		Description: "官网推广返佣申请表提交后自动发送给申请人：收件人依次取申请表里的邮箱、填写为邮箱的 88API 账号、填写的 UID 的注册邮箱；都没有则不发。不含申请人填写的名称、说明等内容。",
+		Variables: []EmailTemplateVariable{
+			varSystemName, varServerAddr, varEmailSubject, varHeading,
+			{Name: "intro", Description: "正文开头说明", Sample: "你的 88API 推广返佣计划申请已通过。登录控制台，在「推荐计划」复制专属推荐链接，就可以开始推广。"},
+			{Name: "reference", Description: "申请编号", Sample: "RA-7K2M9QXD"},
+			{Name: "start_rate", Description: "起始返佣比例", Sample: "5%"},
+			{Name: "next_group", Description: "下一推广等级", Sample: "高级推广"},
+			{Name: "next_rate", Description: "下一等级返佣比例", Sample: "10%"},
+			{Name: "upgrade_invitees", Description: "升级所需有效充值用户数", Sample: "50"},
+			{Name: "upgrade_amount", Description: "升级所需有效充值累计", Sample: "¥2000.00"},
+			{Name: "payout_minimum", Description: "支付宝现金结算起点", Sample: "¥100.00"},
+			{Name: "settlement_day", Description: "每月打款日", Sample: "10"},
+			{Name: "steps_title", Description: "步骤标题", Sample: "接下来"},
+			{Name: "next_steps", Description: "由系统拼装的步骤列表 HTML", Sample: "<ol><li>登录控制台，打开「推荐计划」。</li></ol>"},
+			{Name: "support_note", Description: "客服说明", Sample: "需要推广素材，或想申请更高的返佣比例？联系在线客服即可。"},
+			{Name: "rules_note", Description: "规则提醒", Sample: "请遵守推广计划规则。"},
+			{Name: "security_note", Description: "非本人提交提示", Sample: "如果你没有提交过这份申请，请忽略这封邮件。"},
+			varInfoTable, varActionURL, varActionLabel,
+		},
+		DefaultSubject: "{{email_subject}}",
+		DefaultBody:    referralApplicationUserDefaultBody,
+	}
+}

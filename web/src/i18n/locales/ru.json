@@ -8707,6 +8707,8 @@
     "Enter one or more valid email addresses separated by commas": "Введите один или несколько корректных email через запятую",
     "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.": "Заявки на партнёрскую программу с официального сайта отправляются на эти адреса через SMTP-профиль уведомлений. Несколько адресов разделяйте запятыми.",
     "Referral program application": "Заявка на партнёрскую программу",
+    "Referral application approved notification": "Уведомление об одобрении заявки в партнёрскую программу",
+    "Sent to the applicant after the official website referral application form is submitted. It goes to the email in the form, an account entered as an email, or the registered email of the entered UID.": "Отправляется заявителю после отправки формы партнёрской программы на официальном сайте: на email из формы, на аккаунт, указанный как email, или на регистрационный email указанного UID.",
     "Highest tier reached": "Достигнут высший уровень",
     "You are on the highest promoter tier. Future top-ups use the current tier rate.": "У вас высший уровень партнёра. Для следующих пополнений действует ставка текущего уровня.",
     "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "Выполните цель по числу пользователей с пополнением или по сумме действительных пополнений — после этого администратор сможет повысить вас до уровня {{tier}} ({{rate}}). Прогресс показывается по цели, которая ближе к выполнению.",

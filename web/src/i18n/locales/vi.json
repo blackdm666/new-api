@@ -8707,6 +8707,8 @@
     "Enter one or more valid email addresses separated by commas": "Nhập một hoặc nhiều email hợp lệ, phân tách bằng dấu phẩy",
     "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.": "Đơn đăng ký chương trình giới thiệu gửi từ trang web chính thức sẽ được gửi đến các địa chỉ này qua hồ sơ SMTP thông báo. Phân tách nhiều địa chỉ bằng dấu phẩy.",
     "Referral program application": "Đơn đăng ký chương trình giới thiệu",
+    "Referral application approved notification": "Thông báo duyệt đơn chương trình giới thiệu",
+    "Sent to the applicant after the official website referral application form is submitted. It goes to the email in the form, an account entered as an email, or the registered email of the entered UID.": "Gửi cho người nộp đơn sau khi gửi biểu mẫu chương trình giới thiệu trên trang chính thức, tới email trong biểu mẫu, tài khoản nhập dưới dạng email hoặc email đăng ký của UID đã nhập.",
     "Highest tier reached": "Đã đạt hạng cao nhất",
     "You are on the highest promoter tier. Future top-ups use the current tier rate.": "Bạn đã ở hạng đối tác cao nhất. Các lần nạp tiếp theo dùng tỷ lệ của hạng hiện tại.",
     "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "Đạt một trong hai mục tiêu: số người nạp hợp lệ hoặc số tiền nạp hợp lệ, sau đó quản trị viên có thể duyệt nâng lên {{tier}} ({{rate}}). Tiến độ tính theo mục tiêu gần đạt hơn.",

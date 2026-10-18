@@ -8707,6 +8707,8 @@
     "Enter one or more valid email addresses separated by commas": "有効なメールアドレスを 1 つ以上、カンマ区切りで入力してください",
     "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.": "公式サイトから送信された紹介プログラムの申請は、通知用 SMTP プロファイルでこれらのアドレスに送信されます。複数のアドレスはカンマで区切ってください。",
     "Referral program application": "紹介プログラム申請",
+    "Referral application approved notification": "紹介プログラム申請承認通知",
+    "Sent to the applicant after the official website referral application form is submitted. It goes to the email in the form, an account entered as an email, or the registered email of the entered UID.": "公式サイトの紹介プログラム申請フォーム送信後に申請者へ送信されます。宛先はフォームのメール、メールアドレスで入力されたアカウント、入力された UID の登録メールの順に選ばれます。",
     "Highest tier reached": "最上位ランクに到達",
     "You are on the highest promoter tier. Future top-ups use the current tier rate.": "すでに最上位の紹介ランクです。今後のチャージには現在のランクの料率が適用されます。",
     "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "有効チャージ人数または有効チャージ金額のいずれかが目標に達すると、管理者の承認で{{tier}}（{{rate}}）に昇格できます。進捗は目標により近い方で表示されます。",

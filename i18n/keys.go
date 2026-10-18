@@ -443,6 +443,30 @@ const (
 	MsgAffiliateEmailPayoutStatusPaid          = "affiliate.email.payout.status.paid"
 )
 
+// Referral program application confirmation email texts (88api referral)
+const (
+	MsgReferralApplicationEmailSubject        = "referral_application.email.subject"
+	MsgReferralApplicationEmailHeading        = "referral_application.email.heading"
+	MsgReferralApplicationEmailIntro          = "referral_application.email.intro"
+	MsgReferralApplicationEmailLabelReference = "referral_application.email.label.reference"
+	MsgReferralApplicationEmailLabelStartRate = "referral_application.email.label.start_rate"
+	MsgReferralApplicationEmailLabelNextGroup = "referral_application.email.label.next_group"
+	MsgReferralApplicationEmailLabelUpgrade   = "referral_application.email.label.upgrade"
+	MsgReferralApplicationEmailLabelPayout    = "referral_application.email.label.payout"
+	MsgReferralApplicationEmailValueStartRate = "referral_application.email.value.start_rate"
+	MsgReferralApplicationEmailValueNextGroup = "referral_application.email.value.next_group"
+	MsgReferralApplicationEmailValueUpgrade   = "referral_application.email.value.upgrade"
+	MsgReferralApplicationEmailValuePayout    = "referral_application.email.value.payout"
+	MsgReferralApplicationEmailStepsTitle     = "referral_application.email.steps_title"
+	MsgReferralApplicationEmailStepLink       = "referral_application.email.step.link"
+	MsgReferralApplicationEmailStepShare      = "referral_application.email.step.share"
+	MsgReferralApplicationEmailStepCommission = "referral_application.email.step.commission"
+	MsgReferralApplicationEmailSupportNote    = "referral_application.email.support_note"
+	MsgReferralApplicationEmailRulesNote      = "referral_application.email.rules_note"
+	MsgReferralApplicationEmailSecurityNote   = "referral_application.email.security_note"
+	MsgReferralApplicationEmailAction         = "referral_application.email.action"
+)
+
 // Built-in email template texts, looked up by key when the email is built
 const (
 	MsgCoreEmailVerificationSubject           = "core_email.verification.subject"
