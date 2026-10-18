@@ -325,7 +325,8 @@ func EmailTemplateSpecs() []EmailTemplateSpec {
 			DefaultSubject: "{{email_subject}}",
 			DefaultBody:    defaultBody,
 		},
-		cyberGuardBanEmailTemplateSpec(), // 88api cyberguard
+		cyberGuardBanEmailTemplateSpec(),           // 88api cyberguard
+		referralApplicationUserEmailTemplateSpec(), // 88api referral
 	}
 }
 

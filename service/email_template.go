@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"html"
+	"maps"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -105,6 +106,10 @@ func sampleVarsFromSpecForLang(spec constant.EmailTemplateSpec, lang string) map
 	applyInvoiceTemplatePreviewSamples(spec.Key, lang, vars)
 	applyAffiliateTemplatePreviewSamples(spec.Key, lang, vars)
 	applyCyberGuardTemplatePreviewSamples(spec.Key, lang, vars) // 88api cyberguard
+	// 88api referral
+	if spec.Key == constant.EmailTemplateKeyReferralApplicationUser {
+		maps.Copy(vars, referralApplicationReplyVars("RA-7K2M9QXD", lang))
+	}
 	return vars
 }
 

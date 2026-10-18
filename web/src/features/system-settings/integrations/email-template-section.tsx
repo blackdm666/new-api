@@ -244,6 +244,15 @@ const TEMPLATE_META: Record<string, TemplateMeta> = {
     audience: 'user',
     icon: HandCoins,
   },
+  // 88api referral
+  referral_application_user: {
+    name: 'Referral application approved notification',
+    description:
+      'Sent to the applicant after the official website referral application form is submitted. It goes to the email in the form, an account entered as an email, or the registered email of the entered UID.',
+    group: 'affiliate',
+    audience: 'user',
+    icon: HandCoins,
+  },
 }
 
 const AUDIENCE_LABELS: Record<TemplateAudience, string> = {

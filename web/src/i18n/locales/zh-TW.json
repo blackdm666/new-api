@@ -8709,6 +8709,8 @@
     "Enter one or more valid email addresses separated by commas": "請輸入一個或多個有效信箱，以逗號分隔",
     "Referral program applications submitted on the official website are emailed to these addresses through the notification SMTP profile. Separate multiple addresses with commas.": "官網推廣返佣頁提交的申請會透過通知 SMTP 寄送到這些信箱。多個信箱以逗號分隔。",
     "Referral program application": "推廣返佣計畫申請",
+    "Referral application approved notification": "推廣返佣申請通過通知",
+    "Sent to the applicant after the official website referral application form is submitted. It goes to the email in the form, an account entered as an email, or the registered email of the entered UID.": "官網推廣返佣申請表提交後自動寄送給申請人：收件信箱依序取表單中的電子郵件、填寫為電子郵件的帳號、填寫的 UID 的註冊信箱。",
     "Highest tier reached": "已達最高檔",
     "You are on the highest promoter tier. Future top-ups use the current tier rate.": "你已是最高推廣等級，後續儲值按目前等級比例返佣。",
     "Meet either the effective top-up user target or the effective top-up amount target, then an administrator can approve an upgrade to {{tier}} ({{rate}}). Progress follows whichever target is closer.": "有效儲值人數或有效儲值金額任一達標後，管理員審核可升級至{{tier}}（{{rate}}）。進度按更接近達標的一項計算。",

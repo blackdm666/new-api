@@ -4,20 +4,29 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"maps"
 	"net/mail"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	appI18n "github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/model"
 )
 
 // ReferralApplicationEmailCategory is the email outbox category of the
 // official site's referral program application notification.
 const ReferralApplicationEmailCategory = "referral_application_admin"
+
+// ReferralApplicationReplyEmailCategory is the email outbox category of the
+// confirmation sent to the applicant.
+const ReferralApplicationReplyEmailCategory = "referral_application_user"
 
 type referralApplicationFieldKind int
 
@@ -131,12 +140,16 @@ type referralApplicationEntry struct {
 
 // ReferralApplication is a validated submission ready to be emailed.
 type ReferralApplication struct {
-	Reference   string
-	Entries     []referralApplicationEntry
-	SourcePage  string
-	Locale      string
-	ClientIP    string
-	SubmittedAt time.Time
+	Reference string
+	Entries   []referralApplicationEntry
+	// Account and ContactEmail are the normalized form values used to pick
+	// the confirmation recipient; empty when not filled.
+	Account      string
+	ContactEmail string
+	SourcePage   string
+	Locale       string
+	ClientIP     string
+	SubmittedAt  time.Time
 }
 
 // ReferralApplicationContext carries request facts that are not form fields.
@@ -160,12 +173,14 @@ func IsReferralApplicationSpam(payload map[string]any) bool {
 func ValidateReferralApplication(payload map[string]any, request ReferralApplicationContext) (*ReferralApplication, error) {
 	entries := make([]referralApplicationEntry, 0, len(referralApplicationFields))
 	filled := make(map[string]bool, len(referralApplicationFields))
+	values := make(map[string]string, len(referralApplicationFields))
 	for _, field := range referralApplicationFields {
 		value, err := normalizeReferralApplicationField(field, payload[field.Key])
 		if err != nil {
 			return nil, err
 		}
 		filled[field.Key] = value != ""
+		values[field.Key] = value
 		if value == "" {
 			value = "-"
 		}
@@ -192,12 +207,14 @@ func ValidateReferralApplication(payload map[string]any, request ReferralApplica
 		submittedAt = time.Now()
 	}
 	return &ReferralApplication{
-		Reference:   "RA-" + strings.ToUpper(common.GetRandomString(8)),
-		Entries:     entries,
-		SourcePage:  sourcePage,
-		Locale:      locale,
-		ClientIP:    strings.TrimSpace(request.ClientIP),
-		SubmittedAt: submittedAt,
+		Reference:    "RA-" + strings.ToUpper(common.GetRandomString(8)),
+		Entries:      entries,
+		Account:      values["account"],
+		ContactEmail: values["email"],
+		SourcePage:   sourcePage,
+		Locale:       locale,
+		ClientIP:     strings.TrimSpace(request.ClientIP),
+		SubmittedAt:  submittedAt,
 	}, nil
 }
 
@@ -378,7 +395,8 @@ func ValidateReferralApplicationRecipients(value string) error {
 // RenderReferralApplicationEmail builds the administrator notification. All
 // applicant-provided values are HTML-escaped. The subject carries only the
 // reference so no personal data remains once the outbox clears the body.
-func RenderReferralApplicationEmail(application *ReferralApplication) (string, string) {
+// replyNote tells the administrator where the applicant's confirmation went.
+func RenderReferralApplicationEmail(application *ReferralApplication, replyNote string) (string, string) {
 	beijing := time.FixedZone("UTC+8", 8*60*60)
 	rows := make([]common.EmailTemplateRow, 0, len(application.Entries)+5)
 	for _, entry := range application.Entries {
@@ -402,6 +420,7 @@ func RenderReferralApplicationEmail(application *ReferralApplication) (string, s
 		{Label: "来源页面", Value: html.EscapeString(sourcePage)},
 		{Label: "页面语言", Value: html.EscapeString(locale)},
 		{Label: "IP", Value: html.EscapeString(clientIP)},
+		{Label: "自动回信", Value: html.EscapeString(replyNote)},
 	}
 	systemName := common.SystemNameOrDefault()
 	subject := fmt.Sprintf("[%s] 推广返佣计划申请 %s", systemName, application.Reference)
@@ -421,9 +440,11 @@ func RenderReferralApplicationEmail(application *ReferralApplication) (string, s
 var ErrReferralApplicationEmailNotConfigured = errors.New("referral application email is not configured")
 
 // QueueReferralApplicationEmail stores the notification in the email outbox
-// for each configured recipient. The outbox clears subject and body after
-// delivery, so only delivery metadata stays in the database. It fails only
-// when no recipient could be queued.
+// for each configured recipient, then queues the applicant's confirmation
+// (see referralApplicationReplyRecipient). The outbox clears subject and body
+// after delivery, so only delivery metadata stays in the database. It fails
+// only when no administrator recipient could be queued; a confirmation that
+// cannot be queued is only logged.
 func QueueReferralApplicationEmail(application *ReferralApplication) error {
 	common.OptionMapRWMutex.RLock()
 	smtpServer := strings.TrimSpace(common.SMTPServer)
@@ -431,7 +452,16 @@ func QueueReferralApplicationEmail(application *ReferralApplication) error {
 	if smtpServer == "" {
 		return ErrReferralApplicationEmailNotConfigured
 	}
-	subject, body := RenderReferralApplicationEmail(application)
+	replyTo, replyUserId := "", 0
+	replyNote := "未发送：推广返佣未开启"
+	if enabled, _, _, _ := model.GetAffiliatePolicyState(); enabled {
+		replyTo, replyUserId = referralApplicationReplyRecipient(application)
+		replyNote = "未发送：申请人没有留邮箱，账号也查不到邮箱"
+		if replyTo != "" {
+			replyNote = "已发送「申请已通过」邮件至 " + replyTo
+		}
+	}
+	subject, body := RenderReferralApplicationEmail(application, replyNote)
 	expires := application.SubmittedAt.Add(7 * 24 * time.Hour).Unix()
 	var queueErr error
 	queued := 0
@@ -449,5 +479,112 @@ func QueueReferralApplicationEmail(application *ReferralApplication) error {
 	if queueErr != nil {
 		common.SysError("referral application " + application.Reference + " was not queued for every recipient: " + queueErr.Error())
 	}
+	if replyTo == "" {
+		return nil
+	}
+	lang := appI18n.ParseAcceptLanguage(application.Locale)
+	if lang == "" {
+		lang = appI18n.LangZhCN
+	}
+	replySubject, replyBody := RenderEmailByKeyForLang(constant.EmailTemplateKeyReferralApplicationUser, lang, referralApplicationReplyVars(application.Reference, lang))
+	if _, err := QueueSystemEmail("referral-application-reply:"+application.Reference, ReferralApplicationReplyEmailCategory, 0, replyUserId, replyTo, replySubject, replyBody, expires); err != nil {
+		common.SysError("failed to queue referral application confirmation " + application.Reference + ": " + err.Error())
+	}
 	return nil
+}
+
+// referralApplicationReplyRecipient picks the address of the applicant's
+// confirmation: the contact email, else an account written as an email, else
+// the registered email of the enabled user whose UID was entered (returned
+// with that user's id). The form is public and the submitter never learns
+// which address was used, so the confirmation carries none of the submitted
+// text.
+func referralApplicationReplyRecipient(application *ReferralApplication) (string, int) {
+	if application.ContactEmail != "" {
+		return application.ContactEmail, 0
+	}
+	if isReferralApplicationEmail(application.Account) {
+		return application.Account, 0
+	}
+	userId, err := strconv.Atoi(application.Account)
+	if err != nil || userId <= 0 {
+		return "", 0
+	}
+	user, err := model.GetUserById(userId, false)
+	if err != nil || user.Status != common.UserStatusEnabled {
+		return "", 0
+	}
+	email := strings.TrimSpace(user.Email)
+	if !isReferralApplicationEmail(email) {
+		return "", 0
+	}
+	return email, user.Id
+}
+
+// referralApplicationReplyVars fills the confirmation template from the live
+// referral policy, so its rates and thresholds match the console. The
+// template preview uses it too.
+func referralApplicationReplyVars(reference string, lang string) map[string]string {
+	systemName := common.SystemNameOrDefault()
+	baseURL := systemEmailSiteURL()
+	text := func(key string, data ...map[string]any) string {
+		return affiliateEmailText(lang, key, data...)
+	}
+	startRate := formatAffiliateRate(model.AffiliateRateBasisPointsForGroup(model.AffiliatePromoterGroupDefault))
+	rows := []common.EmailTemplateRow{
+		{Label: text(appI18n.MsgReferralApplicationEmailLabelReference), Value: html.EscapeString(reference)},
+		{Label: text(appI18n.MsgReferralApplicationEmailLabelStartRate), Value: html.EscapeString(text(appI18n.MsgReferralApplicationEmailValueStartRate, map[string]any{
+			"Rate": startRate, "Tier": affiliateTierLabel(model.AffiliatePromoterGroupDefault, lang),
+		}))},
+	}
+	vars := map[string]string{"next_group": "", "next_rate": "", "upgrade_invitees": "", "upgrade_amount": ""}
+	if target, ok := model.GetAffiliateUpgradeTarget(model.AffiliatePromoterGroupDefault); ok {
+		nextGroup := affiliateTierLabel(target.Group, lang)
+		nextRate := formatAffiliateRate(target.RateBasisPoints)
+		upgradeAmount := formatAffiliateMoney(target.TopUpAmountThresholdCents)
+		rows = append(rows,
+			common.EmailTemplateRow{Label: text(appI18n.MsgReferralApplicationEmailLabelNextGroup), Value: html.EscapeString(text(appI18n.MsgReferralApplicationEmailValueNextGroup, map[string]any{
+				"Tier": nextGroup, "Rate": nextRate,
+			}))},
+			common.EmailTemplateRow{Label: text(appI18n.MsgReferralApplicationEmailLabelUpgrade), Value: html.EscapeString(text(appI18n.MsgReferralApplicationEmailValueUpgrade, map[string]any{
+				"Invitees": target.Threshold, "Amount": upgradeAmount,
+			}))},
+		)
+		vars["next_group"] = html.EscapeString(nextGroup)
+		vars["next_rate"] = html.EscapeString(nextRate)
+		vars["upgrade_invitees"] = strconv.Itoa(target.Threshold)
+		vars["upgrade_amount"] = html.EscapeString(upgradeAmount)
+	}
+	payoutMinimum := formatAffiliateMoney(model.AffiliatePayoutMinimumCents)
+	rows = append(rows, common.EmailTemplateRow{Label: text(appI18n.MsgReferralApplicationEmailLabelPayout), Value: html.EscapeString(text(appI18n.MsgReferralApplicationEmailValuePayout, map[string]any{
+		"Amount": payoutMinimum, "Day": model.AffiliatePayoutSettlementDay,
+	}))})
+
+	var steps strings.Builder
+	steps.WriteString(`<ol style="margin:0;padding-left:20px;color:#27324d;font-size:14px;line-height:1.7;">`)
+	for _, key := range []string{appI18n.MsgReferralApplicationEmailStepLink, appI18n.MsgReferralApplicationEmailStepShare, appI18n.MsgReferralApplicationEmailStepCommission} {
+		fmt.Fprintf(&steps, `<li style="margin:0 0 6px;">%s</li>`, html.EscapeString(text(key, map[string]any{"SystemName": systemName})))
+	}
+	steps.WriteString(`</ol>`)
+
+	maps.Copy(vars, map[string]string{
+		"email_subject":  html.EscapeString(text(appI18n.MsgReferralApplicationEmailSubject)),
+		"system_name":    html.EscapeString(systemName),
+		"server_address": html.EscapeString(baseURL),
+		"heading":        html.EscapeString(text(appI18n.MsgReferralApplicationEmailHeading)),
+		"intro":          html.EscapeString(text(appI18n.MsgReferralApplicationEmailIntro, map[string]any{"SystemName": systemName})),
+		"reference":      html.EscapeString(reference),
+		"start_rate":     html.EscapeString(startRate),
+		"payout_minimum": html.EscapeString(payoutMinimum),
+		"settlement_day": strconv.Itoa(model.AffiliatePayoutSettlementDay),
+		"info_table":     common.RenderInfoTableHTML(rows),
+		"steps_title":    html.EscapeString(text(appI18n.MsgReferralApplicationEmailStepsTitle)),
+		"next_steps":     steps.String(),
+		"action_url":     html.EscapeString(baseURL + "/referral"),
+		"action_label":   html.EscapeString(text(appI18n.MsgReferralApplicationEmailAction)),
+		"support_note":   html.EscapeString(text(appI18n.MsgReferralApplicationEmailSupportNote)),
+		"rules_note":     html.EscapeString(text(appI18n.MsgReferralApplicationEmailRulesNote)),
+		"security_note":  html.EscapeString(text(appI18n.MsgReferralApplicationEmailSecurityNote)),
+	})
+	return vars
 }
