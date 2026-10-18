@@ -25,6 +25,7 @@ import (
 	"github.com/mewkiz/flac"
 	"github.com/mewkiz/flac/frame"
 	"github.com/mewkiz/flac/meta"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -129,6 +130,72 @@ func ConvertSpeechRequest(c *gin.Context, info *relaycommon.RelayInfo, request d
 		return nil, "", fmt.Errorf("failed to marshal Gemini audio speech request: %w", err)
 	}
 	return bytes.NewReader(jsonData), responseFormat, nil
+}
+
+// splitGemini38SpeakerTurns rewrites a multi-speaker script written as
+// "Joe: line" (or "[Joe] line") into one part per turn tagged with
+// speechMetadata.speaker. Gemini 3.8 TTS reads the text verbatim, so the
+// script form often speaks the speaker names aloud (Flash-Lite and Chinese
+// scripts almost always), while per-turn speechMetadata never does. The
+// request is left untouched unless every non-empty line starts with one of the
+// configured speakers and nothing else (media, existing metadata) is present.
+func splitGemini38SpeakerTurns(request *dto.GeminiChatRequest) {
+	speechConfig := request.GenerationConfig.SpeechConfig
+	var speakers []string
+	for _, path := range []string{"multiSpeakerVoiceConfig.speakerVoiceConfigs.#.speaker", "multi_speaker_voice_config.speaker_voice_configs.#.speaker"} {
+		for _, speaker := range gjson.GetBytes(speechConfig, path).Array() {
+			if name := strings.TrimSpace(speaker.String()); name != "" {
+				speakers = append(speakers, name)
+			}
+		}
+	}
+	if len(speakers) == 0 || len(request.Contents) != 1 {
+		return
+	}
+	var turns []dto.GeminiPart
+	for _, part := range request.Contents[0].Parts {
+		if part.Text == "" || part.Thought || part.InlineData != nil || part.FileData != nil || part.FunctionCall != nil || part.FunctionResponse != nil || len(part.SpeechMetadata) > 0 {
+			return
+		}
+		for line := range strings.SplitSeq(part.Text, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			speaker, text := "", ""
+			for _, name := range speakers {
+				if rest, ok := strings.CutPrefix(line, "["+name+"]"); ok {
+					speaker, text = name, rest
+					break
+				}
+				rest, ok := strings.CutPrefix(line, name)
+				if !ok {
+					continue
+				}
+				rest = strings.TrimSpace(rest)
+				if after, ok := strings.CutPrefix(rest, ":"); ok {
+					speaker, text = name, after
+					break
+				}
+				if after, ok := strings.CutPrefix(rest, "："); ok {
+					speaker, text = name, after
+					break
+				}
+			}
+			text = strings.TrimSpace(text)
+			if speaker == "" || text == "" {
+				return
+			}
+			metadata, err := common.Marshal(map[string]string{"speaker": speaker})
+			if err != nil {
+				return
+			}
+			turns = append(turns, dto.GeminiPart{Text: text, SpeechMetadata: metadata})
+		}
+	}
+	if len(turns) > 0 {
+		request.Contents[0].Parts = turns
+	}
 }
 
 // RejectTTSModelChat is the client error for a chat request sent to a Gemini

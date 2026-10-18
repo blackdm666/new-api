@@ -586,3 +586,64 @@ func TestTranscriptionClientErrorsExplainTheFix(t *testing.T) {
 		})
 	}
 }
+
+// Gemini 3.8 TTS speaks "Joe:" script labels aloud but never per-turn speechMetadata;
+// native requests are converted only when every line is a labelled turn of a configured speaker.
+func TestGemini38MultiSpeakerScriptBecomesSpeechMetadataTurns(t *testing.T) {
+	const speakers = `"speechConfig":{"multiSpeakerVoiceConfig":{"speakerVoiceConfigs":[{"speaker":"Joe","voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Puck"}}},{"speaker":"小红","voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Kore"}}}]}}`
+	tests := []struct {
+		name  string
+		model string
+		body  string
+		want  string
+	}{
+		{
+			name:  "colon script is split into turns",
+			model: "gemini-3.8-flash-lite-tts",
+			body:  `{"contents":[{"parts":[{"text":"Joe: Good morning <laugh>\n\n小红：挺好的，谢谢。"}]}],"generationConfig":{"responseModalities":["AUDIO"],` + speakers + `}}`,
+			want:  `[{"role":"user","parts":[{"text":"Good morning <laugh>","speechMetadata":{"speaker":"Joe"}},{"text":"挺好的，谢谢。","speechMetadata":{"speaker":"小红"}}]}]`,
+		},
+		{
+			name:  "bracket script across parts with snake_case config",
+			model: "gemini-3.8-flash-tts",
+			body:  `{"contents":[{"role":"user","parts":[{"text":"[Joe] Hi"},{"text":"[小红] 你好"}]}],"generationConfig":{"speech_config":{"multi_speaker_voice_config":{"speaker_voice_configs":[{"speaker":"Joe"},{"speaker":"小红"}]}}}}`,
+			want:  `[{"role":"user","parts":[{"text":"Hi","speechMetadata":{"speaker":"Joe"}},{"text":"你好","speechMetadata":{"speaker":"小红"}}]}]`,
+		},
+		{
+			name:  "client speech_metadata is kept",
+			model: "gemini-3.8-flash-tts",
+			body:  `{"contents":[{"role":"user","parts":[{"text":"Hi","speech_metadata":{"speaker":"Joe","style":"cheerful"}},{"text":"Joe: not a label here"}]}],"generationConfig":{` + speakers + `}}`,
+			want:  `[{"role":"user","parts":[{"text":"Hi","speechMetadata":{"speaker":"Joe","style":"cheerful"}},{"text":"Joe: not a label here"}]}]`,
+		},
+		{
+			name:  "unlabelled narration line keeps the script as is",
+			model: "gemini-3.8-flash-tts",
+			body:  `{"contents":[{"role":"user","parts":[{"text":"Joe: Hi\nThe door opens."}]}],"generationConfig":{` + speakers + `}}`,
+			want:  `[{"role":"user","parts":[{"text":"Joe: Hi\nThe door opens."}]}]`,
+		},
+		{
+			name:  "unknown speaker keeps the script as is",
+			model: "gemini-3.8-flash-tts",
+			body:  `{"contents":[{"role":"user","parts":[{"text":"Joe: Hi\nJane: Hello"}]}],"generationConfig":{` + speakers + `}}`,
+			want:  `[{"role":"user","parts":[{"text":"Joe: Hi\nJane: Hello"}]}]`,
+		},
+		{
+			name:  "older tts models keep the script format",
+			model: "gemini-2.5-flash-preview-tts",
+			body:  `{"contents":[{"role":"user","parts":[{"text":"Joe: Hi\n小红: 你好"}]}],"generationConfig":{` + speakers + `}}`,
+			want:  `[{"role":"user","parts":[{"text":"Joe: Hi\n小红: 你好"}]}]`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var request dto.GeminiChatRequest
+			require.NoError(t, common.UnmarshalJsonStr(tt.body, &request))
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: tt.model}}
+			converted, err := (&Adaptor{}).ConvertGeminiRequest(nil, info, &request)
+			require.NoError(t, err)
+			data, err := common.Marshal(converted)
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.want, gjson.GetBytes(data, "contents").Raw)
+		})
+	}
+}

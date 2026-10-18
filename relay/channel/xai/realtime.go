@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -27,7 +26,7 @@ import (
 
 // xAI 的实时语音（wss /v1/realtime）和流式 TTS（wss /v1/tts）上游都不回用量：
 // 实时语音按会话时长计费（每分钟 1000 tokens，与 grok-stt 同口径），
-// 流式 TTS 按客户端 text.delta 的字符数计费（每字符 1 token，与 grok-tts 同口径）。
+// 流式 TTS 按客户端 text.delta 的字符数计费（每字符 1 token，与 grok-tts 同口径），只计上游产出了音频的段落。
 const (
 	xaiRealtimePath        = "/v1/realtime"
 	xaiRealtimeModelPrefix = "grok-voice"
@@ -65,9 +64,8 @@ func xaiWebSocketURL(info *relaycommon.RelayInfo) (string, error) {
 		}
 		path = xaiTTSPath
 		fields = xaiTTSStreamQueryFields
-		voice := strings.TrimSpace(clientQuery.Get("voice"))
-		if slices.Contains(openAIBuiltinVoices, strings.ToLower(voice)) {
-			return "", openAIVoiceError(voice)
+		if err := ValidateTTSStreamQuery(clientQuery); err != nil {
+			return "", err
 		}
 	} else {
 		if !isXAIRealtimeModel(info.UpstreamModelName) {
@@ -130,7 +128,16 @@ func reserveXAIRealtimeStart(info *relaycommon.RelayInfo) error {
 	return nil
 }
 
-// xaiWebSocketSession 原样转发两端的帧（保留文本 / 二进制类型），只读取计费需要的事件。
+// xaiTTSUtterance 是流式 TTS 的一段文字（text.delta … text.done）。上游按顺序合成，
+// 收到 audio.delta 才算合成成功；音色不存在等失败时上游只回 error，这段不计费。
+type xaiTTSUtterance struct {
+	chars int  // 尚未计费的字符数
+	done  bool // 客户端已发 text.done
+	audio bool // 上游已开始返回这段的音频
+}
+
+// xaiWebSocketSession 原样转发两端的帧（保留文本 / 二进制类型），只读取计费需要的事件；
+// 实时语音的 session.update 若带了 xAI 不认的音色，直接回 error，不转发。
 type xaiWebSocketSession struct {
 	c         *gin.Context
 	info      *relaycommon.RelayInfo
@@ -139,9 +146,11 @@ type xaiWebSocketSession struct {
 
 	clientMu sync.Mutex // 两个转发协程和续留计时器都会写客户端
 
-	mu         sync.Mutex
-	textInputs int
-	chars      int
+	mu          sync.Mutex
+	textInputs  int
+	chars       int               // 流式 TTS 已发给上游的字符数，用于续留
+	billedChars int               // 流式 TTS 上游已产出音频的字符数，用于结算
+	utterances  []xaiTTSUtterance // 流式 TTS 还没结束的段落，队首是上游正在合成的一段
 
 	done     chan struct{}
 	doneOnce sync.Once
@@ -151,14 +160,22 @@ func (s *xaiWebSocketSession) finish() {
 	s.doneOnce.Do(func() { close(s.done) })
 }
 
-// usage 返回截至 now 的计费用量；实时会话额外计入 ahead 的预留时长，已建立的会话至少按 1 秒计。
-func (s *xaiWebSocketSession) usage(now time.Time, ahead time.Duration) *dto.RealtimeUsage {
+// usage 返回截至 now 的用量，已建立的实时会话至少按 1 秒计。reserve 为 true 时用于续留：
+// 实时会话多算 1 分钟，流式 TTS 按已发给上游的全部字符；结算时流式 TTS 只计产出了音频的字符。
+func (s *xaiWebSocketSession) usage(now time.Time, reserve bool) *dto.RealtimeUsage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ttsStream {
-		return xaiTTSStreamUsage(s.chars)
+		if reserve {
+			return xaiTTSStreamUsage(s.chars)
+		}
+		return xaiTTSStreamUsage(s.billedChars)
 	}
-	return xaiRealtimeUsage(max((now.Sub(s.start)+ahead).Seconds(), 1), s.textInputs)
+	elapsed := now.Sub(s.start)
+	if reserve {
+		elapsed += xaiRealtimeReserveAhead
+	}
+	return xaiRealtimeUsage(max(elapsed.Seconds(), 1), s.textInputs)
 }
 
 func (s *xaiWebSocketSession) add(chars, textInputs int) {
@@ -168,10 +185,78 @@ func (s *xaiWebSocketSession) add(chars, textInputs int) {
 	s.textInputs += textInputs
 }
 
+// trackClientTTS 把客户端 text.delta / text.done 记到对应段落；已在出音频的段落新增的字符直接计费。
+func (s *xaiWebSocketSession) trackClientTTS(eventType string, chars int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	last := len(s.utterances) - 1
+	switch eventType {
+	case "text.delta":
+		if chars <= 0 {
+			return
+		}
+		if last < 0 || s.utterances[last].done {
+			s.utterances = append(s.utterances, xaiTTSUtterance{})
+			last++
+		}
+		if s.utterances[last].audio {
+			s.billedChars += chars
+		} else {
+			s.utterances[last].chars += chars
+		}
+	case "text.done":
+		if last >= 0 {
+			s.utterances[last].done = true
+		}
+	}
+}
+
+// trackUpstreamTTS 按上游事件结算队首段落：audio.delta 表示合成成功，计入这段字符；
+// audio.done / audio.clear 结束这段；error 时队首若已发完文字却没有音频，视为合成失败，不计费。
+func (s *xaiWebSocketSession) trackUpstreamTTS(eventType string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.utterances) == 0 {
+		return
+	}
+	head := &s.utterances[0]
+	switch eventType {
+	case "audio.delta":
+		if !head.audio {
+			head.audio = true
+			s.billedChars += head.chars
+			head.chars = 0
+		}
+	case "audio.done", "audio.clear":
+		s.utterances = s.utterances[1:]
+	case "error":
+		if head.done && !head.audio {
+			s.utterances = s.utterances[1:]
+		}
+	}
+}
+
 func (s *xaiWebSocketSession) writeClient(messageType int, data []byte) error {
 	s.clientMu.Lock()
 	defer s.clientMu.Unlock()
 	return s.info.ClientWs.WriteMessage(messageType, data)
+}
+
+// rejectVoice 告知客户端 session.update 里的音色不可用；这条消息不转发给上游，会话继续。
+func (s *xaiWebSocketSession) rejectVoice(err error) {
+	event := dto.RealtimeEvent{
+		Type:    "error",
+		EventId: helper.GetLocalRealtimeID(s.c),
+		Error: &types.OpenAIError{
+			Message: err.Error(),
+			Type:    "invalid_request_error",
+			Code:    "invalid_value",
+			Param:   "session.voice",
+		},
+	}
+	if data, marshalErr := common.Marshal(event); marshalErr == nil {
+		_ = s.writeClient(websocket.TextMessage, data)
+	}
 }
 
 // rejectForQuota 告知客户端余额不足并结束会话。
@@ -214,10 +299,19 @@ func (s *xaiWebSocketSession) relayClient() {
 			return
 		}
 		if messageType == websocket.TextMessage {
+			eventType := gjson.GetBytes(message, "type").String()
 			chars, textInputs := 0, 0
 			if s.ttsStream {
-				if gjson.GetBytes(message, "type").String() == "text.delta" {
+				if eventType == "text.delta" {
 					chars = utf8.RuneCountInString(gjson.GetBytes(message, "delta").String())
+				}
+			} else if eventType == "session.update" {
+				// 上游对不认识的音色不报错、session.updated 也不回显音色，客户无从发现，这里先拦下。
+				if voice := gjson.GetBytes(message, "session.voice"); voice.Type == gjson.String {
+					if err := checkXAIVoice(voice.String(), "grok voice"); err != nil {
+						s.rejectVoice(err)
+						continue
+					}
 				}
 			} else if isXAIRealtimeTextInput(message) {
 				textInputs = 1
@@ -225,11 +319,14 @@ func (s *xaiWebSocketSession) relayClient() {
 			// 先按加上这条消息的用量续留；余额不足时这条消息不计费，也不发给上游。
 			if chars > 0 || textInputs > 0 {
 				s.add(chars, textInputs)
-				if err := service.ReserveWssQuota(s.info, s.usage(time.Now(), s.reserveAhead())); err != nil {
+				if err := service.ReserveWssQuota(s.info, s.usage(time.Now(), true)); err != nil {
 					s.add(-chars, -textInputs)
 					s.rejectForQuota(err)
 					return
 				}
+			}
+			if s.ttsStream {
+				s.trackClientTTS(eventType, chars)
 			}
 		}
 		if err := s.info.TargetWs.WriteMessage(messageType, message); err != nil {
@@ -248,18 +345,14 @@ func (s *xaiWebSocketSession) relayTarget() {
 			return
 		}
 		s.info.SetFirstResponseTime()
+		if s.ttsStream && messageType == websocket.TextMessage {
+			s.trackUpstreamTTS(gjson.GetBytes(message, "type").String())
+		}
 		if err := s.writeClient(messageType, message); err != nil {
 			logger.LogError(s.c, common.LogText("error writing to client: %s", err.Error()))
 			return
 		}
 	}
-}
-
-func (s *xaiWebSocketSession) reserveAhead() time.Duration {
-	if s.ttsStream {
-		return 0
-	}
-	return xaiRealtimeReserveAhead
 }
 
 // xaiWebSocketHandler 转发一次实时语音或流式 TTS 会话，返回会话结束时的计费用量。
@@ -291,10 +384,10 @@ func xaiWebSocketHandler(c *gin.Context, info *relaycommon.RelayInfo) (*dto.Real
 		case <-c.Done():
 			running = false
 		case now := <-ticker:
-			if err := service.ReserveWssQuota(info, session.usage(now, xaiRealtimeReserveAhead)); err != nil {
+			if err := service.ReserveWssQuota(info, session.usage(now, true)); err != nil {
 				session.rejectForQuota(err)
 			}
 		}
 	}
-	return session.usage(time.Now(), 0), nil
+	return session.usage(time.Now(), false), nil
 }

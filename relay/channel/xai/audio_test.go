@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -98,6 +100,7 @@ func TestXAIConvertTTSRequestDefaultsAndRejects(t *testing.T) {
 		{name: "stream", body: `{}`, request: dto.AudioRequest{Input: "hi", StreamFormat: "sse"}, message: "streaming"},
 		{name: "sample_rate", body: `{"sample_rate":999999999}`, request: dto.AudioRequest{Input: "hi"}, message: "sample_rate"},
 		{name: "openai_voice", body: `{}`, request: dto.AudioRequest{Input: "hi", Voice: "Alloy"}, message: `voice "Alloy" is an OpenAI voice and is not available for grok tts, use altair, ara, atlas, aurora, carina, castor, celeste, cosmo, eve, helios, helix, iris, kepler, leo, liora, lumen, luna, lux, naksh, orion, perseus, rex, rigel, sal, sirius, ursa, zagan, zenith or a custom voice id`},
+		{name: "unknown_voice", body: `{}`, request: dto.AudioRequest{Input: "hi", Voice: "storyteller"}, message: `voice "storyteller" is not available for grok tts, use altair, ara,`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -322,6 +325,13 @@ func TestXAIWebSocketURL(t *testing.T) {
 			wantErr: "OpenAI voice",
 		},
 		{
+			name:    "streaming tts rejects invalid synthesis params",
+			mode:    constant.RelayModeAudioSpeechStream,
+			model:   "grok-tts",
+			path:    "/v1/tts?voice=eve&speed=2.0",
+			wantErr: "speed must be between 0.7 and 1.5",
+		},
+		{
 			name:    "streaming tts rejects other models",
 			mode:    constant.RelayModeAudioSpeechStream,
 			model:   "grok-voice-latest",
@@ -347,6 +357,96 @@ func TestXAIWebSocketURL(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// 取值以 xAI 文档为准，并与线上上游实测一致：codec 区分大小写、sample_rate 只认整数、speed 0.7–1.5。
+func TestValidateTTSStreamQuery(t *testing.T) {
+	for _, query := range []string{
+		"",
+		"voice=Rex&codec=ulaw&sample_rate=48000&bit_rate=192000&speed=1.5&with_timestamps=true",
+		"voice=xai_rex&speed=0.7&text_normalization=false&optimize_streaming_latency=3",
+		"voice=abc123xy&codec=alaw&sample_rate=8000",
+	} {
+		values, err := url.ParseQuery(query)
+		require.NoError(t, err)
+		assert.NoError(t, ValidateTTSStreamQuery(values), query)
+	}
+
+	tests := []struct {
+		query   string
+		message string
+	}{
+		{"speed=2.0", "speed must be between 0.7 and 1.5"},
+		{"speed=0.69", "speed must be between 0.7 and 1.5"},
+		{"speed=NaN", "speed must be between 0.7 and 1.5"},
+		{"sample_rate=12345", "sample_rate must be one of 8000, 16000, 22050, 24000, 44100, 48000"},
+		{"sample_rate=24000.0", "sample_rate must be one of"},
+		{"codec=aac", `codec "aac" is not supported by grok tts, use mp3, wav, pcm, mulaw, ulaw, alaw`},
+		{"codec=flac", `codec "flac" is not supported`},
+		{"codec=MP3", `codec "MP3" is not supported`},
+		{"bit_rate=12345", "bit_rate must be one of 32000, 64000, 96000, 128000, 192000"},
+		{"with_timestamps=1", "with_timestamps must be true or false"},
+		{"voice=alloy", `voice "alloy" is an OpenAI voice and is not available for grok tts`},
+		{"voice=nonexistent", `voice "nonexistent" is not available for grok tts, use altair,`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			values, err := url.ParseQuery(tt.query)
+			require.NoError(t, err)
+			err = ValidateTTSStreamQuery(values)
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+			assert.True(t, types.IsSkipRetryError(apiErr))
+			assert.Contains(t, err.Error(), tt.message)
+		})
+	}
+}
+
+// 上游握手失败时，客户收到的报错不能带上游地址或查询串；请求本身被拒（4xx）时不换渠道重试。
+func TestXAIWebSocketHandshakeErrorHidesUpstreamAddress(t *testing.T) {
+	tests := []struct {
+		status    int
+		skipRetry bool
+	}{
+		{http.StatusBadRequest, true},
+		{http.StatusNotFound, true},
+		{http.StatusUnauthorized, false},
+		{http.StatusTooManyRequests, false},
+		{http.StatusBadGateway, false},
+	}
+	for _, tt := range tests {
+		t.Run(http.StatusText(tt.status), func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(`{"error":{"message":"internal detail"}}`))
+			}))
+			t.Cleanup(upstream.Close)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/tts?voice=eve", nil)
+			info := newAudioRelayInfo(constant.RelayModeAudioSpeechStream, nil)
+			info.ChannelBaseUrl = upstream.URL
+			info.RequestURLPath = "/v1/tts?voice=eve&codec=mp3"
+			info.UpstreamModelName = xaiTTSModel
+
+			_, err := (&Adaptor{}).DoRequest(c, info, nil)
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, fmt.Sprintf("upstream websocket handshake failed with status %d", tt.status), err.Error())
+			assert.Equal(t, tt.status, apiErr.StatusCode)
+			assert.Equal(t, tt.skipRetry, types.IsSkipRetryError(apiErr))
+		})
+	}
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/tts", nil)
+	info := newAudioRelayInfo(constant.RelayModeAudioSpeechStream, nil)
+	info.ChannelBaseUrl = "http://127.0.0.1:1"
+	info.RequestURLPath = "/v1/tts?voice=eve"
+	info.UpstreamModelName = xaiTTSModel
+	_, err := (&Adaptor{}).DoRequest(c, info, nil)
+	require.Error(t, err)
+	assert.Equal(t, "failed to connect to upstream websocket", err.Error())
 }
 
 // fakeWssBilling records reservation targets and refuses targets above limit.
@@ -546,4 +646,86 @@ func TestXAITTSStreamBillsTextDeltaCharacters(t *testing.T) {
 	billing.mu.Lock()
 	defer billing.mu.Unlock()
 	assert.Equal(t, []int{126}, billing.targets)
+}
+
+// 上游按段合成：产出音频的段落计费；音色不存在等原因失败、没有音频的段落不计费，但发送前仍按全部字符预留。
+func TestXAITTSStreamBillsOnlySynthesizedUtterances(t *testing.T) {
+	billing := &fakeWssBilling{limit: math.MaxInt32}
+	client, received, result := runXAIWebSocketSession(t, constant.RelayModeAudioSpeechStream, "grok-tts", `tier("base", p * 105)`, billing, func(conn *websocket.Conn) {
+		// 第一段先出音频、客户端再补一句，补的字符也要计费。
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"audio.delta","delta":"AAAA"}`))
+		for range 2 {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"audio.done"}`))
+		for range 2 {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"TTS synthesis failed: Voice 'abc12345' not found"}`))
+	})
+
+	send := func(event string) {
+		require.NoError(t, client.WriteMessage(websocket.TextMessage, []byte(event)))
+	}
+	send(`{"type":"text.delta","delta":"Hello"}`)
+	_, data, err := client.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, "audio.delta", gjson.GetBytes(data, "type").String())
+	send(`{"type":"text.delta","delta":" world"}`)
+	send(`{"type":"text.done"}`)
+	_, data, err = client.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, "audio.done", gjson.GetBytes(data, "type").String())
+	send(`{"type":"text.delta","delta":"失败的一段"}`)
+	send(`{"type":"text.done"}`)
+	_, data, err = client.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, "error", gjson.GetBytes(data, "type").String())
+	closeClient(t, client)
+
+	usage := <-result
+	require.NotNil(t, usage)
+	assert.Equal(t, 11, usage.InputTokens, "only the synthesized utterance (Hello world) is billed")
+	assert.Equal(t, 11, usage.InputTokenDetails.TextTokens)
+	<-received
+
+	// 每字符 $105/1M × 500000 × 0.3 = 15.75：按累计 5、11、16 字符预留（四舍五入）。
+	billing.mu.Lock()
+	defer billing.mu.Unlock()
+	assert.Equal(t, []int{79, 173, 252}, billing.targets)
+}
+
+// 实时语音的 session.update 带 OpenAI 或不存在的音色时回 error、不转发；合法音色照常转发。
+func TestXAIRealtimeSessionRejectsUnknownVoices(t *testing.T) {
+	billing := &fakeWssBilling{limit: math.MaxInt32}
+	client, received, result := runXAIWebSocketSession(t, constant.RelayModeRealtime, "grok-voice-latest", `tier("base", p * 560)`, billing, func(*websocket.Conn) {})
+
+	for _, voice := range []string{"alloy", "nonexistent"} {
+		require.NoError(t, client.WriteMessage(websocket.TextMessage, []byte(`{"type":"session.update","session":{"voice":"`+voice+`","instructions":"hi"}}`)))
+		_, data, err := client.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, "error", gjson.GetBytes(data, "type").String())
+		assert.Equal(t, "invalid_request_error", gjson.GetBytes(data, "error.type").String())
+		assert.Equal(t, "session.voice", gjson.GetBytes(data, "error.param").String())
+		assert.Contains(t, gjson.GetBytes(data, "error.message").String(), `voice "`+voice+`" is`)
+		assert.Contains(t, gjson.GetBytes(data, "error.message").String(), "not available for grok voice, use altair, ara,")
+	}
+	valid := []byte(`{"type":"session.update","session":{"voice":"rex"}}`)
+	noVoice := []byte(`{"type":"session.update","session":{"instructions":"be brief"}}`)
+	require.NoError(t, client.WriteMessage(websocket.TextMessage, valid))
+	require.NoError(t, client.WriteMessage(websocket.TextMessage, noVoice))
+	closeClient(t, client)
+
+	require.NotNil(t, <-result)
+	frames := <-received
+	require.Len(t, frames, 2, "rejected session.update events never reach upstream")
+	assert.Equal(t, valid, frames[0].data)
+	assert.Equal(t, noVoice, frames[1].data)
 }
