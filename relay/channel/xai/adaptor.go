@@ -25,6 +25,7 @@ type Adaptor struct {
 	audioCodec          string
 	audioSampleRate     int
 	audioResponseFormat string
+	audioVoice          string // 发给上游的 TTS 音色，用于解释上游 404
 }
 
 func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dto.GeminiChatRequest) (any, error) {
@@ -53,6 +54,7 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 		}
 		a.audioCodec = codec
 		a.audioSampleRate = sampleRate
+		a.audioVoice, _ = payload["voice_id"].(string)
 		data, err := common.Marshal(payload)
 		if err != nil {
 			return nil, err
@@ -162,8 +164,21 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
 	switch info.RelayMode {
-	case constant.RelayModeAudioTranscription:
-		return channel.DoFormRequest(a, c, info, requestBody)
+	case constant.RelayModeAudioSpeech, constant.RelayModeAudioTranscription:
+		var resp *http.Response
+		var err error
+		if info.RelayMode == constant.RelayModeAudioSpeech {
+			resp, err = channel.DoApiRequest(a, c, info, requestBody)
+		} else {
+			resp, err = channel.DoFormRequest(a, c, info, requestBody)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if notFound := xaiAudioNotFound(resp, info.RelayMode, a.audioVoice); notFound != nil {
+			return nil, notFound
+		}
+		return resp, nil
 	case constant.RelayModeRealtime:
 		if _, err := xaiWebSocketURL(info); err != nil {
 			return nil, err
