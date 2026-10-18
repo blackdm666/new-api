@@ -22,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // xAI 的实时语音（wss /v1/realtime）和流式 TTS（wss /v1/tts）上游都不回用量：
@@ -78,8 +79,13 @@ func xaiWebSocketURL(info *relaycommon.RelayInfo) (string, error) {
 			query.Set(field, value)
 		}
 	}
-	if info.RelayMode == constant.RelayModeAudioSpeechStream && query.Get("language") == "" {
-		query.Set("language", xaiDefaultLanguage)
+	if info.RelayMode == constant.RelayModeAudioSpeechStream {
+		if query.Get("language") == "" {
+			query.Set("language", xaiDefaultLanguage)
+		}
+		if voice, _ := normalizeXAIVoice(query.Get("voice"), "grok tts"); voice != "" {
+			query.Set("voice", voice)
+		}
 	}
 	return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, path+"?"+query.Encode(), info.ChannelType), nil
 }
@@ -308,9 +314,15 @@ func (s *xaiWebSocketSession) relayClient() {
 			} else if eventType == "session.update" {
 				// 上游对不认识的音色不报错、session.updated 也不回显音色，客户无从发现，这里先拦下。
 				if voice := gjson.GetBytes(message, "session.voice"); voice.Type == gjson.String {
-					if err := checkXAIVoice(voice.String(), "grok voice"); err != nil {
+					normalized, err := normalizeXAIVoice(voice.String(), "grok voice")
+					if err != nil {
 						s.rejectVoice(err)
 						continue
+					}
+					if normalized != voice.String() {
+						if rewritten, setErr := sjson.SetBytes(message, "session.voice", normalized); setErr == nil {
+							message = rewritten
+						}
 					}
 				}
 			} else if isXAIRealtimeTextInput(message) {

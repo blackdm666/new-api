@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
@@ -82,18 +83,45 @@ var xaiBuiltinVoices = []string{"altair", "ara", "atlas", "aurora", "carina", "c
 // xAI 自定义音色 ID 是 8 位小写字母或数字（官方示例 nlbqfwie、abc123xy）。
 var xaiCustomVoicePattern = regexp.MustCompile(`^[a-z0-9]{8}$`)
 
-// checkXAIVoice 在连上游前拒绝 xAI 不认的音色：上游对未知音色要等文字发完才报错（流式 TTS）或直接忽略（实时语音）。
-// 官方音色不区分大小写，也可带 session.created 里出现的 xai_ 前缀；空值表示用上游默认音色。
-func checkXAIVoice(voice string, product string) error {
-	name := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(voice)), "xai_")
-	if name == "" || slices.Contains(xaiBuiltinVoices, name) || xaiCustomVoicePattern.MatchString(name) {
-		return nil
+// normalizeXAIVoice 在连上游前拒绝 xAI 不认的音色（上游对未知音色要等文字发完才报错，或直接忽略），
+// 并返回发给上游的写法。官方音色不区分大小写，也可带 session.created 里出现的 xai_ 前缀，
+// 但上游只对部分音色认 xai_ 前缀（xai_rex 可用，xai_eve 返回 404），所以统一发不带前缀的小写名；
+// 自定义音色 ID 原样发送；空值表示用上游默认音色。
+func normalizeXAIVoice(voice string, product string) (string, error) {
+	trimmed := strings.TrimSpace(voice)
+	name := strings.TrimPrefix(strings.ToLower(trimmed), "xai_")
+	if name == "" || slices.Contains(xaiBuiltinVoices, name) {
+		return name, nil
+	}
+	if xaiCustomVoicePattern.MatchString(name) {
+		return trimmed, nil
 	}
 	voices := strings.Join(xaiBuiltinVoices, ", ")
 	if slices.Contains(openAIBuiltinVoices, name) {
-		return badAudioRequest("voice %q is an OpenAI voice and is not available for %s, use %s or a custom voice id", voice, product, voices)
+		return "", badAudioRequest("voice %q is an OpenAI voice and is not available for %s, use %s or a custom voice id", voice, product, voices)
 	}
-	return badAudioRequest("voice %q is not available for %s, use %s or a custom voice id", voice, product, voices)
+	return "", badAudioRequest("voice %q is not available for %s, use %s or a custom voice id", voice, product, voices)
+}
+
+// xaiAudioNotFound 处理 xAI 语音接口的 404：TTS 是自定义音色 ID 不存在，STT 是音频资源不存在。
+// 这是请求本身的问题，换渠道结果一样，所以不重试，直接给客户清楚的错误；上游没有产出，不计费。
+// 官方音色已在 normalizeXAIVoice 校验过，再遇到 404 不是音色问题，按普通上游错误处理（返回 nil）。
+func xaiAudioNotFound(resp *http.Response, mode int, voice string) error {
+	if resp == nil || resp.StatusCode != http.StatusNotFound {
+		return nil
+	}
+	switch mode {
+	case constant.RelayModeAudioSpeech:
+		if voice == "" || slices.Contains(xaiBuiltinVoices, voice) {
+			return nil
+		}
+		service.CloseResponseBodyGracefully(resp)
+		return badAudioRequest("voice %q was not found by grok tts, use %s or a custom voice id created for this service", voice, strings.Join(xaiBuiltinVoices, ", "))
+	case constant.RelayModeAudioTranscription:
+		service.CloseResponseBodyGracefully(resp)
+		return types.NewErrorWithStatusCode(errors.New("grok stt could not find the requested audio (upstream returned 404), check the file or url"), types.ErrorCodeInvalidRequest, http.StatusNotFound, types.ErrOptionWithSkipRetry())
+	}
+	return nil
 }
 
 // xAI 支持的采样率；同时用于界定 pcm/mulaw/alaw 的时长换算。
@@ -116,7 +144,7 @@ const (
 // ValidateTTSStreamQuery 校验流式 TTS（GET /v1/tts）的连接参数；控制器在升级 WebSocket 之前调用，
 // 不合法时直接回 HTTP 400。没传的参数用上游默认值。
 func ValidateTTSStreamQuery(query url.Values) error {
-	if err := checkXAIVoice(query.Get("voice"), "grok tts"); err != nil {
+	if _, err := normalizeXAIVoice(query.Get("voice"), "grok tts"); err != nil {
 		return err
 	}
 	if codec := query.Get("codec"); codec != "" && !slices.Contains(xaiTTSStreamCodecs, codec) {
@@ -217,13 +245,13 @@ func buildXAITTSRequest(c *gin.Context, request dto.AudioRequest) (map[string]an
 		}
 	}
 
-	voice := strings.TrimSpace(request.Voice)
+	// OpenAI SDK 示例默认用 alloy 等 OpenAI 音色；xAI 对未知音色只回 404，这里先给出明确提示。
+	voice, err := normalizeXAIVoice(request.Voice, "grok tts")
+	if err != nil {
+		return nil, "", 0, err
+	}
 	if voice == "" {
 		voice = xaiDefaultVoice
-	}
-	// OpenAI SDK 示例默认用 alloy 等 OpenAI 音色；xAI 对未知音色只回 404，这里先给出明确提示。
-	if err := checkXAIVoice(voice, "grok tts"); err != nil {
-		return nil, "", 0, err
 	}
 	language := audioLanguage(request.Language)
 	if language == "" {

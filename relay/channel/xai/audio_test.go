@@ -718,14 +718,81 @@ func TestXAIRealtimeSessionRejectsUnknownVoices(t *testing.T) {
 		assert.Contains(t, gjson.GetBytes(data, "error.message").String(), "not available for grok voice, use altair, ara,")
 	}
 	valid := []byte(`{"type":"session.update","session":{"voice":"rex"}}`)
+	prefixed := []byte(`{"type":"session.update","session":{"voice":"XAI_Eve","instructions":"hi"}}`)
 	noVoice := []byte(`{"type":"session.update","session":{"instructions":"be brief"}}`)
 	require.NoError(t, client.WriteMessage(websocket.TextMessage, valid))
+	require.NoError(t, client.WriteMessage(websocket.TextMessage, prefixed))
 	require.NoError(t, client.WriteMessage(websocket.TextMessage, noVoice))
 	closeClient(t, client)
 
 	require.NotNil(t, <-result)
 	frames := <-received
-	require.Len(t, frames, 2, "rejected session.update events never reach upstream")
+	require.Len(t, frames, 3, "rejected session.update events never reach upstream")
 	assert.Equal(t, valid, frames[0].data)
-	assert.Equal(t, noVoice, frames[1].data)
+	// 官方音色统一按不带 xai_ 前缀的小写名转发，其余字段不变。
+	assert.JSONEq(t, `{"type":"session.update","session":{"voice":"eve","instructions":"hi"}}`, string(frames[1].data))
+	assert.Equal(t, noVoice, frames[2].data)
+}
+
+// 上游只对部分官方音色认 xai_ 前缀（xai_eve 返回 404），HTTP 和流式 TTS 都按不带前缀的小写名发送；自定义音色 ID 原样发送。
+func TestXAITTSNormalizesBuiltinVoices(t *testing.T) {
+	for voice, want := range map[string]string{"xai_eve": "eve", "XAI_EVE": "eve", "Eve": "eve", "abcd1234": "abcd1234"} {
+		c, _ := newAudioTestContext(t, []byte(`{}`), "application/json")
+		request := dto.AudioRequest{Model: "grok-tts", Input: "hi", Voice: voice}
+		reader, err := (&Adaptor{}).ConvertAudioRequest(c, newAudioRelayInfo(constant.RelayModeAudioSpeech, &request), request)
+		require.NoError(t, err)
+		data, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		assert.Equal(t, want, gjson.GetBytes(data, "voice_id").String(), voice)
+
+		info := newAudioRelayInfo(constant.RelayModeAudioSpeechStream, nil)
+		info.RequestURLPath = "/v1/tts?voice=" + voice
+		info.UpstreamModelName = xaiTTSModel
+		got, err := (&Adaptor{}).GetRequestURL(info)
+		require.NoError(t, err)
+		assert.Equal(t, "http://sub2api:8080/v1/tts?language=auto&voice="+want, got, voice)
+	}
+}
+
+// xAI 对不存在的自定义音色（TTS）和音频资源（STT）回 404：不换渠道重试，直接给客户清楚的错误。
+// 官方音色已在本地校验过，再遇到 404 时按普通上游错误交回（可重试）。
+func TestXAIAudioNotFoundIsNotRetried(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"message":"xAI upstream returned status 404","type":"not_found_error"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	tests := []struct {
+		name    string
+		mode    int
+		voice   string
+		status  int
+		message string
+	}{
+		{name: "missing custom voice", mode: constant.RelayModeAudioSpeech, voice: "abcd1234", status: http.StatusBadRequest, message: `voice "abcd1234" was not found by grok tts, use altair, ara,`},
+		{name: "builtin voice", mode: constant.RelayModeAudioSpeech, voice: "eve"},
+		{name: "missing transcription audio", mode: constant.RelayModeAudioTranscription, status: http.StatusNotFound, message: "grok stt could not find the requested audio"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newAudioTestContext(t, []byte(`{}`), "application/json")
+			info := newAudioRelayInfo(tt.mode, nil)
+			info.ChannelBaseUrl = upstream.URL
+			resp, err := (&Adaptor{audioVoice: tt.voice}).DoRequest(c, info, bytes.NewReader([]byte(`{}`)))
+			if tt.status == 0 {
+				require.NoError(t, err)
+				httpResp := resp.(*http.Response)
+				t.Cleanup(func() { httpResp.Body.Close() })
+				assert.Equal(t, http.StatusNotFound, httpResp.StatusCode)
+				return
+			}
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tt.status, apiErr.StatusCode)
+			assert.True(t, types.IsSkipRetryError(apiErr))
+			assert.Contains(t, err.Error(), tt.message)
+			assert.NotContains(t, err.Error(), "127.0.0.1")
+		})
+	}
 }
