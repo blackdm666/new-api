@@ -165,18 +165,10 @@ func FindEarliestPendingSystemTasks(taskTypes []string) (map[string]*SystemTask,
 		return tasksByType, nil
 	}
 
-	subQuery := DB.Model(&SystemTask{}).
-		Select("MIN(id)").
+	idQuery := DB.Model(&SystemTask{}).
 		Where("type IN ? AND status = ?", taskTypes, SystemTaskStatusPending).
 		Group("type")
-	var tasks []*SystemTask
-	if err := DB.Where("id IN (?)", subQuery).Find(&tasks).Error; err != nil {
-		return nil, err
-	}
-	for _, task := range tasks {
-		tasksByType[task.Type] = task
-	}
-	return tasksByType, nil
+	return findSystemTasksByGroupedID(idQuery, "MIN(id)", tasksByType)
 }
 
 type SystemTaskFilter struct {
@@ -257,12 +249,28 @@ func GetLatestSystemTasks(taskTypes []string) (map[string]*SystemTask, error) {
 		return tasksByType, nil
 	}
 
-	subQuery := DB.Model(&SystemTask{}).
-		Select("MAX(id)").
+	idQuery := DB.Model(&SystemTask{}).
 		Where("type IN ?", taskTypes).
 		Group("type")
+	return findSystemTasksByGroupedID(idQuery, "MAX(id)", tasksByType)
+}
+
+// findSystemTasksByGroupedID loads the one row per type whose id the grouped
+// idQuery selects with aggregate. The ids are read first and the rows are
+// then fetched by primary key: MySQL cannot turn
+// `id IN (SELECT MAX(id) ... GROUP BY type)` into a semi-join and scans the
+// whole table for it on every 15-second scheduler pass, while each step on
+// its own is answered from an index.
+func findSystemTasksByGroupedID(idQuery *gorm.DB, aggregate string, tasksByType map[string]*SystemTask) (map[string]*SystemTask, error) {
+	var ids []int64
+	if err := idQuery.Select(aggregate).Pluck(aggregate, &ids).Error; err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return tasksByType, nil
+	}
 	var tasks []*SystemTask
-	if err := DB.Where("id IN (?)", subQuery).Find(&tasks).Error; err != nil {
+	if err := DB.Where("id IN ?", ids).Find(&tasks).Error; err != nil {
 		return nil, err
 	}
 	for _, task := range tasks {
