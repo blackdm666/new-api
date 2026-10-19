@@ -56,12 +56,12 @@ func sanitizeClickHouseLikePattern(input string) (string, error) {
 }
 
 type Log struct {
-	Id                int    `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
-	UserId            int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
-	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type;index:idx_model_name_created_at,priority:2"`
+	Id                int    `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2;index:idx_logs_user_id_created_at,priority:3;index:idx_logs_username_created_at,priority:3;index:idx_logs_channel_id_created_at,priority:3;index:idx_logs_group_created_at,priority:3"`
+	UserId            int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1;index:idx_logs_user_id_created_at,priority:1"`
+	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type;index:idx_model_name_created_at,priority:2;index:idx_logs_user_id_created_at,priority:2;index:idx_logs_username_created_at,priority:2;index:idx_logs_channel_id_created_at,priority:2;index:idx_logs_group_created_at,priority:2"`
 	Type              int    `json:"type" gorm:"index:idx_created_at_type"`
 	Content           string `json:"content"`
-	Username          string `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
+	Username          string `json:"username" gorm:"index;index:index_username_model_name,priority:2;index:idx_logs_username_created_at,priority:1;default:''"`
 	TokenName         string `json:"token_name" gorm:"index;default:''"`
 	ModelName         string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;index:idx_model_name_created_at,priority:1;default:''"`
 	Quota             int    `json:"quota" gorm:"default:0"`
@@ -69,10 +69,10 @@ type Log struct {
 	CompletionTokens  int    `json:"completion_tokens" gorm:"default:0"`
 	UseTime           int    `json:"use_time" gorm:"default:0"`
 	IsStream          bool   `json:"is_stream"`
-	ChannelId         int    `json:"channel" gorm:"index"`
+	ChannelId         int    `json:"channel" gorm:"index;index:idx_logs_channel_id_created_at,priority:1"`
 	ChannelName       string `json:"channel_name" gorm:"->"`
 	TokenId           int    `json:"token_id" gorm:"default:0;index"`
-	Group             string `json:"group" gorm:"index"`
+	Group             string `json:"group" gorm:"index;index:idx_logs_group_created_at,priority:1"`
 	Ip                string `json:"ip" gorm:"index;default:''"`
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
@@ -644,7 +644,7 @@ func GetUserLogs(userId int, filter LogFilter, startIdx int, num int) (logs []*L
 		common.SysError(common.LogText("failed to count user logs: %s", err.Error()))
 		return nil, 0, common.NewMessage("Failed to query logs")
 	}
-	order := "logs.id desc"
+	order := "logs.created_at desc, logs.id desc"
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		order = clickHouseLogOrder("logs.")
 	}
@@ -695,7 +695,7 @@ func StreamUserLogs(ctx context.Context, userId int, filter LogFilter, fn func(*
 		return err
 	}
 	count := 0
-	return streamLogs(tx, "logs.id desc", func(log *Log) error {
+	return streamLogs(tx, "logs.created_at desc, logs.id desc", func(log *Log) error {
 		count++
 		log.Id = count
 		log.ChannelName = ""
