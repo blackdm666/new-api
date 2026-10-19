@@ -114,6 +114,15 @@ func TestSystemTaskHistoryDatabaseMatrix(t *testing.T) {
 			deleted, err = DeleteSystemTaskHistory(SystemTaskFilter{})
 			require.NoError(t, err)
 			assert.Zero(t, deleted, "repeated cleanup preserves the scheduler's latest runs")
+
+			require.NoError(t, db.Create(&SystemTask{TaskID: "channel-pending-later", Type: SystemTaskTypeChannelTest, Status: SystemTaskStatusPending}).Error)
+			pending, err := FindEarliestPendingSystemTasks([]string{SystemTaskTypeModelUpdate, SystemTaskTypeChannelTest, SystemTaskTypeLogCleanup})
+			require.NoError(t, err)
+			require.Len(t, pending, 1, "types without a pending row are absent")
+			assert.Equal(t, "channel-pending", pending[SystemTaskTypeChannelTest].TaskID)
+			pending, err = FindEarliestPendingSystemTasks([]string{SystemTaskTypeModelUpdate})
+			require.NoError(t, err)
+			assert.Empty(t, pending)
 		})
 	}
 }
