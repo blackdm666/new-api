@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -188,6 +189,35 @@ func TestPricingNativeChannelEndpointTypesUnchanged(t *testing.T) {
 	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAI}, byModel["gpt-4o"])
 	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeGemini, constant.EndpointTypeOpenAI}, byModel["gemini-2.5-flash"])
 	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeAnthropic, constant.EndpointTypeOpenAI}, byModel["claude-3-5-sonnet"])
+}
+
+func TestPricingListsTaskVideoModelsOnVideoEndpointOnly(t *testing.T) {
+	resetPricingEndpointTestTables(t)
+	_, err := jsplugin.DefaultRegistry.Register(`
+export const meta = {apiVersion:1,key:"pricing-video",name:"Pricing Video",version:"1.0.0",author:{name:"Test"},models:["pricing-video"],fetchMode:"per_task",protocols:["openai_video"]};
+export function buildSubmitRequest(ctx){return {url:ctx.baseUrl+"/videos"};}
+export function parseSubmitResponse(){return {taskId:"vendor"};}
+export function buildQueryRequest(){return {url:"https://provider.example"};}
+export function parseTaskResult(){return {status:"SUCCESS"};}
+export function listArtifacts(){return [{key:"video",type:"video",mimeType:"video/mp4"}];}
+export function buildContentRequest(){return {url:"https://provider.example/video.mp4",method:"GET"};}
+export const protocols = {openai_video: {
+  decodeRequest: function(ctx) { return {kind:"submit", model: ctx.model, requestBody: ctx.body.value}; },
+  render: function() { return {}; },
+}};
+`, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = jsplugin.DefaultRegistry.Unregister("pricing-video") })
+
+	// An Ali channel lists Wan video through its plugin, not as a chat model.
+	insertPricingEndpointChannel(t, 211, constant.ChannelTypeAli, dto.ChannelOtherSettings{})
+	insertPricingEndpointAbility(t, 211, "pricing-video")
+	insertPricingEndpointAbility(t, 211, "qwen-max")
+
+	byModel := pricingEndpointTypesByModel(t)
+
+	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAIVideo}, byModel["pricing-video"])
+	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAI}, byModel["qwen-max"])
 }
 
 func TestInitChannelCacheInvalidatesPricingCache(t *testing.T) {

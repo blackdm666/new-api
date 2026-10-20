@@ -8,7 +8,7 @@ import (
 
 // GetEndpointTypesByChannelType 获取渠道最优先端点类型（所有的渠道都支持 OpenAI 端点）
 func GetEndpointTypesByChannelType(channelType int, modelName string) []constant.EndpointType {
-	if isOpenAIVideoTaskModel(modelName) {
+	if IsOpenAIVideoTaskModel(modelName) {
 		return []constant.EndpointType{constant.EndpointTypeOpenAIVideo}
 	}
 	var endpointTypes []constant.EndpointType
@@ -68,7 +68,9 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 	return endpointTypes
 }
 
-func isOpenAIVideoTaskModel(modelName string) bool {
+// IsOpenAIVideoTaskModel reports the built-in video model families served only
+// through the OpenAI video API.
+func IsOpenAIVideoTaskModel(modelName string) bool {
 	modelName = strings.ToLower(strings.TrimSpace(modelName))
 	return strings.HasPrefix(modelName, "veo-") ||
 		strings.HasPrefix(modelName, "grok-imagine-video") ||

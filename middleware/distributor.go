@@ -71,6 +71,16 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, invalidRequestStatus(err), i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		// A video model has no relay on chat, Responses, Messages, Gemini or
+		// Images endpoints: answer before channel selection so nothing is
+		// billed or forwarded. Endpoints a task plugin serves for the model
+		// were pinned earlier and keep their own handling.
+		_, pluginEndpoint := c.Get(jsplugin.ContextKeyPinnedEndpoint)
+		if !pluginEndpoint && c.Request.Method == http.MethodPost && relayconstant.IsTextOrImageGenerationPath(c.Request.URL.Path) &&
+			model.IsVideoGenerationModel(jsplugin.DefaultRegistry.Generation(), modelRequest.Model) {
+			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorVideoModelWrongEndpoint, map[string]any{"Model": modelRequest.Model}), types.ErrorCodeVideoModelWrongEndpoint)
+			return
+		}
 		_, pinned, _ := constraints.ResolvedPin()
 		if !pinned {
 			// Select a channel for the user

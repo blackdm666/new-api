@@ -126,6 +126,11 @@ func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCusto
 	if mappedModel, _, err := common.ResolveMappedModelName(ability.Model, ability.ChannelModelMapping); err == nil {
 		modelName = mappedModel
 	}
+	// Task video models are listed on the video API only, matching the text and
+	// image relays that reject them.
+	if IsVideoGenerationModel(jsplugin.DefaultRegistry.Generation(), ability.Model) {
+		return []constant.EndpointType{constant.EndpointTypeOpenAIVideo}
+	}
 	if ability.ChannelType != constant.ChannelTypeAdvancedCustom {
 		return common.GetEndpointTypesByChannelType(ability.ChannelType, modelName)
 	}

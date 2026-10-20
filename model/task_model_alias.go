@@ -1,6 +1,7 @@
 package model
 
 import (
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -70,6 +71,37 @@ func DynamicTaskEndpointCandidates(g *jsplugin.RoutingGeneration, method, path, 
 		}
 	}
 	return result
+}
+
+// IsVideoGenerationModel reports whether name only creates videos, so a text
+// or image relay can reject it before channel selection and billing. A task
+// model counts when its declared, alias-mapped or channel-scoped plugins bind
+// it to the OpenAI video API and none binds it to the OpenAI Images API; the
+// built-in video families the pricing view already lists as video-only count
+// too.
+func IsVideoGenerationModel(g *jsplugin.RoutingGeneration, name string) bool {
+	if name == "" {
+		return false
+	}
+	if common.IsOpenAIVideoTaskModel(name) {
+		return true
+	}
+	if g == nil {
+		return false
+	}
+	lookup := name
+	if declared, ok := g.CanonicalModel(name); ok {
+		lookup = declared
+	} else if target, ok := ResolveTaskModelAlias(g, name); ok && target.Declared != "" {
+		lookup = target.Declared
+	}
+	servesEndpoint := func(path string) bool {
+		if _, ok := g.LookupEndpoint(http.MethodPost, path, lookup); ok {
+			return true
+		}
+		return len(DynamicTaskEndpointCandidates(g, http.MethodPost, path, name)) > 0
+	}
+	return servesEndpoint("/v1/videos") && !servesEndpoint("/v1/images/generations")
 }
 
 const taskAliasViewTTL = 60 * time.Second
