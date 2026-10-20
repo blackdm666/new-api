@@ -99,6 +99,22 @@ func Path2RelayMode(path string) int {
 	return relayMode
 }
 
+// IsTextOrImageGenerationPath reports whether path is a chat, completion,
+// Responses, Claude Messages, Gemini or Images endpoint, none of which creates
+// a video task.
+func IsTextOrImageGenerationPath(path string) bool {
+	path = CanonicalRelayRequestPath(path)
+	if strings.HasPrefix(path, "/v1/messages") {
+		return true
+	}
+	switch Path2RelayMode(path) {
+	case RelayModeChatCompletions, RelayModeCompletions, RelayModeResponses, RelayModeResponsesCompact,
+		RelayModeImagesGenerations, RelayModeImagesEdits, RelayModeGemini:
+		return true
+	}
+	return false
+}
+
 // IsPlaygroundRelayPath reports whether path belongs to the internal Playground
 // relay namespace. Segment-aware matching avoids treating paths such as /pgx as
 // Playground traffic.

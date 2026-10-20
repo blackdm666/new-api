@@ -352,3 +352,101 @@ func TestSharedEndpointRebindsToBoundNewAPIExtension(t *testing.T) {
 	assert.Equal(t, "alpha", c.GetString("task_plugin_key"), "the first bound candidate executes regardless of the earlier pin")
 	assert.Equal(t, "alpha", c.MustGet(jsplugin.ContextKeyPinnedEndpoint).(jsplugin.PinnedEndpoint).Plugin.Meta.Key)
 }
+
+const videoEndpointGuardPlugin = `
+export const meta = {apiVersion:1,key:"video-guard",name:"Video Guard",version:"1.0.0",author:{name:"Test"},models:["guard-video","guard-mixed"],fetchMode:"per_task",
+  protocols:["openai_video",{name:"openai_image",models:["guard-mixed"]}]};
+export function buildSubmitRequest(ctx){return {url:ctx.baseUrl+"/videos"};}
+export function parseSubmitResponse(){return {taskId:"vendor"};}
+export function buildQueryRequest(){return {url:"https://provider.example"};}
+export function parseTaskResult(){return {status:"SUCCESS"};}
+export function listArtifacts(){return [{key:"video",type:"video",mimeType:"video/mp4"}];}
+export function buildContentRequest(){return {url:"https://provider.example/video.mp4",method:"GET"};}
+export const protocols = {
+  openai_video: {
+    decodeRequest: function(ctx) { return {kind:"submit", model: ctx.model, requestBody: ctx.body.value}; },
+    render: function() { return {}; },
+  },
+  openai_image: {
+    decodeRequest: function(ctx) { return {kind:"submit", model: ctx.model, requestBody: ctx.body.value}; },
+    render: function() { return {data: []}; },
+  },
+};
+`
+
+func TestDistributeRejectsVideoModelsOnTextAndImageEndpoints(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	previousCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousCacheEnabled })
+	previousDB := model.DB
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(&model.Ability{}, &model.Channel{}))
+	model.DB = database
+	t.Cleanup(func() { model.DB = previousDB })
+	// A sales name mapped onto a declared video model is a video model too.
+	mapping := `{"guard-alias":"guard-video"}`
+	aliasChannel := &model.Channel{Id: 91, Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Models: "guard-alias", ModelMapping: &mapping}
+	aliasChannel.SetSetting(dto.ChannelSettings{TaskPluginKey: "video-guard"})
+	require.NoError(t, database.Create(aliasChannel).Error)
+	_, err = jsplugin.DefaultRegistry.Register(videoEndpointGuardPlugin, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = jsplugin.DefaultRegistry.Unregister("video-guard") })
+
+	router := gin.New()
+	router.POST("/*path", RequestId(), func(c *gin.Context) {
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
+		if c.GetHeader("X-Test-Plugin-Endpoint") != "" {
+			c.Set(jsplugin.ContextKeyPinnedEndpoint, jsplugin.PinnedEndpoint{Model: "guard-video"})
+		}
+	}, Distribute(), func(c *gin.Context) {
+		t.Error("requests without a channel must stop before the relay handler")
+		c.Status(http.StatusNoContent)
+	})
+
+	const zhMessage = "guard-video 是视频生成模型，不能用对话、Responses、Messages 或生图接口调用。请改用 POST /v1/videos 提交视频任务，再用 GET /v1/videos/{任务 ID} 查询结果，说明见 https://88api.ai/zh/docs/api/video/video-api-standard/"
+	for _, tc := range []struct {
+		name, path, body, language, pluginEndpoint string
+		rejected                                   bool
+		message                                    string
+	}{
+		{name: "chat", path: "/v1/chat/completions", body: `{"model":"guard-video"}`, language: "zh-CN", rejected: true, message: zhMessage},
+		{name: "messages", path: "/v1/messages", body: `{"model":"guard-video"}`, language: "zh-CN", rejected: true, message: zhMessage},
+		{name: "responses", path: "/v1/responses", body: `{"model":"guard-video"}`, language: "zh-CN", rejected: true, message: zhMessage},
+		{name: "image generation", path: "/v1/images/generations", body: `{"model":"guard-video"}`, language: "zh-CN", rejected: true, message: zhMessage},
+		{name: "gemini native", path: "/v1beta/models/guard-video:generateContent", body: `{}`, language: "zh-CN", rejected: true, message: zhMessage},
+		{name: "english", path: "/v1/chat/completions", body: `{"model":"guard-video"}`, language: "en", rejected: true,
+			message: "guard-video is a video generation model and cannot be called through the chat, Responses, Messages or image endpoints. Submit a video task with POST /v1/videos, then poll GET /v1/videos/{task_id} for the result. Guide: https://88api.ai/en/docs/api/video/video-api-standard/"},
+		{name: "mapped alias", path: "/v1/chat/completions", body: `{"model":"guard-alias"}`, language: "en", rejected: true},
+		{name: "built-in video family", path: "/v1/chat/completions", body: `{"model":"veo-3.1-fast"}`, language: "en", rejected: true},
+		{name: "video endpoint", path: "/v1/videos", body: `{"model":"guard-video"}`, language: "en"},
+		{name: "endpoint served by a plugin", path: "/v1/responses", body: `{"model":"guard-video"}`, language: "en", pluginEndpoint: "1"},
+		{name: "model with an image protocol", path: "/v1/chat/completions", body: `{"model":"guard-mixed"}`, language: "en"},
+		{name: "chat model", path: "/v1/chat/completions", body: `{"model":"gpt-4o"}`, language: "en"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Accept-Language", tc.language)
+			if tc.pluginEndpoint != "" {
+				request.Header.Set("X-Test-Plugin-Endpoint", tc.pluginEndpoint)
+			}
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+
+			if !tc.rejected {
+				// The empty group then answers from channel selection.
+				assert.Contains(t, recorder.Body.String(), `"code":"model_not_in_group"`)
+				return
+			}
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), `"code":"video_model_wrong_endpoint"`)
+			if tc.message != "" {
+				requestID := recorder.Header().Get(common.RequestIdKey)
+				assert.JSONEq(t, fmt.Sprintf(`{"error":{"message":%q,"type":"new_api_error","code":"video_model_wrong_endpoint"}}`,
+					tc.message+" (request id: "+requestID+")"), recorder.Body.String())
+			}
+		})
+	}
+}
