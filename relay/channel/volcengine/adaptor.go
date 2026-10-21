@@ -234,6 +234,9 @@ func detectImageMimeType(filename string) string {
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
+	if info.RelayMode == constant.RelayModeResponses {
+		info.VendorToolUsage = volcResponsesToolUsage
+	}
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
