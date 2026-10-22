@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -105,25 +106,29 @@ func TestConvertImageEditRequestMultipart(t *testing.T) {
 	})
 }
 
-// stubXinMengMedia records reference uploads and serves result downloads
-// without the Worker or the network.
+// stubXinMengMedia records reference and result uploads and serves result
+// downloads without the Worker or the network.
 func stubXinMengMedia(t *testing.T, results map[string][]byte) *[][]byte {
 	t.Helper()
 	var uploads [][]byte
-	previousUpload, previousDownload := uploadXinMengReferenceImage, downloadXinMengResultImage
-	uploadXinMengReferenceImage = func(_ context.Context, image io.ReadSeeker) (string, error) {
+	previousReference, previousUpload, previousDownload := uploadXinMengReferenceImage, uploadImageResult, downloadImageResult
+	upload := func(_ context.Context, image io.ReadSeeker) (string, error) {
 		content, err := io.ReadAll(image)
 		require.NoError(t, err)
 		uploads = append(uploads, content)
 		return fmt.Sprintf("https://assets.example/media/reference-media/%d.png", len(uploads)), nil
 	}
-	downloadXinMengResultImage = func(_ context.Context, sourceURL string) ([]byte, error) {
+	uploadXinMengReferenceImage, uploadImageResult = upload, upload
+	downloadImageResult = func(ctx context.Context, sourceURL string) ([]byte, error) {
+		if strings.HasPrefix(sourceURL, "data:") {
+			return fetchImageResult(ctx, sourceURL)
+		}
 		content, ok := results[sourceURL]
 		require.True(t, ok, "unexpected download %s", sourceURL)
 		return content, nil
 	}
 	t.Cleanup(func() {
-		uploadXinMengReferenceImage, downloadXinMengResultImage = previousUpload, previousDownload
+		uploadXinMengReferenceImage, uploadImageResult, downloadImageResult = previousReference, previousUpload, previousDownload
 	})
 	return &uploads
 }
@@ -268,47 +273,62 @@ func TestXinMengMultipartImageEditBecomesJSON(t *testing.T) {
 	assert.Equal(t, "application/json", header.Get("Content-Type"))
 }
 
-// XinMeng result links name its private image host, so clients receive our
-// own copy (or inline bytes) while the billed count still follows the payloads.
-func TestXinMengImageResultsAreRehosted(t *testing.T) {
+// Upstream result links name the provider's image host, which is often slow
+// or blocked in mainland China and expires quickly. Clients receive the image
+// inline by default, or our own copy when they ask for links, while the billed
+// count still follows the upstream payloads.
+func TestImageResultLinksAreDelivered(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	upstream := `{"created":1792057170,"provider":"xinmeng","data":[{"url":"https://getapib.org/image/a.png"},{"url":"https://getapib.org/image/b.png","revised_prompt":"cat"}],"usage":{"total_tokens":1}}`
 	results := map[string][]byte{"https://getapib.org/image/a.png": []byte("first"), "https://getapib.org/image/b.png": []byte("second")}
+	twoLinks := `{"created":1792057170,"provider":"xinmeng","data":[{"url":"https://getapib.org/image/a.png"},{"url":"https://getapib.org/image/b.png","revised_prompt":"cat"}],"usage":{"total_tokens":1}}`
 
 	for _, tc := range []struct {
-		name, responseFormat, want string
+		name, model, upstream, jsonFormat, formFormat, want string
+		wantCount                                           float64
 	}{
-		{"url", "url", `{"created":1792057170,"data":[
-			{"url":"https://assets.example/media/reference-media/1.png","b64_json":"","revised_prompt":""},
-			{"url":"https://assets.example/media/reference-media/2.png","b64_json":"","revised_prompt":"cat"}],"usage":{"total_tokens":1}}`},
-		{"b64_json", "b64_json", `{"created":1792057170,"data":[
-			{"url":"","b64_json":"Zmlyc3Q=","revised_prompt":""},
-			{"url":"","b64_json":"c2Vjb25k","revised_prompt":"cat"}],"usage":{"total_tokens":1}}`},
+		{"links become inline images by default", "gpt-image-2", twoLinks, "", "", `{"created":1792057170,"provider":"xinmeng","data":[
+			{"b64_json":"Zmlyc3Q="},{"revised_prompt":"cat","b64_json":"c2Vjb25k"}],"usage":{"total_tokens":1}}`, 2},
+		{"links become our media when the client asks for url", "midjourney-v8.2", twoLinks, "url", "", `{"created":1792057170,"provider":"xinmeng","data":[
+			{"url":"https://assets.example/media/reference-media/1.png"},
+			{"url":"https://assets.example/media/reference-media/2.png","revised_prompt":"cat"}],"usage":{"total_tokens":1}}`, 2},
+		{"multipart edit form asks for url", "gpt-image-2", `{"data":[{"url":"https://getapib.org/image/a.png"}]}`, "", "url",
+			`{"data":[{"url":"https://assets.example/media/reference-media/1.png"}]}`, 1},
+		{"explicit b64_json inlines links", "gpt-image-2", `{"data":{"url":"https://getapib.org/image/a.png"}}`, "b64_json", "",
+			`{"data":{"b64_json":"Zmlyc3Q="}}`, 1},
+		{"data URL links are decoded without a download", "gpt-image-2", `{"data":[{"url":"data:image/png;base64,Zmlyc3Q="}]}`, "", "",
+			`{"data":[{"b64_json":"Zmlyc3Q="}]}`, 1},
+		{"a link repeating an inline image is dropped", "gpt-image-2", `{"data":[{"url":"https://getapib.org/image/x.png"},{"b64_json":"Zmlyc3Q="}]}`, "", "",
+			`{"data":[{"b64_json":"Zmlyc3Q="}]}`, 1},
+		{"inline images are forwarded unchanged", "gpt-image-2", `{"data":[{"b64_json":"Zmlyc3Q="}]}`, "url", "",
+			`{"data":[{"b64_json":"Zmlyc3Q="}]}`, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stubXinMengMedia(t, results)
-			c, recorder, resp, info := newImageTestContext(t, upstream, "application/json", false)
-			info.UpstreamModelName = "midjourney-v8.2"
-			info.Request = &dto.ImageRequest{Model: "midjourney-v8.2", ResponseFormat: tc.responseFormat}
+			c, recorder, resp, info := newImageTestContext(t, tc.upstream, "application/json", false)
+			if tc.formFormat != "" {
+				c.Request.MultipartForm = &multipart.Form{Value: map[string][]string{"response_format": {tc.formFormat}}}
+			}
+			info.UpstreamModelName = tc.model
+			info.Request = &dto.ImageRequest{Model: tc.model, ResponseFormat: tc.jsonFormat}
 			info.PriceData.UsePrice = true
-			info.PriceData.AddOtherRatio("n", 1)
+			info.PriceData.AddOtherRatio("n", 3)
 
 			_, apiErr := OpenaiImageHandler(c, info, resp)
 			require.Nil(t, apiErr)
 			assert.JSONEq(t, tc.want, recorder.Body.String())
 			assert.NotContains(t, recorder.Body.String(), "getapib")
-			assert.Equal(t, float64(2), info.PriceData.OtherRatios()["n"])
+			assert.Equal(t, tc.wantCount, info.PriceData.OtherRatios()["n"])
 		})
 	}
 
 	t.Run("delivery failure hides the upstream host", func(t *testing.T) {
 		stubXinMengMedia(t, results)
-		downloadXinMengResultImage = func(_ context.Context, sourceURL string) ([]byte, error) {
+		downloadImageResult = func(_ context.Context, sourceURL string) ([]byte, error) {
 			return nil, fmt.Errorf("Get %q: timeout", sourceURL)
 		}
-		c, recorder, resp, info := newImageTestContext(t, upstream, "application/json", false)
-		info.UpstreamModelName = "midjourney-v8.2"
-		info.Request = &dto.ImageRequest{Model: "midjourney-v8.2"}
+		c, recorder, resp, info := newImageTestContext(t, twoLinks, "application/json", false)
+		info.UpstreamModelName = "gpt-image-2"
+		info.Request = &dto.ImageRequest{Model: "gpt-image-2"}
 
 		_, apiErr := OpenaiImageHandler(c, info, resp)
 		require.NotNil(t, apiErr)

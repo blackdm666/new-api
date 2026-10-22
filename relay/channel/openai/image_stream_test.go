@@ -472,6 +472,9 @@ func TestOpenaiImageHandlerUsesPositiveActualCountForFixedPrice(t *testing.T) {
 		body      string
 		usePrice  bool
 		wantCount float64
+		// wantBody is the client body when upstream links are rewritten;
+		// empty means the upstream body is forwarded unchanged.
+		wantBody string
 	}{
 		{
 			name:      "fixed price uses data length",
@@ -496,12 +499,14 @@ func TestOpenaiImageHandlerUsesPositiveActualCountForFixedPrice(t *testing.T) {
 			body:      `{"data":{"url":"https://example.com/a.png","b64_json":"` + longImage + `"}}`,
 			usePrice:  true,
 			wantCount: 1,
+			wantBody:  `{"data":{"b64_json":"` + longImage + `"}}`,
 		},
 		{
 			name:      "url and b64_json split across entries count one image",
 			body:      `{"data":[{"url":"https://example.com/a.png"},{"b64_json":"` + longImage + `"}]}`,
 			usePrice:  true,
 			wantCount: 1,
+			wantBody:  `{"data":[{"b64_json":"` + longImage + `"}]}`,
 		},
 		{
 			name:      "entries without image payload keep requested count",
@@ -521,7 +526,11 @@ func TestOpenaiImageHandlerUsesPositiveActualCountForFixedPrice(t *testing.T) {
 
 			require.Nil(t, err)
 			require.Equal(t, tt.wantCount, info.PriceData.OtherRatios()["n"])
-			require.Equal(t, tt.body, recorder.Body.String())
+			wantBody := tt.body
+			if tt.wantBody != "" {
+				wantBody = tt.wantBody
+			}
+			require.Equal(t, wantBody, recorder.Body.String())
 		})
 	}
 }
@@ -547,14 +556,14 @@ func TestOpenaiImageStreamHandlerWrapsNonStandardDataShapes(t *testing.T) {
 			body:       `{"data":{"url":"https://example.com/a.png","b64_json":"first"}}`,
 			wantEvents: 1,
 			wantCount:  1,
-			wantBody:   []string{`"url":"https://example.com/a.png"`, `"b64_json":"first"`},
+			wantBody:   []string{`"b64_json":"first"`},
 		},
 		{
-			name:       "split url and b64_json entries bill one image",
+			name:       "split url and b64_json entries bill and forward one image",
 			body:       `{"data":[{"url":"https://example.com/a.png"},{"b64_json":"first"}]}`,
-			wantEvents: 2,
+			wantEvents: 1,
 			wantCount:  1,
-			wantBody:   []string{`"url":"https://example.com/a.png"`, `"b64_json":"first"`},
+			wantBody:   []string{`"b64_json":"first"`},
 		},
 		{
 			name:       "entries without image payload are dropped and keep requested count",
@@ -576,6 +585,7 @@ func TestOpenaiImageStreamHandlerWrapsNonStandardDataShapes(t *testing.T) {
 			for _, want := range tc.wantBody {
 				assert.Contains(t, out, want)
 			}
+			assert.NotContains(t, out, "example.com")
 			assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"))
 			assert.Equal(t, tc.wantCount, info.PriceData.OtherRatios()["n"])
 		})

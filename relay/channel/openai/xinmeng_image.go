@@ -7,11 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -19,20 +17,10 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
-	"github.com/tidwall/gjson"
 )
 
-const (
-	maxXinMengResultImageBytes = 32 << 20
-	xinMengResultImageTimeout  = 60 * time.Second
-)
-
-// Replaced in tests; production stores inputs and results as public
-// reference media and fetches result links through the SSRF-protected client.
-var (
-	uploadXinMengReferenceImage = service.UploadReferenceImage
-	downloadXinMengResultImage  = fetchXinMengResultImage
-)
+// Replaced in tests; production stores inputs as public reference media.
+var uploadXinMengReferenceImage = service.UploadReferenceImage
 
 func isXinMengImageRequest(info *relaycommon.RelayInfo) bool {
 	if info == nil {
@@ -194,81 +182,4 @@ func xinMengReferenceImageError(err error) error {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	return fmt.Errorf("failed to store reference image: %w", err)
-}
-
-type xinMengImageResponse struct {
-	Created int64           `json:"created"`
-	Data    []dto.ImageData `json:"data"`
-	Usage   json.RawMessage `json:"usage,omitempty"`
-}
-
-// presentXinMengImageResponse rebuilds a XinMeng result as an OpenAI image
-// response that names only our own media. Result links point at XinMeng's
-// image host, so each linked image is stored as public reference media, or
-// inlined when the client asked for b64_json. Entries keep their order and
-// payload kind, so the billed image count is unchanged.
-func presentXinMengImageResponse(ctx context.Context, info *relaycommon.RelayInfo, responseBody []byte) ([]byte, error) {
-	wantBase64 := false
-	if request, ok := info.Request.(*dto.ImageRequest); ok {
-		wantBase64 = request.ResponseFormat == "b64_json"
-	}
-	items := gjson.GetBytes(responseBody, "data").Array()
-	response := xinMengImageResponse{
-		Created: gjson.GetBytes(responseBody, "created").Int(),
-		Data:    make([]dto.ImageData, 0, len(items)),
-	}
-	if usage := gjson.GetBytes(responseBody, "usage"); usage.IsObject() {
-		response.Usage = json.RawMessage(usage.Raw)
-	}
-	if response.Created == 0 {
-		response.Created = time.Now().Unix()
-	}
-	for _, item := range items {
-		image := dto.ImageData{
-			B64Json:       item.Get("b64_json").String(),
-			RevisedPrompt: item.Get("revised_prompt").String(),
-		}
-		sourceURL := strings.TrimSpace(item.Get("url").String())
-		if image.B64Json == "" && sourceURL != "" {
-			content, err := downloadXinMengResultImage(ctx, sourceURL)
-			if err != nil {
-				return nil, fmt.Errorf("failed to fetch generated image: %w", err)
-			}
-			if wantBase64 {
-				image.B64Json = base64.StdEncoding.EncodeToString(content)
-			} else if image.Url, err = uploadXinMengReferenceImage(ctx, bytes.NewReader(content)); err != nil {
-				return nil, fmt.Errorf("failed to store generated image: %w", err)
-			}
-		}
-		response.Data = append(response.Data, image)
-	}
-	return common.Marshal(response)
-}
-
-func fetchXinMengResultImage(ctx context.Context, sourceURL string) ([]byte, error) {
-	if err := service.ValidateSSRFProtectedFetchURL(sourceURL); err != nil {
-		return nil, err
-	}
-	fetchCtx, cancel := context.WithTimeout(ctx, xinMengResultImageTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, sourceURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := service.GetSSRFProtectedHTTPClient().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
-	}
-	content, err := io.ReadAll(io.LimitReader(resp.Body, maxXinMengResultImageBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(content) > maxXinMengResultImageBytes {
-		return nil, errors.New("generated image exceeds size limit")
-	}
-	return content, nil
 }
