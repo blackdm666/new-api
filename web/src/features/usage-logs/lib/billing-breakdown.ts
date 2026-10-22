@@ -87,6 +87,8 @@ export function buildBillingBreakdownRows(
     isTask
   )
   const isClaude = other.claude === true
+  // OpenAI 12-hour cache writes have their own price, listed like Claude's.
+  const hasCacheWrite12h = (other.cache_creation_tokens_12h || 0) > 0
   const isTieredExpr = other.billing_mode === 'tiered_expr'
   const tieredSummary = getTieredBillingSummary(other)
 
@@ -187,7 +189,11 @@ export function buildBillingBreakdownRows(
     }
   }
 
-  if (!isTieredExpr && isClaude && hasAnyCacheTokens(other)) {
+  if (
+    !isTieredExpr &&
+    (isClaude || hasCacheWrite12h) &&
+    hasAnyCacheTokens(other)
+  ) {
     if (other.cache_ratio != null && other.cache_ratio !== 1) {
       rows.push({
         label: t('Cache Read'),
@@ -199,7 +205,9 @@ export function buildBillingBreakdownRows(
       other.cache_creation_ratio !== 1
     ) {
       rows.push({
-        label: t('Cache Creation'),
+        label: hasCacheWrite12h
+          ? t('Cache Creation (30m)')
+          : t('Cache Creation'),
         value: `${fmtPrice(
           actualPrice(baseInputUSD * other.cache_creation_ratio)
         )}/M`,
@@ -224,6 +232,17 @@ export function buildBillingBreakdownRows(
         label: t('Cache Creation (1h)'),
         value: `${fmtPrice(
           actualPrice(baseInputUSD * other.cache_creation_ratio_1h)
+        )}/M`,
+      })
+    }
+    if (
+      other.cache_creation_ratio_12h != null &&
+      other.cache_creation_ratio_12h !== 0
+    ) {
+      rows.push({
+        label: t('Cache Creation (12h)'),
+        value: `${fmtPrice(
+          actualPrice(baseInputUSD * other.cache_creation_ratio_12h)
         )}/M`,
       })
     }

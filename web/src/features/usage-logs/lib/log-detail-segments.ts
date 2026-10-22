@@ -150,9 +150,12 @@ export function buildTypeDetailSegments(
 
       const cacheEntries = tieredSummary.priceEntries
         .filter((entry) =>
-          ['cacheReadPrice', 'cacheCreatePrice', 'cacheCreate1hPrice'].includes(
-            entry.field
-          )
+          [
+            'cacheReadPrice',
+            'cacheCreatePrice',
+            'cacheCreate1hPrice',
+            'cacheCreate12hPrice',
+          ].includes(entry.field)
         )
         .map((entry) => {
           return formatPriceCompact(entry.price)
@@ -173,6 +176,7 @@ export function buildTypeDetailSegments(
               'cacheReadPrice',
               'cacheCreatePrice',
               'cacheCreate1hPrice',
+              'cacheCreate12hPrice',
             ].includes(entry.field)
         )
         .map((entry) =>
@@ -237,6 +241,10 @@ export function buildTypeDetailSegments(
           other.cache_creation_ratio_1h != null &&
           other.cache_creation_ratio_1h !== 0
             ? formatPriceCompact(inputPriceUSD * other.cache_creation_ratio_1h)
+            : null,
+          other.cache_creation_ratio_12h != null &&
+          other.cache_creation_ratio_12h !== 0
+            ? formatPriceCompact(inputPriceUSD * other.cache_creation_ratio_12h)
             : null,
         ].filter(Boolean) as string[]
 
