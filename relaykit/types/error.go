@@ -66,6 +66,7 @@ const (
 	ErrorCodeAccessDenied            ErrorCode = "access_denied"
 	ErrorCodeModelNotInGroup         ErrorCode = "model_not_in_group"
 	ErrorCodeVideoModelWrongEndpoint ErrorCode = "video_model_wrong_endpoint"
+	ErrorCodeImageModelWrongEndpoint ErrorCode = "image_model_wrong_endpoint"
 
 	// request error
 	ErrorCodeBadRequestBody ErrorCode = "bad_request_body"

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +75,9 @@ var (
 
 var (
 	modelSupportEndpointTypes = make(map[string][]constant.EndpointType)
+	// modelDeclaredEndpoints keeps only the endpoint types administrators
+	// declared in model metadata, without the channel-type inference above.
+	modelDeclaredEndpoints    = make(map[string][]string)
 	modelSupportEndpointsLock = sync.RWMutex{}
 )
 
@@ -119,6 +123,22 @@ func GetModelSupportEndpointTypes(model string) []constant.EndpointType {
 		return endpoints
 	}
 	return make([]constant.EndpointType, 0)
+}
+
+// ImageModelDeclaredEndpoints returns the endpoint types declared in the
+// metadata of an image model, or nil when the metadata does not declare the
+// model on the Images API. Channels of one type differ in which text endpoints
+// they serve for image models, so only this declaration tells which of them
+// exist; the text relays reject the rest before channel selection.
+func ImageModelDeclaredEndpoints(modelName string) []string {
+	GetPricing()
+	modelSupportEndpointsLock.RLock()
+	defer modelSupportEndpointsLock.RUnlock()
+	declared := modelDeclaredEndpoints[modelName]
+	if !slices.Contains(declared, string(constant.EndpointTypeImageGeneration)) {
+		return nil
+	}
+	return declared
 }
 
 func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCustomConfigs map[int]*dto.AdvancedCustomConfig) []constant.EndpointType {
@@ -286,6 +306,13 @@ func updatePricing() {
 			if len(endpoints) > 0 {
 				modelSupportEndpointsStr[modelName] = endpoints
 			}
+		}
+	}
+
+	modelDeclaredEndpoints = make(map[string][]string, len(metaMap))
+	for modelName, meta := range metaMap {
+		if declared, err := declaredEndpointNames(meta.Endpoints); err == nil && len(declared) > 0 {
+			modelDeclaredEndpoints[modelName] = declared
 		}
 	}
 

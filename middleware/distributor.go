@@ -81,6 +81,32 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorVideoModelWrongEndpoint, map[string]any{"Model": modelRequest.Model}), types.ErrorCodeVideoModelWrongEndpoint)
 			return
 		}
+		// An image model declared on the Images API answers text endpoints only
+		// when its metadata declares them too: upstreams of the same channel type
+		// differ here, and an undeclared one returns a bare 404 on every retry.
+		if textEndpoint, ok := relayconstant.TextEndpointType(c.Request.URL.Path); ok && !pluginEndpoint && c.Request.Method == http.MethodPost {
+			declared := model.ImageModelDeclaredEndpoints(modelRequest.Model)
+			if declared != nil && !slices.Contains(declared, string(textEndpoint)) {
+				endpoints := make([]string, 0, len(declared)+1)
+				for _, endpointType := range []constant.EndpointType{constant.EndpointTypeImageGeneration, constant.EndpointTypeOpenAI,
+					constant.EndpointTypeOpenAIResponse, constant.EndpointTypeAnthropic, constant.EndpointTypeGemini} {
+					info, known := common.GetDefaultEndpointInfo(endpointType)
+					if !known || !slices.Contains(declared, string(endpointType)) {
+						continue
+					}
+					endpoints = append(endpoints, "POST "+strings.ReplaceAll(info.Path, "{model}", modelRequest.Model))
+					if endpointType == constant.EndpointTypeImageGeneration {
+						endpoints = append(endpoints, "POST /v1/images/edits")
+					}
+				}
+				abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorImageModelWrongEndpoint, map[string]any{
+					"Model":     modelRequest.Model,
+					"Path":      relayconstant.CanonicalRelayRequestPath(c.Request.URL.Path),
+					"Endpoints": strings.Join(endpoints, ", "),
+				}), types.ErrorCodeImageModelWrongEndpoint)
+				return
+			}
+		}
 		_, pinned, _ := constraints.ResolvedPin()
 		if !pinned {
 			// Select a channel for the user

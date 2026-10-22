@@ -56,6 +56,7 @@ const (
 	MsgDistributorModelNotInGroup              = "distributor.model_not_in_group"
 	MsgDistributorModelNotInGroupSuggest       = "distributor.model_not_in_group_suggest"
 	MsgDistributorVideoModelWrongEndpoint      = "distributor.video_model_wrong_endpoint"
+	MsgDistributorImageModelWrongEndpoint      = "distributor.image_model_wrong_endpoint"
 
 	MsgQuotaUserInsufficient             = "quota.user_insufficient"
 	MsgQuotaPreConsumeInsufficient       = "quota.pre_consume_insufficient"

@@ -450,3 +450,82 @@ func TestDistributeRejectsVideoModelsOnTextAndImageEndpoints(t *testing.T) {
 		})
 	}
 }
+
+func TestDistributeRejectsImageModelsOnUndeclaredTextEndpoints(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	previousCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	previousDB := model.DB
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(&model.Ability{}, &model.Channel{}, &model.Model{}, &model.Vendor{}))
+	model.DB = database
+	t.Cleanup(func() {
+		model.DB = previousDB
+		model.InvalidatePricingCache()
+		common.MemoryCacheEnabled = previousCacheEnabled
+	})
+	require.NoError(t, database.Create(&model.Channel{Id: 92, Type: constant.ChannelTypeOpenAI, Key: "key-92", Status: common.ChannelStatusEnabled, Name: "image-guard"}).Error)
+	for _, metadata := range []model.Model{
+		{ModelName: "guard-image-chat", Endpoints: `{"image-generation":{"path":"/v1/images/generations","method":"POST"},"openai":{"path":"/v1/chat/completions","method":"POST"}}`},
+		{ModelName: "guard-image-only", Endpoints: `["image-generation"]`},
+		{ModelName: "guard-text", Endpoints: `["openai"]`},
+		{ModelName: "guard-undeclared"},
+	} {
+		metadata.NameRule = model.NameRuleExact
+		metadata.Status = 1
+		require.NoError(t, database.Create(&metadata).Error)
+		// The abilities live in another group, so requests that pass the guard
+		// end in channel selection for the empty default group.
+		require.NoError(t, database.Create(&model.Ability{Group: "image-guard", Model: metadata.ModelName, ChannelId: 92, Enabled: true}).Error)
+	}
+	model.InvalidatePricingCache()
+
+	router := gin.New()
+	router.POST("/*path", RequestId(), func(c *gin.Context) {
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
+	}, Distribute(), func(c *gin.Context) {
+		t.Error("requests without a channel must stop before the relay handler")
+		c.Status(http.StatusNoContent)
+	})
+
+	for _, tc := range []struct {
+		name, path, model, language string
+		rejected                    bool
+		message                     string
+	}{
+		{name: "responses on chat-capable image model", rejected: true, path: "/v1/responses", model: "guard-image-chat", language: "zh-CN",
+			message: "guard-image-chat 是生图模型，不支持 /v1/responses 接口。请改用：POST /v1/images/generations, POST /v1/images/edits, POST /v1/chat/completions"},
+		{name: "playground responses", rejected: true, path: "/pg/responses", model: "guard-image-chat", language: "en",
+			message: "guard-image-chat is an image generation model and does not support /v1/responses. Use one of: POST /v1/images/generations, POST /v1/images/edits, POST /v1/chat/completions"},
+		{name: "messages", rejected: true, path: "/v1/messages", model: "guard-image-only", language: "en",
+			message: "guard-image-only is an image generation model and does not support /v1/messages. Use one of: POST /v1/images/generations, POST /v1/images/edits"},
+		{name: "chat on images-only model", rejected: true, path: "/v1/chat/completions", model: "guard-image-only", language: "en"},
+		{name: "gemini native", rejected: true, path: "/v1beta/models/guard-image-only:generateContent", model: "guard-image-only", language: "en"},
+		{name: "declared chat endpoint", path: "/v1/chat/completions", model: "guard-image-chat", language: "en"},
+		{name: "image endpoint", path: "/v1/images/generations", model: "guard-image-only", language: "en"},
+		{name: "image edits endpoint", path: "/v1/images/edits", model: "guard-image-chat", language: "en"},
+		{name: "text model declared on chat only", path: "/v1/responses", model: "guard-text", language: "en"},
+		{name: "model without declared endpoints", path: "/v1/responses", model: "guard-undeclared", language: "en"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(`{"model":"`+tc.model+`","prompt":"cat"}`))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Accept-Language", tc.language)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+
+			if !tc.rejected {
+				assert.Contains(t, recorder.Body.String(), `"code":"model_not_in_group"`)
+				return
+			}
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), `"code":"image_model_wrong_endpoint"`)
+			if tc.message != "" {
+				requestID := recorder.Header().Get(common.RequestIdKey)
+				assert.JSONEq(t, fmt.Sprintf(`{"error":{"message":%q,"type":"new_api_error","code":"image_model_wrong_endpoint"}}`,
+					tc.message+" (request id: "+requestID+")"), recorder.Body.String())
+			}
+		})
+	}
+}

@@ -236,6 +236,7 @@ stt.file_format_unsupported: "Không nhận dạng được định dạng của
 distributor.model_not_in_group: "Nhóm của token \"{{.Group}}\" không cung cấp mô hình \"{{.Model}}\". Hãy kiểm tra tên mô hình, hoặc sửa token trên trang \"Khóa API\" của bảng điều khiển để đổi sang nhóm có mô hình này."
 distributor.model_not_in_group_suggest: "Nhóm của token \"{{.Group}}\" không cung cấp mô hình \"{{.Model}}\". Hãy sửa token trên trang \"Khóa API\" của bảng điều khiển để đổi sang nhóm có mô hình này: {{.Groups}}."
 distributor.video_model_wrong_endpoint: "{{.Model}} là mô hình tạo video, không thể gọi qua endpoint chat, Responses, Messages hoặc tạo ảnh. Hãy gửi tác vụ video bằng POST /v1/videos, rồi truy vấn kết quả bằng GET /v1/videos/{task_id}. Hướng dẫn: https://88api.ai/en/docs/api/video/video-api-standard/"
+distributor.image_model_wrong_endpoint: "{{.Model}} là mô hình tạo ảnh và không hỗ trợ {{.Path}}. Hãy dùng: {{.Endpoints}}"
 quota.user_insufficient: "Số dư không đủ: số dư hiện tại là {{.Remaining}}. Vui lòng nạp tiền rồi thử lại."
 quota.pre_consume_insufficient: "Số dư không đủ: số dư hiện tại là {{.Remaining}}, yêu cầu này cần tạm giữ {{.Required}} (ước tính theo tham số yêu cầu; sau khi hoàn tất sẽ tính theo mức dùng thực tế, phần chênh lệch được hoàn lại hoặc thu thêm). Vui lòng nạp tiền rồi thử lại."
 quota.token_insufficient: "Hạn mức token không đủ: token này còn {{.Remaining}}, yêu cầu này cần tạm giữ {{.Required}}. Hãy tăng hạn mức của token hoặc đặt thành hạn mức không giới hạn trên trang \"Khóa API\" của bảng điều khiển."
