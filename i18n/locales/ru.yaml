@@ -237,6 +237,7 @@ distributor.model_not_in_group: "Группа токена «{{.Group}}» не �
 distributor.model_not_in_group_suggest: "Группа токена «{{.Group}}» не предоставляет модель «{{.Model}}». Откройте токен на странице «Ключи API» в консоли и выберите группу с этой моделью: {{.Groups}}."
 distributor.video_model_wrong_endpoint: "{{.Model}} — модель генерации видео, её нельзя вызывать через эндпоинты чата, Responses, Messages или изображений. Отправьте видеозадачу через POST /v1/videos и получите результат через GET /v1/videos/{task_id}. Руководство: https://88api.ai/en/docs/api/video/video-api-standard/"
 distributor.image_model_wrong_endpoint: "{{.Model}} — модель генерации изображений и не поддерживает {{.Path}}. Используйте: {{.Endpoints}}"
+distributor.images_endpoint_not_supported: "{{.Model}} не поддерживает эндпоинт OpenAI Images {{.Path}}. Используйте: {{.Endpoints}}"
 quota.user_insufficient: "Недостаточно средств: текущий баланс {{.Remaining}}. Пополните баланс и повторите попытку."
 quota.pre_consume_insufficient: "Недостаточно средств: текущий баланс {{.Remaining}}, а для этого запроса нужно зарезервировать {{.Required}} (оценка по параметрам запроса; после выполнения списывается фактическая стоимость, разница возвращается или доплачивается). Пополните баланс и повторите попытку."
 quota.token_insufficient: "Недостаточно квоты токена: у этого токена осталось {{.Remaining}}, а для этого запроса нужно зарезервировать {{.Required}}. Увеличьте квоту токена или сделайте её неограниченной на странице «Ключи API» в консоли."

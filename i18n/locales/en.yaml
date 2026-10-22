@@ -48,6 +48,7 @@ distributor.model_not_in_group: "Token group \"{{.Group}}\" does not offer model
 distributor.model_not_in_group_suggest: "Token group \"{{.Group}}\" does not offer model \"{{.Model}}\". Edit the token on the \"API Keys\" page of the console and switch it to a group that offers this model: {{.Groups}}."
 distributor.video_model_wrong_endpoint: "{{.Model}} is a video generation model and cannot be called through the chat, Responses, Messages or image endpoints. Submit a video task with POST /v1/videos, then poll GET /v1/videos/{task_id} for the result. Guide: https://88api.ai/en/docs/api/video/video-api-standard/"
 distributor.image_model_wrong_endpoint: "{{.Model}} is an image generation model and does not support {{.Path}}. Use one of: {{.Endpoints}}"
+distributor.images_endpoint_not_supported: "{{.Model}} does not support the OpenAI Images endpoint {{.Path}}. Use one of: {{.Endpoints}}"
 quota.user_insufficient: "Insufficient balance: your balance is {{.Remaining}}. Please top up and try again."
 quota.pre_consume_insufficient: "Insufficient balance: your balance is {{.Remaining}}, and this request needs {{.Required}} reserved (estimated from the request parameters; after completion you pay for actual usage and the difference is refunded or charged). Please top up and try again."
 quota.subscription_insufficient: "Subscription quota is insufficient or no subscription is configured: {{.Error}}"

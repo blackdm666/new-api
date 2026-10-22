@@ -1,7 +1,6 @@
 package model
 
 import (
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -125,20 +124,15 @@ func GetModelSupportEndpointTypes(model string) []constant.EndpointType {
 	return make([]constant.EndpointType, 0)
 }
 
-// ImageModelDeclaredEndpoints returns the endpoint types declared in the
-// metadata of an image model, or nil when the metadata does not declare the
-// model on the Images API. Channels of one type differ in which text endpoints
-// they serve for image models, so only this declaration tells which of them
-// exist; the text relays reject the rest before channel selection.
-func ImageModelDeclaredEndpoints(modelName string) []string {
+// ModelDeclaredEndpoints returns the endpoint types declared in the metadata
+// of a model, or nil when its metadata declares none. Channels of one type
+// differ in which endpoints they serve for image models, so only this
+// declaration tells the relays which image or text endpoints exist.
+func ModelDeclaredEndpoints(modelName string) []string {
 	GetPricing()
 	modelSupportEndpointsLock.RLock()
 	defer modelSupportEndpointsLock.RUnlock()
-	declared := modelDeclaredEndpoints[modelName]
-	if !slices.Contains(declared, string(constant.EndpointTypeImageGeneration)) {
-		return nil
-	}
-	return declared
+	return modelDeclaredEndpoints[modelName]
 }
 
 func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCustomConfigs map[int]*dto.AdvancedCustomConfig) []constant.EndpointType {

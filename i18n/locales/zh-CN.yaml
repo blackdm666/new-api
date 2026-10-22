@@ -49,6 +49,7 @@ distributor.model_not_in_group: "令牌分组「{{.Group}}」不提供模型「{
 distributor.model_not_in_group_suggest: "令牌分组「{{.Group}}」不提供模型「{{.Model}}」。请在控制台「API 密钥」页编辑该令牌，改用包含该模型的分组：{{.Groups}}。"
 distributor.video_model_wrong_endpoint: "{{.Model}} 是视频生成模型，不能用对话、Responses、Messages 或生图接口调用。请改用 POST /v1/videos 提交视频任务，再用 GET /v1/videos/{任务 ID} 查询结果，说明见 https://88api.ai/zh/docs/api/video/video-api-standard/"
 distributor.image_model_wrong_endpoint: "{{.Model}} 是生图模型，不支持 {{.Path}} 接口。请改用：{{.Endpoints}}"
+distributor.images_endpoint_not_supported: "{{.Model}} 不支持 OpenAI 生图接口 {{.Path}}。请改用：{{.Endpoints}}"
 quota.user_insufficient: "余额不足：当前余额 {{.Remaining}}，请充值后重试。"
 quota.pre_consume_insufficient: "余额不足：当前余额 {{.Remaining}}，本次需要预留 {{.Required}}（按请求参数预估，完成后按实际用量多退少补）。请充值后重试。"
 quota.subscription_insufficient: "订阅额度不足或未配置订阅: {{.Error}}"
