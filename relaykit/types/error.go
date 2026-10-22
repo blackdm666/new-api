@@ -61,11 +61,13 @@ const (
 	ErrorCodeChannelResponseTimeExceeded  ErrorCode = "channel:response_time_exceeded"
 
 	// client request error
-	ErrorCodeReadRequestBodyFailed   ErrorCode = "read_request_body_failed"
-	ErrorCodeConvertRequestFailed    ErrorCode = "convert_request_failed"
-	ErrorCodeAccessDenied            ErrorCode = "access_denied"
-	ErrorCodeModelNotInGroup         ErrorCode = "model_not_in_group"
-	ErrorCodeVideoModelWrongEndpoint ErrorCode = "video_model_wrong_endpoint"
+	ErrorCodeReadRequestBodyFailed      ErrorCode = "read_request_body_failed"
+	ErrorCodeConvertRequestFailed       ErrorCode = "convert_request_failed"
+	ErrorCodeAccessDenied               ErrorCode = "access_denied"
+	ErrorCodeModelNotInGroup            ErrorCode = "model_not_in_group"
+	ErrorCodeVideoModelWrongEndpoint    ErrorCode = "video_model_wrong_endpoint"
+	ErrorCodeImageModelWrongEndpoint    ErrorCode = "image_model_wrong_endpoint"
+	ErrorCodeImagesEndpointNotSupported ErrorCode = "images_endpoint_not_supported"
 
 	// request error
 	ErrorCodeBadRequestBody ErrorCode = "bad_request_body"

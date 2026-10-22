@@ -2,6 +2,8 @@ package constant
 
 import (
 	"strings"
+
+	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
 const (
@@ -113,6 +115,27 @@ func IsTextOrImageGenerationPath(path string) bool {
 		return true
 	}
 	return false
+}
+
+// TextEndpointType returns the model endpoint type of a chat, completion,
+// Responses, Claude Messages or Gemini request path, the endpoints an image
+// model can only be called on when its metadata declares them.
+func TextEndpointType(path string) (types.EndpointType, bool) {
+	path = CanonicalRelayRequestPath(path)
+	if strings.HasPrefix(path, "/v1/messages") {
+		return types.EndpointTypeAnthropic, true
+	}
+	switch Path2RelayMode(path) {
+	case RelayModeChatCompletions, RelayModeCompletions:
+		return types.EndpointTypeOpenAI, true
+	case RelayModeResponses:
+		return types.EndpointTypeOpenAIResponse, true
+	case RelayModeResponsesCompact:
+		return types.EndpointTypeOpenAIResponseCompact, true
+	case RelayModeGemini:
+		return types.EndpointTypeGemini, true
+	}
+	return "", false
 }
 
 // IsPlaygroundRelayPath reports whether path belongs to the internal Playground
