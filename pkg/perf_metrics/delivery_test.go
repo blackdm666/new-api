@@ -54,7 +54,7 @@ func TestCompletedRelaySurvivesProxyClose(t *testing.T) {
 	t.Cleanup(func() { constant.StreamingTimeout = previousTimeout })
 	constant.StreamingTimeout = 10
 	fixtures := []fixture{
-		{"images", `{"created":1789917600,"data":[{"url":"https://example.invalid/image.png"}]}`, types.RelayFormatOpenAI, openai.OpenaiImageHandler, false, ""},
+		{"images", `{"created":1789917600,"data":[{"b64_json":"aW1hZ2U="}]}`, types.RelayFormatOpenAI, openai.OpenaiImageHandler, false, ""},
 		{"chat", `{"id":"mock","model":"mock","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`, types.RelayFormatOpenAI, openai.OpenaiHandler, false, ""},
 		{"claude", `{"id":"mock","type":"message","model":"mock","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":1}}`, types.RelayFormatClaude,
 			func(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
