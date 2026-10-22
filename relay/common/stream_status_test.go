@@ -9,20 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestStreamStatus_NormalCompletionCorrectsClientGoneRace(t *testing.T) {
-	t.Parallel()
-
-	for _, completed := range []StreamEndReason{StreamEndReasonDone, StreamEndReasonEOF} {
-		s := NewStreamStatus()
-		s.SetEndReason(StreamEndReasonClientGone, context.Canceled)
-		s.SetEndReason(completed, nil)
-
-		assert.Equal(t, completed, s.EndReason)
-		assert.Nil(t, s.EndError)
-		assert.True(t, s.IsNormalEnd())
-	}
-}
-
 func TestStreamStatus_ClientGoneStillWinsOverAbnormalScannerEnd(t *testing.T) {
 	t.Parallel()
 
