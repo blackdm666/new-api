@@ -8728,6 +8728,13 @@
     "Sign-in password is required": "サインインパスワードは必須です",
     "Token JSON path is required": "トークンの JSON パスは必須です",
     "Sign-in request body must be valid JSON and contain {password}": "サインインリクエスト本文は {password} を含む有効な JSON である必要があります",
-    "Insert {login_token} into the authentication value, a header, or the request body": "認証値、ヘッダー、またはリクエスト本文に {login_token} を挿入してください"
+    "Insert {login_token} into the authentication value, a header, or the request body": "認証値、ヘッダー、またはリクエスト本文に {login_token} を挿入してください",
+    "Key quota": "キーのクォータ",
+    "Balance query failed": "残高の照会に失敗しました",
+    "Failed to allow balance queries for this key": "このキーの残高照会を有効にできませんでした",
+    "Show account balance in CC Switch": "CC Switch にアカウント残高を表示",
+    "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance": "コンソールでこのキーの「ユーザーのクォータ照会を許可」をオンにするとウォレット残高が表示されます",
+    "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.": "このキーの「ユーザーのクォータ照会を許可」もオンにし、CC Switch がウォレット残高を読み取れるようにします。",
+    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch はこのキーでウォレット残高を読み取り、{{minutes}} 分ごとに更新します。"
   }
 }

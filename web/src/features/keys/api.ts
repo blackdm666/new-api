@@ -85,6 +85,28 @@ export async function updateApiKey(
   return res.data
 }
 
+// Turn on "Allow querying user quota" for an existing key and keep every
+// other setting. The update endpoint rewrites all editable fields, so they
+// are sent back as stored; auto_groups is left out, which keeps it unchanged.
+export async function enableApiKeyUserQuotaQuery(
+  apiKey: ApiKey
+): Promise<ApiResponse<ApiKey>> {
+  const res = await api.put('/api/token/', {
+    id: apiKey.id,
+    name: apiKey.name,
+    remain_quota: apiKey.remain_quota,
+    expired_time: apiKey.expired_time,
+    unlimited_quota: apiKey.unlimited_quota,
+    model_limits_enabled: apiKey.model_limits_enabled,
+    model_limits: apiKey.model_limits ?? '',
+    allow_ips: apiKey.allow_ips ?? '',
+    group: apiKey.group ?? '',
+    cross_group_retry: apiKey.cross_group_retry,
+    allow_user_quota_query: true,
+  })
+  return res.data
+}
+
 // Delete a single API key
 export async function deleteApiKey(id: number): Promise<ApiResponse> {
   const res = await api.delete(`/api/token/${id}/`)
