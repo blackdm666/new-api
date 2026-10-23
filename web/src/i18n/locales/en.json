@@ -8822,6 +8822,13 @@
     "Sign-in password is required": "Sign-in password is required",
     "Token JSON path is required": "Token JSON path is required",
     "Sign-in request body must be valid JSON and contain {password}": "Sign-in request body must be valid JSON and contain {password}",
-    "Insert {login_token} into the authentication value, a header, or the request body": "Insert {login_token} into the authentication value, a header, or the request body"
+    "Insert {login_token} into the authentication value, a header, or the request body": "Insert {login_token} into the authentication value, a header, or the request body",
+    "Key quota": "Key quota",
+    "Balance query failed": "Balance query failed",
+    "Failed to allow balance queries for this key": "Failed to allow balance queries for this key",
+    "Show account balance in CC Switch": "Show account balance in CC Switch",
+    "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance": "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance",
+    "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.": "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.",
+    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes."
   }
 }

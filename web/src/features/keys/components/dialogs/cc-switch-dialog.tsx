@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { Dialog } from '@/components/dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import {
   Popover,
@@ -31,6 +32,17 @@ import {
 } from '@/components/ui/popover'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { getCurrencyDisplay } from '@/lib/currency'
+import { handleServerError } from '@/lib/handle-server-error'
+
+import { enableApiKeyUserQuotaQuery } from '../../api'
+import {
+  buildCCSwitchUsageScript,
+  CC_SWITCH_USAGE_INTERVAL_MINUTES,
+  encodeCCSwitchUsageScript,
+  type CCSwitchUsageUnit,
+} from '../../lib/cc-switch-usage'
+import type { ApiKey } from '../../types'
 
 type CCSwitchApp = 'claude' | 'codex' | 'gemini' | 'grokbuild'
 
@@ -94,7 +106,11 @@ const APP_LABELS: Record<DialogApp, string> = {
   grokbuild: 'Grok Build',
 }
 
-function buildCCSwitchURL(app: CCSwitchApp, apiKey: string): string {
+function buildCCSwitchURL(
+  app: CCSwitchApp,
+  apiKey: string,
+  usageScript?: string
+): string {
   const preset = CC_SWITCH_APPS[app]
   const params = new URLSearchParams()
   params.set('resource', 'provider')
@@ -106,7 +122,26 @@ function buildCCSwitchURL(app: CCSwitchApp, apiKey: string): string {
   params.set('apiKey', apiKey)
   if (preset.model) params.set('model', preset.model)
   params.set('enabled', 'true')
+  if (usageScript) {
+    params.set('usageScript', encodeCCSwitchUsageScript(usageScript))
+    // usageEnabled keeps CC Switch releases before 4.0.10 from ignoring it.
+    params.set('usageEnabled', 'true')
+    params.set('usageAutoInterval', String(CC_SWITCH_USAGE_INTERVAL_MINUTES))
+  }
   return `ccswitch://v1/import?${params.toString()}`
+}
+
+// The balance shown in CC Switch uses the console's display currency; a
+// token-count display falls back to USD, as billing amounts do.
+function getCCSwitchUsageUnit(): CCSwitchUsageUnit {
+  const { config, meta } = getCurrencyDisplay()
+  if (meta.kind === 'tokens') {
+    return { quotaPerUnit: config.quotaPerUnit, unit: 'USD' }
+  }
+  return {
+    quotaPerUnit: config.quotaPerUnit / meta.exchangeRate,
+    unit: meta.kind === 'currency' ? meta.currencyCode : meta.symbol,
+  }
 }
 
 interface Props {
@@ -114,17 +149,23 @@ interface Props {
   onOpenChange: (open: boolean) => void
   tokenKey: string
   group: string
+  // The key being imported; when it does not yet allow user quota queries,
+  // importing with the balance shown turns that on.
+  apiKey?: ApiKey | null
+  onBalanceQueryEnabled?: () => void
 }
 
 export function CCSwitchDialog(props: Props) {
   const { t } = useTranslation()
   const { copyToClipboard } = useCopyToClipboard()
   const [app, setApp] = useState<DialogApp>('claude')
+  const [showBalance, setShowBalance] = useState(true)
 
   useEffect(() => {
     if (props.open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setApp('claude')
+      setShowBalance(true)
     }
   }, [props.open])
 
@@ -136,13 +177,50 @@ export function CCSwitchDialog(props: Props) {
   if (!groupLabel) groupLabel = t('Follow user group')
   if (groupLabel === 'auto') groupLabel = t('Cross-group')
 
+  const balanceAllowed = props.apiKey?.allow_user_quota_query === true
+
   const handleSubmit = async () => {
     if (app === 'claude-desktop') {
       await copyToClipboard(key)
       return
     }
-    window.open(buildCCSwitchURL(app, key), '_blank')
+    const usageScript = showBalance
+      ? buildCCSwitchUsageScript(getCCSwitchUsageUnit(), {
+          wallet: t('Wallet balance'),
+          key: t('Key quota'),
+          disabled: t(
+            'Turn on "Allow querying user quota" for this key in the console to see the wallet balance'
+          ),
+          failed: t('Balance query failed'),
+        })
+      : undefined
+    // Start allowing balance queries before CC Switch opens, but open it in
+    // this click so the browser does not block it. The user still has to
+    // confirm the import in CC Switch, so the change lands before its first
+    // balance query.
+    const enabling =
+      showBalance && props.apiKey && !balanceAllowed
+        ? enableApiKeyUserQuotaQuery(props.apiKey)
+        : null
+    window.open(buildCCSwitchURL(app, key, usageScript), '_blank')
     props.onOpenChange(false)
+    if (!enabling) return
+    try {
+      const result = await enabling
+      if (!result.success) {
+        handleServerError(
+          result,
+          t('Failed to allow balance queries for this key')
+        )
+        return
+      }
+      props.onBalanceQueryEnabled?.()
+    } catch (error) {
+      handleServerError(
+        error,
+        t('Failed to allow balance queries for this key')
+      )
+    }
   }
 
   return (
@@ -261,6 +339,32 @@ export function CCSwitchDialog(props: Props) {
             <dt className='text-muted-foreground shrink-0'>{t('Group')}</dt>
             <dd className='font-medium break-all'>{groupLabel}</dd>
           </dl>
+        </div>
+      )}
+
+      {preset && (
+        <div className='flex items-start gap-2'>
+          <Checkbox
+            id='cc-switch-show-balance'
+            checked={showBalance}
+            onCheckedChange={(checked) => setShowBalance(checked === true)}
+            className='mt-0.5'
+          />
+          <div className='space-y-0.5'>
+            <Label htmlFor='cc-switch-show-balance' className='cursor-pointer'>
+              {t('Show account balance in CC Switch')}
+            </Label>
+            <p className='text-muted-foreground text-xs'>
+              {balanceAllowed
+                ? t(
+                    'CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.',
+                    { minutes: CC_SWITCH_USAGE_INTERVAL_MINUTES }
+                  )
+                : t(
+                    'Also turns on "Allow querying user quota" for this key, so CC Switch can read the wallet balance with it.'
+                  )}
+            </p>
+          </div>
         </div>
       )}
 

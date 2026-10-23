@@ -8728,6 +8728,13 @@
     "Sign-in password is required": "Cần nhập mật khẩu đăng nhập",
     "Token JSON path is required": "Cần nhập đường dẫn JSON của token",
     "Sign-in request body must be valid JSON and contain {password}": "Nội dung yêu cầu đăng nhập phải là JSON hợp lệ và chứa {password}",
-    "Insert {login_token} into the authentication value, a header, or the request body": "Hãy chèn {login_token} vào giá trị xác thực, header hoặc nội dung yêu cầu"
+    "Insert {login_token} into the authentication value, a header, or the request body": "Hãy chèn {login_token} vào giá trị xác thực, header hoặc nội dung yêu cầu",
+    "Key quota": "Hạn mức của khóa",
+    "Balance query failed": "Tra cứu số dư thất bại",
+    "Failed to allow balance queries for this key": "Không thể bật tra cứu số dư cho khóa này",
+    "Show account balance in CC Switch": "Hiển thị số dư tài khoản trong CC Switch",
+    "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance": "Bật \"Cho phép tra cứu hạn mức người dùng\" cho khóa này trong bảng điều khiển để xem số dư ví",
+    "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.": "Đồng thời bật \"Cho phép tra cứu hạn mức người dùng\" cho khóa này để CC Switch đọc được số dư ví.",
+    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch đọc số dư ví bằng khóa này và làm mới mỗi {{minutes}} phút."
   }
 }

@@ -21,6 +21,9 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { api } from '@/lib/api'
+
+import type { ApiKey } from '../../../types'
 import { CCSwitchDialog } from '../cc-switch-dialog'
 
 let queryClient: QueryClient
@@ -44,8 +47,13 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function renderDialog({ tokenKey = 'test-only', group = 'Claude Kiro' } = {}) {
+function renderDialog({
+  tokenKey = 'test-only',
+  group = 'Claude Kiro',
+  apiKey = null as ApiKey | null,
+} = {}) {
   const onOpenChange = vi.fn()
+  const onBalanceQueryEnabled = vi.fn()
   render(
     <QueryClientProvider client={queryClient}>
       <CCSwitchDialog
@@ -53,10 +61,18 @@ function renderDialog({ tokenKey = 'test-only', group = 'Claude Kiro' } = {}) {
         onOpenChange={onOpenChange}
         tokenKey={tokenKey}
         group={group}
+        apiKey={apiKey}
+        onBalanceQueryEnabled={onBalanceQueryEnabled}
       />
     </QueryClientProvider>
   )
-  return { onOpenChange }
+  return { onOpenChange, onBalanceQueryEnabled }
+}
+
+function decodeUsageScript(encoded: string | undefined) {
+  return new TextDecoder().decode(
+    Uint8Array.from(atob(encoded ?? ''), (char) => char.charCodeAt(0))
+  )
 }
 
 function openedImportParams() {
@@ -75,7 +91,8 @@ describe('CC Switch 88API preset import', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))
 
-    expect(openedImportParams()).toEqual({
+    const { usageScript, ...params } = openedImportParams()
+    expect(params).toEqual({
       resource: 'provider',
       app: 'claude',
       name: '88API',
@@ -84,7 +101,10 @@ describe('CC Switch 88API preset import', () => {
       endpoint: 'https://api.88api.ai,https://88api.ai',
       apiKey: 'sk-test-only',
       enabled: 'true',
+      usageEnabled: 'true',
+      usageAutoInterval: '30',
     })
+    expect(decodeUsageScript(usageScript)).toContain('/api/usage/token/')
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
@@ -217,5 +237,108 @@ describe('CC Switch 88API preset import', () => {
     await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))
 
     expect(openedImportParams().apiKey).toBe('sk-test-only')
+  })
+})
+
+const storedKey: ApiKey = {
+  id: 7,
+  name: 'claude',
+  key: 'abc',
+  status: 1,
+  remain_quota: -100,
+  used_quota: 100,
+  unlimited_quota: true,
+  expired_time: -1,
+  created_time: 1,
+  accessed_time: 1,
+  group: 'auto',
+  auto_groups: ['vip'],
+  cross_group_retry: true,
+  model_limits_enabled: false,
+  model_limits: '',
+  allow_ips: '',
+  allow_user_quota_query: false,
+}
+
+describe('CC Switch balance display', () => {
+  let puts: Array<Record<string, unknown>>
+
+  beforeEach(() => {
+    puts = []
+    vi.spyOn(api, 'put').mockImplementation(async (url, data) => {
+      expect(url).toBe('/api/token/')
+      puts.push(data as Record<string, unknown>)
+      return { data: { success: true } }
+    })
+  })
+
+  it('turns on user quota queries for the key and keeps its other settings when imported with the balance shown', async () => {
+    const { onBalanceQueryEnabled } = renderDialog({ apiKey: storedKey })
+    const user = userEvent.setup()
+
+    expect(
+      screen.getByRole('checkbox', {
+        name: 'Show account balance in CC Switch',
+      })
+    ).toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))
+
+    expect(openedImportParams().usageScript).toBeTruthy()
+    await vi.waitFor(() => expect(onBalanceQueryEnabled).toHaveBeenCalled())
+    expect(puts).toEqual([
+      {
+        id: 7,
+        name: 'claude',
+        remain_quota: -100,
+        expired_time: -1,
+        unlimited_quota: true,
+        model_limits_enabled: false,
+        model_limits: '',
+        allow_ips: '',
+        group: 'auto',
+        cross_group_retry: true,
+        allow_user_quota_query: true,
+      },
+    ])
+  })
+
+  it('imports without a usage script and leaves the key unchanged when the balance option is unchecked', async () => {
+    renderDialog({ apiKey: storedKey })
+    const user = userEvent.setup()
+
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: 'Show account balance in CC Switch',
+      })
+    )
+    await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))
+
+    const params = openedImportParams()
+    expect(params.usageScript).toBeUndefined()
+    expect(params.usageEnabled).toBeUndefined()
+    expect(puts).toHaveLength(0)
+  })
+
+  it('imports with the usage script without updating a key that already allows user quota queries', async () => {
+    renderDialog({ apiKey: { ...storedKey, allow_user_quota_query: true } })
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))
+
+    expect(openedImportParams().usageScript).toBeTruthy()
+    expect(puts).toHaveLength(0)
+  })
+
+  it('hides the balance option when Claude Desktop is selected', async () => {
+    renderDialog({ apiKey: storedKey })
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('radio', { name: 'Claude Desktop' }))
+
+    expect(
+      screen.queryByRole('checkbox', {
+        name: 'Show account balance in CC Switch',
+      })
+    ).not.toBeInTheDocument()
   })
 })

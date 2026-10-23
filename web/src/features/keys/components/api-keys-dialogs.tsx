@@ -22,7 +22,8 @@ import { useApiKeys } from './api-keys-provider'
 import { CCSwitchDialog } from './dialogs/cc-switch-dialog'
 
 export function ApiKeysDialogs() {
-  const { open, setOpen, currentRow, resolvedKey } = useApiKeys()
+  const { open, setOpen, currentRow, resolvedKey, triggerRefresh } =
+    useApiKeys()
 
   return (
     <>
@@ -37,6 +38,8 @@ export function ApiKeysDialogs() {
         onOpenChange={(isOpen) => !isOpen && setOpen(null)}
         tokenKey={resolvedKey}
         group={currentRow?.group ?? ''}
+        apiKey={currentRow}
+        onBalanceQueryEnabled={triggerRefresh}
       />
     </>
   )

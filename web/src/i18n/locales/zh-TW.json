@@ -8730,6 +8730,13 @@
     "Sign-in password is required": "請填寫登入密碼",
     "Token JSON path is required": "請填寫權杖 JSON 路徑",
     "Sign-in request body must be valid JSON and contain {password}": "登入請求本文必須是有效 JSON，且包含 {password}",
-    "Insert {login_token} into the authentication value, a header, or the request body": "請在認證值、請求標頭或請求本文中填入 {login_token}"
+    "Insert {login_token} into the authentication value, a header, or the request body": "請在認證值、請求標頭或請求本文中填入 {login_token}",
+    "Key quota": "Key 額度",
+    "Balance query failed": "餘額查詢失敗",
+    "Failed to allow balance queries for this key": "為這個 Key 開啟餘額查詢失敗",
+    "Show account balance in CC Switch": "在 CC Switch 顯示帳戶餘額",
+    "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance": "在控制台為這個 Key 開啟「允許查詢使用者額度」後顯示錢包餘額",
+    "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.": "同時為這個 Key 開啟「允許查詢使用者額度」，CC Switch 才能用它讀取錢包餘額。",
+    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch 用這個 Key 讀取錢包餘額，每 {{minutes}} 分鐘重新整理一次。"
   }
 }

@@ -8823,6 +8823,13 @@
     "Sign-in password is required": "请填写登录密码",
     "Token JSON path is required": "请填写令牌 JSON 路径",
     "Sign-in request body must be valid JSON and contain {password}": "登录请求体必须是有效 JSON，且包含 {password}",
-    "Insert {login_token} into the authentication value, a header, or the request body": "请在认证值、请求头或请求体中填入 {login_token}"
+    "Insert {login_token} into the authentication value, a header, or the request body": "请在认证值、请求头或请求体中填入 {login_token}",
+    "Key quota": "Key 额度",
+    "Balance query failed": "余额查询失败",
+    "Failed to allow balance queries for this key": "为这个 Key 开启余额查询失败",
+    "Show account balance in CC Switch": "在 CC Switch 显示账户余额",
+    "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance": "在控制台给这个 Key 打开「允许查询用户额度」后显示钱包余额",
+    "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.": "同时为这个 Key 打开「允许查询用户额度」，CC Switch 才能用它读取钱包余额。",
+    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch 用这个 Key 读取钱包余额，每 {{minutes}} 分钟刷新一次。"
   }
 }

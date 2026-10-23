@@ -8728,6 +8728,13 @@
     "Sign-in password is required": "Укажите пароль для входа",
     "Token JSON path is required": "Укажите JSON-путь к токену",
     "Sign-in request body must be valid JSON and contain {password}": "Тело запроса входа должно быть корректным JSON и содержать {password}",
-    "Insert {login_token} into the authentication value, a header, or the request body": "Вставьте {login_token} в значение аутентификации, заголовок или тело запроса"
+    "Insert {login_token} into the authentication value, a header, or the request body": "Вставьте {login_token} в значение аутентификации, заголовок или тело запроса",
+    "Key quota": "Квота ключа",
+    "Balance query failed": "Не удалось получить баланс",
+    "Failed to allow balance queries for this key": "Не удалось разрешить запрос баланса для этого ключа",
+    "Show account balance in CC Switch": "Показывать баланс аккаунта в CC Switch",
+    "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance": "Включите «Разрешить просмотр квоты пользователя» для этого ключа в консоли, чтобы видеть баланс кошелька",
+    "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.": "Также включает «Разрешить просмотр квоты пользователя» для этого ключа, чтобы CC Switch мог читать баланс кошелька.",
+    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch читает баланс кошелька с помощью этого ключа и обновляет его каждые {{minutes}} мин."
   }
 }
