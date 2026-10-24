@@ -1083,7 +1083,41 @@ function CompactTaskPricingTable(props: {
               cell: (rowValue: string) =>
                 renderPriceCell(rowValue, columnValue),
             }))
-          : [
+          : []),
+        // A one-dimension table that bills several quantities (for example
+        // output seconds, reference video seconds and extra images) labels
+        // each price in its own column instead of stacking unnamed prices.
+        ...(!props.matrix.columnField && props.priceFields.length > 1
+          ? props.priceFields.map((entry) => {
+              const unitLabel = taskUsageUnitLabel(
+                entry,
+                i18n.language,
+                getCellUnitLabel(entry)
+              )
+              return {
+                id: `price-${entry.field}`,
+                header: (
+                  <>
+                    <DynamicPriceEntryLabel entry={entry} />
+                    {unitLabel ? ` / ${unitLabel}` : ''}
+                  </>
+                ),
+                className: `${thClass} text-right`,
+                cellClassName: 'py-2.5 text-right font-mono',
+                cell: (rowValue: string) => {
+                  const tier = props.matrix.cells.get(
+                    taskCompactMatrixCellKey(rowValue, '')
+                  )
+                  const prices = tier
+                    ? props.formattedPricesByTier.get(tier)
+                    : undefined
+                  return prices?.get(entry.field) ?? '-'
+                },
+              }
+            })
+          : []),
+        ...(!props.matrix.columnField && props.priceFields.length <= 1
+          ? [
               {
                 id: 'price',
                 header: t('Price'),
@@ -1091,7 +1125,8 @@ function CompactTaskPricingTable(props: {
                 cellClassName: 'py-2.5 text-right font-mono',
                 cell: (rowValue: string) => renderPriceCell(rowValue),
               },
-            ]),
+            ]
+          : []),
       ]}
     />
   )
