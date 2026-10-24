@@ -37,9 +37,11 @@ import type {
   PerformanceGroup,
   PerformanceSeriesPoint,
 } from '@/features/performance-metrics/types'
+import { movePinnedGroupsLast } from '@/lib/group-order'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
+import { usePricingData } from '../hooks/use-pricing-data'
 import type { UptimeDayPoint } from '../lib/mock-stats'
 import type { PricingModel } from '../types'
 import { LatencyTrendChart, UptimeTrendChart } from './model-details-charts'
@@ -123,6 +125,7 @@ function toGroupUptimeSeries(group: PerformanceGroup): UptimeDayPoint[] {
 
 export function ModelDetailsPerformance(props: { model: PricingModel }) {
   const { t } = useTranslation()
+  const { groupPinBottom } = usePricingData()
   const metricsQuery = useQuery({
     queryKey: ['perf-metrics', props.model.model_name],
     queryFn: async () =>
@@ -139,17 +142,26 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
     () => metricsQuery.data?.data.series ?? [],
     [metricsQuery.data]
   )
-  const performances = useMemo<PerformanceRow[]>(
-    () =>
-      groups.map((group) => ({
-        group: group.group,
-        avg_ttft_ms: group.avg_ttft_ms,
-        avg_latency_ms: group.avg_latency_ms,
-        success_rate: group.success_rate,
-        avg_tps: group.avg_tps,
-      })),
-    [groups]
-  )
+  const performances = useMemo<PerformanceRow[]>(() => {
+    const byName = new Map(groups.map((group) => [group.group, group]))
+    const ordered = movePinnedGroupsLast(
+      groups.map((group) => group.group),
+      groupPinBottom
+    )
+    return ordered.flatMap((name) => {
+      const group = byName.get(name)
+      if (!group) return []
+      return [
+        {
+          group: group.group,
+          avg_ttft_ms: group.avg_ttft_ms,
+          avg_latency_ms: group.avg_latency_ms,
+          success_rate: group.success_rate,
+          avg_tps: group.avg_tps,
+        },
+      ]
+    })
+  }, [groups, groupPinBottom])
   const latencySeries = useMemo(() => toLatencySeries(series), [series])
   const uptimeSeries = useMemo(() => toUptimeSeries(series), [series])
   const uptimeByGroup = useMemo<Record<string, UptimeDayPoint[]>>(() => {

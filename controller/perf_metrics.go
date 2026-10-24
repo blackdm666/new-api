@@ -5,12 +5,33 @@ import (
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
-	"github.com/samber/lo"
 )
+
+// perfMetricsVisibleGroups returns the groups whose metrics the caller may
+// see: the priced groups they can select (as on the pricing page), plus auto.
+// Groups that are priced but not selectable stay hidden.
+func perfMetricsVisibleGroups(c *gin.Context) []string {
+	userGroup := ""
+	if userId := c.GetInt("id"); userId > 0 {
+		if user, err := model.GetUserCache(userId); err == nil {
+			userGroup = user.Group
+		}
+	}
+	usable := service.GetUserUsableGroups(userGroup)
+	groups := []string{"auto"}
+	for group := range ratio_setting.GetGroupRatioCopy() {
+		if _, ok := usable[group]; ok {
+			groups = append(groups, group)
+		}
+	}
+	return groups
+}
 
 func GetPerfMetricsSummary(c *gin.Context) {
 	hours := 24
@@ -25,8 +46,7 @@ func GetPerfMetricsSummary(c *gin.Context) {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid parameters"))
 		return
 	}
-	activeGroups := append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto")
-	result, err := perfmetrics.QuerySummaryAll(hours, activeGroups, recentModels...)
+	result, err := perfmetrics.QuerySummaryAll(hours, perfMetricsVisibleGroups(c), recentModels...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -62,7 +82,7 @@ func GetPerfMetrics(c *gin.Context) {
 		Model:         modelName,
 		Group:         c.Query("group"),
 		Hours:         hours,
-		AllowedGroups: append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto"),
+		AllowedGroups: perfMetricsVisibleGroups(c),
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
