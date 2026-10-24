@@ -57,7 +57,10 @@ func TestAdaptorUsesExactRouteAndQueryAuth(t *testing.T) {
 // An absolute route sends the request to a host other than the channel base
 // URL, and a channel proxy is dialed before the upstream; a failed handshake
 // must hide both.
-func TestAdaptorMasksDialedHostsInDialFailure(t *testing.T) {
+// 88API keeps dialed hosts out of the error itself: the WebSocket dial writes
+// the target to the server log and returns a generic error, so neither the
+// error nor the message relayed to the client names the host.
+func TestAdaptorKeepsDialedHostsOutOfDialFailure(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
@@ -87,10 +90,10 @@ func TestAdaptorMasksDialedHostsInDialFailure(t *testing.T) {
 
 			var apiErr *types.NewAPIError
 			require.ErrorAs(t, err, &apiErr)
-			require.Contains(t, apiErr.Error(), tc.hidden)
+			assert.NotContains(t, apiErr.Error(), tc.hidden)
 			message := apiErr.ToOpenAIError(common.UpstreamAddresses(c)...).Message
-			assert.Contains(t, message, "dial failed to ws://***:"+upstreamURL.Port()+"/***/***")
 			assert.NotContains(t, message, tc.hidden)
+			assert.NotContains(t, message, upstreamURL.Port())
 		})
 	}
 }
