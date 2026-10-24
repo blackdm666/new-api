@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { describe, expect, it } from 'vitest'
 
-import { orderGroupsPinnedBottom } from '../group-order'
+import { movePinnedGroupsLast, orderGroupsPinnedBottom } from '../group-order'
 
 const groups = {
   'AZ-GPT-T6号池': 'azure',
@@ -60,5 +60,16 @@ describe('orderGroupsPinnedBottom', () => {
   it('returns the groups unchanged when nothing is pinned', () => {
     expect(orderGroupsPinnedBottom(groups, undefined)).toBe(groups)
     expect(orderGroupsPinnedBottom(groups, [])).toBe(groups)
+  })
+})
+
+describe('movePinnedGroupsLast', () => {
+  it('lists a model group set with pinned groups last so another group is shown first', () => {
+    expect(
+      movePinnedGroupsLast(
+        ['AZ-GPT-T6号池', 'GPT-Plus', 'AZ-GPT可蒸馏', 'GPT-Pro'],
+        ['AZ-GPT-T6号池', 'AZ-GPT可蒸馏']
+      )
+    ).toEqual(['GPT-Plus', 'GPT-Pro', 'AZ-GPT-T6号池', 'AZ-GPT可蒸馏'])
   })
 })

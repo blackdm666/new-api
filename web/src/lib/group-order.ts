@@ -19,9 +19,21 @@ For commercial licensing, please contact support@quantumnous.com
 
 /**
  * Moves the groups an administrator pinned to the bottom to the end of a group
- * record, in the pinned order. Other groups keep the order the server sent.
- * Group names that look like array indexes ("1", "2") are always enumerated
- * first by JavaScript objects and cannot be moved.
+ * list, in the pinned order. Other groups keep the order the server sent.
+ */
+export function movePinnedGroupsLast(
+  groups: readonly string[],
+  pinBottom: readonly string[] | null | undefined
+): string[] {
+  const pinned = (pinBottom ?? []).filter((name) => groups.includes(name))
+  if (pinned.length === 0) return [...groups]
+  return [...groups.filter((name) => !pinned.includes(name)), ...pinned]
+}
+
+/**
+ * Record version of movePinnedGroupsLast. Group names that look like array
+ * indexes ("1", "2") are always enumerated first by JavaScript objects and
+ * cannot be moved.
  */
 export function orderGroupsPinnedBottom<T>(
   groups: Record<string, T>,

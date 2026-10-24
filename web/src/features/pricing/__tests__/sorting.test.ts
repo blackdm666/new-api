@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { describe, expect, test } from 'vitest'
 
 import { SORT_OPTIONS } from '../constants'
-import { sortModels } from '../lib/filters'
+import { filterAndSortModels, sortModels } from '../lib/filters'
 import type { PricingModel } from '../types'
 
 function pricingModel(
@@ -123,4 +123,39 @@ describe('price sorting', () => {
       )
     }
   )
+})
+
+describe('pinned group sorting', () => {
+  const pinnedGroups = ['AZ-GPT-T6号池', 'AZ-GPT可蒸馏']
+  const catalog = [
+    pricingModel('az-gpt-image-2', { enable_groups: ['AZ-GPT-T6号池'] }),
+    pricingModel('claude-fable-5', { enable_groups: ['Claude Kiro'] }),
+    pricingModel('gpt-5.5', { enable_groups: ['AZ-GPT-T6号池', 'auto'] }),
+    pricingModel('gpt-6-sol', {
+      enable_groups: ['AZ-GPT-T6号池', 'GPT-Plus'],
+    }),
+  ]
+  const filters = {
+    search: '',
+    vendor: 'all',
+    group: 'all',
+    quotaType: 'all',
+    endpointType: 'all',
+    tag: 'all',
+    sortBy: SORT_OPTIONS.NAME,
+  }
+
+  test('models offered only in pinned groups move after the rest in name order', () => {
+    expect(
+      filterAndSortModels(catalog, filters, pinnedGroups).map(
+        (m) => m.model_name
+      )
+    ).toEqual(['claude-fable-5', 'gpt-6-sol', 'az-gpt-image-2', 'gpt-5.5'])
+  })
+
+  test('without pinned groups the name order is unchanged', () => {
+    expect(
+      filterAndSortModels(catalog, filters).map((m) => m.model_name)
+    ).toEqual(['az-gpt-image-2', 'claude-fable-5', 'gpt-5.5', 'gpt-6-sol'])
+  })
 })
