@@ -328,7 +328,10 @@ export function parseTaskResult(ctx, body) {
   }
   const response = body.response || {};
   const url = dataVideo(response);
-  if (!trimmed(url)) {
+  // 88API: a finished operation with no video entries was filtered or produced
+  // nothing. Entries without inline data are still a success: a New API
+  // gateway serves their content through its own content route.
+  if (!trimmed(url) && !(response.videos || []).length) {
     const reasons = (response.raiMediaFilteredReasons || []).filter(function (reason) {
       return trimmed(reason);
     });
