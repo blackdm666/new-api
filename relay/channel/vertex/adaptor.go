@@ -187,17 +187,20 @@ func (a *Adaptor) getRequestUrl(info *relaycommon.RelayInfo, modelName, suffix s
 		} else {
 			keyPrefix = "?"
 		}
+		// An API key carries no project. Without a configured project ID the URL
+		// keeps the express-mode form, which has no region in its path.
+		projectID := strings.TrimSpace(info.ChannelOtherSettings.VertexProjectID)
 		if a.RequestMode == RequestModeGemini {
 			return fmt.Sprintf(
 				"%s%skey=%s",
-				BuildGoogleModelURL(info.ChannelBaseUrl, apiVersion, "", region, modelName, suffix),
+				BuildGoogleModelURL(info.ChannelBaseUrl, apiVersion, projectID, region, modelName, suffix),
 				keyPrefix,
 				info.ApiKey,
 			), nil
 		} else if a.RequestMode == RequestModeClaude {
 			return fmt.Sprintf(
 				"%s%skey=%s",
-				BuildAnthropicModelURL(info.ChannelBaseUrl, DefaultAPIVersion, "", region, modelName, suffix),
+				BuildAnthropicModelURL(info.ChannelBaseUrl, DefaultAPIVersion, projectID, region, modelName, suffix),
 				keyPrefix,
 				info.ApiKey,
 			), nil

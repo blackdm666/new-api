@@ -1427,15 +1427,17 @@ func DeltaUpdateUserQuota(id int, delta int) (err error) {
 	}
 }
 
-//func GetRootUserEmail() (email string) {
-//	DB.Model(&User{}).Where("role = ?", common.RoleRootUser).Select("email").Find(&email)
-//	return email
-//}
-
+// GetRootUser 返回超级管理员；88API 的推广通知和 cyber 风控按它发管理员通知
+// （官方 rc.45 起渠道通知改为按各管理员的开关发送后已不再使用）。
 func GetRootUser() (user *User) {
 	DB.Where("role = ?", common.RoleRootUser).First(&user)
 	return user
 }
+
+//func GetRootUserEmail() (email string) {
+//	DB.Model(&User{}).Where("role = ?", common.RoleRootUser).Select("email").Find(&email)
+//	return email
+//}
 
 func UpdateUserLastLoginAt(id int) {
 	if err := DB.Model(&User{}).Where("id = ?", id).Update("last_login_at", common.GetTimestamp()).Error; err != nil {

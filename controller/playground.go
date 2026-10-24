@@ -79,6 +79,6 @@ func setupPlaygroundContext(c *gin.Context) *types.NewAPIError {
 
 func respondPlaygroundError(c *gin.Context, newAPIError *types.NewAPIError) {
 	c.JSON(newAPIError.StatusCode, gin.H{
-		"error": newAPIError.ToOpenAIError(),
+		"error": newAPIError.ToOpenAIError(common.UpstreamAddresses(c)...),
 	})
 }

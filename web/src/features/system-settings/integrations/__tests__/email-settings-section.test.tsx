@@ -28,6 +28,8 @@ import {
 } from '../email-settings-section'
 
 const settings: EmailFormValues = {
+  QuotaRemindEnabled: true,
+  QuotaRemindThreshold: '1000',
   SMTPServer: 'smtp.primary.example',
   SMTPPort: '587',
   SMTPAccount: 'primary@example.com',

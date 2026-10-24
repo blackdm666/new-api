@@ -202,11 +202,9 @@ func applyClaudeGeminiTools(request *dto.GeminiChatRequest, rawTools any, rawToo
 	}
 	functions := make([]dto.FunctionRequest, 0, len(tools))
 	for _, tool := range tools {
-		parameters := sharedgemini.CleanFunctionParameters(tool.InputSchema)
-		if schema, ok := parameters.(map[string]interface{}); ok {
-			if properties, exists := schema["properties"].(map[string]interface{}); exists && len(properties) == 0 {
-				parameters = nil
-			}
+		parameters, err := sharedgemini.CleanFunctionParametersJSON(tool.InputSchema)
+		if err != nil {
+			return fmt.Errorf("invalid Anthropic tool %s input_schema: %w", tool.Name, err)
 		}
 		functions = append(functions, dto.FunctionRequest{
 			Name:        tool.Name,

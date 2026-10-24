@@ -653,6 +653,32 @@ export function buildSubmitRequest(ctx){return {url:ctx.baseUrl+"/submit"}} expo
 	assert.Contains(t, taskErr.Message, "must not return renderer")
 }
 
+func TestTaskAdaptorMasksChannelAddressInBuildFailure(t *testing.T) {
+	source := `
+export const meta = {apiVersion:1,key:"build-fail",name:"Build Fail",version:"1.0.0",author:{name:"Test"},models:["m"],fetchMode:"per_task",allowedHosts:["assets.corp.internal"]};
+export function buildSubmitRequest(ctx){throw new Error("utils.fetch to private.example.com failed: dial tcp: lookup private.example.com: no such host; utils.fetch to assets.corp.internal failed: dial tcp: lookup assets.corp.internal: no such host")}
+export function parseSubmitResponse(){return {taskId:"one"}} export function buildQueryRequest(){return {}} export function parseTaskResult(){return {status:"SUCCESS"}}
+`
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+	c.Set("task_request", map[string]any{"model": "m"})
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://private.example.com")
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://private.example.com"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}, OriginModelName: "m"}
+	adaptor := New(plugin)
+	adaptor.Init(info)
+
+	taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "plugin_request_invalid", taskErr.Code)
+	assert.True(t, taskErr.LocalError)
+	assert.Contains(t, taskErr.Message, "no such host")
+	assert.NotContains(t, taskErr.Message, "private.example.com")
+	assert.NotContains(t, taskErr.Message, "assets.corp.internal")
+}
+
 const orderedProtocolPlugin = `
 export const meta = {apiVersion:1,key:"ordered",name:"Ordered",version:"1.0.0",author:{name:"Test"},models:["m"],fetchMode:"per_task",requiredCapabilities:["json-order@1"],protocols:[{name:"openai_responses",supports:["sync"]}]};
 export const protocols = {openai_responses:{decodeRequest:function(ctx){const b = ctx.body.value; return {kind:"submit",model:ctx.model,requestBody:{model:b.model,state:b.state,questions:b.questions}};},renderFinal:function(){return {};}}};
@@ -1081,7 +1107,7 @@ export function parseBatchResult() {return [];}
 			http.Redirect(w, r, target.URL+"/final", http.StatusFound)
 		}))
 		defer origin.Close()
-		resp, err := New(defaultPlugin).doFetchDescriptor(origin.URL, "", requestDescriptor{
+		resp, err := New(defaultPlugin).doFetchDescriptor(origin.URL, "", "", requestDescriptor{
 			URL:     origin.URL + "/query?key=query-secret",
 			Headers: map[string]string{"X-API-Key": "channel-secret", "x-goog-api-key": "channel-secret", "X-Vendor-Credential": "channel-secret"},
 		})
@@ -1184,6 +1210,115 @@ func TestTaskAdaptorMapsJSContract(t *testing.T) {
 	}`, string(rendered))
 	_, err = plugin.Engine.Export(context.Background(), "meta")
 	require.NoError(t, err)
+}
+
+func TestTaskAdaptorHeaderOverrides(t *testing.T) {
+	service.InitHttpClient()
+	source := strings.ReplaceAll(mockPlugin, `"X-Plugin":`, `"Authorization": "plugin-default", "X-Plugin":`)
+	source += `
+export function buildBatchQueryRequest(ctx) {
+  return {url: ctx.baseUrl + "/batch", method: "POST", headers: {Authorization: "plugin-default", "X-Plugin": "batch"}, body: {}};
+}
+export function parseBatchResult() { return {}; }
+`
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	overrides := map[string]any{
+		"X-API-Key":     "{api_key}",
+		"Authorization": "Custom {api_key}",
+		"X-Plugin":      "configured",
+		"Host":          "upstream.example",
+		"*":             true,
+		"re:^X-Trace-":  true,
+		"X-Client":      "{client_header:X-Trace-Id}",
+	}
+	for _, mode := range []string{"submit", "poll", "batch"} {
+		for _, tc := range []struct {
+			name    string
+			headers map[string]any
+			invalid bool
+		}{
+			{name: "plugin defaults"},
+			{name: "channel overrides", headers: overrides},
+			{name: "invalid header value", headers: map[string]any{"X-API-Key": "key\r\nInjected: value"}, invalid: true},
+		} {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				received := make(chan *http.Request, 1)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					received <- r.Clone(r.Context())
+					_, _ = w.Write([]byte(`{}`))
+				}))
+				defer server.Close()
+				info := &relaycommon.RelayInfo{
+					ChannelMeta: &relaycommon.ChannelMeta{
+						ChannelBaseUrl:  server.URL,
+						ApiKey:          "channel-key",
+						HeadersOverride: tc.headers,
+					},
+					TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+				}
+				adaptor := New(plugin)
+				adaptor.Init(info)
+				task := &model.Task{PrivateData: model.TaskPrivateData{UpstreamTaskID: "task-1", Key: "task-key"}}
+				var resp *http.Response
+				var requestErr error
+				wantKey := "channel-key"
+				wantPlugin := "submit"
+				switch mode {
+				case "submit":
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+					c.Request.Header.Set("X-Trace-Id", "client-trace")
+					c.Request.Header.Set("X-API-Key", "client-key")
+					c.Request.Header.Set("Authorization", "client-authorization")
+					c.Request.Header.Set("Cookie", "client-session")
+					c.Set("task_request", relaycommon.TaskSubmitReq{Prompt: "hello"})
+					body, err := adaptor.BuildRequestBody(c, info)
+					require.NoError(t, err)
+					resp, requestErr = adaptor.DoRequest(c, info, body)
+				case "poll":
+					wantKey, wantPlugin = "task-key", "query"
+					resp, requestErr = adaptor.FetchTask(server.URL, "argument-key", task, "")
+				case "batch":
+					wantKey, wantPlugin = "batch-key", "batch"
+					resp, requestErr = adaptor.FetchBatchTasks(server.URL, "batch-key", []*model.Task{task}, "")
+				}
+				if resp != nil {
+					t.Cleanup(func() { _ = resp.Body.Close() })
+				}
+				if tc.invalid {
+					require.Error(t, requestErr)
+					assert.Nil(t, resp)
+					assert.Empty(t, received, "invalid configuration must reject the descriptor request before sending it")
+					return
+				}
+				require.NoError(t, requestErr)
+				require.NotNil(t, resp)
+				assert.Equal(t, http.StatusOK, resp.StatusCode)
+				require.Len(t, received, 1)
+				request := <-received
+				assert.Empty(t, request.Header.Get("Cookie"))
+				if tc.headers == nil {
+					assert.Equal(t, wantPlugin, request.Header.Get("X-Plugin"))
+					assert.Equal(t, "plugin-default", request.Header.Get("Authorization"))
+					assert.Empty(t, request.Header.Get("X-API-Key"))
+				} else {
+					assert.Equal(t, "configured", request.Header.Get("X-Plugin"))
+					assert.Equal(t, wantKey, request.Header.Get("X-API-Key"))
+					assert.Equal(t, "Custom "+wantKey, request.Header.Get("Authorization"))
+					assert.Equal(t, "upstream.example", request.Host)
+					wantClient := ""
+					if mode == "submit" {
+						wantClient = "client-trace"
+					}
+					assert.Equal(t, wantClient, request.Header.Get("X-Client"))
+					assert.Equal(t, wantClient, request.Header.Get("X-Trace-Id"))
+					assert.Equal(t, "{api_key}", tc.headers["X-API-Key"], "resolving credentials must not mutate channel configuration")
+				}
+				assert.Equal(t, "channel-key", info.ApiKey, "polling must not change shared channel credentials")
+			})
+		}
+	}
 }
 
 func TestTaskAdaptorPreservesSoraVideoResponseFields(t *testing.T) {

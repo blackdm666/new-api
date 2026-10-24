@@ -211,6 +211,10 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
   const cacheWrite = other.cache_creation_tokens || 0
   const cacheWrite5m = other.cache_creation_tokens_5m || 0
   const cacheWrite1h = other.cache_creation_tokens_1h || 0
+  const cacheWrite12h = other.cache_creation_tokens_12h || 0
+  // cache_creation_tokens counts OpenAI 30-minute and 12-hour writes together.
+  const cacheWrite30m =
+    cacheWrite12h > 0 ? Math.max(cacheWrite - cacheWrite12h, 0) : 0
   const hasTokens = promptTokens > 0 || completionTokens > 0
 
   if (!hasTokens) return null
@@ -237,7 +241,12 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
     })
   }
 
-  if (cacheWrite > 0 && cacheWrite5m === 0 && cacheWrite1h === 0) {
+  if (
+    cacheWrite > 0 &&
+    cacheWrite5m === 0 &&
+    cacheWrite1h === 0 &&
+    cacheWrite12h === 0
+  ) {
     rows.push({
       label: t('Cache Write'),
       value: cacheWrite.toLocaleString(),
@@ -255,6 +264,20 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
     rows.push({
       label: t('Cache Write (1h)'),
       value: cacheWrite1h.toLocaleString(),
+    })
+  }
+
+  if (cacheWrite30m > 0) {
+    rows.push({
+      label: t('Cache Write (30m)'),
+      value: cacheWrite30m.toLocaleString(),
+    })
+  }
+
+  if (cacheWrite12h > 0) {
+    rows.push({
+      label: t('Cache Write (12h)'),
+      value: cacheWrite12h.toLocaleString(),
     })
   }
 

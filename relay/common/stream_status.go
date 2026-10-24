@@ -74,9 +74,9 @@ func NewStreamStatus() *StreamStatus {
 	return &StreamStatus{}
 }
 
-// SetEndReason records why the stream ended. The first reason normally wins,
-// except that a confirmed normal completion can correct an earlier
-// client_gone written by the completion/disconnect race.
+// SetEndReason records why the stream ended; the first reason wins. A
+// client_gone that raced a delivered completion is corrected by the stream
+// scanner only after its workers join (see StreamScannerHandler).
 func (s *StreamStatus) SetEndReason(reason StreamEndReason, err error) {
 	if s == nil {
 		return
@@ -84,11 +84,6 @@ func (s *StreamStatus) SetEndReason(reason StreamEndReason, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.reasonSet {
-		if s.EndReason == StreamEndReasonClientGone &&
-			(reason == StreamEndReasonDone || reason == StreamEndReasonEOF) {
-			s.EndReason = reason
-			s.EndError = err
-		}
 		return
 	}
 	s.reasonSet = true

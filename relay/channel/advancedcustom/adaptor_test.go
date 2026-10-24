@@ -54,6 +54,50 @@ func TestAdaptorUsesExactRouteAndQueryAuth(t *testing.T) {
 	assert.Equal(t, "sk-test", parsedURL.Query().Get("api_key"))
 }
 
+// An absolute route sends the request to a host other than the channel base
+// URL, and a channel proxy is dialed before the upstream; a failed handshake
+// must hide both.
+// 88API keeps dialed hosts out of the error itself: the WebSocket dial writes
+// the target to the server log and returns a generic error, so neither the
+// error nor the message relayed to the client names the host.
+func TestAdaptorKeepsDialedHostsOutOfDialFailure(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer upstream.Close()
+	upstreamURL, err := url.Parse(upstream.URL)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name   string
+		proxy  string
+		hidden string
+	}{
+		{name: "absolute route host", hidden: "localhost"},
+		{name: "channel proxy host", proxy: "http://egress.private.invalid:8080", hidden: "egress.private.invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			info := advancedCustomRelayInfo(&dto.AdvancedCustomConfig{
+				Routes: []dto.AdvancedCustomRoute{{IncomingPath: "/v1/realtime", UpstreamPath: "http://localhost:" + upstreamURL.Port() + "/v1/realtime", Converter: relayconvert.ConverterNone}},
+			})
+			info.RelayMode = relayconstant.RelayModeRealtime
+			info.RequestURLPath = "/v1/realtime"
+			info.ChannelSetting.Proxy = tc.proxy
+			c := advancedCustomGinContext("/v1/realtime")
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, info.ChannelBaseUrl)
+			common.SetContextKey(c, constant.ContextKeyChannelSetting, info.ChannelSetting)
+
+			_, err := (&Adaptor{}).DoRequest(c, info, nil)
+
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.NotContains(t, apiErr.Error(), tc.hidden)
+			message := apiErr.ToOpenAIError(common.UpstreamAddresses(c)...).Message
+			assert.NotContains(t, message, tc.hidden)
+			assert.NotContains(t, message, upstreamURL.Port())
+		})
+	}
+}
+
 func TestAdaptorJoinsUpstreamPathWithChannelBaseURL(t *testing.T) {
 	adaptor := &Adaptor{}
 	info := advancedCustomRelayInfo(&dto.AdvancedCustomConfig{

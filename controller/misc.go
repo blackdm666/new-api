@@ -135,6 +135,8 @@ func GetStatus(c *gin.Context) {
 		"invoice_file_allowed_exts":   setting.InvoiceFileAllowedExts,
 		"log_export_enabled":          operation_setting.GetLogSetting().UserExportEnabled,
 		"log_max_range_days":          operation_setting.GetLogSetting().MaxRangeDays,
+		"quota_remind_enabled":        common.QuotaRemindEnabled,
+		"quota_remind_threshold":      common.QuotaRemindThreshold,
 	}
 
 	// 根据启用状态注入可选内容

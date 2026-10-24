@@ -306,6 +306,23 @@ func SendEmailWithProfile(profile string, subject string, receiver string, conte
 }
 
 func SendEmailWithProfileResult(profile string, subject string, receiver string, content string) (SMTPDeliveryResult, error) {
+	OptionMapRWMutex.RLock()
+	provider := OptionMap["EmailProvider"]
+	resendKey := OptionMap["ResendApiKey"]
+	resendFrom := OptionMap["ResendFrom"]
+	OptionMapRWMutex.RUnlock()
+	// One selector controls delivery. Never fall back to a second provider:
+	// a failed response does not prove that the first provider did not send.
+	switch provider {
+	case "resend":
+		if err := sendResendEmail(resendKey, resendFrom, subject, receiver, content); err != nil {
+			return SMTPDeliveryResult{}, err
+		}
+		return SMTPDeliveryResult{Profile: profile, Channel: "resend"}, nil
+	case "", "smtp": // Preserve existing installations without a selector.
+	default:
+		return SMTPDeliveryResult{}, NewMessage("Email sending method must be SMTP or Resend")
+	}
 	return sendEmailWithAttachmentsProfile(profile, subject, receiver, content, nil)
 }
 
