@@ -20,7 +20,10 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 
 import { useStatus } from '@/hooks/use-status'
-import { orderGroupsPinnedBottom } from '@/lib/group-order'
+import {
+  movePinnedGroupsLast,
+  orderGroupsPinnedBottom,
+} from '@/lib/group-order'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { getPricing } from '../api'
@@ -61,9 +64,15 @@ export function usePricingData(enabled = true) {
         vendor_icon: vendor?.icon,
         vendor_description: vendor?.description,
         group_ratio: data.group_ratio,
+        enable_groups: movePinnedGroupsLast(
+          model.enable_groups ?? [],
+          data.group_pin_bottom
+        ),
       }
     })
   }, [data])
+
+  const groupPinBottom = useMemo(() => data?.group_pin_bottom ?? [], [data])
 
   const usableGroup = useMemo(
     () =>
@@ -76,6 +85,7 @@ export function usePricingData(enabled = true) {
     vendors: data?.vendors ?? [],
     groupRatio: data?.group_ratio ?? {},
     usableGroup,
+    groupPinBottom,
     endpointMap: data?.supported_endpoint ?? {},
     autoGroups: data?.auto_groups ?? [],
     isLoading,

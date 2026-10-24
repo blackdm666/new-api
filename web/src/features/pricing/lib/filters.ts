@@ -22,6 +22,7 @@ import {
   QUOTA_TYPES,
   QUOTA_TYPE_VALUES,
   ENDPOINT_TYPES,
+  EXCLUDED_GROUPS,
   type SortOption,
 } from '../constants'
 import type { PricingModel } from '../types'
@@ -210,6 +211,32 @@ export function sortModels(
 }
 
 /**
+ * Move models offered only in groups pinned to the bottom after the other
+ * models, keeping the current order within both parts.
+ */
+export function sinkPinnedGroupModels(
+  models: PricingModel[],
+  pinnedGroups: readonly string[]
+): PricingModel[] {
+  if (pinnedGroups.length === 0) return models
+  const regular: PricingModel[] = []
+  const pinnedOnly: PricingModel[] = []
+  for (const model of models) {
+    const groups = (model.enable_groups ?? []).filter(
+      (group) => !EXCLUDED_GROUPS.includes(group)
+    )
+    const onlyPinned =
+      groups.length > 0 && groups.every((group) => pinnedGroups.includes(group))
+    if (onlyPinned) {
+      pinnedOnly.push(model)
+    } else {
+      regular.push(model)
+    }
+  }
+  return [...regular, ...pinnedOnly]
+}
+
+/**
  * Apply all filters and sorting to models
  */
 export function filterAndSortModels(
@@ -222,7 +249,8 @@ export function filterAndSortModels(
     endpointType: string
     tag: string
     sortBy: string
-  }
+  },
+  pinnedGroups: readonly string[] = []
 ): PricingModel[] {
   let result = filterBySearch(models, filters.search)
   result = filterByVendor(result, filters.vendor)
@@ -231,6 +259,7 @@ export function filterAndSortModels(
   result = filterByEndpointType(result, filters.endpointType)
   result = filterByTag(result, filters.tag)
   result = sortModels(result, filters.sortBy)
+  result = sinkPinnedGroupModels(result, pinnedGroups)
 
   return result
 }

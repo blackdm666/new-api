@@ -46,6 +46,8 @@ type FilterState = {
   rechargePrice?: boolean
 }
 
+const NO_PINNED_GROUPS: readonly string[] = []
+
 function normalizeViewMode(value: unknown): ViewMode {
   if (value === VIEW_MODES.TABLE) {
     return VIEW_MODES.TABLE
@@ -53,7 +55,10 @@ function normalizeViewMode(value: unknown): ViewMode {
   return VIEW_MODES.CARD
 }
 
-export function useFilters(models: PricingModel[]) {
+export function useFilters(
+  models: PricingModel[],
+  pinnedGroups: readonly string[] = NO_PINNED_GROUPS
+) {
   const search = useSearch({ from: '/pricing/' })
   const [filterState, setFilterState] = useState<FilterState>(() => ({
     search: search.search,
@@ -149,17 +154,22 @@ export function useFilters(models: PricingModel[]) {
   const filteredModels = useMemo(() => {
     if (!models || models.length === 0) return []
 
-    return filterAndSortModels(models, {
-      search: debouncedSearchInput,
-      vendor: vendorFilter,
-      group: groupFilter,
-      quotaType: quotaTypeFilter,
-      endpointType: endpointTypeFilter,
-      tag: tagFilter,
-      sortBy,
-    })
+    return filterAndSortModels(
+      models,
+      {
+        search: debouncedSearchInput,
+        vendor: vendorFilter,
+        group: groupFilter,
+        quotaType: quotaTypeFilter,
+        endpointType: endpointTypeFilter,
+        tag: tagFilter,
+        sortBy,
+      },
+      pinnedGroups
+    )
   }, [
     models,
+    pinnedGroups,
     debouncedSearchInput,
     vendorFilter,
     groupFilter,
