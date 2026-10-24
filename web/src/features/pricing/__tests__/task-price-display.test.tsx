@@ -473,6 +473,71 @@ it('uses the compact resolution and reference-input matrix when recognized', asy
   expect(screen.getAllByText(/\/ Per 1M/).length).toBeGreaterThan(0)
 })
 
+it('gives each billed quantity of a compact resolution table its own labelled column', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <ModelDetailsContent
+        model={{
+          ...model,
+          model_name: 'video-with-references',
+          billing_mode: 'tiered_expr',
+          billing_expr:
+            'u("resolution") == "2k" ? tier("2k", u("seconds") * 0.55 + u("input_video_seconds") * 0.55 + u("extra_images") * 0.15) : tier("768p", u("seconds") * 0.35 + u("input_video_seconds") * 0.35 + u("extra_images") * 0.15)',
+          billing_usage_schema: {
+            seconds: {
+              type: 'number',
+              unit: 'second',
+              description: { en: 'Generated video', zh: '生成视频' },
+            },
+            resolution: {
+              enum: ['768p', '2k'],
+              description: { en: 'Output resolution', zh: '输出分辨率' },
+            },
+            input_video_seconds: {
+              type: 'number',
+              unit: 'second',
+              description: { en: 'Reference video', zh: '参考视频' },
+            },
+            extra_images: {
+              type: 'number',
+              unit: 'count',
+              unitLabel: { en: 'image', zh: '张' },
+              description: { en: 'Images from #6', zh: '第 6 张起的图片' },
+            },
+          },
+          compact_pricing_display: 1,
+        }}
+        groupRatio={{ default: 1 }}
+        usableGroup={{ default: { desc: 'Default group', ratio: 1 } }}
+        endpointMap={{}}
+        autoGroups={[]}
+        priceRate={1}
+        usdExchangeRate={1}
+        tokenUnit='M'
+      />
+    </QueryClientProvider>
+  )
+
+  expect(screen.queryByText('Base Price')).not.toBeInTheDocument()
+  expect(
+    screen.getByRole('columnheader', { name: 'Generated video / s' })
+  ).toBeVisible()
+  expect(
+    screen.getByRole('columnheader', { name: 'Reference video / s' })
+  ).toBeVisible()
+  expect(
+    screen.getByRole('columnheader', { name: 'Images from #6 / image' })
+  ).toBeVisible()
+  const row = screen.getByRole('row', { name: /^2k/ })
+  expect(within(row).getAllByText('$0.55')).toHaveLength(2)
+  expect(within(row).getByText('$0.15')).toBeVisible()
+})
+
 it('uses plugin option labels and infers a unique fallback without expanding unrelated fields', async () => {
   render(
     <DynamicPricingBreakdown
