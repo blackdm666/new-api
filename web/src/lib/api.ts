@@ -1,3 +1,4 @@
+import { orderGroupsPinnedBottom } from '@/lib/group-order'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -61,8 +62,15 @@ export async function getUserGroups(): Promise<{
   success: boolean
   message?: string
   data?: Record<string, { desc: string; ratio: number | string }>
+  group_pin_bottom?: string[]
 }> {
   const res = await api.get('/api/user/self/groups')
+  if (res.data?.data) {
+    res.data.data = orderGroupsPinnedBottom(
+      res.data.data,
+      res.data.group_pin_bottom
+    )
+  }
   return res.data
 }
 

@@ -74,6 +74,7 @@ type GroupFormValues = {
   MaxTokenAutoGroups: number
   DefaultUseAutoGroup: boolean
   GroupSpecialUsableGroup: string
+  GroupPinBottom: string
 }
 
 type GroupRatioFormProps = {
@@ -170,6 +171,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
             groupRatio={values.GroupRatio ?? ''}
             topupGroupRatio={values.TopupGroupRatio ?? ''}
             userUsableGroups={values.UserUsableGroups ?? ''}
+            groupPinBottom={values.GroupPinBottom ?? ''}
             groupGroupRatio={values.GroupGroupRatio ?? ''}
             autoGroups={values.AutoGroups ?? ''}
             maxTokenAutoGroupsField={
@@ -302,6 +304,32 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                   <FormDescription>
                     {t(
                       'JSON map of group → description exposed when users create API keys.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='GroupPinBottom'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Pinned to bottom')}</FormLabel>
+                  <FormControl>
+                    <JsonCodeEditor
+                      value={field.value}
+                      onChange={field.onChange}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      textareaRef={field.ref}
+                      heightClassName='h-24 min-h-24 max-h-24'
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON array of groups listed last, in this order, in the model marketplace and the API key group list.'
                     )}
                   </FormDescription>
                   <FormMessage />

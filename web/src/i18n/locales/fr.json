@@ -8735,6 +8735,9 @@
     "Show account balance in CC Switch": "Afficher le solde du compte dans CC Switch",
     "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance": "Activez « Autoriser la consultation du quota utilisateur » pour cette clé dans la console pour voir le solde du portefeuille",
     "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.": "Active aussi « Autoriser la consultation du quota utilisateur » pour cette clé, afin que CC Switch puisse lire le solde du portefeuille.",
-    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch lit le solde du portefeuille avec cette clé et le met à jour toutes les {{minutes}} minutes."
+    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch lit le solde du portefeuille avec cette clé et le met à jour toutes les {{minutes}} minutes.",
+    "Pin to bottom": "Épingler en bas",
+    "Pinned to bottom": "Groupes épinglés en bas",
+    "JSON array of groups listed last, in this order, in the model marketplace and the API key group list.": "Tableau JSON des groupes affichés en dernier, dans cet ordre, dans la place de marché des modèles et la liste des groupes des clés API."
   }
 }

@@ -8737,6 +8737,9 @@
     "Show account balance in CC Switch": "在 CC Switch 顯示帳戶餘額",
     "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance": "在控制台為這個 Key 開啟「允許查詢使用者額度」後顯示錢包餘額",
     "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.": "同時為這個 Key 開啟「允許查詢使用者額度」，CC Switch 才能用它讀取錢包餘額。",
-    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch 用這個 Key 讀取錢包餘額，每 {{minutes}} 分鐘重新整理一次。"
+    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch 用這個 Key 讀取錢包餘額，每 {{minutes}} 分鐘重新整理一次。",
+    "Pin to bottom": "置底",
+    "Pinned to bottom": "置底分組",
+    "JSON array of groups listed last, in this order, in the model marketplace and the API key group list.": "JSON 陣列：這些分組在模型廣場和建立 API 金鑰的分組列表中按此順序排在最後。"
   }
 }

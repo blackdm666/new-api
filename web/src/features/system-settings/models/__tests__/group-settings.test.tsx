@@ -43,6 +43,7 @@ const defaults = {
   MaxTokenAutoGroups: 5,
   DefaultUseAutoGroup: false,
   GroupSpecialUsableGroup: '{}',
+  GroupPinBottom: '[]',
 }
 
 const schema = z.object({
@@ -54,6 +55,7 @@ const schema = z.object({
   MaxTokenAutoGroups: positiveIntegerSchema('Enter a positive integer'),
   DefaultUseAutoGroup: z.boolean(),
   GroupSpecialUsableGroup: z.string(),
+  GroupPinBottom: z.string(),
 })
 
 function Fixture(props: {
@@ -128,7 +130,9 @@ describe('group settings workspace', () => {
         .map((input) => input.value)
     ).toEqual(['group_2', 'group_1', 'default', 'vip'])
 
-    await user.click(screen.getByRole('button', { name: 'Save group settings' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     const saved = onSave.mock.calls[0][0]
     expect(JSON.parse(saved.GroupRatio)).toEqual({
@@ -145,6 +149,26 @@ describe('group settings workspace', () => {
     })
     expect(JSON.parse(saved.TopupGroupRatio)).toEqual({ vip: 1.2 })
     expect(saved.AutoGroups).toBe(defaults.AutoGroups)
+  })
+
+  it('saves pinned groups in table order when their pin-to-bottom switches are turned on', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (_values: typeof defaults) => {})
+    render(<Fixture onSave={onSave} initial={{ GroupPinBottom: '["vip"]' }} />)
+
+    const switches = screen.getAllByRole('switch', { name: 'Pin to bottom' })
+    expect(switches[0]).toHaveAttribute('aria-checked', 'false')
+    expect(switches[1]).toHaveAttribute('aria-checked', 'true')
+
+    await user.click(switches[0])
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(JSON.parse(onSave.mock.calls[0][0].GroupPinBottom)).toEqual([
+      'default',
+      'vip',
+    ])
   })
 
   it('keeps unfinished visibility rules while switching sections and supports keyboard tabs', async () => {

@@ -45,8 +45,9 @@ func GetUserGroups(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    usableGroups,
+		"success":          true,
+		"message":          "",
+		"data":             usableGroups,
+		"group_pin_bottom": ratio_setting.GetGroupPinBottomIn(usableGroups),
 	})
 }

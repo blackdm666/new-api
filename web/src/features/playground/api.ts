@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import { orderGroupsPinnedBottom } from '@/lib/group-order'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { API_ENDPOINTS } from './constants'
@@ -151,10 +152,10 @@ export async function getUserGroups(): Promise<GroupOption[]> {
     return []
   }
 
-  const groupData = data.data as Record<
-    string,
-    { desc: string; ratio: number | string }
-  >
+  const groupData = orderGroupsPinnedBottom(
+    data.data as Record<string, { desc: string; ratio: number | string }>,
+    data.group_pin_bottom
+  )
 
   // label is for button display (name only); desc is for dropdown content
   return Object.entries(groupData).map(([group, info]) => ({

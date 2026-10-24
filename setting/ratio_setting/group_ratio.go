@@ -1,6 +1,8 @@
 package ratio_setting
 
 import (
+	"slices"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/types"
@@ -28,6 +30,8 @@ type GroupRatioSetting struct {
 	GroupRatio              *types.RWMap[string, float64]            `json:"group_ratio"`
 	GroupGroupRatio         *types.RWMap[string, map[string]float64] `json:"group_group_ratio"`
 	GroupSpecialUsableGroup *types.RWMap[string, map[string]string]  `json:"group_special_usable_group"`
+	// GroupPinBottom lists groups shown last, in this order, wherever users pick a group.
+	GroupPinBottom []string `json:"group_pin_bottom"`
 }
 
 var groupRatioSetting GroupRatioSetting
@@ -43,6 +47,7 @@ func init() {
 		GroupSpecialUsableGroup: groupSpecialUsableGroup,
 		GroupRatio:              groupRatioMap,
 		GroupGroupRatio:         groupGroupRatioMap,
+		GroupPinBottom:          []string{},
 	}
 
 	config.GlobalConfig.Register("group_ratio_setting", &groupRatioSetting)
@@ -54,6 +59,18 @@ func GetGroupRatioSetting() *GroupRatioSetting {
 		groupRatioSetting.GroupSpecialUsableGroup.AddAll(defaultGroupSpecialUsableGroup)
 	}
 	return &groupRatioSetting
+}
+
+// GetGroupPinBottomIn returns the pinned-to-bottom groups present in groups,
+// keeping the configured order so hidden groups are never exposed.
+func GetGroupPinBottomIn[V any](groups map[string]V) []string {
+	pinned := make([]string, 0)
+	for _, name := range groupRatioSetting.GroupPinBottom {
+		if _, ok := groups[name]; ok && !slices.Contains(pinned, name) {
+			pinned = append(pinned, name)
+		}
+	}
+	return pinned
 }
 
 func GetGroupRatioCopy() map[string]float64 {
