@@ -8829,6 +8829,9 @@
     "Show account balance in CC Switch": "Show account balance in CC Switch",
     "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance": "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance",
     "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.": "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.",
-    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes."
+    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.",
+    "Pin to bottom": "Pin to bottom",
+    "Pinned to bottom": "Pinned to bottom",
+    "JSON array of groups listed last, in this order, in the model marketplace and the API key group list.": "JSON array of groups listed last, in this order, in the model marketplace and the API key group list."
   }
 }

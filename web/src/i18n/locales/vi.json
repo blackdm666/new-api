@@ -8735,6 +8735,9 @@
     "Show account balance in CC Switch": "Hiển thị số dư tài khoản trong CC Switch",
     "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance": "Bật \"Cho phép tra cứu hạn mức người dùng\" cho khóa này trong bảng điều khiển để xem số dư ví",
     "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.": "Đồng thời bật \"Cho phép tra cứu hạn mức người dùng\" cho khóa này để CC Switch đọc được số dư ví.",
-    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch đọc số dư ví bằng khóa này và làm mới mỗi {{minutes}} phút."
+    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch đọc số dư ví bằng khóa này và làm mới mỗi {{minutes}} phút.",
+    "Pin to bottom": "Ghim xuống cuối",
+    "Pinned to bottom": "Nhóm ghim xuống cuối",
+    "JSON array of groups listed last, in this order, in the model marketplace and the API key group list.": "Mảng JSON các nhóm được xếp cuối, theo thứ tự này, trong chợ mô hình và danh sách nhóm của khóa API."
   }
 }

@@ -78,6 +78,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
@@ -98,6 +99,7 @@ type GroupRatioVisualEditorProps = {
   groupRatio: string
   topupGroupRatio: string
   userUsableGroups: string
+  groupPinBottom: string
   groupGroupRatio: string
   autoGroups: string
   maxTokenAutoGroupsField: ReactNode
@@ -111,6 +113,7 @@ type GroupPricingRow = {
   ratio: string
   topupRatio: string
   selectable: boolean
+  pinBottom: boolean
   description: string
 }
 
@@ -147,6 +150,16 @@ function parseUsableMap(value: string): Record<string, string> {
   })
 }
 
+function parsePinBottomList(value: string): string[] {
+  const parsed = safeJsonParse<unknown>(value, {
+    fallback: [],
+    silent: true,
+  })
+  return Array.isArray(parsed)
+    ? parsed.filter((item): item is string => typeof item === 'string')
+    : []
+}
+
 function parseNestedRatioMap(
   value: string
 ): Record<string, Record<string, number>> {
@@ -159,11 +172,13 @@ function parseNestedRatioMap(
 function buildGroupPricingRows(
   groupRatio: string,
   userUsableGroups: string,
-  topupGroupRatio: string
+  topupGroupRatio: string,
+  groupPinBottom: string
 ): GroupPricingRow[] {
   const ratioMap = parseRatioMap(groupRatio)
   const usableMap = parseUsableMap(userUsableGroups)
   const topupMap = parseRatioMap(topupGroupRatio)
+  const pinBottom = parsePinBottomList(groupPinBottom)
   const names = new Set([
     ...Object.keys(ratioMap),
     ...Object.keys(usableMap),
@@ -176,6 +191,7 @@ function buildGroupPricingRows(
     ratio: String(normalizeRatio(ratioMap[name])),
     topupRatio: Object.hasOwn(topupMap, name) ? String(topupMap[name]) : '',
     selectable: Object.hasOwn(usableMap, name),
+    pinBottom: pinBottom.includes(name),
     description: String(usableMap[name] ?? ''),
   }))
 }
@@ -184,6 +200,7 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
   const groupRatio: Record<string, number> = {}
   const userUsableGroups: Record<string, string> = {}
   const topupGroupRatio: Record<string, number> = {}
+  const groupPinBottom: string[] = []
 
   for (const row of rows) {
     const name = row.name.trim()
@@ -191,6 +208,9 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
     groupRatio[name] = normalizeRatio(row.ratio)
     if (row.selectable) {
       userUsableGroups[name] = row.description
+    }
+    if (row.pinBottom && !groupPinBottom.includes(name)) {
+      groupPinBottom.push(name)
     }
     const topup = row.topupRatio.trim()
     if (topup !== '' && Number.isFinite(Number(topup))) {
@@ -202,6 +222,7 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
     GroupRatio: JSON.stringify(groupRatio, null, 2),
     UserUsableGroups: JSON.stringify(userUsableGroups, null, 2),
     TopupGroupRatio: JSON.stringify(topupGroupRatio, null, 2),
+    GroupPinBottom: JSON.stringify(groupPinBottom, null, 2),
   }
 }
 
@@ -211,18 +232,21 @@ function groupPricingSignature(rows: GroupPricingRow[]): string {
     groupRatio: parseRatioMap(serialized.GroupRatio),
     userUsableGroups: parseUsableMap(serialized.UserUsableGroups),
     topupGroupRatio: parseRatioMap(serialized.TopupGroupRatio),
+    groupPinBottom: parsePinBottomList(serialized.GroupPinBottom),
   })
 }
 
 function sourceGroupPricingSignature(
   groupRatio: string,
   userUsableGroups: string,
-  topupGroupRatio: string
+  topupGroupRatio: string,
+  groupPinBottom: string
 ): string {
   return JSON.stringify({
     groupRatio: parseRatioMap(groupRatio),
     userUsableGroups: parseUsableMap(userUsableGroups),
     topupGroupRatio: parseRatioMap(topupGroupRatio),
+    groupPinBottom: parsePinBottomList(groupPinBottom),
   })
 }
 
@@ -273,6 +297,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupRatio,
   topupGroupRatio,
   userUsableGroups,
+  groupPinBottom,
   groupGroupRatio,
   autoGroups,
   maxTokenAutoGroupsField,
@@ -370,6 +395,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
           groupRatio={groupRatio}
           userUsableGroups={userUsableGroups}
           topupGroupRatio={topupGroupRatio}
+          groupPinBottom={groupPinBottom}
           onChange={onChange}
           onShowDetail={setDetailGroup}
         />
@@ -475,6 +501,7 @@ type GroupPricingTableProps = {
   groupRatio: string
   userUsableGroups: string
   topupGroupRatio: string
+  groupPinBottom: string
   onChange: (field: string, value: string) => void
   onShowDetail: (name: string) => void
 }
@@ -483,20 +510,27 @@ function GroupPricingTable({
   groupRatio,
   userUsableGroups,
   topupGroupRatio,
+  groupPinBottom,
   onChange,
   onShowDetail,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [rows, setRows] = useState<GroupPricingRow[]>(() =>
-    buildGroupPricingRows(groupRatio, userUsableGroups, topupGroupRatio)
+    buildGroupPricingRows(
+      groupRatio,
+      userUsableGroups,
+      topupGroupRatio,
+      groupPinBottom
+    )
   )
 
   useEffect(() => {
     const incomingSignature = sourceGroupPricingSignature(
       groupRatio,
       userUsableGroups,
-      topupGroupRatio
+      topupGroupRatio,
+      groupPinBottom
     )
     setRows((currentRows) => {
       if (groupPricingSignature(currentRows) === incomingSignature) {
@@ -505,10 +539,11 @@ function GroupPricingTable({
       return buildGroupPricingRows(
         groupRatio,
         userUsableGroups,
-        topupGroupRatio
+        topupGroupRatio,
+        groupPinBottom
       )
     })
-  }, [groupRatio, userUsableGroups, topupGroupRatio])
+  }, [groupRatio, userUsableGroups, topupGroupRatio, groupPinBottom])
 
   const emitRows = useCallback(
     (nextRows: GroupPricingRow[]) => {
@@ -517,6 +552,7 @@ function GroupPricingTable({
       onChange('GroupRatio', serialized.GroupRatio)
       onChange('UserUsableGroups', serialized.UserUsableGroups)
       onChange('TopupGroupRatio', serialized.TopupGroupRatio)
+      onChange('GroupPinBottom', serialized.GroupPinBottom)
     },
     [onChange]
   )
@@ -550,6 +586,7 @@ function GroupPricingTable({
         ratio: '1',
         topupRatio: '',
         selectable: true,
+        pinBottom: false,
         description: '',
       },
       ...rows,
@@ -626,7 +663,7 @@ function GroupPricingTable({
             )}
           </InputGroup>
           <StaticDataTable
-            tableClassName='min-w-[760px]'
+            tableClassName='min-w-[860px]'
             tableProps={{ 'aria-label': t('Pricing groups') }}
             data={visibleRows}
             getRowKey={(row) => row._id}
@@ -715,6 +752,22 @@ function GroupPricingTable({
                         updateRow(row._id, 'selectable', checked === true)
                       }
                       aria-label={t('User selectable')}
+                    />
+                  </div>
+                ),
+              },
+              {
+                id: 'pin-bottom',
+                header: t('Pin to bottom'),
+                className: 'w-24 text-center',
+                cell: (row) => (
+                  <div className='flex justify-center'>
+                    <Switch
+                      checked={row.pinBottom}
+                      onCheckedChange={(checked) =>
+                        updateRow(row._id, 'pinBottom', checked === true)
+                      }
+                      aria-label={t('Pin to bottom')}
                     />
                   </div>
                 ),

@@ -8735,6 +8735,9 @@
     "Show account balance in CC Switch": "Показывать баланс аккаунта в CC Switch",
     "Turn on \"Allow querying user quota\" for this key in the console to see the wallet balance": "Включите «Разрешить просмотр квоты пользователя» для этого ключа в консоли, чтобы видеть баланс кошелька",
     "Also turns on \"Allow querying user quota\" for this key, so CC Switch can read the wallet balance with it.": "Также включает «Разрешить просмотр квоты пользователя» для этого ключа, чтобы CC Switch мог читать баланс кошелька.",
-    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch читает баланс кошелька с помощью этого ключа и обновляет его каждые {{minutes}} мин."
+    "CC Switch reads the wallet balance with this key and refreshes it every {{minutes}} minutes.": "CC Switch читает баланс кошелька с помощью этого ключа и обновляет его каждые {{minutes}} мин.",
+    "Pin to bottom": "Закрепить внизу",
+    "Pinned to bottom": "Группы, закреплённые внизу",
+    "JSON array of groups listed last, in this order, in the model marketplace and the API key group list.": "JSON-массив групп, которые показываются последними, в этом порядке, на витрине моделей и в списке групп API-ключей."
   }
 }
