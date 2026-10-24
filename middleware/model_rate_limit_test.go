@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -42,19 +43,21 @@ func TestResolveModelRequestRateLimitFallsBackFromTokenGroupToUserGroup(t *testi
 		userGroup   string
 		expectTotal int
 		expectOK    int
+		expectGroup string
 	}{
-		{name: "default user and unconfigured model group use global limits", tokenGroup: "GPT-Pro", userGroup: "default", expectTotal: 60, expectOK: 60},
-		{name: "vip user and unconfigured model group use identity limits", tokenGroup: "GPT-Pro", userGroup: "vip", expectTotal: 120, expectOK: 120},
-		{name: "configured model group overrides vip identity limits", tokenGroup: "Claude 官转 可蒸馏", userGroup: "vip", expectTotal: 2000, expectOK: 2000},
-		{name: "agent user and unconfigured model group use identity limits", tokenGroup: "GPT-Pro", userGroup: "代理商", expectTotal: 600, expectOK: 600},
-		{name: "empty token group uses vip identity limits", userGroup: "vip", expectTotal: 120, expectOK: 120},
+		{name: "default user and unconfigured model group use global limits", tokenGroup: "GPT-Pro", userGroup: "default", expectTotal: 60, expectOK: 60, expectGroup: ""},
+		{name: "vip user and unconfigured model group use identity limits", tokenGroup: "GPT-Pro", userGroup: "vip", expectTotal: 120, expectOK: 120, expectGroup: "vip"},
+		{name: "configured model group overrides vip identity limits", tokenGroup: "Claude 官转 可蒸馏", userGroup: "vip", expectTotal: 2000, expectOK: 2000, expectGroup: "Claude 官转 可蒸馏"},
+		{name: "agent user and unconfigured model group use identity limits", tokenGroup: "GPT-Pro", userGroup: "代理商", expectTotal: 600, expectOK: 600, expectGroup: "代理商"},
+		{name: "empty token group uses vip identity limits", userGroup: "vip", expectTotal: 120, expectOK: 120, expectGroup: "vip"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			total, success := resolveModelRequestRateLimit(test.tokenGroup, test.userGroup)
+			total, success, group := resolveModelRequestRateLimit(test.tokenGroup, test.userGroup)
 			assert.Equal(t, test.expectTotal, total)
 			assert.Equal(t, test.expectOK, success)
+			assert.Equal(t, test.expectGroup, group)
 		})
 	}
 }
@@ -117,14 +120,14 @@ func TestModelRateLimitStreamFailuresDoNotConsumeSuccessLimit(t *testing.T) {
 	for _, backend := range []string{"memory", "redis"} {
 		for _, totalLimit := range []int{0, 2} {
 			t.Run(fmt.Sprintf("%s/total=%d", backend, totalLimit), func(t *testing.T) {
-				userID := 7200000 + int(modelRateLimitTestUsers.Add(1))
-				handler := memoryRateLimitHandler(60, totalLimit, 1)
+				subject := strconv.Itoa(7200000 + int(modelRateLimitTestUsers.Add(1)))
+				handler := memoryRateLimitHandler(subject, 60, totalLimit, 1)
 				if backend == "redis" {
 					useRateLimitMiniRedis(t)
-					handler = redisRateLimitHandler(60, totalLimit, 1)
+					handler = redisRateLimitHandler(subject, 60, totalLimit, 1)
 				}
 				router := gin.New()
-				router.GET("/:outcome", func(c *gin.Context) { c.Set("id", userID) }, handler, func(c *gin.Context) {
+				router.GET("/:outcome", handler, func(c *gin.Context) {
 					status := relaycommon.NewStreamStatus()
 					if c.Param("outcome") == "failed" {
 						status.MarkFailed("server_error", "", 0)
@@ -148,10 +151,10 @@ func TestModelRateLimitStreamFailuresDoNotConsumeSuccessLimit(t *testing.T) {
 
 func TestModelMemoryRateLimitReservesConcurrentSuccessAdmission(t *testing.T) {
 	require.NoError(t, i18n.Init())
-	userID := 7200000 + int(modelRateLimitTestUsers.Add(1))
+	subject := strconv.Itoa(7200000 + int(modelRateLimitTestUsers.Add(1)))
 	entered, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	router := gin.New()
-	router.GET("/:outcome", func(c *gin.Context) { c.Set("id", userID) }, memoryRateLimitHandler(60, 0, 1), func(c *gin.Context) {
+	router.GET("/:outcome", memoryRateLimitHandler(subject, 60, 0, 1), func(c *gin.Context) {
 		if c.Param("outcome") == "failed" {
 			close(entered)
 			<-release
@@ -186,12 +189,11 @@ func TestModelMemoryRateLimitRejectionsReturnOpenAIError(t *testing.T) {
 		{name: "success", successLimit: 1, messageKey: i18n.MsgRateLimitReached},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			userID := 7200000 + int(modelRateLimitTestUsers.Add(1))
+			subject := strconv.Itoa(7200000 + int(modelRateLimitTestUsers.Add(1)))
 			router := gin.New()
 			router.GET("/", func(c *gin.Context) {
-				c.Set("id", userID)
 				c.Set(common.RequestIdKey, "req-limited")
-			}, memoryRateLimitHandler(60, tc.totalLimit, tc.successLimit), func(c *gin.Context) {
+			}, memoryRateLimitHandler(subject, 60, tc.totalLimit, tc.successLimit), func(c *gin.Context) {
 				c.Status(http.StatusOK)
 			})
 			require.Equal(t, http.StatusOK, performRateLimitRequest(router, "/", "127.0.0.1:1000").Code)
@@ -206,6 +208,62 @@ func TestModelMemoryRateLimitRejectionsReturnOpenAIError(t *testing.T) {
 			}})
 			require.NoError(t, err)
 			assert.JSONEq(t, string(want), resp.Body.String())
+		})
+	}
+}
+
+// A group with its own limit counts each user's requests on its own; groups
+// without one keep sharing the user's global limit.
+func TestModelRateLimitCountsConfiguredGroupsSeparately(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	previousEnabled, previousMinutes := setting.ModelRequestRateLimitEnabled, setting.ModelRequestRateLimitDurationMinutes
+	previousTotal, previousSuccess := setting.ModelRequestRateLimitCount, setting.ModelRequestRateLimitSuccessCount
+	previousGroups, previousRedisEnabled := setting.ModelRequestRateLimitGroup, common.RedisEnabled
+	t.Cleanup(func() {
+		setting.ModelRequestRateLimitEnabled, setting.ModelRequestRateLimitDurationMinutes = previousEnabled, previousMinutes
+		setting.ModelRequestRateLimitCount, setting.ModelRequestRateLimitSuccessCount = previousTotal, previousSuccess
+		setting.ModelRequestRateLimitGroup, common.RedisEnabled = previousGroups, previousRedisEnabled
+	})
+	setting.ModelRequestRateLimitEnabled, setting.ModelRequestRateLimitDurationMinutes = true, 1
+	common.RedisEnabled = false
+
+	// Groups a and b have their own limits; c and d have none and share the global one.
+	steps := []struct {
+		group string
+		want  int
+	}{
+		{"a", http.StatusOK}, {"a", http.StatusTooManyRequests},
+		{"b", http.StatusOK}, {"b", http.StatusTooManyRequests},
+		{"c", http.StatusOK}, {"d", http.StatusTooManyRequests},
+	}
+	// The Redis token bucket binds to the first Redis client it sees and another
+	// test already drives it, so the total limit runs on the memory backend only.
+	for _, tc := range []struct {
+		backend, limit string
+		counts         [2]int // [total, success] for groups a and b and for the global limit
+	}{
+		{"memory", "success", [2]int{0, 1}},
+		{"redis", "success", [2]int{0, 1}},
+		{"memory", "total", [2]int{1, 1000}},
+	} {
+		t.Run(tc.backend+"/"+tc.limit, func(t *testing.T) {
+			if tc.backend == "redis" {
+				useRateLimitMiniRedis(t)
+			}
+			setting.ModelRequestRateLimitCount, setting.ModelRequestRateLimitSuccessCount = tc.counts[0], tc.counts[1]
+			setting.ModelRequestRateLimitGroup = map[string][2]int{"a": tc.counts, "b": tc.counts}
+			userID := 7200000 + int(modelRateLimitTestUsers.Add(1))
+			router := gin.New()
+			router.GET("/:group", func(c *gin.Context) {
+				c.Set("id", userID)
+				common.SetContextKey(c, constant.ContextKeyTokenGroup, c.Param("group"))
+			}, ModelRequestRateLimit(), func(c *gin.Context) {
+				c.Status(http.StatusOK)
+			})
+
+			for _, step := range steps {
+				assert.Equal(t, step.want, performRateLimitRequest(router, "/"+step.group, "127.0.0.1:1000").Code, "group %s", step.group)
+			}
 		})
 	}
 }
