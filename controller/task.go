@@ -295,10 +295,11 @@ func initTaskArtifactAdaptorInstance(task *model.Task, adaptor relaychannel.Task
 	}
 	adaptor.Init(&relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelType:    channelModel.Type,
-			ChannelBaseUrl: baseURL,
-			ApiKey:         pluginKey,
-			ChannelSetting: channelModel.GetSetting(),
+			ChannelType:     channelModel.Type,
+			ChannelBaseUrl:  baseURL,
+			ApiKey:          pluginKey,
+			ChannelSetting:  channelModel.GetSetting(),
+			HeadersOverride: channelModel.GetHeaderOverride(),
 		},
 	})
 	return adaptor, nil

@@ -456,10 +456,11 @@ type fakeWssBilling struct {
 	targets []int
 }
 
-func (b *fakeWssBilling) Settle(int) error         { return nil }
-func (b *fakeWssBilling) Refund(*gin.Context)      {}
-func (b *fakeWssBilling) NeedsRefund() bool        { return false }
-func (b *fakeWssBilling) GetPreConsumedQuota() int { return 0 }
+func (b *fakeWssBilling) Settle(int) error                     { return nil }
+func (b *fakeWssBilling) Refund(*gin.Context)                  {}
+func (b *fakeWssBilling) NeedsRefund() bool                    { return false }
+func (b *fakeWssBilling) GetPreConsumedQuota() int             { return 0 }
+func (b *fakeWssBilling) ReserveBeforeSubmit(target int) error { return b.Reserve(target) }
 func (b *fakeWssBilling) Reserve(target int) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

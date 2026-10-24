@@ -542,6 +542,9 @@ func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, pre
 func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo) {
 	gopool.Go(func() {
 		userSetting := relayInfo.UserSetting
+		if !quotaRemindersOn(userSetting) {
+			return
+		}
 		threshold := common.QuotaRemindThreshold
 		if userSetting.QuotaWarningThreshold != 0 {
 			threshold = int(userSetting.QuotaWarningThreshold)
@@ -578,6 +581,9 @@ func checkAndSendSubscriptionQuotaNotify(relayInfo *relaycommon.RelayInfo) {
 		}
 
 		userSetting := relayInfo.UserSetting
+		if !quotaRemindersOn(userSetting) {
+			return
+		}
 		threshold := common.QuotaRemindThreshold
 		if userSetting.QuotaWarningThreshold != 0 {
 			threshold = int(userSetting.QuotaWarningThreshold)
@@ -603,6 +609,18 @@ func checkAndSendSubscriptionQuotaNotify(relayInfo *relaycommon.RelayInfo) {
 			common.SysError(common.LogText("failed to send subscription quota notify to user %d: %s", relayInfo.UserId, err.Error()))
 		}
 	})
+}
+
+// quotaRemindersOn reports whether low-balance reminders are on for a user:
+// the site switch and the user's own switch must both allow them, and a user
+// who never chose gets them. Each drop below the threshold is claimed once in
+// the database (claimQuotaWarningForCurrentBalance), so nodes settling the same
+// user at once still send a single reminder.
+func quotaRemindersOn(userSetting dto.UserSetting) bool {
+	if !common.QuotaRemindEnabled {
+		return false
+	}
+	return userSetting.QuotaWarningEnabled == nil || *userSetting.QuotaWarningEnabled
 }
 
 func claimQuotaWarningForCurrentBalance(relayInfo *relaycommon.RelayInfo, source string, sourceId int64, threshold int64) (bool, int64, int64, error) {

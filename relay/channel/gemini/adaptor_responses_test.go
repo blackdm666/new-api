@@ -210,3 +210,26 @@ func TestConvertImageRequestRejectsGeminiImageModelAsNonRetryableBadRequest(t *t
 	assert.True(t, types.IsSkipRetryError(apiErr))
 	assert.Equal(t, "请使用 Gemini 原生接口调用 / please use the Gemini native API", apiErr.Error())
 }
+
+// Gemini embeds plain text only. A content part fails the request with a 400
+// that skips retries, because the request estimate billed for this channel
+// counts parts Gemini would never receive.
+func TestConvertEmbeddingRequestRejectsContentParts(t *testing.T) {
+	imagePart := map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.com/cat.png"}}
+	textPart := map[string]any{"type": "text", "text": "a cat"}
+	for _, input := range []any{[]any{"a cat", imagePart}, []any{textPart}} {
+		info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gemini-embedding-001"}}
+		_, err := (&Adaptor{}).ConvertEmbeddingRequest(nil, info, dto.EmbeddingRequest{Model: "gemini-embedding-001", Input: input})
+		var apiErr *types.NewAPIError
+		require.ErrorAs(t, err, &apiErr)
+		assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+		assert.True(t, types.IsSkipRetryError(apiErr))
+	}
+
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gemini-embedding-001"}}
+	got, err := (&Adaptor{}).ConvertEmbeddingRequest(nil, info, dto.EmbeddingRequest{Model: "gemini-embedding-001", Input: []any{"a cat", "a dog"}})
+	require.NoError(t, err)
+	wire, err := common.Marshal(got)
+	require.NoError(t, err)
+	assert.JSONEq(t, `["a cat","a dog"]`, gjson.GetBytes(wire, "requests.#.content.parts.0.text").Raw)
+}
