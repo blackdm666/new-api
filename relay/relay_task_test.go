@@ -600,6 +600,7 @@ func TestUpstreamTaskSubmitErrorOmitsProviderEnvelope(t *testing.T) {
 		{"message field", `{"code":1001,"message":"prompt rejected","request_id":"req-1"}`, "prompt rejected"},
 		{"msg field", `{"code":500,"msg":"busy"}`, "busy"},
 		{"detail field", `{"detail":"not found"}`, "not found"},
+		{"google interactions array", `[{"error":{"code":400,"message":"Unsupported duration for this model.","status":"INVALID_ARGUMENT"}}]`, "Unsupported duration for this model."},
 		{"empty nested message falls through", `{"error":{"message":" "},"message":"fallback"}`, "fallback"},
 		{"no message", `{"error":{"code":"x"},"trace":"vendor"}`, "上游任务提交失败（状态码 400），请稍后重试。"},
 		{"not json", `<html>vendor gateway</html>`, "上游任务提交失败（状态码 400），请稍后重试。"},
@@ -667,12 +668,38 @@ func TestUpstreamTaskSubmitErrorReportsExhaustedProviderAccount(t *testing.T) {
 			assert.Equal(t, taskUpstreamUnavailableMessage, taskErr.Message)
 			assert.Equal(t, taskUpstreamUnavailableMessage, taskErr.Error.Error())
 			assert.False(t, taskErr.LocalError, "the channel is still processed as an upstream failure")
+			assert.False(t, taskErr.UpstreamBillingDisabled, "a balance recovers with a top-up")
 		})
 	}
 	// Customer-side limits reported by the provider are not account exhaustion.
 	for _, body := range []string{`{"error":{"message":"The video duration exceeds the limit"}}`, `{"error":{"message":"prompt quota exceeded for this request"}}`} {
 		assert.False(t, upstreamTaskSubmitError([]byte(body), http.StatusBadRequest).UpstreamQuotaExhausted, body)
 	}
+}
+
+// A Google Cloud project whose billing stopped reads as the same temporary
+// outage and fails over, and is also marked so its channel gets disabled.
+// Bodies follow Vertex Veo (object) and Gemini Omni Interactions (array)
+// responses logged on 2026-10-21.
+func TestUpstreamTaskSubmitErrorMarksStoppedGoogleBilling(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"veo object", `{"error":{"code":403,"message":"This API method requires billing to be enabled. Please enable billing on project #project-e982ec36 by visiting https://console.developers.google.com/billing/enable?project=project-e982ec36 then retry.","status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"BILLING_DISABLED","domain":"googleapis.com","metadata":{"consumer":"projects/project-e982ec36","service":"aiplatform.googleapis.com"}}]}}`},
+		{"interactions array", `[{"error":{"code":403,"message":"This API method requires billing to be enabled. Please enable billing on project #project-e982ec36 then retry.","status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"BILLING_DISABLED","domain":"googleapis.com"}]}}]`},
+		{"reason without the sentence", `{"error":{"code":403,"message":"Permission denied.","status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"BILLING_DISABLED"}]}}`},
+		{"sentence without details", `{"error":{"code":403,"message":"This API method requires billing to be enabled.","status":"PERMISSION_DENIED"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			taskErr := upstreamTaskSubmitError([]byte(tc.body), http.StatusForbidden)
+			assert.True(t, taskErr.UpstreamQuotaExhausted)
+			assert.True(t, taskErr.UpstreamBillingDisabled)
+			assert.Equal(t, http.StatusServiceUnavailable, taskErr.StatusCode)
+			assert.Equal(t, taskUpstreamUnavailableMessage, taskErr.Message)
+			assert.NotContains(t, taskErr.Error.Error(), "project")
+		})
+	}
+	other := upstreamTaskSubmitError([]byte(`{"error":{"code":403,"message":"Permission denied on resource.","status":"PERMISSION_DENIED","details":[{"reason":"IAM_PERMISSION_DENIED"}]}}`), http.StatusForbidden)
+	assert.False(t, other.UpstreamBillingDisabled)
+	assert.False(t, other.UpstreamQuotaExhausted)
 }
 
 func TestModelPriceAndTransportErrorsKeepDetailsOutOfCustomerText(t *testing.T) {

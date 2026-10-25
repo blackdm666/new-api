@@ -18,6 +18,7 @@ import (
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaykittypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -672,6 +673,26 @@ func TestExhaustedProviderAccountRetriesElsewhere(t *testing.T) {
 	assert.Equal(t, service.PolicyDecision{Action: "retry", Reason: "upstream_quota_exhausted", Source: "system"}, decideTaskRetry(c, exhausted, 2))
 	assert.Equal(t, "attempt_budget_exhausted", decideTaskRetry(c, exhausted, 0).Reason)
 	assert.Equal(t, "status_not_retryable", decideTaskRetry(c, &dto.TaskError{StatusCode: http.StatusServiceUnavailable}, 2).Reason)
+}
+
+// Stopped provider billing disables the channel automatically; the customer
+// message is generic, so this cannot rely on the disable keywords. A low
+// balance or a busy provider never does.
+func TestStoppedProviderBillingDisablesChannel(t *testing.T) {
+	oldEnabled := common.AutomaticDisableChannelEnabled
+	common.AutomaticDisableChannelEnabled = true
+	t.Cleanup(func() { common.AutomaticDisableChannelEnabled = oldEnabled })
+
+	stopped := &dto.TaskError{Message: "服务暂时不可用，请稍后再试。", StatusCode: http.StatusServiceUnavailable, UpstreamQuotaExhausted: true, UpstreamBillingDisabled: true}
+	apiErr := taskSubmissionAPIError(stopped)
+	assert.True(t, relaykittypes.IsChannelError(apiErr))
+	assert.True(t, service.ShouldDisableChannel(apiErr))
+	assert.Equal(t, "服务暂时不可用，请稍后再试。", apiErr.Error(), "the stored error keeps the customer-facing message")
+
+	lowBalance := &dto.TaskError{Message: "服务暂时不可用，请稍后再试。", StatusCode: http.StatusServiceUnavailable, UpstreamQuotaExhausted: true}
+	assert.False(t, relaykittypes.IsChannelError(taskSubmissionAPIError(lowBalance)))
+	busy := &dto.TaskError{Message: "上游服务繁忙，请稍后重试。", StatusCode: http.StatusServiceUnavailable}
+	assert.False(t, relaykittypes.IsChannelError(taskSubmissionAPIError(busy)))
 }
 
 // Local task rejections carry a message but no cause; the response and the

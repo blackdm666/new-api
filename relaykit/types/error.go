@@ -59,6 +59,9 @@ const (
 	ErrorCodeChannelAwsClientError        ErrorCode = "channel:aws_client_error"
 	ErrorCodeChannelInvalidKey            ErrorCode = "channel:invalid_key"
 	ErrorCodeChannelResponseTimeExceeded  ErrorCode = "channel:response_time_exceeded"
+	// ErrorCodeChannelUpstreamBillingDisabled marks a provider account behind
+	// the channel whose billing stopped (Google Cloud BILLING_DISABLED).
+	ErrorCodeChannelUpstreamBillingDisabled ErrorCode = "channel:upstream_billing_disabled"
 
 	// client request error
 	ErrorCodeReadRequestBodyFailed      ErrorCode = "read_request_body_failed"

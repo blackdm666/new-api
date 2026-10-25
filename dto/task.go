@@ -16,6 +16,10 @@ type TaskError struct {
 	// UpstreamQuotaExhausted marks a provider account that cannot pay for the
 	// submission; it is retried on the group's other channels.
 	UpstreamQuotaExhausted bool `json:"-"`
+	// UpstreamBillingDisabled marks the subset whose provider billing stopped
+	// (a Google Cloud project with BILLING_DISABLED). Unlike a low balance it
+	// does not recover by itself, so the channel is disabled automatically.
+	UpstreamBillingDisabled bool `json:"-"`
 }
 
 type TaskData interface {
