@@ -283,6 +283,16 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
+	if isImageModelChatReply(info) {
+		var deliverErr *types.NewAPIError
+		if responseBody, deliverErr = deliverChatImageLinks(c, responseBody); deliverErr != nil {
+			return nil, deliverErr
+		}
+		if err = common.Unmarshal(responseBody, &simpleResponse); err != nil {
+			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		}
+	}
+
 	info.ObserveResponseModel(simpleResponse.Model)
 	for _, choice := range simpleResponse.Choices {
 		if choice.FinishReason == constant.FinishReasonContentFilter {
