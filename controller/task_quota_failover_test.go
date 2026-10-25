@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	plugin "github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -209,6 +210,8 @@ func assertPublicUnavailable(t *testing.T, r failoverResult, wantMessage string)
 }
 
 func TestTaskSubmissionQuotaFailover(t *testing.T) {
+	// The no-channel-left message and the disable reason are translated.
+	require.NoError(t, i18n.Init())
 	t.Run("single channel answers 503 without retrying it", func(t *testing.T) {
 		r := runTaskFailover(t, []failoverChannel{{letter: "a", priority: 10, reply: "quota"}})
 		assert.Equal(t, []string{"/a"}, r.paths())
@@ -257,6 +260,10 @@ func TestTaskSubmissionQuotaFailover(t *testing.T) {
 		assert.Equal(t, []string{"/a", "/b"}, r.paths())
 		assert.Equal(t, 942002, r.outcome.Task.ChannelId)
 		assert.Equal(t, []int{942001}, r.disabled, "billing that stopped does not recover by itself")
+		var disabled model.Channel
+		require.NoError(t, model.DB.First(&disabled, 942001).Error)
+		assert.Equal(t, i18n.Translate("", i18n.MsgChannelUpstreamBillingDisabled), disabled.GetOtherInfo()["status_reason"],
+			"administrators see why the channel was disabled")
 		for _, log := range r.logs {
 			assert.Contains(t, log.Content, "服务暂时不可用，请稍后再试。")
 			assert.NotContains(t, log.Content, "project-fixture")
