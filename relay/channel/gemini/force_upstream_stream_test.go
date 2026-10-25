@@ -251,6 +251,74 @@ func TestForcedUpstreamStreamBillsLikeStreaming(t *testing.T) {
 	}
 }
 
+// Vertex streamGenerateContent rejects candidateCount > 1, which
+// generateContent serves, so such requests keep the non-streaming endpoint.
+func TestForcedUpstreamStreamKeepsMultiCandidateRequestsNonStreaming(t *testing.T) {
+	two, one := 2, 1
+	tests := []struct {
+		name   string
+		format types.RelayFormat
+		mode   int
+		path   string
+		send   func(*Adaptor, *gin.Context, *relaycommon.RelayInfo) error
+		forced bool
+	}{
+		{
+			name: "native candidateCount 2", format: types.RelayFormatGemini, mode: relayconstant.RelayModeGemini,
+			path: "/v1beta/models/gemini-3.8-flash:generateContent",
+			send: func(a *Adaptor, c *gin.Context, info *relaycommon.RelayInfo) error {
+				request := &dto.GeminiChatRequest{
+					Contents:         []dto.GeminiChatContent{{Role: "user", Parts: []dto.GeminiPart{{Text: "hi"}}}},
+					GenerationConfig: dto.GeminiChatGenerationConfig{CandidateCount: &two},
+				}
+				_, err := a.ConvertGeminiRequest(c, info, request)
+				return err
+			},
+		},
+		{
+			name: "native candidateCount 1", format: types.RelayFormatGemini, mode: relayconstant.RelayModeGemini,
+			path: "/v1beta/models/gemini-3.8-flash:generateContent", forced: true,
+			send: func(a *Adaptor, c *gin.Context, info *relaycommon.RelayInfo) error {
+				request := &dto.GeminiChatRequest{
+					Contents:         []dto.GeminiChatContent{{Role: "user", Parts: []dto.GeminiPart{{Text: "hi"}}}},
+					GenerationConfig: dto.GeminiChatGenerationConfig{CandidateCount: &one},
+				}
+				_, err := a.ConvertGeminiRequest(c, info, request)
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := forcedStreamContext(tt.path)
+			info := &relaycommon.RelayInfo{
+				RelayFormat:     tt.format,
+				RelayMode:       tt.mode,
+				RequestURLPath:  tt.path,
+				OriginModelName: "gemini-3.8-flash",
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType:       constant.ChannelTypeGemini,
+					ChannelBaseUrl:    "https://upstream.example",
+					UpstreamModelName: "gemini-3.8-flash",
+					ChannelSetting:    dto.ChannelSettings{ForceUpstreamStream: true},
+				},
+			}
+			adaptor := &Adaptor{}
+			adaptor.Init(info)
+			require.True(t, adaptor.forceUpstreamStream)
+
+			require.NoError(t, tt.send(adaptor, c, info))
+			url, err := adaptor.GetRequestURL(info)
+			require.NoError(t, err)
+			if tt.forced {
+				assert.Equal(t, "https://upstream.example/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse", url)
+			} else {
+				assert.Equal(t, "https://upstream.example/v1beta/models/gemini-3.8-flash:generateContent", url)
+			}
+		})
+	}
+}
+
 func TestShouldForceUpstreamStreamScope(t *testing.T) {
 	tests := []struct {
 		name        string

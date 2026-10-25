@@ -54,6 +54,7 @@ func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayIn
 	if strings.Contains(info.UpstreamModelName, "gemini-3.8-") && strings.Contains(info.UpstreamModelName, "-tts") {
 		splitGemini38SpeakerTurns(request)
 	}
+	a.keepForcedStreamCompatible(request)
 	return request, nil
 }
 
@@ -66,6 +67,7 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 	if !ok {
 		return nil, fmt.Errorf("expected Gemini generateContent request, got %T", result.Value)
 	}
+	a.keepForcedStreamCompatible(geminiRequest)
 	return geminiRequest, nil
 }
 
@@ -214,6 +216,9 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	result, err := service.ConvertRequest(c, info, types.RelayFormatGemini, request)
 	if err != nil {
 		return nil, err
+	}
+	if geminiRequest, ok := result.Value.(*dto.GeminiChatRequest); ok {
+		a.keepForcedStreamCompatible(geminiRequest)
 	}
 	return result.Value, nil
 }

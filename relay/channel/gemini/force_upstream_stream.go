@@ -55,6 +55,18 @@ func shouldForceUpstreamStream(info *relaycommon.RelayInfo) bool {
 	}
 }
 
+// keepForcedStreamCompatible turns forced streaming off for a request the
+// streaming endpoint rejects although generateContent accepts it: Vertex
+// streamGenerateContent only allows candidateCount 1 (OpenAI n).
+func (a *Adaptor) keepForcedStreamCompatible(request *dto.GeminiChatRequest) {
+	if !a.forceUpstreamStream || request == nil {
+		return
+	}
+	if count := request.GenerationConfig.CandidateCount; count != nil && *count > 1 {
+		a.forceUpstreamStream = false
+	}
+}
+
 // collectForcedUpstreamStream reads the upstream SSE stream to the end and
 // returns a response that looks like the generateContent call the client
 // made: a JSON body on success, or the upstream's own error with its status
