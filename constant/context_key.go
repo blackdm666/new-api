@@ -60,6 +60,10 @@ const (
 	ContextKeyUserName    ContextKey = "username"
 
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
+	// ContextKeyUpstreamStreamForced marks a non-streaming request that was sent
+	// upstream as a stream and rebuilt into one response (channel setting
+	// force_upstream_stream).
+	ContextKeyUpstreamStreamForced ContextKey = "upstream_stream_forced"
 
 	ContextKeySystemPromptOverride ContextKey = "system_prompt_override"
 

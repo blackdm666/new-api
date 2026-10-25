@@ -89,6 +89,9 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	if common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens) {
 		other.SetAdmin("local_count_tokens", true)
 	}
+	if common.GetContextKeyBool(ctx, constant.ContextKeyUpstreamStreamForced) {
+		other.SetAdmin("upstream_stream_forced", true)
+	}
 
 	AppendChannelAffinityAdminInfo(ctx, other)
 	if events := RequestPolicy(ctx).Events(); len(events) > 0 {
