@@ -37,6 +37,10 @@ type ChannelSettings struct {
 	// TLSInsecureSkipVerify accepts upstream certificates that fail
 	// verification, such as self-signed ones, for this channel only.
 	TLSInsecureSkipVerify bool `json:"tls_insecure_skip_verify,omitempty"`
+	// ForceUpstreamStream sends non-streaming text requests upstream as a
+	// stream and rebuilds the single response the client asked for, for
+	// upstreams that cut long non-streaming calls. Gemini channels only.
+	ForceUpstreamStream bool `json:"force_upstream_stream,omitempty"`
 }
 
 // BindsTaskPlugin reports whether the channel is bound to the task plugin,

@@ -232,6 +232,7 @@ import {
   type PassthroughKind,
 } from '../dialogs/passthrough-warning-dialog'
 import { StatusCodeRiskDialog } from '../dialogs/status-code-risk-dialog'
+import { ForceUpstreamStreamSetting } from '../force-upstream-stream-setting'
 import {
   ModelMappingBatchDialog,
   type ModelMappingBatchResult,
@@ -314,6 +315,7 @@ const SENSITIVE_FORM_FIELDS = [
   'tls_insecure_skip_verify',
   'pass_through_body_enabled',
   'responses_websocket_enabled',
+  'force_upstream_stream',
   'system_prompt',
   'system_prompt_override',
   'allow_service_tier',
@@ -4851,6 +4853,10 @@ export function ChannelMutateDrawer({
                 className='space-y-4 disabled:opacity-60'
               >
                 <ResponsesWebSocketSetting
+                  channelType={currentType}
+                  disabled={sensitiveLocked || isSubmitting}
+                />
+                <ForceUpstreamStreamSetting
                   channelType={currentType}
                   disabled={sensitiveLocked || isSubmitting}
                 />

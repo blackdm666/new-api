@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
+	appconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
@@ -24,6 +26,9 @@ import (
 type Adaptor struct {
 	AudioResponseFormat string
 	Transcription       *Transcription
+	// forceUpstreamStream is decided per attempt in Init; see
+	// shouldForceUpstreamStream.
+	forceUpstreamStream bool
 }
 
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
@@ -156,7 +161,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
-
+	a.forceUpstreamStream = shouldForceUpstreamStream(info)
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
@@ -183,6 +188,8 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		if info.RelayMode == constant.RelayModeGemini {
 			info.DisablePing = true
 		}
+	} else if a.forceUpstreamStream {
+		action = "streamGenerateContent?alt=sse"
 	}
 	return fmt.Sprintf("%s/%s/models/%s:%s", info.ChannelBaseUrl, version, info.UpstreamModelName, action), nil
 }
@@ -286,7 +293,14 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
-	return channel.DoApiRequest(a, c, info, requestBody)
+	common.SetContextKey(c, appconstant.ContextKeyUpstreamStreamForced, a.forceUpstreamStream)
+	resp, err := channel.DoApiRequest(a, c, info, requestBody)
+	if err != nil || !a.forceUpstreamStream {
+		return resp, err
+	}
+	// Rebuild the generateContent response here so the relay handlers and the
+	// non-stream response handlers (formatting and billing) run unchanged.
+	return collectForcedUpstreamStream(c, resp)
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {

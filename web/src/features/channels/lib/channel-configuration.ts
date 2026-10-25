@@ -30,6 +30,7 @@ import {
   DEFAULT_CLAUDE_THINKING_COMPAT_MODE,
   supportsClaudeThinkingCompat,
 } from './claude-thinking-compat'
+import { supportsForceUpstreamStream } from './force-upstream-stream'
 import { supportsResponsesWebSocket } from './responses-websocket'
 
 export type ChannelProviderTarget =
@@ -65,6 +66,7 @@ const CONFIGURATION_BLOCKS = {
       'thinking_to_content',
       'pass_through_body_enabled',
       'responses_websocket_enabled',
+      'force_upstream_stream',
       'ollama_openai_chat',
       'claude_thinking_compat_mode',
       'system_prompt',
@@ -163,6 +165,8 @@ export function getChannelConfigurationState(
         values.pass_through_body_enabled) ||
       (supportsResponsesWebSocket(values.type) &&
         values.responses_websocket_enabled) ||
+      (supportsForceUpstreamStream(values.type) &&
+        values.force_upstream_stream) ||
       (values.type === CHANNEL_TYPE_OLLAMA && values.ollama_openai_chat) ||
       (supportsClaudeThinkingCompat(values.type) &&
         (values.claude_thinking_compat_mode ??
