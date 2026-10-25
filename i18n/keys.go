@@ -128,6 +128,9 @@ const (
 	MsgChannelTestCompletedSubject  = "channel.test_completed_subject"
 	MsgChannelTestCompletedContent  = "channel.test_completed_content"
 	MsgChannelResponseTimeExceeded  = "channel.response_time_exceeded"
+	// MsgChannelUpstreamBillingDisabled is the disable reason of a channel
+	// whose Google Cloud project stopped billing.
+	MsgChannelUpstreamBillingDisabled = "channel.upstream_billing_disabled"
 
 	MsgChannelUpstreamUpdateNotifySubject   = "channel.upstream_update_notify_subject"
 	MsgChannelUpstreamUpdateSummary         = "channel.upstream_update_summary"

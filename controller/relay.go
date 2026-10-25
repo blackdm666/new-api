@@ -883,7 +883,10 @@ func taskSubmissionAPIError(taskErr *taskdto.TaskError) *types.NewAPIError {
 	// itself; the customer only sees a generic outage message, so the disable
 	// keywords cannot match the provider text and it is a channel error instead.
 	if taskErr.UpstreamBillingDisabled {
-		return types.NewOpenAIError(err, types.ErrorCodeChannelUpstreamBillingDisabled, taskErr.StatusCode)
+		// The channel's disable reason and watcher notice name the cause; the
+		// customer message above stays generic.
+		return types.NewOpenAIError(err, types.ErrorCodeChannelUpstreamBillingDisabled, taskErr.StatusCode,
+			types.ErrOptionWithChannelDisableReason(i18n.Translate("", i18n.MsgChannelUpstreamBillingDisabled)))
 	}
 	return types.NewOpenAIError(err, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
 }

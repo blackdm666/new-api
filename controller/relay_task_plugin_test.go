@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
@@ -679,6 +680,7 @@ func TestExhaustedProviderAccountRetriesElsewhere(t *testing.T) {
 // message is generic, so this cannot rely on the disable keywords. A low
 // balance or a busy provider never does.
 func TestStoppedProviderBillingDisablesChannel(t *testing.T) {
+	require.NoError(t, i18n.Init())
 	oldEnabled := common.AutomaticDisableChannelEnabled
 	common.AutomaticDisableChannelEnabled = true
 	t.Cleanup(func() { common.AutomaticDisableChannelEnabled = oldEnabled })
@@ -688,9 +690,12 @@ func TestStoppedProviderBillingDisablesChannel(t *testing.T) {
 	assert.True(t, relaykittypes.IsChannelError(apiErr))
 	assert.True(t, service.ShouldDisableChannel(apiErr))
 	assert.Equal(t, "服务暂时不可用，请稍后再试。", apiErr.Error(), "the stored error keeps the customer-facing message")
+	assert.Equal(t, i18n.Translate("", i18n.MsgChannelUpstreamBillingDisabled), apiErr.ChannelDisableReason())
+	assert.Equal(t, "上游 GCP 项目结算已停用（BILLING_DISABLED），恢复结算后手动启用", i18n.Translate("zh-CN", i18n.MsgChannelUpstreamBillingDisabled))
 
 	lowBalance := &dto.TaskError{Message: "服务暂时不可用，请稍后再试。", StatusCode: http.StatusServiceUnavailable, UpstreamQuotaExhausted: true}
 	assert.False(t, relaykittypes.IsChannelError(taskSubmissionAPIError(lowBalance)))
+	assert.Empty(t, taskSubmissionAPIError(lowBalance).ChannelDisableReason())
 	busy := &dto.TaskError{Message: "上游服务繁忙，请稍后重试。", StatusCode: http.StatusServiceUnavailable}
 	assert.False(t, relaykittypes.IsChannelError(taskSubmissionAPIError(busy)))
 }

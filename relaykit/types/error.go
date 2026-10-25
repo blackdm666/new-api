@@ -103,6 +103,10 @@ type NewAPIError struct {
 	errorCode      ErrorCode
 	StatusCode     int
 	Metadata       json.RawMessage
+	// channelDisableReason replaces the error text as the reason recorded on
+	// an automatically disabled channel and sent to its watchers, when the
+	// error text itself is written for customers.
+	channelDisableReason string
 }
 
 // Unwrap enables errors.Is / errors.As to work with NewAPIError by exposing the underlying error.
@@ -400,6 +404,22 @@ func ErrOptionWithNoRecordErrorLog() NewAPIErrorOptions {
 	return func(e *NewAPIError) {
 		e.recordErrorLog = kitutil.GetPointer(false)
 	}
+}
+
+// ErrOptionWithChannelDisableReason sets the administrator-facing reason used
+// when the error disables its channel; the error text stays unchanged.
+func ErrOptionWithChannelDisableReason(reason string) NewAPIErrorOptions {
+	return func(e *NewAPIError) {
+		e.channelDisableReason = reason
+	}
+}
+
+// ChannelDisableReason returns the reason set by ErrOptionWithChannelDisableReason.
+func (e *NewAPIError) ChannelDisableReason() string {
+	if e == nil {
+		return ""
+	}
+	return e.channelDisableReason
 }
 
 func ErrOptionWithStatusCode(statusCode int) NewAPIErrorOptions {
