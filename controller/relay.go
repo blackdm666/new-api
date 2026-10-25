@@ -878,6 +878,13 @@ func taskSubmissionAPIError(taskErr *taskdto.TaskError) *types.NewAPIError {
 	if err == nil {
 		err = errors.New(taskErr.Message)
 	}
+	// A low provider balance never disables the channel (it is topped up and
+	// the submission fails over meanwhile). Stopped billing does not recover by
+	// itself; the customer only sees a generic outage message, so the disable
+	// keywords cannot match the provider text and it is a channel error instead.
+	if taskErr.UpstreamBillingDisabled {
+		return types.NewOpenAIError(err, types.ErrorCodeChannelUpstreamBillingDisabled, taskErr.StatusCode)
+	}
 	return types.NewOpenAIError(err, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
 }
 

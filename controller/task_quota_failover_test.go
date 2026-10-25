@@ -25,6 +25,8 @@ const (
 	failoverQuotaBody  = `{"error":{"message":"预扣费额度失败, 用户剩余额度: ＄0.01, 需要预扣费额度: ＄1.00","code":"insufficient_user_quota"}}`
 	failoverCreditBody = `{"error":{"message":"Your credit balance is too low to access the API."}}`
 	failoverBusyBody   = `{"error":{"message":"fixture unavailable"}}`
+	// Google Interactions (Vertex Gemini Omni) wraps its error in an array.
+	failoverBillingBody = `[{"error":{"code":403,"message":"This API method requires billing to be enabled. Please enable billing on project #project-fixture then retry.","status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"BILLING_DISABLED"}]}}]`
 )
 
 type failoverChannel struct {
@@ -90,6 +92,9 @@ func runTaskFailover(t *testing.T, channels []failoverChannel) failoverResult {
 		case "credit":
 			w.WriteHeader(http.StatusForbidden)
 			fmt.Fprint(w, failoverCreditBody)
+		case "billing":
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, failoverBillingBody)
 		case "busy":
 			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprint(w, failoverBusyBody)
@@ -241,6 +246,21 @@ func TestTaskSubmissionQuotaFailover(t *testing.T) {
 		assertNoChannelReplay(t, r)
 		assertPublicUnavailable(t, r, "服务暂时不可用，请稍后再试。")
 		assert.Empty(t, r.disabled, "balance errors never disable a channel, even with auto-ban keywords")
+	})
+
+	t.Run("stopped google billing disables the channel and fails over", func(t *testing.T) {
+		r := runTaskFailover(t, []failoverChannel{
+			{letter: "a", priority: 20, reply: "billing"},
+			{letter: "b", priority: 10, reply: "ok"},
+		})
+		require.Nil(t, r.taskErr, r.body)
+		assert.Equal(t, []string{"/a", "/b"}, r.paths())
+		assert.Equal(t, 942002, r.outcome.Task.ChannelId)
+		assert.Equal(t, []int{942001}, r.disabled, "billing that stopped does not recover by itself")
+		for _, log := range r.logs {
+			assert.Contains(t, log.Content, "服务暂时不可用，请稍后再试。")
+			assert.NotContains(t, log.Content, "project-fixture")
+		}
 	})
 
 	t.Run("a busy single channel is not replayed", func(t *testing.T) {

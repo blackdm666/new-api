@@ -534,6 +534,14 @@ var (
 	upstreamQuotaErrorPhrases = []string{"预扣费额度失败", "额度不足", "額度不足", "余额不足", "餘額不足", "积分不足", "token quota is not enough", "insufficient token quota", "insufficient user quota", "not enough quota to pre-consume", "subscription quota is insufficient", "credit balance is too low", "exceeded your current quota", "insufficient balance", "insufficient credit", "insufficient quota"}
 )
 
+// A Google Cloud project whose billing account stopped (spent credits, closed
+// account) answers 403 with the ErrorInfo reason BILLING_DISABLED. Unlike a
+// low balance it does not recover by itself.
+const (
+	googleBillingDisabledReason = "BILLING_DISABLED"
+	googleBillingDisabledPhrase = "requires billing to be enabled"
+)
+
 // modelPriceTaskError hides pricing internals (model names, expressions and
 // plugin keys) from the customer and from the customer's error log.
 func modelPriceTaskError(c *gin.Context, err error) *dto.TaskError {
@@ -561,9 +569,11 @@ func taskRequestFailedError(c *gin.Context, channelID int, err error) *dto.TaskE
 // so the submission is retried on the group's other channels.
 func upstreamTaskSubmitError(body []byte, statusCode int) *dto.TaskError {
 	message := upstreamTaskErrorText(body)
-	if upstreamQuotaExhausted(body, statusCode, message) {
+	billingDisabled := googleBillingDisabled(body, message)
+	if billingDisabled || upstreamQuotaExhausted(body, statusCode, message) {
 		taskErr := service.TaskErrorWrapper(errors.New(taskUpstreamUnavailableMessage), "upstream_unavailable", http.StatusServiceUnavailable)
 		taskErr.UpstreamQuotaExhausted = true
+		taskErr.UpstreamBillingDisabled = billingDisabled
 		return taskErr
 	}
 	switch {
@@ -577,28 +587,43 @@ func upstreamTaskSubmitError(body []byte, statusCode int) *dto.TaskError {
 
 // upstreamTaskErrorText extracts the provider's error message, if any.
 func upstreamTaskErrorText(body []byte) string {
-	var envelope map[string]any
-	if common.Unmarshal(body, &envelope) == nil {
-		var candidates []any
-		if nested, ok := envelope["error"].(map[string]any); ok {
-			candidates = append(candidates, nested["message"])
-		}
-		candidates = append(candidates, envelope["error"], envelope["message"], envelope["msg"], envelope["detail"])
-		for _, candidate := range candidates {
-			if message, ok := candidate.(string); ok && strings.TrimSpace(message) != "" {
-				return strings.TrimSpace(message)
-			}
+	envelope := upstreamErrorEnvelope(body)
+	if envelope == nil {
+		return ""
+	}
+	var candidates []any
+	if nested, ok := envelope["error"].(map[string]any); ok {
+		candidates = append(candidates, nested["message"])
+	}
+	candidates = append(candidates, envelope["error"], envelope["message"], envelope["msg"], envelope["detail"])
+	for _, candidate := range candidates {
+		if message, ok := candidate.(string); ok && strings.TrimSpace(message) != "" {
+			return strings.TrimSpace(message)
 		}
 	}
 	return ""
+}
+
+// upstreamErrorEnvelope returns the provider's JSON error object. Google's
+// Interactions API (Vertex Gemini Omni) wraps it in a one-element array:
+// [{"error": {...}}].
+func upstreamErrorEnvelope(body []byte) map[string]any {
+	var envelope map[string]any
+	if common.Unmarshal(body, &envelope) == nil {
+		return envelope
+	}
+	var list []map[string]any
+	if common.Unmarshal(body, &list) == nil && len(list) > 0 {
+		return list[0]
+	}
+	return nil
 }
 
 func upstreamQuotaExhausted(body []byte, statusCode int, message string) bool {
 	if statusCode == http.StatusPaymentRequired {
 		return true
 	}
-	var envelope map[string]any
-	if common.Unmarshal(body, &envelope) == nil {
+	if envelope := upstreamErrorEnvelope(body); envelope != nil {
 		fields := []any{envelope["code"], envelope["type"]}
 		if nested, ok := envelope["error"].(map[string]any); ok {
 			fields = append(fields, nested["code"], nested["type"])
@@ -612,6 +637,24 @@ func upstreamQuotaExhausted(body []byte, statusCode int, message string) bool {
 	lower := strings.ToLower(message)
 	for _, phrase := range upstreamQuotaErrorPhrases {
 		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// googleBillingDisabled reports a Google Cloud project whose billing stopped:
+// {"error": {"details": [{"reason": "BILLING_DISABLED", ...}]}} or, without
+// the details, the provider's sentence.
+func googleBillingDisabled(body []byte, message string) bool {
+	if strings.Contains(strings.ToLower(message), googleBillingDisabledPhrase) {
+		return true
+	}
+	envelope := upstreamErrorEnvelope(body)
+	nested, _ := envelope["error"].(map[string]any)
+	details, _ := nested["details"].([]any)
+	for _, detail := range details {
+		if info, ok := detail.(map[string]any); ok && info["reason"] == googleBillingDisabledReason {
 			return true
 		}
 	}
