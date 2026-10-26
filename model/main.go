@@ -417,6 +417,9 @@ func migrateDB() error {
 	if err := backfillAffiliateAccounts(); err != nil {
 		return err
 	}
+	if err := backfillTaskModelNames(); err != nil {
+		return err
+	}
 	if err := backfillEmailDeliveryStates(); err != nil {
 		return err
 	}
@@ -552,6 +555,9 @@ func migrateDBFast() error {
 		}
 	}
 	if err := backfillAffiliateAccounts(); err != nil {
+		return err
+	}
+	if err := backfillTaskModelNames(); err != nil {
 		return err
 	}
 	if err := backfillEmailDeliveryStates(); err != nil {

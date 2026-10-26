@@ -8959,6 +8959,7 @@
     "This balance transfer has already been processed": "This balance transfer has already been processed",
     "Please enter a rejection reason": "Please enter a rejection reason",
     "The API balance would exceed the wallet limit": "The API balance would exceed the wallet limit",
-    "Transfer amount": "Transfer amount"
+    "Transfer amount": "Transfer amount",
+    "Task ID or official task ID": "Task ID or official task ID"
   }
 }

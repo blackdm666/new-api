@@ -50,25 +50,28 @@ const (
 const TaskRefundLegacyCutoff int64 = 1771718400 // 2026-02-22 00:00:00 UTC
 
 type Task struct {
-	ID          int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
-	CreatedAt   int64                 `json:"created_at" gorm:"index"`
-	UpdatedAt   int64                 `json:"updated_at"`
-	TaskID      string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
-	Platform    constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
-	UserId      int                   `json:"user_id" gorm:"index"`
-	Group       string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
-	ChannelId   int                   `json:"channel_id" gorm:"index"`
-	Quota       int                   `json:"quota"`
-	Action      string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
-	Status      TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
-	FailReason  string                `json:"fail_reason"`
-	SubmitTime  int64                 `json:"submit_time" gorm:"index"`
-	StartTime   int64                 `json:"start_time" gorm:"index"`
-	FinishTime  int64                 `json:"finish_time" gorm:"index"`
-	Progress    string                `json:"progress" gorm:"type:varchar(20);index"`
-	Properties  Properties            `json:"properties" gorm:"type:json"`
-	Username    string                `json:"username,omitempty" gorm:"-"`
-	ChannelName string                `json:"channel_name,omitempty" gorm:"-"`
+	ID         int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
+	CreatedAt  int64                 `json:"created_at" gorm:"index"`
+	UpdatedAt  int64                 `json:"updated_at"`
+	TaskID     string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
+	Platform   constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
+	UserId     int                   `json:"user_id" gorm:"index"`
+	Group      string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
+	ChannelId  int                   `json:"channel_id" gorm:"index"`
+	Quota      int                   `json:"quota"`
+	Action     string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
+	Status     TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
+	FailReason string                `json:"fail_reason"`
+	SubmitTime int64                 `json:"submit_time" gorm:"index"`
+	StartTime  int64                 `json:"start_time" gorm:"index"`
+	FinishTime int64                 `json:"finish_time" gorm:"index"`
+	Progress   string                `json:"progress" gorm:"type:varchar(20);index"`
+	// ModelName mirrors the model the user requested (Properties.OriginModelName)
+	// in a plain indexed column so task logs can be searched by model.
+	ModelName   string     `json:"-" gorm:"type:varchar(191);index;default:''"`
+	Properties  Properties `json:"properties" gorm:"type:json"`
+	Username    string     `json:"username,omitempty" gorm:"-"`
+	ChannelName string     `json:"channel_name,omitempty" gorm:"-"`
 	// 禁止返回给用户，内部可能包含key等隐私信息
 	PrivateData TaskPrivateData `json:"-" gorm:"column:private_data;type:json"`
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
@@ -244,6 +247,11 @@ type SyncTaskQueryParams struct {
 	StartTimestamp int64
 	EndTimestamp   int64
 	UserIDs        []int
+	// ModelName matches exactly, or as a LIKE pattern when it contains %.
+	ModelName string
+	// IDs restricts the result to these rows; set (possibly empty) when a
+	// task ID search was resolved to rows by the caller.
+	IDs []int64
 }
 
 func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) *Task {
@@ -286,8 +294,109 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 		Platform:    platform,
 		Properties:  properties,
 		PrivateData: privateData,
+		ModelName:   taskModelName(properties),
 	}
 	return t
+}
+
+func taskModelName(properties Properties) string {
+	if properties.OriginModelName != "" {
+		return properties.OriginModelName
+	}
+	return properties.UpstreamModelName
+}
+
+// applyTaskSearchFilters adds the model-name and resolved task-ID filters
+// shared by the task list and count queries.
+func applyTaskSearchFilters(query *gorm.DB, queryParams SyncTaskQueryParams) (*gorm.DB, error) {
+	if queryParams.IDs != nil {
+		query = query.Where("id IN ?", append([]int64{0}, queryParams.IDs...))
+	}
+	modelName := strings.TrimSpace(queryParams.ModelName)
+	if modelName == "" {
+		return query, nil
+	}
+	if !strings.Contains(modelName, "%") {
+		return query.Where("model_name = ?", modelName), nil
+	}
+	pattern, err := sanitizeLikePattern(modelName)
+	if err != nil {
+		return nil, err
+	}
+	return query.Where("model_name LIKE ? ESCAPE '!'", pattern), nil
+}
+
+// FindTaskSearchCandidates returns the newest tasks whose task_id equals the
+// keyword or whose stored upstream payload contains it, for the caller to
+// confirm against the official task ID the viewer would see. userId 0 searches
+// every user's tasks.
+func FindTaskSearchCandidates(keyword string, userId int, limit int) ([]*Task, error) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" || len(keyword) > 191 {
+		return nil, nil
+	}
+	escaped := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(keyword)
+	pattern := "%" + escaped + "%"
+	// MySQL compares a JSON column as text; PostgreSQL json and SQLite blobs
+	// must be cast first.
+	dataCol, privateCol := "CAST(data AS TEXT)", "CAST(private_data AS TEXT)"
+	if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
+		dataCol, privateCol = "data", "private_data"
+	}
+	query := DB.Where("task_id = ? OR "+dataCol+" LIKE ? ESCAPE '!' OR "+privateCol+" LIKE ? ESCAPE '!'", keyword, pattern, pattern)
+	if userId > 0 {
+		query = query.Where("user_id = ?", userId)
+	}
+	var tasks []*Task
+	err := query.Order("id desc").Limit(limit).Find(&tasks).Error
+	return tasks, err
+}
+
+// FindTaskUserIDsByUsername resolves a username search (exact, or a LIKE
+// pattern when it contains %) to user IDs, including deleted users.
+func FindTaskUserIDsByUsername(username string) ([]int, error) {
+	username = strings.TrimSpace(username)
+	query := DB.Unscoped().Model(&User{})
+	if strings.Contains(username, "%") {
+		pattern, err := sanitizeLikePattern(username)
+		if err != nil {
+			return nil, err
+		}
+		query = query.Where("username LIKE ? ESCAPE '!'", pattern)
+	} else {
+		query = query.Where("username = ?", username)
+	}
+	ids := []int{}
+	err := query.Limit(1000).Pluck("id", &ids).Error
+	return ids, err
+}
+
+// backfillTaskModelNames copies the requested model out of the properties
+// JSON for tasks created before the model_name column existed. Rows are
+// grouped by model so each batch issues one UPDATE per model.
+func backfillTaskModelNames() error {
+	lastID := int64(0)
+	for {
+		var tasks []*Task
+		if err := DB.Select("id", "properties").Where("id > ? AND (model_name = '' OR model_name IS NULL)", lastID).Order("id").Limit(500).Find(&tasks).Error; err != nil {
+			return err
+		}
+		if len(tasks) == 0 {
+			return nil
+		}
+		byModel := map[string][]int64{}
+		for _, task := range tasks {
+			lastID = task.ID
+			if name := taskModelName(task.Properties); name != "" && len(name) <= 191 {
+				byModel[name] = append(byModel[name], task.ID)
+			}
+		}
+		for name, ids := range byModel {
+			if err := DB.Model(&Task{}).Where("id IN ?", ids).Update("model_name", name).Error; err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQueryParams) []*Task {
@@ -315,6 +424,10 @@ func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQ
 	}
 	if queryParams.EndTimestamp != 0 {
 		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
+	}
+
+	if query, err = applyTaskSearchFilters(query, queryParams); err != nil {
+		return nil
 	}
 
 	// 获取数据
@@ -365,6 +478,10 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	}
 	if queryParams.EndTimestamp != 0 {
 		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
+	}
+
+	if query, err = applyTaskSearchFilters(query, queryParams); err != nil {
+		return nil
 	}
 
 	// 获取数据
@@ -724,6 +841,10 @@ func TaskCountAllTasks(queryParams SyncTaskQueryParams) int64 {
 	if queryParams.EndTimestamp != 0 {
 		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
 	}
+	query, err := applyTaskSearchFilters(query, queryParams)
+	if err != nil {
+		return 0
+	}
 	_ = query.Count(&total).Error
 	return total
 }
@@ -749,6 +870,10 @@ func TaskCountAllUserTask(userId int, queryParams SyncTaskQueryParams) int64 {
 	}
 	if queryParams.EndTimestamp != 0 {
 		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
+	}
+	query, err := applyTaskSearchFilters(query, queryParams)
+	if err != nil {
+		return 0
 	}
 	_ = query.Count(&total).Error
 	return total

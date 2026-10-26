@@ -8867,6 +8867,7 @@
     "This balance transfer has already been processed": "這筆轉餘額已經處理過了",
     "Please enter a rejection reason": "請填寫駁回原因",
     "The API balance would exceed the wallet limit": "API 餘額將超過錢包上限",
-    "Transfer amount": "轉餘額金額"
+    "Transfer amount": "轉餘額金額",
+    "Task ID or official task ID": "任務 ID 或官方任務 ID"
   }
 }
