@@ -43,6 +43,11 @@ import { cn } from '@/lib/utils'
 interface LogsFilterToolbarProps<TData> {
   table: Table<TData>
   primaryFilters: ReactNode
+  /**
+   * Fixed desktop column counts for the primary filters. Without it the grid
+   * auto-fits 10rem columns, which can leave a ragged last row.
+   */
+  primaryGridClassName?: string
   advancedFilters?: ReactNode
   compactMobile?: boolean
   mobilePinnedFilters?: ReactNode
@@ -250,7 +255,13 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
       )}
     >
       <div className='flex flex-wrap items-start gap-2'>
-        <div className='grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'>
+        <div
+          data-slot='logs-primary-filters'
+          className={cn(
+            'grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]',
+            props.primaryGridClassName
+          )}
+        >
           {props.primaryFilters}
         </div>
         {advancedToggle && (

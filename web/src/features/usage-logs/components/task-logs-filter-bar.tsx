@@ -231,6 +231,15 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
         />
       </LogsFilterField>
     ) : null
+  // Every row is filled: the date range takes two columns, so the admin task
+  // view has six slots (date, task ID, model, username, channel) and the
+  // own-task view four (date, task ID, model).
+  let primaryGridClassName: string | undefined
+  if (props.logCategory === 'task') {
+    primaryGridClassName = isAdmin
+      ? 'sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6'
+      : 'sm:grid-cols-2 xl:grid-cols-4'
+  }
   const channelFilter = isAdmin ? (
     <LogsFilterField>
       <LogsFilterInput
@@ -245,6 +254,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
   return (
     <LogsFilterToolbar
       table={props.table}
+      primaryGridClassName={primaryGridClassName}
       primaryFilters={
         <>
           {dateRangeFilter}
