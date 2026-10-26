@@ -326,6 +326,18 @@ func applyTaskSearchFilters(query *gorm.DB, queryParams SyncTaskQueryParams) (*g
 	return query.Where("model_name LIKE ? ESCAPE '!'", pattern), nil
 }
 
+// FindTaskRowIDsByTaskID returns the rows whose task_id equals taskID; userId
+// 0 searches every user's tasks.
+func FindTaskRowIDsByTaskID(taskID string, userId int) ([]int64, error) {
+	query := DB.Model(&Task{}).Where("task_id = ?", strings.TrimSpace(taskID))
+	if userId > 0 {
+		query = query.Where("user_id = ?", userId)
+	}
+	ids := []int64{}
+	err := query.Limit(200).Pluck("id", &ids).Error
+	return ids, err
+}
+
 // FindTaskSearchCandidates returns the newest tasks whose task_id equals the
 // keyword or whose stored upstream payload contains it, for the caller to
 // confirm against the official task ID the viewer would see. userId 0 searches
@@ -787,6 +799,9 @@ func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 	result := DB.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
 	if result.Error != nil {
 		return false, result.Error
+	}
+	if result.RowsAffected > 0 {
+		SyncTaskSearchTerms(t)
 	}
 	return result.RowsAffected > 0, nil
 }

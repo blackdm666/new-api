@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -699,7 +700,7 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 				NodeName:       task.PrivateData.NodeName,
 			}
 			if item.OfficialTaskID == "" {
-				item.OfficialTaskID = officialTaskID(task)
+				item.OfficialTaskID = relay.RootOfficialTaskID(task)
 			}
 			if execution := task.PrivateData.Execution; execution != nil {
 				if snapshot := execution.TaskPlugin; snapshot != nil {
@@ -721,63 +722,53 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 }
 
 // taskIDSearchCandidateLimit bounds how many payload matches are checked
-// against the official task ID for one search.
+// against the official task ID while old tasks are still being indexed.
 const taskIDSearchCandidateLimit = 200
 
 // resolveTaskIDSearch turns the task_id query into the rows it names: our own
-// task ID, or the model platform's official task ID exactly as this viewer sees
-// it in the list. It reports false when nothing matches.
+// task ID, or an ID from the task search index that this viewer may see (the
+// published official ID for everyone; the fallback official ID and the
+// upstream task ID for root). It reports false when nothing matches.
 func resolveTaskIDSearch(c *gin.Context, queryParams *model.SyncTaskQueryParams, userID int) bool {
 	keyword := strings.TrimSpace(c.Query("task_id"))
 	if keyword == "" {
 		return true
 	}
-	candidates, err := model.FindTaskSearchCandidates(keyword, userID, taskIDSearchCandidateLimit)
+	role := c.GetInt("role")
+	kinds := []string{model.TaskSearchTermKindOfficial}
+	if role >= common.RoleRootUser {
+		kinds = append(kinds, model.TaskSearchTermKindRootOfficial, model.TaskSearchTermKindUpstream)
+	}
+	ids, err := model.FindTaskRowIDsByTaskID(keyword, userID)
 	if err != nil {
-		common.SysError("task id search failed: " + err.Error())
+		common.SysError(common.LogText("task id search failed: %s", err.Error()))
 		return false
 	}
-	role := c.GetInt("role")
-	ids := []int64{}
-	for _, task := range candidates {
-		officialID := relay.PublicOfficialTaskID(task)
-		if officialID == "" && role >= common.RoleRootUser {
-			officialID = officialTaskID(task)
+	indexed, err := model.FindTaskIDsBySearchTerm(keyword, kinds)
+	if err != nil {
+		common.SysError(common.LogText("task id search failed: %s", err.Error()))
+		return false
+	}
+	ids = append(ids, indexed...)
+	// Until every older task is indexed, also check payload matches directly.
+	if !model.TaskSearchTermsBackfilled() {
+		candidates, err := model.FindTaskSearchCandidates(keyword, userID, taskIDSearchCandidateLimit)
+		if err != nil {
+			common.SysError(common.LogText("task id search failed: %s", err.Error()))
+			return false
 		}
-		if task.TaskID == keyword || officialID == keyword {
-			ids = append(ids, task.ID)
-		}
-	}
-	queryParams.IDs = ids
-	return len(ids) > 0
-}
-
-func officialTaskID(task *model.Task) string {
-	if task == nil {
-		return ""
-	}
-
-	var snapshot struct {
-		ID     string `json:"id"`
-		TaskID string `json:"task_id"`
-		Data   struct {
-			ID     string `json:"id"`
-			TaskID string `json:"task_id"`
-		} `json:"data"`
-	}
-	if len(task.Data) > 0 && common.Unmarshal(task.Data, &snapshot) == nil {
-		for _, candidate := range []string{
-			snapshot.ID,
-			snapshot.TaskID,
-			snapshot.Data.ID,
-			snapshot.Data.TaskID,
-		} {
-			if candidate = strings.TrimSpace(candidate); candidate != "" {
-				return candidate
+		for _, task := range candidates {
+			for _, term := range relay.TaskSearchTerms(task) {
+				if term.Value == keyword && slices.Contains(kinds, term.Kind) {
+					ids = append(ids, task.ID)
+					break
+				}
 			}
 		}
 	}
-	return strings.TrimSpace(task.PrivateData.UpstreamTaskID)
+	slices.Sort(ids)
+	queryParams.IDs = slices.Compact(ids)
+	return len(queryParams.IDs) > 0
 }
 
 func taskFailReasonIsLegacyResultURL(value string) bool {

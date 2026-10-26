@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
@@ -152,11 +153,11 @@ func TestTaskSearchDatabaseMatrix(t *testing.T) {
 			t.Cleanup(func() {
 				DB = previousDB
 				common.SetDatabaseTypes(previousMain, previousLog)
-				require.NoError(t, db.Migrator().DropTable(&Task{}))
+				require.NoError(t, db.Migrator().DropTable(&Task{}, &TaskSearchTerm{}))
 				require.NoError(t, sqlDB.Close())
 			})
-			require.NoError(t, db.Migrator().DropTable(&Task{}))
-			require.NoError(t, db.AutoMigrate(&Task{}))
+			require.NoError(t, db.Migrator().DropTable(&Task{}, &TaskSearchTerm{}))
+			require.NoError(t, db.AutoMigrate(&Task{}, &TaskSearchTerm{}))
 
 			tasks := []*Task{
 				{TaskID: "task_numeric_official", UserId: 7, Properties: Properties{OriginModelName: "MiniMax-Hailuo-H3"}, Data: json.RawMessage(`{"id":385412976501234}`)},
@@ -202,6 +203,96 @@ func TestTaskSearchDatabaseMatrix(t *testing.T) {
 			assert.Empty(t, listed(SyncTaskQueryParams{ModelName: "seedance-2%"}), "underscore is not a wildcard")
 			assert.Equal(t, []string{"task_string_official"}, listed(SyncTaskQueryParams{IDs: []int64{tasks[1].ID}}))
 			assert.Empty(t, listed(SyncTaskQueryParams{IDs: []int64{}}))
+
+			terms := []TaskSearchTerm{
+				{TaskRowId: tasks[0].ID, Kind: TaskSearchTermKindOfficial, Value: "385412976501234"},
+				{TaskRowId: tasks[2].ID, Kind: TaskSearchTermKindUpstream, Value: "op_upstream_42"},
+			}
+			// Writing the same terms again (every poll) must not fail or duplicate.
+			require.NoError(t, insertTaskSearchTerms(terms))
+			require.NoError(t, insertTaskSearchTerms([]TaskSearchTerm{terms[0], terms[1]}))
+			var termCount int64
+			require.NoError(t, db.Model(&TaskSearchTerm{}).Count(&termCount).Error)
+			assert.Equal(t, int64(2), termCount)
+			found, err := FindTaskIDsBySearchTerm("op_upstream_42", []string{TaskSearchTermKindOfficial, TaskSearchTermKindUpstream})
+			require.NoError(t, err)
+			assert.Equal(t, []int64{tasks[2].ID}, found)
+			found, err = FindTaskIDsBySearchTerm("op_upstream_42", []string{TaskSearchTermKindOfficial})
+			require.NoError(t, err)
+			assert.Empty(t, found)
 		})
 	}
+}
+
+func TestTaskSearchTermsSyncOnWriteAndBackfillResumes(t *testing.T) {
+	truncateTables(t)
+	require.NoError(t, DB.AutoMigrate(&TaskSearchTerm{}, &Option{}))
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = map[string]string{}
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		DB.Exec("DELETE FROM task_search_terms")
+		DB.Where("key IN ?", []string{TaskSearchTermsBackfillCursorOptionKey, TaskSearchTermsBackfillDoneOptionKey}).Delete(&Option{})
+		common.OptionMapRWMutex.Lock()
+		delete(common.OptionMap, TaskSearchTermsBackfillCursorOptionKey)
+		delete(common.OptionMap, TaskSearchTermsBackfillDoneOptionKey)
+		common.OptionMapRWMutex.Unlock()
+	})
+	previousResolver := TaskSearchTermResolver
+	t.Cleanup(func() { TaskSearchTermResolver = previousResolver })
+	TaskSearchTermResolver = func(task *Task) []TaskSearchTerm {
+		var snapshot struct {
+			ID string `json:"id"`
+		}
+		_ = common.Unmarshal(task.Data, &snapshot)
+		return []TaskSearchTerm{
+			{Kind: TaskSearchTermKindOfficial, Value: snapshot.ID},
+			{Kind: TaskSearchTermKindUpstream, Value: task.PrivateData.UpstreamTaskID},
+		}
+	}
+	countTerms := func() int64 {
+		var count int64
+		require.NoError(t, DB.Model(&TaskSearchTerm{}).Count(&count).Error)
+		return count
+	}
+
+	// Tasks written before the index existed.
+	legacy := []*Task{
+		{TaskID: "task_legacy_1", UserId: 7, Data: json.RawMessage(`{"id":"cgt-legacy-1"}`), PrivateData: TaskPrivateData{UpstreamTaskID: "up-legacy-1"}},
+		{TaskID: "task_legacy_2", UserId: 7, Data: json.RawMessage(`{"status":"queued"}`)},
+	}
+	for _, task := range legacy {
+		require.NoError(t, DB.Create(task).Error)
+	}
+	assert.False(t, TaskSearchTermsBackfilled())
+	require.NoError(t, BackfillTaskSearchTerms(context.Background()))
+	assert.True(t, TaskSearchTermsBackfilled())
+	assert.Equal(t, int64(2), countTerms(), "empty IDs are not indexed")
+
+	ids, err := FindTaskIDsBySearchTerm("cgt-legacy-1", []string{TaskSearchTermKindOfficial})
+	require.NoError(t, err)
+	assert.Equal(t, []int64{legacy[0].ID}, ids)
+	ids, err = FindTaskIDsBySearchTerm("up-legacy-1", []string{TaskSearchTermKindOfficial})
+	require.NoError(t, err)
+	assert.Empty(t, ids, "the upstream ID is not visible as an official ID")
+
+	// New tasks are indexed when written, including IDs that appear on a poll.
+	fresh := &Task{TaskID: "task_fresh", UserId: 7, Status: TaskStatusSubmitted, Data: json.RawMessage(`{"status":"queued"}`), PrivateData: TaskPrivateData{UpstreamTaskID: "up-fresh"}}
+	require.NoError(t, fresh.InsertWithContext(context.Background(), "data"))
+	SyncTaskSearchTerms(fresh)
+	assert.Equal(t, int64(3), countTerms())
+	fresh.Data = json.RawMessage(`{"id":"cgt-fresh"}`)
+	fresh.Status = TaskStatusInProgress
+	won, err := fresh.UpdateWithStatus(TaskStatusSubmitted)
+	require.NoError(t, err)
+	require.True(t, won)
+	ids, err = FindTaskIDsBySearchTerm("cgt-fresh", []string{TaskSearchTermKindOfficial})
+	require.NoError(t, err)
+	assert.Equal(t, []int64{fresh.ID}, ids)
+
+	// A later run resumes after the saved cursor and never duplicates terms.
+	require.NoError(t, BackfillTaskSearchTerms(context.Background()))
+	assert.Equal(t, int64(4), countTerms())
 }
