@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -234,10 +236,11 @@ func TestTaskSearchTermsSyncOnWriteAndBackfillResumes(t *testing.T) {
 	common.OptionMapRWMutex.Unlock()
 	t.Cleanup(func() {
 		DB.Exec("DELETE FROM task_search_terms")
-		DB.Where("key IN ?", []string{TaskSearchTermsBackfillCursorOptionKey, TaskSearchTermsBackfillDoneOptionKey}).Delete(&Option{})
+		DB.Where("key IN ?", []string{TaskSearchTermsBackfillCursorOptionKey, TaskSearchTermsBackfillDoneOptionKey, TaskSearchTermsBackfillVersionOptionKey}).Delete(&Option{})
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, TaskSearchTermsBackfillCursorOptionKey)
 		delete(common.OptionMap, TaskSearchTermsBackfillDoneOptionKey)
+		delete(common.OptionMap, TaskSearchTermsBackfillVersionOptionKey)
 		common.OptionMapRWMutex.Unlock()
 	})
 	previousResolver := TaskSearchTermResolver
@@ -295,4 +298,57 @@ func TestTaskSearchTermsSyncOnWriteAndBackfillResumes(t *testing.T) {
 	// A later run resumes after the saved cursor and never duplicates terms.
 	require.NoError(t, BackfillTaskSearchTerms(context.Background()))
 	assert.Equal(t, int64(4), countTerms())
+}
+
+func TestTaskSearchTermsIndexLongIDsAndRerunOlderBackfill(t *testing.T) {
+	truncateTables(t)
+	require.NoError(t, DB.AutoMigrate(&TaskSearchTerm{}, &Option{}))
+	optionKeys := []string{TaskSearchTermsBackfillCursorOptionKey, TaskSearchTermsBackfillDoneOptionKey, TaskSearchTermsBackfillVersionOptionKey}
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = map[string]string{}
+	}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		DB.Exec("DELETE FROM task_search_terms")
+		DB.Where("key IN ?", optionKeys).Delete(&Option{})
+		common.OptionMapRWMutex.Lock()
+		for _, key := range optionKeys {
+			delete(common.OptionMap, key)
+		}
+		common.OptionMapRWMutex.Unlock()
+	})
+	previousResolver := TaskSearchTermResolver
+	t.Cleanup(func() { TaskSearchTermResolver = previousResolver })
+	TaskSearchTermResolver = func(task *Task) []TaskSearchTerm {
+		return []TaskSearchTerm{{Kind: TaskSearchTermKindUpstream, Value: task.PrivateData.UpstreamTaskID}}
+	}
+
+	// A Vertex operation name is longer than the indexed column.
+	longID := strings.Repeat("cHJvamVjdHMvcHJvamVjdC0yMzhi", 8)
+	require.Greater(t, len(longID), 191)
+	task := &Task{TaskID: "task_vertex_long", UserId: 7, PrivateData: TaskPrivateData{UpstreamTaskID: longID}}
+	require.NoError(t, DB.Create(task).Error)
+
+	// State left by the first release: marked done without the long ID indexed.
+	require.NoError(t, UpdateOption(TaskSearchTermsBackfillCursorOptionKey, strconv.FormatInt(task.ID, 10)))
+	require.NoError(t, UpdateOption(TaskSearchTermsBackfillDoneOptionKey, "true"))
+
+	require.NoError(t, BackfillTaskSearchTerms(context.Background()))
+	assert.True(t, TaskSearchTermsBackfilled())
+	ids, err := FindTaskIDsBySearchTerm("  "+longID+" ", []string{TaskSearchTermKindUpstream})
+	require.NoError(t, err)
+	assert.Equal(t, []int64{task.ID}, ids)
+	ids, err = FindTaskIDsBySearchTerm(longID[:191], []string{TaskSearchTermKindUpstream})
+	require.NoError(t, err)
+	assert.Empty(t, ids, "a truncated ID does not match")
+
+	// The current version does not restart again.
+	var before int64
+	require.NoError(t, DB.Model(&TaskSearchTerm{}).Count(&before).Error)
+	require.NoError(t, BackfillTaskSearchTerms(context.Background()))
+	assert.Equal(t, strconv.FormatInt(task.ID, 10), common.OptionMap[TaskSearchTermsBackfillCursorOptionKey])
+	var after int64
+	require.NoError(t, DB.Model(&TaskSearchTerm{}).Count(&after).Error)
+	assert.Equal(t, before, after)
 }

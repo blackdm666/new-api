@@ -2,6 +2,8 @@ package model
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,8 +27,15 @@ const (
 	// TaskSearchTermKindUpstream is the upstream task ID, shown to root only.
 	TaskSearchTermKindUpstream = "upstream"
 
-	TaskSearchTermsBackfillCursorOptionKey = "TaskSearchTermsBackfillCursor"
-	TaskSearchTermsBackfillDoneOptionKey   = "TaskSearchTermsBackfillDone"
+	TaskSearchTermsBackfillCursorOptionKey  = "TaskSearchTermsBackfillCursor"
+	TaskSearchTermsBackfillDoneOptionKey    = "TaskSearchTermsBackfillDone"
+	TaskSearchTermsBackfillVersionOptionKey = "TaskSearchTermsBackfillVersion"
+
+	// taskSearchTermsBackfillVersion is raised when the index starts holding
+	// IDs it skipped before; a lower stored version re-runs the backfill from
+	// the first task. Version 2 indexes IDs longer than the column as hashes.
+	taskSearchTermsBackfillVersion = "2"
+	taskSearchTermHashPrefix       = "sha256:"
 
 	taskSearchTermMaxLength      = 191
 	taskSearchTermBackfillBatch  = 200
@@ -60,14 +69,26 @@ func taskSearchTermsKey(terms []TaskSearchTerm) string {
 	return builder.String()
 }
 
+// taskSearchTermValue is how an ID is stored and looked up. IDs longer than
+// the column, such as Vertex operation names, are kept as their SHA-256 so
+// they can still be matched exactly.
+func taskSearchTermValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= taskSearchTermMaxLength {
+		return value
+	}
+	sum := sha256.Sum256([]byte(value))
+	return taskSearchTermHashPrefix + hex.EncodeToString(sum[:])
+}
+
 func resolveTaskSearchTerms(task *Task) []TaskSearchTerm {
 	if TaskSearchTermResolver == nil || task == nil || task.ID <= 0 {
 		return nil
 	}
 	terms := []TaskSearchTerm{}
 	for _, term := range TaskSearchTermResolver(task) {
-		term.Value = strings.TrimSpace(term.Value)
-		if term.Value == "" || len(term.Value) > taskSearchTermMaxLength {
+		term.Value = taskSearchTermValue(term.Value)
+		if term.Value == "" {
 			continue
 		}
 		term.TaskRowId = task.ID
@@ -115,9 +136,9 @@ func SyncTaskSearchTerms(task *Task) {
 // FindTaskIDsBySearchTerm returns the task rows whose indexed ID of one of the
 // given kinds equals value.
 func FindTaskIDsBySearchTerm(value string, kinds []string) ([]int64, error) {
-	value = strings.TrimSpace(value)
+	value = taskSearchTermValue(value)
 	ids := []int64{}
-	if value == "" || len(value) > taskSearchTermMaxLength || len(kinds) == 0 {
+	if value == "" || len(kinds) == 0 {
 		return ids, nil
 	}
 	err := DB.Model(&TaskSearchTerm{}).
@@ -154,6 +175,20 @@ func BackfillTaskSearchTerms(ctx context.Context) error {
 	if TaskSearchTermResolver == nil {
 		return nil
 	}
+	common.OptionMapRWMutex.RLock()
+	storedVersion := common.OptionMap[TaskSearchTermsBackfillVersionOptionKey]
+	common.OptionMapRWMutex.RUnlock()
+	if storedVersion != taskSearchTermsBackfillVersion {
+		// Start over; searches fall back to payload matching until it finishes.
+		for key, value := range map[string]string{
+			TaskSearchTermsBackfillDoneOptionKey:   "false",
+			TaskSearchTermsBackfillCursorOptionKey: "0",
+		} {
+			if err := UpdateOption(key, value); err != nil {
+				return err
+			}
+		}
+	}
 	cursor := taskSearchTermsBackfillCursor()
 	indexed := 0
 	for {
@@ -187,6 +222,11 @@ func BackfillTaskSearchTerms(ctx context.Context) error {
 	}
 	if !TaskSearchTermsBackfilled() {
 		if err := UpdateOption(TaskSearchTermsBackfillDoneOptionKey, "true"); err != nil {
+			return err
+		}
+	}
+	if storedVersion != taskSearchTermsBackfillVersion {
+		if err := UpdateOption(TaskSearchTermsBackfillVersionOptionKey, taskSearchTermsBackfillVersion); err != nil {
 			return err
 		}
 	}
