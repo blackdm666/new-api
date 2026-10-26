@@ -475,7 +475,12 @@ func setupTaskSubmissionDatabase(t *testing.T, migrate bool, events *[]string) *
 		models = append(models, &model.Task{})
 	}
 	database, _ := openTaskDialectDatabase(t, models...)
-	require.NoError(t, database.Callback().Create().Before("gorm:create").Register("test:task-submit-order", func(*gorm.DB) {
+	require.NoError(t, database.Callback().Create().Before("gorm:create").Register("test:task-submit-order", func(tx *gorm.DB) {
+		// The ordering contract is about the task row; the search index written
+		// after settlement is not part of it.
+		if strings.HasSuffix(tx.Statement.Table, "task_search_terms") {
+			return
+		}
 		*events = append(*events, "insert")
 	}))
 	model.DB = database
