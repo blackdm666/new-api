@@ -37,6 +37,7 @@ import type {
   AffiliatePayoutSummary,
   AffiliateSummary,
   AffiliateTransfer,
+  AffiliateTransferStatus,
   AffiliateUpgradeCandidate,
   AffiliateUpgradeNotice,
   ApiResponse,
@@ -151,14 +152,48 @@ export async function fetchAdminAffiliateCommissions(params: {
 export async function fetchAdminAffiliateTransfers(params: {
   page: number
   pageSize: number
+  status?: AffiliateTransferStatus
   keyword?: string
 }): Promise<PaginatedResponse<AffiliateTransfer>> {
   const query = pageQuery(params.page, params.pageSize)
+  if (params.status) query.set('status', String(params.status))
   if (params.keyword?.trim()) query.set('keyword', params.keyword.trim())
   const response = await api.get<
     ApiResponse<PaginatedResponse<AffiliateTransfer>>
   >(`/api/affiliate/admin/transfers?${query.toString()}`)
   return unwrap(response.data)
+}
+
+export async function cancelAffiliateTransfer(id: number): Promise<void> {
+  const response = await api.post<ApiResponse<unknown>>(
+    `/api/user/aff/transfers/${id}/cancel`
+  )
+  unwrap(response.data)
+}
+
+export async function approveAffiliateTransfer(id: number): Promise<void> {
+  const response = await api.post<ApiResponse<unknown>>(
+    `/api/affiliate/admin/transfers/${id}/approve`
+  )
+  unwrap(response.data)
+}
+
+export async function rejectAffiliateTransfer(
+  id: number,
+  reason: string
+): Promise<void> {
+  const response = await api.post<ApiResponse<unknown>>(
+    `/api/affiliate/admin/transfers/${id}/reject`,
+    { reason }
+  )
+  unwrap(response.data)
+}
+
+export async function refreshAffiliateTransferRisk(id: number): Promise<void> {
+  const response = await api.post<ApiResponse<unknown>>(
+    `/api/affiliate/admin/transfers/${id}/risk`
+  )
+  unwrap(response.data)
 }
 
 export async function approveAffiliateCommission(id: number): Promise<void> {
@@ -181,7 +216,7 @@ export async function rejectAffiliateCommission(
 
 export type AffiliateSettingsPayload = {
   enabled: boolean
-  auto_approve: boolean
+  transfer_auto_approve: boolean
   commission_top_up_limit: number
   default_rate_basis_points: number
   group_rates: Record<string, number>

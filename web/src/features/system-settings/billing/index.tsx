@@ -31,7 +31,8 @@ const defaultBillingSettings: BillingSettings = {
   TopUpLink: '',
   'quota_setting.enable_free_model_pre_consume': true,
   AffiliateCommissionEnabled: true,
-  AffiliateCommissionAutoApprove: false,
+  AffiliateCommissionAutoApprove: true,
+  AffiliateTransferAutoApprove: true,
   AffiliateCommissionInviteeTopUpLimit: 0,
   AffiliateCommissionDefaultRateBasisPoints: 500,
   AffiliateCommissionGroupRates:

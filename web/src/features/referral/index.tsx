@@ -77,6 +77,7 @@ import {
 } from './lib'
 import { OverflowNote } from './overflow-note'
 import { AffiliatePayouts } from './payouts-user'
+import { AffiliateTransfers } from './transfers-user'
 import type {
   AffiliateInviteeStats,
   AffiliateInviterCommission,
@@ -134,6 +135,9 @@ export function ReferralProgram() {
             minimumPayoutCents={payoutSummaryQuery.data?.minimum_cents ?? 10000}
             settlementDay={payoutSummaryQuery.data?.settlement_day ?? 10}
             loading={summaryQuery.isLoading || payoutSummaryQuery.isLoading}
+            transferRequiresReview={
+              summaryQuery.data?.transfer_auto_approve === false
+            }
             onTransfer={() => setTransferDialogOpen(true)}
             onPayout={() => setPayoutDialogOpen(true)}
           />
@@ -200,6 +204,9 @@ export function ReferralProgram() {
                 {t('Commission records')}
               </TabsTrigger>
               <TabsTrigger value='invitees'>{t('Invited users')}</TabsTrigger>
+              <TabsTrigger value='transfers'>
+                {t('Balance transfers')}
+              </TabsTrigger>
               <TabsTrigger value='payouts'>
                 {t('Payout applications')}
               </TabsTrigger>
@@ -212,6 +219,9 @@ export function ReferralProgram() {
                 inviteeTopUpLimit={summaryQuery.data?.invitee_top_up_limit ?? 0}
               />
             </TabsContent>
+            <TabsContent value='transfers'>
+              <AffiliateTransfers />
+            </TabsContent>
             <TabsContent value='payouts'>
               <AffiliatePayouts />
             </TabsContent>
@@ -222,6 +232,9 @@ export function ReferralProgram() {
               onOpenChange={setTransferDialogOpen}
               availableCents={summaryQuery.data?.available_cents ?? 0}
               currentBalanceQuota={currentBalanceQuota}
+              requiresReview={
+                summaryQuery.data?.transfer_auto_approve === false
+              }
             />
           ) : null}
           {payoutDialogOpen ? (
@@ -256,8 +269,8 @@ export function SummaryGrid({
       icon: CircleDollarSign,
     },
     {
-      label: t('Pending commission'),
-      value: formatCents(summary?.pending_commission_cents ?? 0),
+      label: t('Transfers under review'),
+      value: formatCents(summary?.pending_transfer_cents ?? 0),
       icon: Hourglass,
     },
     {

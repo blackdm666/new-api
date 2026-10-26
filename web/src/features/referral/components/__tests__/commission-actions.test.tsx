@@ -81,6 +81,7 @@ describe('commission actions', () => {
       minimumPayoutCents: 10_000,
       settlementDay: 10,
       loading: false,
+      transferRequiresReview: false,
       onTransfer: () => {
         transferClicks += 1
       },
@@ -104,12 +105,30 @@ describe('commission actions', () => {
     await unmountActions(rendered)
   })
 
+  test('explains that transfers wait for review when review is required', async () => {
+    const rendered = await renderActions({
+      availableCents: 12_850,
+      minimumPayoutCents: 10_000,
+      settlementDay: 10,
+      loading: false,
+      transferRequiresReview: true,
+      onTransfer: () => {},
+      onPayout: () => {},
+    })
+
+    const text = rendered.container.textContent ?? ''
+    assert.match(text, /Credited after review · no referral commission/)
+    assert.doesNotMatch(text, /Instant credit/)
+    await unmountActions(rendered)
+  })
+
   test('disables unavailable transfer and cash payout actions', async () => {
     const rendered = await renderActions({
       availableCents: 99,
       minimumPayoutCents: 10_000,
       settlementDay: 10,
       loading: false,
+      transferRequiresReview: false,
       onTransfer: () => {},
       onPayout: () => {},
     })

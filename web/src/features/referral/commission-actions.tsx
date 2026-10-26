@@ -59,12 +59,15 @@ import {
 
 import { createAffiliatePayout, transferAffiliateCommission } from './api'
 import { formatCents } from './lib'
+import { AFFILIATE_TRANSFER_STATUS } from './types'
 
 type CommissionActionsProps = {
   availableCents: number
   minimumPayoutCents: number
   settlementDay: number
   loading: boolean
+  /** True when transfers wait for administrator review. */
+  transferRequiresReview: boolean
   onTransfer: () => void
   onPayout: () => void
 }
@@ -91,7 +94,9 @@ export function CommissionActions(props: CommissionActionsProps) {
             {t('Transfer to API balance')}
           </Button>
           <span className='text-muted-foreground text-sm'>
-            {t('Instant credit · no referral commission')}
+            {props.transferRequiresReview
+              ? t('Credited after review · no referral commission')
+              : t('Instant credit · no referral commission')}
           </span>
         </div>
         <div className='border-border/70 flex flex-wrap items-center gap-3 border-t px-4 py-3 lg:border-t-0 lg:border-l'>
@@ -122,6 +127,7 @@ type TransferBalanceDialogProps = {
   onOpenChange: (open: boolean) => void
   availableCents: number
   currentBalanceQuota: number
+  requiresReview: boolean
 }
 
 export function TransferBalanceDialog(props: TransferBalanceDialogProps) {
@@ -153,14 +159,18 @@ export function TransferBalanceDialog(props: TransferBalanceDialogProps) {
     if (!valid || submitting) return
     setSubmitting(true)
     try {
-      await transferAffiliateCommission({
+      const transfer = await transferAffiliateCommission({
         amount_cents: amountCents,
         request_id: crypto.randomUUID(),
       })
       const self = await getSelf()
       if (self.success && self.data) setUser(self.data)
       await queryClient.invalidateQueries({ queryKey: ['referral'] })
-      toast.success(t('Transfer successful'))
+      toast.success(
+        transfer.status === AFFILIATE_TRANSFER_STATUS.PENDING
+          ? t('Transfer submitted for review')
+          : t('Transfer successful')
+      )
       props.onOpenChange(false)
     } catch (error) {
       toast.error(getUserFacingErrorMessage(error))
@@ -168,6 +178,11 @@ export function TransferBalanceDialog(props: TransferBalanceDialogProps) {
       setSubmitting(false)
     }
   }
+
+  let submitLabel = props.requiresReview
+    ? t('Submit for review')
+    : t('Confirm transfer')
+  if (submitting) submitLabel = t('Transferring')
 
   return (
     <Dialog open={props.open} onOpenChange={close}>
@@ -177,7 +192,11 @@ export function TransferBalanceDialog(props: TransferBalanceDialogProps) {
             {t('Transfer to API balance')}
           </DialogTitle>
           <DialogDescription>
-            {t('Move available commission to your API balance instantly.')}
+            {props.requiresReview
+              ? t(
+                  'Move available commission to your API balance. The amount is frozen until an administrator approves it.'
+                )
+              : t('Move available commission to your API balance instantly.')}
           </DialogDescription>
         </DialogHeader>
         <div className='space-y-4 py-1'>
@@ -230,11 +249,17 @@ export function TransferBalanceDialog(props: TransferBalanceDialogProps) {
             </span>
           </div>
           <p className='text-muted-foreground text-sm'>
-            {t('API balance after transfer: {{amount}}', {
-              amount: formatQuota(
-                props.currentBalanceQuota + (valid ? transferQuota : 0)
-              ),
-            })}
+            {props.requiresReview
+              ? t('API balance after approval: {{amount}}', {
+                  amount: formatQuota(
+                    props.currentBalanceQuota + (valid ? transferQuota : 0)
+                  ),
+                })
+              : t('API balance after transfer: {{amount}}', {
+                  amount: formatQuota(
+                    props.currentBalanceQuota + (valid ? transferQuota : 0)
+                  ),
+                })}
           </p>
         </div>
         <DialogFooter>
@@ -242,7 +267,7 @@ export function TransferBalanceDialog(props: TransferBalanceDialogProps) {
             {t('Cancel')}
           </Button>
           <Button onClick={() => void submit()} disabled={!valid || submitting}>
-            {submitting ? t('Transferring') : t('Confirm transfer')}
+            {submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

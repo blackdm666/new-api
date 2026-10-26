@@ -72,6 +72,8 @@ func createAffiliateFixture(t *testing.T, suffix string, money float64) (*User, 
 }
 
 func TestAffiliateCommissionCreatedFromSuccessfulTopUpAndApproved(t *testing.T) {
+	// Manual commission review is a legacy path; the option now defaults to automatic.
+	setAffiliateOptionForTest(t, AffiliateCommissionAutoApproveOptionKey, "false")
 	truncateTables(t)
 	enableAffiliateForTest(t)
 	originalRate := operation_setting.USDExchangeRate
@@ -585,6 +587,8 @@ func TestAffiliateCommissionOnlyUsesEpayProvider(t *testing.T) {
 }
 
 func TestAffiliateCommissionCannotApproveInvalidatedTopUp(t *testing.T) {
+	// Manual commission review is a legacy path; the option now defaults to automatic.
+	setAffiliateOptionForTest(t, AffiliateCommissionAutoApproveOptionKey, "false")
 	truncateTables(t)
 	enableAffiliateForTest(t)
 	inviter := &User{
@@ -753,6 +757,8 @@ func TestEpayRechargeCompletesWhenCommissionIsZeroOrInviterDeleted(t *testing.T)
 }
 
 func TestAffiliateCommissionConcurrentApprovalCreditsExactlyOnce(t *testing.T) {
+	// Manual commission review is a legacy path; the option now defaults to automatic.
+	setAffiliateOptionForTest(t, AffiliateCommissionAutoApproveOptionKey, "false")
 	truncateTables(t)
 	enableAffiliateForTest(t)
 	inviter, _, _, record := createAffiliateFixture(t, "concurrent", 100)
@@ -987,6 +993,8 @@ func TestAffiliateUpgradeCanQualifyByCumulativeTopUpAmount(t *testing.T) {
 }
 
 func TestAffiliateRejectedCommissionDoesNotCountTowardAmountUpgrade(t *testing.T) {
+	// Manual commission review is a legacy path; the option now defaults to automatic.
+	setAffiliateOptionForTest(t, AffiliateCommissionAutoApproveOptionKey, "false")
 	truncateTables(t)
 	enableAffiliateForTest(t)
 	setAffiliateOptionForTest(t, AffiliateUpgradeInviteesThresholdOptionKey, "50")
