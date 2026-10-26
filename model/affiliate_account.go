@@ -168,11 +168,19 @@ func backfillAffiliateAccounts() error {
 				return err
 			}
 			var transferred int64
+			var pendingTransfer int64
 			if tx.Migrator().HasTable(&AffiliateTransfer{}) {
-				if err := tx.Model(&AffiliateTransfer{}).
-					Where("user_id = ?", userId).
-					Select("COALESCE(SUM(amount_cents), 0)").
-					Scan(&transferred).Error; err != nil {
+				transferQuery := tx.Model(&AffiliateTransfer{}).Where("user_id = ?", userId)
+				if tx.Migrator().HasColumn(&AffiliateTransfer{}, "Status") {
+					transferQuery = transferQuery.Where("status IN (?, ?)", AffiliateTransferStatusApproved, AffiliateTransferStatusPending)
+					if err := tx.Model(&AffiliateTransfer{}).
+						Where("user_id = ? AND status = ?", userId, AffiliateTransferStatusPending).
+						Select("COALESCE(SUM(amount_cents), 0)").
+						Scan(&pendingTransfer).Error; err != nil {
+						return err
+					}
+				}
+				if err := transferQuery.Select("COALESCE(SUM(amount_cents), 0)").Scan(&transferred).Error; err != nil {
 					return err
 				}
 			}
@@ -199,7 +207,7 @@ func backfillAffiliateAccounts() error {
 			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&AffiliateAccount{
 				UserId:              userId,
 				AvailableCents:      available,
-				FrozenCents:         frozen,
+				FrozenCents:         frozen + pendingTransfer,
 				LifetimeEarnedCents: lifetime,
 			}).Error; err != nil {
 				return err

@@ -105,6 +105,8 @@ type AffiliateUpgradeNotice struct {
 
 type AffiliateSummary struct {
 	AutoApprove             bool           `json:"auto_approve"`
+	TransferAutoApprove     bool           `json:"transfer_auto_approve"`
+	PendingTransferCents    int64          `json:"pending_transfer_cents"`
 	AvailableQuota          int            `json:"available_quota"`
 	AvailableCents          int64          `json:"available_cents"`
 	TotalApprovedQuota      int            `json:"total_approved_quota"`
@@ -168,6 +170,8 @@ type AffiliateCommissionQueryOptions struct {
 type AffiliateAdminSummary struct {
 	PendingCount          int64 `json:"pending_count"`
 	PendingCents          int64 `json:"pending_cents"`
+	PendingTransferCount  int64 `json:"pending_transfer_count"`
+	PendingTransferCents  int64 `json:"pending_transfer_cents"`
 	ApprovedCents         int64 `json:"approved_cents"`
 	TotalInviteeCount     int64 `json:"total_invitee_count"`
 	EffectiveInviteeCount int64 `json:"effective_invitee_count"`
@@ -243,7 +247,7 @@ func normalizeAffiliateGroupRates(groupRates map[string]int, defaultRate int) ma
 func getAffiliatePolicy() affiliatePolicy {
 	policy := affiliatePolicy{
 		Enabled:                              false,
-		AutoApprove:                          false,
+		AutoApprove:                          true,
 		InviteeTopUpLimit:                    0,
 		DefaultRateBasisPoints:               affiliateCommissionDefaultRateBasisPoints,
 		GroupRates:                           defaultAffiliateGroupRates(),
@@ -391,7 +395,7 @@ func GetAffiliateCommissionById(id int) (*AffiliateCommission, error) {
 
 func ValidateAffiliateOptionValue(key string, value string) error {
 	switch key {
-	case AffiliateCommissionEnabledOptionKey, AffiliateCommissionAutoApproveOptionKey:
+	case AffiliateCommissionEnabledOptionKey, AffiliateCommissionAutoApproveOptionKey, AffiliateTransferAutoApproveOptionKey:
 		if value != "true" && value != "false" {
 			return fmt.Errorf("%s must be true or false", key)
 		}
@@ -814,8 +818,14 @@ func GetAffiliateSummary(userId int) (*AffiliateSummary, error) {
 	if err != nil {
 		return nil, err
 	}
+	pendingTransfers, err := GetAffiliateTransferPendingSummary(userId)
+	if err != nil {
+		return nil, err
+	}
 	summary := &AffiliateSummary{
 		AutoApprove:            policy.AutoApprove,
+		TransferAutoApprove:    affiliateTransferAutoApprove(),
+		PendingTransferCents:   pendingTransfers.Cents,
 		AvailableQuota:         availableQuota,
 		AvailableCents:         account.AvailableCents,
 		TotalApprovedQuota:     totalApprovedQuota,
@@ -1029,6 +1039,12 @@ func GetAffiliateAdminSummary() (*AffiliateAdminSummary, error) {
 	if err := DB.Model(&AffiliateCommission{}).Where("status = ?", AffiliateCommissionStatusPending).Count(&summary.PendingCount).Error; err != nil {
 		return nil, err
 	}
+	pendingTransfers, err := GetAffiliateTransferPendingSummary(0)
+	if err != nil {
+		return nil, err
+	}
+	summary.PendingTransferCount = pendingTransfers.Count
+	summary.PendingTransferCents = pendingTransfers.Cents
 	type sums struct {
 		PendingCents  int64
 		ApprovedCents int64

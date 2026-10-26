@@ -74,7 +74,7 @@ describe('affiliate upgrade approval API', () => {
 
     await updateAffiliateSettings({
       enabled: true,
-      auto_approve: false,
+      transfer_auto_approve: false,
       commission_top_up_limit: 0,
       default_rate_basis_points: 500,
       group_rates: { default: 500, 高级推广: 1000, 金牌推广: 1500 },
@@ -87,6 +87,7 @@ describe('affiliate upgrade approval API', () => {
     assert.equal(captured?.url, '/api/affiliate/root/settings')
     assert.equal(captured?.method, 'put')
     const payload = JSON.parse(String(captured?.data))
+    assert.equal(payload.transfer_auto_approve, false)
     assert.equal(payload.upgrade_invitees_threshold, 50)
     assert.equal(payload.commission_top_up_limit, 0)
     assert.equal(payload.gold_upgrade_invitees_threshold, 500)

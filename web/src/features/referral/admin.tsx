@@ -16,23 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import {
-  keepPreviousData,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query'
-import { Check, RefreshCw, Search, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Check } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -42,73 +34,38 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
-import { useDebounce } from '@/hooks/use-debounce'
 import { formatNumber, formatTimestampToDate } from '@/lib/format'
 import { getUserFacingErrorMessage } from '@/lib/user-facing-error'
 import { cn } from '@/lib/utils'
 
 import { AdminUserIdentity } from './admin-user-identity'
 import {
-  approveAffiliateCommission,
   approveAffiliateUpgrade,
-  fetchAdminAffiliateCommissions,
   fetchAdminAffiliateSummary,
   fetchAffiliateNotificationFailures,
   fetchAffiliateUpgradeCandidates,
-  rejectAffiliateCommission,
   retryAffiliateNotification,
 } from './api'
 import { AffiliateCommissionLedger } from './commission-ledger-admin'
 import { AdminInviteRecords } from './invite-records-admin'
 import {
-  AFFILIATE_STATUS_META,
   formatCents,
   formatRate,
   promoterTierBadgeClassName,
   promoterTierLabelKey,
 } from './lib'
-import { OverflowNote } from './overflow-note'
 import { AffiliatePayoutManagement } from './payouts-admin'
+import { AffiliateTransferReview } from './transfer-review-admin'
 import { AffiliateTransferManagement } from './transfers-admin'
-import { AFFILIATE_COMMISSION_STATUS, type AffiliateCommission } from './types'
-
-const PAGE_SIZE = 10
 
 export function AdminAffiliatePage() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const [page, setPage] = useState(1)
-  const [keyword, setKeyword] = useState(() => {
-    if (typeof window === 'undefined') return ''
-    return new URLSearchParams(window.location.search).get('keyword') ?? ''
-  })
-  const [reviewTarget, setReviewTarget] = useState<{
-    item: AffiliateCommission
-    approve: boolean
-  } | null>(null)
-  const [reviewing, setReviewing] = useState(false)
-  const [rejectReason, setRejectReason] = useState('')
   const [upgradingId, setUpgradingId] = useState<number | null>(null)
   const [retryingNoticeId, setRetryingNoticeId] = useState<number | null>(null)
-  const debouncedKeyword = useDebounce(keyword, 300)
-  const params = useMemo(
-    () => ({
-      page,
-      pageSize: PAGE_SIZE,
-      status: AFFILIATE_COMMISSION_STATUS.PENDING,
-      keyword: debouncedKeyword,
-    }),
-    [debouncedKeyword, page]
-  )
   const summaryQuery = useQuery({
     queryKey: ['admin-affiliate', 'summary'],
     queryFn: fetchAdminAffiliateSummary,
-  })
-  const listQuery = useQuery({
-    queryKey: ['admin-affiliate', 'commissions', params],
-    queryFn: () => fetchAdminAffiliateCommissions(params),
-    placeholderData: keepPreviousData,
   })
   const upgradeQuery = useQuery({
     queryKey: ['admin-affiliate', 'upgrade-candidates'],
@@ -118,35 +75,6 @@ export function AdminAffiliatePage() {
     queryKey: ['admin-affiliate', 'notification-failures'],
     queryFn: () => fetchAffiliateNotificationFailures(),
   })
-  useEffect(() => setPage(1), [debouncedKeyword])
-
-  const refresh = () => {
-    void summaryQuery.refetch()
-    void listQuery.refetch()
-    void upgradeQuery.refetch()
-    void notificationFailureQuery.refetch()
-  }
-
-  const review = async (item: AffiliateCommission, approve: boolean) => {
-    setReviewing(true)
-    try {
-      if (approve) {
-        await approveAffiliateCommission(item.id)
-        toast.success(t('Commission approved'))
-      } else {
-        await rejectAffiliateCommission(item.id, rejectReason.trim())
-        toast.success(t('Commission rejected'))
-      }
-      await queryClient.invalidateQueries({ queryKey: ['admin-affiliate'] })
-      setReviewTarget(null)
-      setRejectReason('')
-    } catch (error) {
-      toast.error(getUserFacingErrorMessage(error))
-    } finally {
-      setReviewing(false)
-    }
-  }
-
   const approveUpgrade = async (inviterId: number, nextGroup: string) => {
     setUpgradingId(inviterId)
     try {
@@ -173,9 +101,6 @@ export function AdminAffiliatePage() {
     }
   }
 
-  const total = listQuery.data?.total ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const items = listQuery.data?.items ?? []
   return (
     <div className='h-full overflow-y-auto px-4 py-6 sm:px-8'>
       <div className='mx-auto w-full max-w-[1440px] space-y-5'>
@@ -192,11 +117,11 @@ export function AdminAffiliatePage() {
         <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-5'>
           <AdminStat
             label={t('Pending review')}
-            value={formatNumber(summaryQuery.data?.pending_count ?? 0)}
+            value={formatNumber(summaryQuery.data?.pending_transfer_count ?? 0)}
           />
           <AdminStat
-            label={t('Pending commission')}
-            value={formatCents(summaryQuery.data?.pending_cents ?? 0)}
+            label={t('Transfers awaiting review')}
+            value={formatCents(summaryQuery.data?.pending_transfer_cents ?? 0)}
           />
           <AdminStat
             label={t('Approved commission')}
@@ -460,168 +385,11 @@ export function AdminAffiliatePage() {
               </Card>
             ) : null}
           </TabsContent>
-          <TabsContent value='commissions' className='space-y-4'>
-            <div className='bg-card flex flex-wrap items-center gap-2 rounded-xl border p-3'>
-              <Button variant='outline' onClick={refresh}>
-                <RefreshCw
-                  className={cn(
-                    'size-4',
-                    (summaryQuery.isFetching || listQuery.isFetching) &&
-                      'animate-spin'
-                  )}
-                />
-                {t('Refresh')}
-              </Button>
-              <div className='relative min-w-[280px] flex-1 md:max-w-[560px]'>
-                <Label htmlFor='affiliate-search' className='sr-only'>
-                  {t('Search by order number, promoter, or invited user')}
-                </Label>
-                <Search
-                  className='text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2'
-                  aria-hidden='true'
-                />
-                <Input
-                  id='affiliate-search'
-                  value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
-                  placeholder={t(
-                    'Search by order number, promoter, or invited user'
-                  )}
-                  className='pl-9'
-                />
-              </div>
-            </div>
-            <div className='bg-card overflow-x-auto rounded-xl border'>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>ID</TableHead>
-                    <TableHead>{t('Promoter')}</TableHead>
-                    <TableHead>{t('Invited user')}</TableHead>
-                    <TableHead>{t('Order No.')}</TableHead>
-                    <TableHead className='text-right'>
-                      {t('Top-up amount')}
-                    </TableHead>
-                    <TableHead>{t('Rate')}</TableHead>
-                    <TableHead>{t('Promoter tier')}</TableHead>
-                    <TableHead className='text-right'>
-                      {t('Commission')}
-                    </TableHead>
-                    <TableHead>{t('Status')}</TableHead>
-                    <TableHead>{t('Created at')}</TableHead>
-                    <TableHead className='text-right'>{t('Actions')}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {listQuery.isLoading ? <SkeletonRows /> : null}
-                  {!listQuery.isLoading && items.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={11}
-                        className='text-muted-foreground py-12 text-center'
-                      >
-                        {t('No commission records')}
-                      </TableCell>
-                    </TableRow>
-                  ) : null}
-                  {!listQuery.isLoading
-                    ? items.map((item) => (
-                        <AdminCommissionRow
-                          key={item.id}
-                          item={item}
-                          onApprove={() =>
-                            setReviewTarget({ item, approve: true })
-                          }
-                          onReject={() => {
-                            setRejectReason('')
-                            setReviewTarget({ item, approve: false })
-                          }}
-                        />
-                      ))
-                    : null}
-                </TableBody>
-              </Table>
-            </div>
-            <div className='flex flex-wrap items-center justify-between gap-3'>
-              <span className='text-muted-foreground text-xs'>
-                {t('Total {{n}} records', { n: total })}
-              </span>
-              <div className='flex items-center gap-2'>
-                <Button
-                  variant='outline'
-                  size='sm'
-                  disabled={listQuery.isLoading || page <= 1}
-                  onClick={() => setPage((value) => Math.max(1, value - 1))}
-                >
-                  {t('Previous')}
-                </Button>
-                <span className='text-muted-foreground text-xs'>
-                  {t('Page {{p}} / {{total}}', { p: page, total: totalPages })}
-                </span>
-                <Button
-                  variant='outline'
-                  size='sm'
-                  disabled={listQuery.isLoading || page >= totalPages}
-                  onClick={() =>
-                    setPage((value) => Math.min(totalPages, value + 1))
-                  }
-                >
-                  {t('Next')}
-                </Button>
-              </div>
-            </div>
+          <TabsContent value='commissions'>
+            <AffiliateTransferReview />
           </TabsContent>
         </Tabs>
       </div>
-      <ConfirmDialog
-        open={reviewTarget !== null}
-        onOpenChange={(open) => {
-          if (!open && !reviewing) setReviewTarget(null)
-        }}
-        title={
-          reviewTarget?.approve
-            ? t('Approve commission')
-            : t('Reject commission')
-        }
-        desc={
-          reviewTarget
-            ? t(
-                'Order {{order}} will be marked as {{status}}. Commission: {{amount}}.',
-                {
-                  order: reviewTarget.item.trade_no,
-                  status: reviewTarget.approve ? t('Approved') : t('Rejected'),
-                  amount: formatCents(reviewTarget.item.commission_cents),
-                }
-              )
-            : ''
-        }
-        confirmText={reviewTarget?.approve ? t('Approve') : t('Reject')}
-        destructive={reviewTarget?.approve === false}
-        isLoading={reviewing}
-        disabled={
-          reviewing || (reviewTarget?.approve === false && !rejectReason.trim())
-        }
-        handleConfirm={() => {
-          if (reviewTarget) {
-            void review(reviewTarget.item, reviewTarget.approve)
-          }
-        }}
-      >
-        {reviewTarget?.approve === false ? (
-          <div className='space-y-2'>
-            <Label htmlFor='affiliate-reject-reason'>
-              {t('Rejection reason')}
-            </Label>
-            <Textarea
-              id='affiliate-reject-reason'
-              value={rejectReason}
-              onChange={(event) => setRejectReason(event.target.value)}
-              maxLength={255}
-              placeholder={t('Explain why this commission was rejected')}
-            />
-          </div>
-        ) : null}
-      </ConfirmDialog>
     </div>
   )
 }
@@ -635,115 +403,4 @@ function AdminStat({ label, value }: { label: string; value: string }) {
       </CardContent>
     </Card>
   )
-}
-
-function AdminCommissionRow(props: {
-  item: AffiliateCommission
-  onApprove: () => void
-  onReject: () => void
-}) {
-  const { t } = useTranslation()
-  const meta = AFFILIATE_STATUS_META[props.item.status]
-  const pending = props.item.status === AFFILIATE_COMMISSION_STATUS.PENDING
-  return (
-    <TableRow>
-      <TableCell className='font-mono'>{props.item.id}</TableCell>
-      <TableCell>
-        <AdminUserIdentity
-          id={props.item.inviter_id}
-          username={props.item.inviter_username}
-          remark={props.item.inviter_remark}
-        />
-      </TableCell>
-      <TableCell>
-        <AdminUserIdentity
-          id={props.item.invitee_id}
-          username={props.item.invitee_username}
-          remark={props.item.invitee_remark}
-        />
-      </TableCell>
-      <TableCell className='font-mono text-xs'>{props.item.trade_no}</TableCell>
-      <TableCell className='text-right font-medium'>
-        {formatCents(props.item.topup_amount_cents)}
-      </TableCell>
-      <TableCell>{formatRate(props.item.rate_basis_points)}</TableCell>
-      <TableCell>
-        <Badge
-          variant='outline'
-          className={cn(
-            'font-normal',
-            promoterTierBadgeClassName(props.item.tier_name)
-          )}
-        >
-          {t(promoterTierLabelKey(props.item.tier_name))}
-        </Badge>
-      </TableCell>
-      <TableCell className='text-right'>
-        <span className='font-semibold'>
-          {formatCents(props.item.commission_cents)}
-        </span>
-      </TableCell>
-      <TableCell>
-        <div className='flex min-w-0 items-center gap-2'>
-          <Badge
-            variant='outline'
-            className={cn('shrink-0 font-normal', meta.className)}
-          >
-            {t(meta.labelKey)}
-          </Badge>
-          {props.item.reject_reason ? (
-            <OverflowNote
-              text={props.item.reject_reason}
-              className='text-muted-foreground max-w-48 text-xs'
-            />
-          ) : null}
-        </div>
-      </TableCell>
-      <TableCell className='text-muted-foreground text-xs'>
-        {formatTimestampToDate(props.item.created_time)}
-      </TableCell>
-      <TableCell className='text-right'>
-        <div className='flex justify-end gap-2'>
-          <Button size='sm' disabled={!pending} onClick={props.onApprove}>
-            <Check className='size-4' />
-            {t('Approve')}
-          </Button>
-          <Button
-            size='sm'
-            variant='outline'
-            disabled={!pending}
-            onClick={props.onReject}
-          >
-            <X className='size-4' />
-            {t('Reject')}
-          </Button>
-        </div>
-      </TableCell>
-    </TableRow>
-  )
-}
-
-function SkeletonRows() {
-  const columns = [
-    'promoter',
-    'invitee',
-    'order',
-    'topup',
-    'rate',
-    'tier',
-    'commission',
-    'status',
-    'created',
-    'reviewed',
-    'actions',
-  ]
-  return ['one', 'two', 'three', 'four', 'five'].map((row) => (
-    <TableRow key={row}>
-      {columns.map((column) => (
-        <TableCell key={`${row}-${column}`}>
-          <Skeleton className='h-4 w-full' />
-        </TableCell>
-      ))}
-    </TableRow>
-  ))
 }

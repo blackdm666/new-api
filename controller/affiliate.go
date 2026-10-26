@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,7 +12,9 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type affiliateCommissionActionPayload struct {
@@ -42,12 +45,105 @@ func TransferAffiliateCommission(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserTransferFailed, map[string]any{"Error": err.Error()})
 		return
 	}
+	if transfer.Status == model.AffiliateTransferStatusPending && transfer.RiskEvaluatedTime == 0 {
+		transferId := transfer.Id
+		gopool.Go(func() {
+			if err := model.EvaluateAffiliateTransferRisk(transferId); err != nil {
+				common.SysError(fmt.Sprintf("affiliate transfer risk evaluation failed transfer_id=%d: %s", transferId, err.Error()))
+			}
+		})
+		common.ApiSuccessT(c, "Transfer submitted for review", transfer)
+		return
+	}
 	common.ApiSuccessI18n(c, i18n.MsgUserTransferSuccess, transfer)
+}
+
+func CancelAffiliateTransfer(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidId)
+		return
+	}
+	if affiliateTransferError(c, model.CancelAffiliateTransfer(id, c.GetInt("id"))) {
+		return
+	}
+	common.ApiSuccess(c, gin.H{"updated": true})
+}
+
+func ApproveAffiliateTransfer(c *gin.Context) {
+	reviewAffiliateTransfer(c, true)
+}
+
+func RejectAffiliateTransfer(c *gin.Context) {
+	reviewAffiliateTransfer(c, false)
+}
+
+func reviewAffiliateTransfer(c *gin.Context, approve bool) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidId)
+		return
+	}
+	payload := affiliateCommissionActionPayload{}
+	if !approve {
+		_ = c.ShouldBindJSON(&payload)
+	}
+	transfer, err := model.ReviewAffiliateTransfer(id, c.GetInt("id"), approve, payload.Reason)
+	if affiliateTransferError(c, err) {
+		return
+	}
+	recordManageAudit(c, "affiliate.transfer.review", map[string]any{
+		"transfer_id":  id,
+		"user_id":      transfer.UserId,
+		"amount_cents": transfer.AmountCents,
+		"approved":     approve,
+		"risk_score":   transfer.RiskScore,
+		"reason":       strings.TrimSpace(payload.Reason),
+	})
+	common.ApiSuccess(c, gin.H{"updated": true})
+}
+
+func RefreshAffiliateTransferRisk(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidId)
+		return
+	}
+	if err := model.EvaluateAffiliateTransferRisk(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ApiErrorT(c, "Balance transfer not found")
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"updated": true})
+}
+
+func affiliateTransferError(c *gin.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, model.ErrAffiliateTransferNotFound):
+		common.ApiErrorT(c, "Balance transfer not found")
+	case errors.Is(err, model.ErrAffiliateTransferForbidden):
+		common.ApiErrorT(c, "This balance transfer does not belong to you")
+	case errors.Is(err, model.ErrAffiliateTransferStatusInvalid):
+		common.ApiErrorT(c, "This balance transfer has already been processed")
+	case errors.Is(err, model.ErrAffiliateTransferRejectionReasonRequired):
+		common.ApiErrorT(c, "Please enter a rejection reason")
+	case errors.Is(err, model.ErrWalletQuotaLimitExceeded):
+		common.ApiErrorT(c, "The API balance would exceed the wallet limit")
+	default:
+		common.ApiError(c, err)
+	}
+	return true
 }
 
 type affiliateSettingsPayload struct {
 	Enabled                              bool           `json:"enabled"`
-	AutoApprove                          bool           `json:"auto_approve"`
+	TransferAutoApprove                  bool           `json:"transfer_auto_approve"`
 	CommissionTopUpLimit                 int            `json:"commission_top_up_limit"`
 	DefaultRateBasisPoints               int            `json:"default_rate_basis_points"`
 	GroupRates                           map[string]int `json:"group_rates"`
@@ -239,8 +335,10 @@ func GetAdminAffiliateInviteRecords(c *gin.Context) {
 
 func GetAdminAffiliateTransfers(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
+	status, _ := strconv.Atoi(c.Query("status"))
 	rows, total, err := model.ListAffiliateTransfers(model.AffiliateTransferQueryOptions{
 		IncludeAdminRemarks: true,
+		Status:              status,
 		Keyword:             strings.TrimSpace(c.Query("keyword")),
 	}, pageInfo)
 	if err != nil {
@@ -529,8 +627,11 @@ func UpdateAffiliateSettings(c *gin.Context) {
 		return
 	}
 	values := map[string]string{
-		model.AffiliateCommissionEnabledOptionKey:               strconv.FormatBool(payload.Enabled),
-		model.AffiliateCommissionAutoApproveOptionKey:           strconv.FormatBool(payload.AutoApprove),
+		model.AffiliateCommissionEnabledOptionKey: strconv.FormatBool(payload.Enabled),
+		// Commission is always credited automatically; the review switch now
+		// guards commission-to-balance transfers instead.
+		model.AffiliateCommissionAutoApproveOptionKey:           "true",
+		model.AffiliateTransferAutoApproveOptionKey:             strconv.FormatBool(payload.TransferAutoApprove),
 		model.AffiliateCommissionInviteeTopUpLimitOptionKey:     strconv.Itoa(payload.CommissionTopUpLimit),
 		model.AffiliateCommissionDefaultRateOptionKey:           strconv.Itoa(payload.DefaultRateBasisPoints),
 		model.AffiliateCommissionGroupRatesOptionKey:            string(groupRates),
@@ -560,7 +661,7 @@ func UpdateAffiliateSettings(c *gin.Context) {
 	}
 	recordManageAudit(c, "affiliate.settings.update", map[string]interface{}{
 		"enabled":                                    payload.Enabled,
-		"auto_approve":                               payload.AutoApprove,
+		"transfer_auto_approve":                      payload.TransferAutoApprove,
 		"commission_top_up_limit":                    payload.CommissionTopUpLimit,
 		"default_rate_basis_points":                  payload.DefaultRateBasisPoints,
 		"group_rates":                                payload.GroupRates,

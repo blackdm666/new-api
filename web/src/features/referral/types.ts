@@ -39,6 +39,10 @@ export type PaginatedResponse<T> = {
 
 export type AffiliateSummary = {
   auto_approve: boolean
+  /** False when commission-to-balance transfers wait for administrator review. */
+  transfer_auto_approve?: boolean
+  /** Commission frozen by transfers that are waiting for review. */
+  pending_transfer_cents?: number
   available_quota: number
   available_cents: number
   total_approved_quota: number
@@ -135,11 +139,50 @@ export type AdminAffiliateInviteRecord = {
 export type AffiliateAdminSummary = {
   pending_count: number
   pending_cents: number
+  pending_transfer_count?: number
+  pending_transfer_cents?: number
   approved_cents: number
   total_invitee_count: number
   effective_invitee_count: number
   topup_cents: number
   commission_record_count: number
+}
+
+export const AFFILIATE_TRANSFER_STATUS = {
+  PENDING: 1,
+  APPROVED: 2,
+  REJECTED: 3,
+  CANCELLED: 4,
+} as const
+
+export type AffiliateTransferStatus =
+  (typeof AFFILIATE_TRANSFER_STATUS)[keyof typeof AFFILIATE_TRANSFER_STATUS]
+
+export type AffiliateRiskSignal =
+  | 'shared_ip'
+  | 'same_user_agent'
+  | 'registered_within_day'
+  | 'inviter_idle'
+  | 'similar_name'
+
+export type AffiliateRiskPair = {
+  invitee_id: number
+  invitee_username: string
+  score: number
+  signals: AffiliateRiskSignal[]
+  shared_ip?: string
+  /** Invitee registration time minus inviter registration time. */
+  registration_gap_seconds: number
+  commission_cents: number
+}
+
+/** Self-referral evidence; only returned to administrators. */
+export type AffiliateRiskDetail = {
+  invitee_count: number
+  single_invitee: boolean
+  invitee_cluster_count: number
+  suspicious_commission_cents: number
+  pairs: AffiliateRiskPair[]
 }
 
 export type AffiliateTransfer = {
@@ -152,6 +195,14 @@ export type AffiliateTransfer = {
   balance_cents_after: number
   quota_before: number
   quota_after: number
+  /** Missing on records returned by older servers, which were all credited. */
+  status?: AffiliateTransferStatus
+  operator_id?: number
+  reviewed_time?: number
+  reject_reason?: string
+  risk_score?: number
+  risk_evaluated_time?: number
+  risk?: AffiliateRiskDetail
   created_time: number
   username?: string
   remark?: string

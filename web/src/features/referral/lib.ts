@@ -21,8 +21,11 @@ import { formatLocalCurrencyAmount } from '@/lib/currency'
 import {
   AFFILIATE_COMMISSION_STATUS,
   AFFILIATE_PAYOUT_STATUS,
+  AFFILIATE_TRANSFER_STATUS,
   type AffiliateCommissionStatus,
   type AffiliatePayoutStatus,
+  type AffiliateRiskSignal,
+  type AffiliateTransferStatus,
 } from './types'
 
 export const AFFILIATE_STATUS_META: Record<
@@ -75,6 +78,69 @@ export const AFFILIATE_PAYOUT_STATUS_META: Record<
     labelKey: 'Paying via Alipay',
     className: 'border-violet-500/40 bg-violet-500/10 text-violet-600',
   },
+}
+
+export const AFFILIATE_TRANSFER_STATUS_META: Record<
+  AffiliateTransferStatus,
+  { labelKey: string; className: string }
+> = {
+  [AFFILIATE_TRANSFER_STATUS.PENDING]: {
+    labelKey: 'Pending review',
+    className: 'border-amber-500/40 bg-amber-500/10 text-amber-600',
+  },
+  [AFFILIATE_TRANSFER_STATUS.APPROVED]: {
+    labelKey: 'Credited',
+    className: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600',
+  },
+  [AFFILIATE_TRANSFER_STATUS.REJECTED]: {
+    labelKey: 'Rejected',
+    className: 'border-destructive/40 bg-destructive/10 text-destructive',
+  },
+  [AFFILIATE_TRANSFER_STATUS.CANCELLED]: {
+    labelKey: 'Cancelled',
+    className: 'border-muted-foreground/30 bg-muted text-muted-foreground',
+  },
+}
+
+/** Score thresholds agreed for the self-referral review queue. */
+export const AFFILIATE_RISK_HIGH_SCORE = 5
+export const AFFILIATE_RISK_MEDIUM_SCORE = 3
+
+export type AffiliateRiskLevel = 'high' | 'medium' | 'low'
+
+export function affiliateRiskLevel(score: number): AffiliateRiskLevel {
+  if (score >= AFFILIATE_RISK_HIGH_SCORE) return 'high'
+  if (score >= AFFILIATE_RISK_MEDIUM_SCORE) return 'medium'
+  return 'low'
+}
+
+export const AFFILIATE_RISK_LEVEL_META: Record<
+  AffiliateRiskLevel,
+  { labelKey: string; className: string }
+> = {
+  high: {
+    labelKey: 'High risk',
+    className: 'border-destructive/40 bg-destructive/10 text-destructive',
+  },
+  medium: {
+    labelKey: 'Medium risk',
+    className: 'border-amber-500/40 bg-amber-500/10 text-amber-600',
+  },
+  low: {
+    labelKey: 'Low risk',
+    className: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600',
+  },
+}
+
+export const AFFILIATE_RISK_SIGNAL_LABEL_KEYS: Record<
+  AffiliateRiskSignal,
+  string
+> = {
+  shared_ip: 'Shared rare IP',
+  same_user_agent: 'Same browser',
+  registered_within_day: 'Registered within 24 hours',
+  inviter_idle: 'Promoter has no usage',
+  similar_name: 'Similar username or email',
 }
 
 export function formatCents(cents: number | null | undefined): string {

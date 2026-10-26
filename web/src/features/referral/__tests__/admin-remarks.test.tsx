@@ -130,17 +130,23 @@ async function openTab(tab: string) {
   return { user, client }
 }
 
-test('commission review shows both administrator remarks without changing review controls', async () => {
+test('commission review lists pending balance transfers with the user remark and review controls', async () => {
   const { client } = await openTab('Commission review')
-  expect(await screen.findByText('Remark: promoter review note')).toBeVisible()
-  expect(screen.getByText('Remark: buyer review note')).toBeVisible()
+  expect(await screen.findByText('Remark: transfer review note')).toBeVisible()
   expect(
     screen.getByRole('button', { name: 'User Information: promoter' })
   ).toBeEnabled()
-  expect(
-    screen.getByRole('button', { name: 'User Information: buyer' })
-  ).toBeEnabled()
   expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled()
+  expect(screen.getByRole('button', { name: 'Reject' })).toBeEnabled()
+  expect(
+    vi
+      .mocked(api.get)
+      .mock.calls.some(
+        ([url]) =>
+          String(url).includes('/api/affiliate/admin/transfers?') &&
+          String(url).includes('status=1')
+      )
+  ).toBe(true)
   client.clear()
 })
 

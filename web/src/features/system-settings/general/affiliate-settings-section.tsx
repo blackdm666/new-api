@@ -56,7 +56,7 @@ import {
 
 const schema = z.object({
   enabled: z.boolean(),
-  autoApprove: z.boolean(),
+  transferAutoApprove: z.boolean(),
   topUpLimit: z.coerce.number().int().min(0).max(1000000),
   juniorRate: z.coerce.number().min(0).max(100),
   advancedRate: z.coerce.number().min(0).max(100),
@@ -110,7 +110,7 @@ export function AffiliateSettingsSection(props: {
     }
     await updateMutation.mutateAsync({
       enabled: values.enabled,
-      auto_approve: values.autoApprove,
+      transfer_auto_approve: values.transferAutoApprove,
       commission_top_up_limit: values.topUpLimit,
       default_rate_basis_points: Math.round(values.juniorRate * 100),
       group_rates: {
@@ -210,16 +210,16 @@ export function AffiliateSettingsSection(props: {
 
             <FormField
               control={form.control}
-              name='autoApprove'
+              name='transferAutoApprove'
               render={({ field }) => (
                 <SettingsSwitchItem>
                   <SettingsSwitchContent>
                     <FormLabel>
-                      {t('Automatically approve commissions')}
+                      {t('Credit balance transfers automatically')}
                     </FormLabel>
                     <FormDescription>
                       {t(
-                        'When enabled, valid wallet top-up commissions are credited immediately and still appear in the commission ledger. When disabled, new commissions wait for manual review.'
+                        'Commission is always credited automatically. When enabled, commission transferred to API balance is credited immediately. When disabled, each transfer waits for administrator review under Commission review, with a self-referral score.'
                       )}
                     </FormDescription>
                   </SettingsSwitchContent>

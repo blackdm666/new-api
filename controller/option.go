@@ -46,6 +46,7 @@ func isAffiliateCommissionOptionKey(key string) bool {
 	switch key {
 	case model.AffiliateCommissionEnabledOptionKey,
 		model.AffiliateCommissionAutoApproveOptionKey,
+		model.AffiliateTransferAutoApproveOptionKey,
 		model.AffiliateCommissionDefaultRateOptionKey,
 		model.AffiliateCommissionGroupRatesOptionKey,
 		model.AffiliateUpgradeInviteesThresholdOptionKey,

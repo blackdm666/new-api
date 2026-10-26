@@ -109,7 +109,7 @@ const BILLING_SECTIONS = [
         <AffiliateSettingsSection
           defaultValues={{
             enabled: settings.AffiliateCommissionEnabled,
-            autoApprove: settings.AffiliateCommissionAutoApprove,
+            transferAutoApprove: settings.AffiliateTransferAutoApprove,
             topUpLimit: settings.AffiliateCommissionInviteeTopUpLimit ?? 0,
             juniorRate:
               (groupRates.default ??

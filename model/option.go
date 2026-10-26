@@ -122,7 +122,8 @@ func InitOptionMap() {
 	common.OptionMap["InvoiceAdminEmail"] = common.InvoiceAdminEmail
 	common.OptionMap["ReferralApplicationRecipient"] = common.ReferralApplicationRecipient
 	common.OptionMap[AffiliateCommissionEnabledOptionKey] = "false"
-	common.OptionMap[AffiliateCommissionAutoApproveOptionKey] = "false"
+	common.OptionMap[AffiliateCommissionAutoApproveOptionKey] = "true"
+	common.OptionMap[AffiliateTransferAutoApproveOptionKey] = "true"
 	common.OptionMap[AffiliateCommissionDefaultRateOptionKey] = strconv.Itoa(affiliateCommissionDefaultRateBasisPoints)
 	common.OptionMap[AffiliateCommissionGroupRatesOptionKey] = affiliateCommissionDefaultGroupRatesJSON
 	common.OptionMap[AffiliateUpgradeInviteesThresholdOptionKey] = strconv.Itoa(AffiliateUpgradeEffectiveInviteesThreshold)

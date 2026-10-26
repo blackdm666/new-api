@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -135,4 +136,139 @@ func TestLegacyInvitationQuotaIsNotWithdrawableCommission(t *testing.T) {
 	var transfers int64
 	require.NoError(t, DB.Model(&AffiliateTransfer{}).Count(&transfers).Error)
 	assert.Zero(t, transfers)
+}
+
+func TestAffiliateTransferReviewFreezesUntilApprovedOrRejected(t *testing.T) {
+	user := setupAffiliatePayoutTest(t, 10)
+	setAffiliateOptionForTest(t, AffiliateTransferAutoApproveOptionKey, "false")
+	quotaPerUnit := int(common.QuotaPerUnit)
+
+	pending, err := user.TransferAffiliateCentsToQuotaWithRequestId(300, "transfer-review-1")
+	require.NoError(t, err)
+	assert.Equal(t, AffiliateTransferStatusPending, pending.Status)
+	duplicate, err := user.TransferAffiliateCentsToQuotaWithRequestId(300, "transfer-review-1")
+	require.NoError(t, err)
+	assert.Equal(t, pending.Id, duplicate.Id)
+
+	account, err := GetAffiliateAccount(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(700), account.AvailableCents)
+	assert.Equal(t, int64(300), account.FrozenCents)
+	fresh, err := GetUserById(user.Id, false)
+	require.NoError(t, err)
+	assert.Zero(t, fresh.Quota)
+
+	_, err = ReviewAffiliateTransfer(pending.Id, 1, false, " ")
+	assert.ErrorIs(t, err, ErrAffiliateTransferRejectionReasonRequired)
+	approved, err := ReviewAffiliateTransfer(pending.Id, 1, true, "")
+	require.NoError(t, err)
+	assert.Equal(t, AffiliateTransferStatusApproved, approved.Status)
+	assert.Equal(t, 1, approved.OperatorId)
+	assert.Zero(t, approved.QuotaBefore)
+	assert.Equal(t, 3*quotaPerUnit, approved.QuotaAfter)
+	_, err = ReviewAffiliateTransfer(pending.Id, 1, true, "")
+	assert.ErrorIs(t, err, ErrAffiliateTransferStatusInvalid)
+
+	rejected, err := user.TransferAffiliateCentsToQuotaWithRequestId(200, "transfer-review-2")
+	require.NoError(t, err)
+	assert.ErrorIs(t, CancelAffiliateTransfer(rejected.Id, user.Id+1), ErrAffiliateTransferForbidden)
+	reviewed, err := ReviewAffiliateTransfer(rejected.Id, 1, false, "self referral")
+	require.NoError(t, err)
+	assert.Equal(t, AffiliateTransferStatusRejected, reviewed.Status)
+	assert.Equal(t, "self referral", reviewed.RejectReason)
+
+	cancelled, err := user.TransferAffiliateCentsToQuotaWithRequestId(100, "transfer-review-3")
+	require.NoError(t, err)
+	require.NoError(t, CancelAffiliateTransfer(cancelled.Id, user.Id))
+	assert.ErrorIs(t, CancelAffiliateTransfer(cancelled.Id, user.Id), ErrAffiliateTransferStatusInvalid)
+
+	account, err = GetAffiliateAccount(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(700), account.AvailableCents)
+	assert.Zero(t, account.FrozenCents)
+	fresh, err = GetUserById(user.Id, false)
+	require.NoError(t, err)
+	assert.Equal(t, 3*quotaPerUnit, fresh.Quota)
+	pendingSummary, err := GetAffiliateTransferPendingSummary(0)
+	require.NoError(t, err)
+	assert.Zero(t, pendingSummary.Count)
+
+	rows, total, err := ListAffiliateTransfers(AffiliateTransferQueryOptions{Status: AffiliateTransferStatusRejected}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	assert.Equal(t, rejected.Id, rows[0].Id)
+}
+
+func TestAffiliateInviterRiskScoresSelfReferralAndHidesEvidenceFromUser(t *testing.T) {
+	user := setupAffiliatePayoutTest(t, 10)
+	require.NoError(t, LOG_DB.AutoMigrate(&AuditLog{}))
+	t.Cleanup(func() {
+		DB.Exec("DELETE FROM affiliate_commissions")
+		LOG_DB.Exec("DELETE FROM audit_logs")
+	})
+	quotaPerUnit := int(common.QuotaPerUnit)
+	require.NoError(t, DB.Model(user).Updates(map[string]any{"username": "rainc", "created_at": int64(1_000_000), "used_quota": 0}).Error)
+	selfAccount := &User{Username: "esun", AffCode: "risk-self", Email: "rainc0627@qq.com", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, InviterId: user.Id, CreatedAt: 1_000_360, UsedQuota: 90 * quotaPerUnit}
+	friend := &User{Username: "friend-account", AffCode: "risk-friend", Email: "friend@example.com", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, InviterId: user.Id, CreatedAt: 9_000_000}
+	require.NoError(t, DB.Create(selfAccount).Error)
+	require.NoError(t, DB.Create(friend).Error)
+	for i, inviteeId := range []int{selfAccount.Id, friend.Id} {
+		require.NoError(t, DB.Create(&AffiliateCommission{InviterId: user.Id, InviteeId: inviteeId, TopUpId: 9000 + i, CommissionCents: 500, Status: AffiliateCommissionStatusApproved}).Error)
+	}
+	sessions := []struct {
+		userId int
+		ip     string
+	}{
+		{user.Id, "203.0.113.7"}, {selfAccount.Id, "203.0.113.7"},
+		// A busy exit shared by more than four accounts must not count.
+		{user.Id, "198.51.100.9"}, {friend.Id, "198.51.100.9"}, {9001, "198.51.100.9"}, {9002, "198.51.100.9"}, {9003, "198.51.100.9"},
+		{user.Id, "10.0.0.8"}, {friend.Id, "10.0.0.8"},
+	}
+	for i, session := range sessions {
+		require.NoError(t, DB.Create(&UserSession{SID: "risk-session-" + strconv.Itoa(i), UserID: session.userId, Status: "active", RefreshHash: "hash", LoginMethod: "password", IP: session.ip, UserAgent: "Mozilla/5.0 Test", ExpiresAt: 1, LastActiveAt: 1}).Error)
+	}
+
+	score, detail, err := EvaluateAffiliateInviterRisk(user.Id)
+	require.NoError(t, err)
+	// shared IP 3 + same UA 1 + registered within a day 2 + idle inviter 2 + similar name 2
+	assert.Equal(t, 10, score)
+	assert.Equal(t, 2, detail.InviteeCount)
+	assert.False(t, detail.SingleInvitee)
+	assert.Zero(t, detail.InviteeClusterCount)
+	assert.Equal(t, int64(500), detail.SuspiciousCommissionCents)
+	require.Len(t, detail.Pairs, 1)
+	assert.Equal(t, selfAccount.Id, detail.Pairs[0].InviteeId)
+	assert.Equal(t, "203.0.113.7", detail.Pairs[0].SharedIp)
+	assert.Equal(t, []string{AffiliateRiskSignalSharedIP, AffiliateRiskSignalSameUserAgent, AffiliateRiskSignalRegisteredClose, AffiliateRiskSignalInviterIdle, AffiliateRiskSignalSimilarName}, detail.Pairs[0].Signals)
+
+	setAffiliateOptionForTest(t, AffiliateTransferAutoApproveOptionKey, "false")
+	transfer, err := user.TransferAffiliateCentsToQuotaWithRequestId(100, "transfer-risk")
+	require.NoError(t, err)
+	require.NoError(t, EvaluateAffiliateTransferRisk(transfer.Id))
+	adminRows, _, err := ListAffiliateTransfers(AffiliateTransferQueryOptions{IncludeAdminRemarks: true}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.NotNil(t, adminRows[0].Risk)
+	assert.Equal(t, 10, adminRows[0].RiskScore)
+	userRows, _, err := ListAffiliateTransfers(AffiliateTransferQueryOptions{UserId: user.Id}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.Nil(t, userRows[0].Risk)
+	assert.Zero(t, userRows[0].RiskScore)
+}
+
+func TestAffiliateRiskNameSimilarity(t *testing.T) {
+	cases := []struct {
+		inviter affiliateRiskUser
+		invitee affiliateRiskUser
+		similar bool
+	}{
+		{affiliateRiskUser{Username: "lee-x"}, affiliateRiskUser{Username: "lee-s"}, true},
+		{affiliateRiskUser{Username: "1332537578", Email: "1332537578@qq.com"}, affiliateRiskUser{Username: "13216031237", Email: "us1332537578@qq.com"}, true},
+		{affiliateRiskUser{Username: "ao15185338454"}, affiliateRiskUser{Email: "al15185338454@163.com"}, true},
+		{affiliateRiskUser{Username: "liu12300", Email: "647603604@qq.com"}, affiliateRiskUser{Username: "ao15185338454", Email: "al15185338454@163.com"}, false},
+		{affiliateRiskUser{Username: "google_1726"}, affiliateRiskUser{Username: "google_1727"}, false},
+		{affiliateRiskUser{Username: "dong_soft", Email: "xizhudong@gmail.com"}, affiliateRiskUser{Username: "dong123", Email: "342877216@qq.com"}, false},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.similar, affiliateRiskNamesSimilar(affiliateRiskNameTokens(tc.inviter), affiliateRiskNameTokens(tc.invitee)), "%s / %s", tc.inviter.Username, tc.invitee.Username)
+	}
 }

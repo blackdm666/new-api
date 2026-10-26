@@ -21,6 +21,7 @@ import { RefreshCw, Search } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -39,8 +40,9 @@ import { cn } from '@/lib/utils'
 
 import { AdminUserIdentity } from './admin-user-identity'
 import { fetchAdminAffiliateTransfers } from './api'
-import { formatCents } from './lib'
-import type { AffiliateTransfer } from './types'
+import { AFFILIATE_TRANSFER_STATUS_META, formatCents } from './lib'
+import { OverflowNote } from './overflow-note'
+import { AFFILIATE_TRANSFER_STATUS, type AffiliateTransfer } from './types'
 
 const PAGE_SIZE = 10
 
@@ -138,6 +140,7 @@ export function AffiliateTransferTable(props: {
             <TableHead className='text-right'>{t('Transfer amount')}</TableHead>
             <TableHead>{t('Commission balance change')}</TableHead>
             <TableHead>{t('API balance change')}</TableHead>
+            <TableHead>{t('Status')}</TableHead>
             <TableHead>{t('Created at')}</TableHead>
             <TableHead>{t('Request ID')}</TableHead>
           </TableRow>
@@ -147,7 +150,7 @@ export function AffiliateTransferTable(props: {
           {!props.loading && props.items.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={7}
+                colSpan={8}
                 className='text-muted-foreground py-12 text-center'
               >
                 {t('No balance transfer records')}
@@ -173,8 +176,13 @@ export function AffiliateTransferTable(props: {
                     {formatCents(item.balance_cents_after)}
                   </TableCell>
                   <TableCell className='whitespace-nowrap tabular-nums'>
-                    {formatQuota(item.quota_before)} →{' '}
-                    {formatQuota(item.quota_after)}
+                    {(item.status ?? AFFILIATE_TRANSFER_STATUS.APPROVED) ===
+                    AFFILIATE_TRANSFER_STATUS.APPROVED
+                      ? `${formatQuota(item.quota_before)} → ${formatQuota(item.quota_after)}`
+                      : '—'}
+                  </TableCell>
+                  <TableCell>
+                    <TransferStatus item={item} />
                   </TableCell>
                   <TableCell className='text-muted-foreground text-xs whitespace-nowrap'>
                     {formatTimestampToDate(item.created_time)}
@@ -194,10 +202,34 @@ export function AffiliateTransferTable(props: {
   )
 }
 
+export function TransferStatus(props: { item: AffiliateTransfer }) {
+  const { t } = useTranslation()
+  const meta =
+    AFFILIATE_TRANSFER_STATUS_META[
+      props.item.status ?? AFFILIATE_TRANSFER_STATUS.APPROVED
+    ]
+  return (
+    <div className='flex min-w-0 items-center gap-2'>
+      <Badge
+        variant='outline'
+        className={cn('shrink-0 font-normal', meta.className)}
+      >
+        {t(meta.labelKey)}
+      </Badge>
+      {props.item.reject_reason ? (
+        <OverflowNote
+          text={props.item.reject_reason}
+          className='text-muted-foreground max-w-48 text-xs'
+        />
+      ) : null}
+    </div>
+  )
+}
+
 function TransferSkeletonRows() {
   return ['one', 'two', 'three', 'four', 'five'].map((row) => (
     <TableRow key={row}>
-      {Array.from({ length: 7 }, (_, index) => (
+      {Array.from({ length: 8 }, (_, index) => (
         <TableCell key={`${row}-${index}`}>
           <Skeleton className='h-4 w-full' />
         </TableCell>
