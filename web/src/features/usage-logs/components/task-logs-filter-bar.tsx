@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQueryClient, useIsFetching } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
-import { type Table } from '@tanstack/react-table'
+import type { Table } from '@tanstack/react-table'
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -97,6 +97,10 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
         : {
             ...baseFilters,
             ...(searchParams.filter ? { taskId: searchParams.filter } : {}),
+            ...(searchParams.model ? { model: searchParams.model } : {}),
+            ...(searchParams.username
+              ? { username: searchParams.username }
+              : {}),
           }
 
     setFilters(next)
@@ -106,10 +110,15 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     searchParams.endTime,
     searchParams.channel,
     searchParams.filter,
+    searchParams.model,
+    searchParams.username,
   ])
 
   const handleChange = useCallback(
-    (field: keyof TaskLogsFilters, value: Date | string | undefined) => {
+    (
+      field: keyof DrawingLogFilters | keyof TaskLogFilters,
+      value: Date | string | undefined
+    ) => {
       setFilters((prev) => ({ ...prev, [field]: value }))
     },
     []
@@ -163,8 +172,18 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
   const placeholder =
     props.logCategory === 'drawing'
       ? t('Filter by MjProxy task ID')
-      : t('Filter by task ID')
-  const hasAdditionalFilters = !!filterValue || !!filters.channel
+      : t('Task ID or official task ID')
+  const taskFilters = filters as TaskLogFilters
+  const extraFilterValues =
+    props.logCategory === 'task'
+      ? [taskFilters.model, isAdmin ? taskFilters.username : undefined]
+      : []
+  const activeFilterCount = [
+    filterValue,
+    filters.channel,
+    ...extraFilterValues,
+  ].filter(Boolean).length
+  const hasAdditionalFilters = activeFilterCount > 0
   const dateRangeFilter = (
     <LogsFilterField wide>
       <CompactDateTimeRangePicker
@@ -188,6 +207,30 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
       />
     </LogsFilterField>
   )
+  const modelFilter =
+    props.logCategory === 'task' ? (
+      <LogsFilterField>
+        <LogsFilterInput
+          aria-label={t('Model Name')}
+          placeholder={t('Model Name')}
+          value={taskFilters.model || ''}
+          onChange={(e) => handleChange('model', e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+      </LogsFilterField>
+    ) : null
+  const usernameFilter =
+    props.logCategory === 'task' && isAdmin ? (
+      <LogsFilterField>
+        <LogsFilterInput
+          aria-label={t('Username')}
+          placeholder={t('Username')}
+          value={taskFilters.username || ''}
+          onChange={(e) => handleChange('username', e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+      </LogsFilterField>
+    ) : null
   const channelFilter = isAdmin ? (
     <LogsFilterField>
       <LogsFilterInput
@@ -206,6 +249,8 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
         <>
           {dateRangeFilter}
           {taskIdFilter}
+          {modelFilter}
+          {usernameFilter}
           {channelFilter}
         </>
       }
@@ -213,10 +258,12 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
       mobileFilters={
         <>
           {taskIdFilter}
+          {modelFilter}
+          {usernameFilter}
           {channelFilter}
         </>
       }
-      mobileFilterCount={[filterValue, filters.channel].filter(Boolean).length}
+      mobileFilterCount={activeFilterCount}
       hasActiveFilters={hasAdditionalFilters}
       onSearch={handleApply}
       searchLoading={fetchingLogs > 0}

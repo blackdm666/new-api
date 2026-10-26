@@ -8865,6 +8865,7 @@
     "This balance transfer has already been processed": "Этот перевод уже обработан",
     "Please enter a rejection reason": "Укажите причину отклонения",
     "The API balance would exceed the wallet limit": "API-баланс превысит лимит кошелька",
-    "Transfer amount": "Сумма перевода"
+    "Transfer amount": "Сумма перевода",
+    "Task ID or official task ID": "ID задачи или официальный ID задачи"
   }
 }

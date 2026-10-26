@@ -8865,6 +8865,7 @@
     "This balance transfer has already been processed": "この残高振替は処理済みです",
     "Please enter a rejection reason": "却下理由を入力してください",
     "The API balance would exceed the wallet limit": "API 残高がウォレット上限を超えます",
-    "Transfer amount": "振替金額"
+    "Transfer amount": "振替金額",
+    "Task ID or official task ID": "タスク ID または公式タスク ID"
   }
 }

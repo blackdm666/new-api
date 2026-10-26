@@ -8960,6 +8960,7 @@
     "This balance transfer has already been processed": "这笔转余额已经处理过了",
     "Please enter a rejection reason": "请填写驳回原因",
     "The API balance would exceed the wallet limit": "API 余额将超过钱包上限",
-    "Transfer amount": "转余额金额"
+    "Transfer amount": "转余额金额",
+    "Task ID or official task ID": "任务 ID 或官方任务 ID"
   }
 }
