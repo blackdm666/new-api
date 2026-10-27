@@ -29,6 +29,11 @@ const ReferralApplicationEmailCategory = "referral_application_admin"
 // confirmation sent to the applicant.
 const ReferralApplicationReplyEmailCategory = "referral_application_user"
 
+// ReferralPromoKitPath is the fixed download address of the promotion kit on
+// the official site (88api-home-live site/downloads/). Updating the kit only
+// replaces the file, so the address in confirmation emails never changes.
+const ReferralPromoKitPath = "/downloads/88api-promo-kit.zip"
+
 type referralApplicationFieldKind int
 
 const (
@@ -674,8 +679,13 @@ func referralApplicationReplyVars(reference string, lang string) map[string]stri
 
 	var steps strings.Builder
 	steps.WriteString(`<ol style="margin:0;padding-left:20px;color:#27324d;font-size:14px;line-height:1.7;">`)
-	for _, key := range []string{appI18n.MsgReferralApplicationEmailStepLink, appI18n.MsgReferralApplicationEmailStepShare, appI18n.MsgReferralApplicationEmailStepCommission} {
-		fmt.Fprintf(&steps, `<li style="margin:0 0 6px;">%s</li>`, html.EscapeString(text(key, map[string]any{"SystemName": systemName})))
+	promoKitURL := baseURL + ReferralPromoKitPath
+	for _, key := range []string{appI18n.MsgReferralApplicationEmailStepLink, appI18n.MsgReferralApplicationEmailStepKit, appI18n.MsgReferralApplicationEmailStepShare, appI18n.MsgReferralApplicationEmailStepCommission} {
+		item := html.EscapeString(text(key, map[string]any{"SystemName": systemName}))
+		if key == appI18n.MsgReferralApplicationEmailStepKit {
+			item += fmt.Sprintf(` <a href="%s" style="color:#4f46e5;font-weight:650;">%s</a>`, html.EscapeString(promoKitURL), html.EscapeString(text(appI18n.MsgReferralApplicationEmailStepKitLink)))
+		}
+		fmt.Fprintf(&steps, `<li style="margin:0 0 6px;">%s</li>`, item)
 	}
 	steps.WriteString(`</ol>`)
 
@@ -693,6 +703,7 @@ func referralApplicationReplyVars(reference string, lang string) map[string]stri
 		"steps_title":    html.EscapeString(text(appI18n.MsgReferralApplicationEmailStepsTitle)),
 		"next_steps":     steps.String(),
 		"action_url":     html.EscapeString(baseURL + "/referral"),
+		"promo_kit_url":  html.EscapeString(promoKitURL),
 		"action_label":   html.EscapeString(text(appI18n.MsgReferralApplicationEmailAction)),
 		"support_note":   html.EscapeString(text(appI18n.MsgReferralApplicationEmailSupportNote)),
 		"rules_note":     html.EscapeString(text(appI18n.MsgReferralApplicationEmailRulesNote)),

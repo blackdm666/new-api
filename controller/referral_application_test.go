@@ -379,9 +379,10 @@ func TestReferralApplicationApprovalEmailContent(t *testing.T) {
 	reply := model.EmailDelivery{}
 	require.NoError(t, db.Where("category = ?", service.ReferralApplicationReplyEmailCategory).First(&reply).Error)
 	assert.Equal(t, "Your referral program application is approved", reply.Subject)
-	for _, expected := range []string{reference, "5% (Junior promoter)", "Advanced promoter (10%)", "50 paying invitees or ¥2000.00 in top-ups", "¥2000.00", "Alipay from ¥100.00", "day 10", "/referral", "Open referral program"} {
+	for _, expected := range []string{reference, "5% (Junior promoter)", "Advanced promoter (10%)", "50 paying invitees or ¥2000.00 in top-ups", "¥2000.00", "Alipay from ¥100.00", "day 10", "/referral", "Open referral program", "/downloads/88api-promo-kit.zip", "Download the promotion kit"} {
 		assert.Contains(t, reply.Body, expected)
 	}
+	assert.NotContains(t, reply.Body, "promotional materials")
 	for _, submitted := range []string{"spam.example", "Line one", "bilibili.com", "alice_ai", "{{"} {
 		assert.NotContains(t, reply.Body, submitted)
 	}
@@ -390,6 +391,7 @@ func TestReferralApplicationApprovalEmailContent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "你的推广返佣申请已通过", subject)
 	assert.Contains(t, body, "5%（初级推广）")
+	assert.Contains(t, body, "下载推广素材包")
 	assert.NotContains(t, body, "{{")
 }
 
