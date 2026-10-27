@@ -21,7 +21,8 @@ import (
 
 // setupReferralApplicationTest prepares an outbox database, an SMTP server
 // address that refuses connections (so background delivery fails fast) and
-// the same middleware chain as POST /api/public/referral-application.
+// the same middleware chains as POST /api/public/referral-application and
+// POST /api/public/partner-application.
 func setupReferralApplicationTest(t *testing.T) (*gin.Engine, *gorm.DB) {
 	t.Helper()
 	previousDB := model.DB
@@ -72,6 +73,12 @@ func setupReferralApplicationTest(t *testing.T) (*gin.Engine, *gorm.DB) {
 		middleware.TurnstileCheckFromBody(),
 		SubmitReferralApplication,
 	)
+	router.POST("/api/public/partner-application",
+		middleware.PartnerApplicationRateLimit(),
+		middleware.AnonymousRequestBodyLimit(),
+		middleware.TurnstileCheckFromBody(),
+		SubmitPartnerApplication,
+	)
 	return router, db
 }
 
@@ -96,9 +103,14 @@ func validReferralApplicationPayload() map[string]any {
 
 func postReferralApplication(t *testing.T, router *gin.Engine, ip string, payload map[string]any) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
+	return postApplicationForm(t, router, "/api/public/referral-application", ip, payload)
+}
+
+func postApplicationForm(t *testing.T, router *gin.Engine, path string, ip string, payload map[string]any) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
 	body, err := common.Marshal(payload)
 	require.NoError(t, err)
-	request := httptest.NewRequest(http.MethodPost, "/api/public/referral-application", bytes.NewReader(body))
+	request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.RemoteAddr = ip + ":40000"
 	recorder := httptest.NewRecorder()
@@ -126,9 +138,9 @@ func TestSubmitReferralApplicationQueuesEscapedEmailToDefaultRecipient(t *testin
 	require.Len(t, deliveries, 1)
 	delivery := deliveries[0]
 	assert.Equal(t, "laohei@88fk.org", delivery.Recipient)
-	assert.Contains(t, delivery.Subject, reference)
-	assert.NotContains(t, delivery.Subject, "Alice")
+	assert.Equal(t, fmt.Sprintf("[%s] 推广返佣计划申请 %s", common.SystemNameOrDefault(), reference), delivery.Subject)
 	for _, expected := range []string{
+		"官网推广返佣页的申请表收到一份新申请。账号与联系方式由申请人自行填写，联系前请先核实。",
 		"Alice &lt;b&gt;Studio&lt;/b&gt;", "10086", "@alice_ai", "alice@example.com",
 		"B站、Telegram 群", "1 万–10 万", "Line one<br/>Line two",
 		"https://88api.ai/business/referral/", "198.51.100.10", "北京时间", "zh-CN", reference,
