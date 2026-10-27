@@ -51,10 +51,15 @@ var partnerApplicationForm = applicationForm{
 			{Value: "undecided", Label: "还没确定"},
 		}},
 		{Key: "monthly_spend", Label: "预计月消耗", Kind: referralFieldChoice, Required: true, Options: []referralApplicationOption{
-			{Value: "lt3k", Label: "¥3,000 以下"},
-			{Value: "3k-10k", Label: "¥3,000–1 万"},
+			{Value: "lt5k", Label: "¥5,000 以下"},
+			{Value: "5k-10k", Label: "¥5,000–1 万"},
 			{Value: "10k-50k", Label: "¥1 万–5 万"},
 			{Value: "gt50k", Label: "¥5 万以上"},
+		}},
+		{Key: "prepay", Label: "单次预存不少于 ¥2,000", Kind: referralFieldChoice, Required: true, Options: []referralApplicationOption{
+			{Value: "paid", Label: "已预存 ¥2,000 以上"},
+			{Value: "willing", Label: "还没预存，接受预存"},
+			{Value: "decline", Label: "不接受"},
 		}},
 		{Key: "models", Label: "主要模型", Kind: referralFieldMultiChoice, Required: true, Options: []referralApplicationOption{
 			{Value: "claude", Label: "Claude"},
@@ -104,8 +109,9 @@ func ValidatePartnerApplication(payload map[string]any, request ReferralApplicat
 	if err != nil {
 		return nil, err
 	}
-	// Personal and in-house use stay on regular top-ups; the site form blocks
-	// them first, this only enforces it.
+	// The thresholds (2026-10-28): monthly spend of ¥5,000 or more and a single
+	// prepayment of at least ¥2,000. Personal and in-house use stay on regular
+	// top-ups. The site form blocks all of these first; this only enforces it.
 	if slices.Contains([]string{"personal", "studio"}, submission.Values["business_type"]) {
 		return nil, &ReferralApplicationFieldError{Field: "business_type", Code: PartnerApplicationErrorNotEligible}
 	}
@@ -113,10 +119,13 @@ func ValidatePartnerApplication(payload map[string]any, request ReferralApplicat
 	switch submission.Values["monthly_spend"] {
 	case "10k-50k", "gt50k":
 		grade = "A"
-	case "3k-10k":
+	case "5k-10k":
 		grade = "B"
 	default:
 		return nil, &ReferralApplicationFieldError{Field: "monthly_spend", Code: PartnerApplicationErrorNotEligible}
+	}
+	if submission.Values["prepay"] == "decline" {
+		return nil, &ReferralApplicationFieldError{Field: "prepay", Code: PartnerApplicationErrorNotEligible}
 	}
 	notFound := &ReferralApplicationFieldError{Field: "account", Code: PartnerApplicationErrorAccountNotFound}
 	userId, err := strconv.Atoi(submission.Values["account"])

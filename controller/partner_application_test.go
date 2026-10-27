@@ -38,6 +38,7 @@ func validPartnerApplicationPayload() map[string]any {
 		"site_url":        "https://relay.example.com",
 		"system":          "new_api",
 		"monthly_spend":   "10k-50k",
+		"prepay":          "paid",
 		"models":          []any{"claude", "gpt", "claude"},
 		"needs":           []any{"price", "fapiao"},
 		"telegram":        "@acme_relay",
@@ -79,7 +80,7 @@ func TestSubmitPartnerApplicationQueuesGradedEmailWithAccountOverview(t *testing
 	for _, expected := range []string{
 		"官网代理合作页收到一份新申请；评级只按申请人自报的月消耗，联系前请结合账号概况核实。",
 		"88API UID", "30001", "Acme &lt;b&gt;Relay&lt;/b&gt;", "已在运营 API 中转站", "https://relay.example.com",
-		"New API", "¥1 万–5 万", "Claude、GPT / Codex", "专属价格、开发票", "@acme_relay", "Line one<br/>Line two",
+		"New API", "¥1 万–5 万", "单次预存不少于 ¥2,000", "已预存 ¥2,000 以上", "Claude、GPT / Codex", "专属价格、开发票", "@acme_relay", "Line one<br/>Line two",
 		"账号概况", "partner_a", "vip", "$2.50", "$10.00", "42", "2026-01-01 00:00:00（北京时间）",
 		"https://88api.ai/business/partner/", "203.0.113.10", reference,
 	} {
@@ -98,7 +99,8 @@ func TestSubmitPartnerApplicationGradeAndOptionalSite(t *testing.T) {
 		grade string
 	}{
 		{"spend over 50k", func(p map[string]any) { p["monthly_spend"] = "gt50k" }, "A"},
-		{"spend 3k to 10k", func(p map[string]any) { p["monthly_spend"] = "3k-10k" }, "B"},
+		{"spend 5k to 10k", func(p map[string]any) { p["monthly_spend"] = "5k-10k" }, "B"},
+		{"willing to prepay", func(p map[string]any) { p["prepay"] = "willing" }, "A"},
 		{"reseller without site", func(p map[string]any) { p["business_type"], p["site_url"] = "reseller", "" }, "A"},
 		{"building without site", func(p map[string]any) { p["business_type"], p["site_url"] = "relay_building", "" }, "A"},
 	}
@@ -156,14 +158,17 @@ func TestSubmitPartnerApplicationRejectsInvalidFieldsWithoutSending(t *testing.T
 		{"privacy not accepted", func(p map[string]any) { p["consent_privacy"] = false }, "consent_privacy", service.ReferralApplicationErrorRequired},
 		{"personal use", func(p map[string]any) { p["business_type"] = "personal" }, "business_type", service.PartnerApplicationErrorNotEligible},
 		{"in-house use", func(p map[string]any) { p["business_type"] = "studio" }, "business_type", service.PartnerApplicationErrorNotEligible},
-		{"spend under 3k", func(p map[string]any) { p["monthly_spend"] = "lt3k" }, "monthly_spend", service.PartnerApplicationErrorNotEligible},
+		{"spend under 5k", func(p map[string]any) { p["monthly_spend"] = "lt5k" }, "monthly_spend", service.PartnerApplicationErrorNotEligible},
+		{"old 3k tier value", func(p map[string]any) { p["monthly_spend"] = "3k-10k" }, "monthly_spend", service.ReferralApplicationErrorInvalid},
+		{"missing prepay", func(p map[string]any) { p["prepay"] = "" }, "prepay", service.ReferralApplicationErrorRequired},
+		{"prepay declined", func(p map[string]any) { p["prepay"] = "decline" }, "prepay", service.PartnerApplicationErrorNotEligible},
 		{"unknown uid", func(p map[string]any) { p["account"] = "99999" }, "account", service.PartnerApplicationErrorAccountNotFound},
 		{"zero uid", func(p map[string]any) { p["account"] = "0" }, "account", service.PartnerApplicationErrorAccountNotFound},
 		{"disabled uid", func(p map[string]any) { p["account"] = "30002" }, "account", service.PartnerApplicationErrorAccountNotFound},
 		// Order: field formats, then contact, then eligibility, then the UID lookup.
 		{"site checked before contact", func(p map[string]any) { p["site_url"], p["telegram"] = "", "" }, "site_url", service.ReferralApplicationErrorRequired},
 		{"contact checked before eligibility", func(p map[string]any) { p["business_type"], p["telegram"] = "personal", "" }, "contact", service.ReferralApplicationErrorContactRequired},
-		{"eligibility checked before uid", func(p map[string]any) { p["monthly_spend"], p["account"] = "lt3k", "99999" }, "monthly_spend", service.PartnerApplicationErrorNotEligible},
+		{"eligibility checked before uid", func(p map[string]any) { p["monthly_spend"], p["account"] = "lt5k", "99999" }, "monthly_spend", service.PartnerApplicationErrorNotEligible},
 	}
 	for index, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
