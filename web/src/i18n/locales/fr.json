@@ -8865,6 +8865,7 @@
     "This balance transfer has already been processed": "Ce transfert de solde a déjà été traité",
     "Please enter a rejection reason": "Veuillez indiquer un motif de refus",
     "The API balance would exceed the wallet limit": "Le solde API dépasserait la limite du portefeuille",
-    "Transfer amount": "Montant du transfert"
+    "Transfer amount": "Montant du transfert",
+    "Task ID or official task ID": "ID de tâche ou ID de tâche officiel"
   }
 }

@@ -1,12 +1,16 @@
 package controller
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -226,4 +230,137 @@ export function officialTaskId(task) { return /^cgt-/.test(task.data && task.dat
 	assert.Equal(t, "cgt-list-1", view.OfficialTaskID)
 	assert.Nil(t, view.Data)
 	assert.Empty(t, view.Platform)
+}
+
+func TestTaskLogSearchMatchesOfficialTaskIDModelAndUsername(t *testing.T) {
+	source := `
+export const meta = {apiVersion: 1, key: "official-search", name: "Official Search", version: "1.0.0", author: {name: "Test"}, models: ["m"], fetchMode: "per_task"};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+export function officialTaskId(task) { const id = String((task.data && task.data.id) || ""); return /^[0-9]+$/.test(id) ? id : ""; }
+`
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = jsplugin.DefaultRegistry.Unregister("official-search") })
+
+	ownTask := setupGenericTaskTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.TaskSearchTerm{}))
+	require.NoError(t, model.DB.Model(ownTask).Update("model_name", "doc-parser").Error)
+	require.NoError(t, model.DB.Create(&model.User{Id: 8, Username: "other-owner", AffCode: "search-other", Status: common.UserStatusEnabled, Role: common.RoleCommonUser, Group: "default"}).Error)
+	// The official ID is a JSON number, so it never appears quoted in the payload.
+	official := &model.Task{TaskID: "task_official", Platform: "official-search", UserId: 7, ModelName: "MiniMax-Hailuo-H3", Status: model.TaskStatusSuccess, SubmitTime: 11, Data: []byte(`{"id":385412976501234}`)}
+	foreign := &model.Task{TaskID: "task_foreign", Platform: "official-search", UserId: 8, ModelName: "MiniMax-Hailuo-H3", Status: model.TaskStatusSuccess, SubmitTime: 12, Data: []byte(`{"id":999000111222333}`)}
+	// A payload that merely contains the digits must not match.
+	lookalike := &model.Task{TaskID: "task_lookalike", Platform: "document", UserId: 7, ModelName: "doc-parser", Status: model.TaskStatusSuccess, SubmitTime: 13, Data: []byte(`{"note":"385412976501234"}`)}
+	for _, task := range []*model.Task{official, foreign, lookalike} {
+		require.NoError(t, model.DB.Create(task).Error)
+	}
+
+	list := func(handler gin.HandlerFunc, role int, query string) []string {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/api/task?"+query, nil)
+		ctx.Set("id", 7)
+		ctx.Set("role", role)
+		handler(ctx)
+		var response struct {
+			Success bool `json:"success"`
+			Data    struct {
+				Items []struct {
+					TaskID string `json:"task_id"`
+				} `json:"items"`
+			} `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		require.True(t, response.Success, recorder.Body.String())
+		ids := []string{}
+		for _, item := range response.Data.Items {
+			ids = append(ids, item.TaskID)
+		}
+		return ids
+	}
+
+	assert.Equal(t, []string{"task_official"}, list(GetUserTask, common.RoleCommonUser, "task_id=385412976501234"))
+	assert.Equal(t, []string{"task_generic"}, list(GetUserTask, common.RoleCommonUser, "task_id=task_generic"))
+	assert.Empty(t, list(GetUserTask, common.RoleCommonUser, "task_id=999000111222333"), "another user's official ID")
+	assert.Empty(t, list(GetUserTask, common.RoleCommonUser, "task_id=38541297650"), "partial official ID")
+	assert.Equal(t, []string{"task_lookalike", "task_generic"}, list(GetUserTask, common.RoleCommonUser, "model_name=doc-parser"))
+	assert.Equal(t, []string{"task_official"}, list(GetUserTask, common.RoleCommonUser, "model_name=MiniMax%25"))
+
+	assert.Equal(t, []string{"task_foreign"}, list(GetAllTask, common.RoleAdminUser, "task_id=999000111222333"))
+	assert.Equal(t, []string{"task_foreign"}, list(GetAllTask, common.RoleAdminUser, "username=other-owner"))
+	assert.Equal(t, []string{"task_foreign", "task_official"}, list(GetAllTask, common.RoleAdminUser, "model_name=MiniMax-Hailuo-H3"))
+	assert.Empty(t, list(GetAllTask, common.RoleAdminUser, "username=nobody"))
+}
+
+func TestTaskLogSearchUsesIndexOnceBackfilled(t *testing.T) {
+	source := `
+export const meta = {apiVersion: 1, key: "official-index", name: "Official Index", version: "1.0.0", author: {name: "Test"}, models: ["m"], fetchMode: "per_task"};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+export function officialTaskId(task) { const id = String((task.data && task.data.id) || ""); return /^cgt-/.test(id) ? id : ""; }
+`
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = jsplugin.DefaultRegistry.Unregister("official-index") })
+
+	setupGenericTaskTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.TaskSearchTerm{}))
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = map[string]string{}
+	}
+	previousDone, hadDone := common.OptionMap[model.TaskSearchTermsBackfillDoneOptionKey]
+	common.OptionMap[model.TaskSearchTermsBackfillDoneOptionKey] = "true"
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		defer common.OptionMapRWMutex.Unlock()
+		if hadDone {
+			common.OptionMap[model.TaskSearchTermsBackfillDoneOptionKey] = previousDone
+			return
+		}
+		delete(common.OptionMap, model.TaskSearchTermsBackfillDoneOptionKey)
+	})
+
+	indexed := &model.Task{TaskID: "task_indexed", Platform: "official-index", UserId: 7, Status: model.TaskStatusSuccess, SubmitTime: 11,
+		Data: []byte(`{"id":"cgt-indexed-1"}`), PrivateData: model.TaskPrivateData{UpstreamTaskID: "up-indexed-secret"}}
+	require.NoError(t, indexed.InsertWithContext(context.Background()))
+	model.SyncTaskSearchTerms(indexed)
+	// Written around the index (as by an older node): no longer found once backfilled.
+	unindexed := &model.Task{TaskID: "task_unindexed", Platform: "official-index", UserId: 7, Status: model.TaskStatusSuccess, SubmitTime: 12, Data: []byte(`{"id":"cgt-unindexed-1"}`)}
+	require.NoError(t, model.DB.Create(unindexed).Error)
+
+	list := func(handler gin.HandlerFunc, role int, query string) []string {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/api/task?"+query, nil)
+		ctx.Set("id", 7)
+		ctx.Set("role", role)
+		handler(ctx)
+		var response struct {
+			Data struct {
+				Items []struct {
+					TaskID string `json:"task_id"`
+				} `json:"items"`
+			} `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		ids := []string{}
+		for _, item := range response.Data.Items {
+			ids = append(ids, item.TaskID)
+		}
+		return ids
+	}
+
+	assert.Equal(t, []string{"task_indexed"}, list(GetUserTask, common.RoleCommonUser, "task_id=cgt-indexed-1"))
+	assert.Empty(t, list(GetUserTask, common.RoleCommonUser, "task_id=up-indexed-secret"), "users never match the upstream ID")
+	assert.Empty(t, list(GetAllTask, common.RoleAdminUser, "task_id=up-indexed-secret"), "admins do not see the upstream ID")
+	assert.Equal(t, []string{"task_indexed"}, list(GetAllTask, common.RoleRootUser, "task_id=up-indexed-secret"))
+	assert.Empty(t, list(GetUserTask, common.RoleCommonUser, "task_id=cgt-unindexed-1"), "no full-table scan after backfill")
+	assert.Equal(t, []string{"task_unindexed"}, list(GetUserTask, common.RoleCommonUser, "task_id=task_unindexed"))
 }

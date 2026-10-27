@@ -68,7 +68,11 @@ export interface DrawingLogFilters extends CommonFilters {
  * Task logs specific filters
  */
 export interface TaskLogFilters extends CommonFilters {
+  /** Our task ID or the model platform's official task ID. */
   taskId?: string
+  model?: string
+  /** Administrators only. */
+  username?: string
 }
 
 /**
@@ -509,6 +513,8 @@ export interface GetTaskLogsParams {
   page_size?: number
   channel_id?: string
   task_id?: string
+  model_name?: string
+  username?: string
   start_timestamp?: number
   end_timestamp?: number
 }

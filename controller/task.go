@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -529,7 +530,25 @@ func GetAllTask(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
-	queryParams := model.SyncTaskQueryParams{Platform: constant.TaskPlatform(c.Query("platform")), TaskID: c.Query("task_id"), Status: c.Query("status"), Action: c.Query("action"), StartTimestamp: startTimestamp, EndTimestamp: endTimestamp, ChannelID: c.Query("channel_id")}
+	queryParams := model.SyncTaskQueryParams{Platform: constant.TaskPlatform(c.Query("platform")), Status: c.Query("status"), Action: c.Query("action"), StartTimestamp: startTimestamp, EndTimestamp: endTimestamp, ChannelID: c.Query("channel_id"), ModelName: strings.TrimSpace(c.Query("model_name"))}
+	if username := strings.TrimSpace(c.Query("username")); username != "" {
+		userIDs, err := model.FindTaskUserIDsByUsername(username)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if len(userIDs) == 0 {
+			pageInfo.SetItems([]*dto.TaskDto{})
+			common.ApiSuccess(c, pageInfo)
+			return
+		}
+		queryParams.UserIDs = userIDs
+	}
+	if !resolveTaskIDSearch(c, &queryParams, 0) {
+		pageInfo.SetItems([]*dto.TaskDto{})
+		common.ApiSuccess(c, pageInfo)
+		return
+	}
 	items := model.TaskGetAllTasks(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
 	pageInfo.SetTotal(int(model.TaskCountAllTasks(queryParams)))
 	pageInfo.SetItems(tasksToDto(items, true, c.GetInt("role")))
@@ -541,7 +560,12 @@ func GetUserTask(c *gin.Context) {
 	userID := c.GetInt("id")
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
-	queryParams := model.SyncTaskQueryParams{Platform: constant.TaskPlatform(c.Query("platform")), TaskID: c.Query("task_id"), Status: c.Query("status"), Action: c.Query("action"), StartTimestamp: startTimestamp, EndTimestamp: endTimestamp}
+	queryParams := model.SyncTaskQueryParams{Platform: constant.TaskPlatform(c.Query("platform")), Status: c.Query("status"), Action: c.Query("action"), StartTimestamp: startTimestamp, EndTimestamp: endTimestamp, ModelName: strings.TrimSpace(c.Query("model_name"))}
+	if !resolveTaskIDSearch(c, &queryParams, userID) {
+		pageInfo.SetItems([]*dto.TaskDto{})
+		common.ApiSuccess(c, pageInfo)
+		return
+	}
 	items := model.TaskGetAllUserTask(userID, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
 	pageInfo.SetTotal(int(model.TaskCountAllUserTask(userID, queryParams)))
 	pageInfo.SetItems(tasksToDto(items, false, common.RoleCommonUser))
@@ -676,7 +700,7 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 				NodeName:       task.PrivateData.NodeName,
 			}
 			if item.OfficialTaskID == "" {
-				item.OfficialTaskID = officialTaskID(task)
+				item.OfficialTaskID = relay.RootOfficialTaskID(task)
 			}
 			if execution := task.PrivateData.Execution; execution != nil {
 				if snapshot := execution.TaskPlugin; snapshot != nil {
@@ -697,32 +721,54 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 	return result
 }
 
-func officialTaskID(task *model.Task) string {
-	if task == nil {
-		return ""
-	}
+// taskIDSearchCandidateLimit bounds how many payload matches are checked
+// against the official task ID while old tasks are still being indexed.
+const taskIDSearchCandidateLimit = 200
 
-	var snapshot struct {
-		ID     string `json:"id"`
-		TaskID string `json:"task_id"`
-		Data   struct {
-			ID     string `json:"id"`
-			TaskID string `json:"task_id"`
-		} `json:"data"`
+// resolveTaskIDSearch turns the task_id query into the rows it names: our own
+// task ID, or an ID from the task search index that this viewer may see (the
+// published official ID for everyone; the fallback official ID and the
+// upstream task ID for root). It reports false when nothing matches.
+func resolveTaskIDSearch(c *gin.Context, queryParams *model.SyncTaskQueryParams, userID int) bool {
+	keyword := strings.TrimSpace(c.Query("task_id"))
+	if keyword == "" {
+		return true
 	}
-	if len(task.Data) > 0 && common.Unmarshal(task.Data, &snapshot) == nil {
-		for _, candidate := range []string{
-			snapshot.ID,
-			snapshot.TaskID,
-			snapshot.Data.ID,
-			snapshot.Data.TaskID,
-		} {
-			if candidate = strings.TrimSpace(candidate); candidate != "" {
-				return candidate
+	role := c.GetInt("role")
+	kinds := []string{model.TaskSearchTermKindOfficial}
+	if role >= common.RoleRootUser {
+		kinds = append(kinds, model.TaskSearchTermKindRootOfficial, model.TaskSearchTermKindUpstream)
+	}
+	ids, err := model.FindTaskRowIDsByTaskID(keyword, userID)
+	if err != nil {
+		common.SysError(common.LogText("task id search failed: %s", err.Error()))
+		return false
+	}
+	indexed, err := model.FindTaskIDsBySearchTerm(keyword, kinds)
+	if err != nil {
+		common.SysError(common.LogText("task id search failed: %s", err.Error()))
+		return false
+	}
+	ids = append(ids, indexed...)
+	// Until every older task is indexed, also check payload matches directly.
+	if !model.TaskSearchTermsBackfilled() {
+		candidates, err := model.FindTaskSearchCandidates(keyword, userID, taskIDSearchCandidateLimit)
+		if err != nil {
+			common.SysError(common.LogText("task id search failed: %s", err.Error()))
+			return false
+		}
+		for _, task := range candidates {
+			for _, term := range relay.TaskSearchTerms(task) {
+				if term.Value == keyword && slices.Contains(kinds, term.Kind) {
+					ids = append(ids, task.ID)
+					break
+				}
 			}
 		}
 	}
-	return strings.TrimSpace(task.PrivateData.UpstreamTaskID)
+	slices.Sort(ids)
+	queryParams.IDs = slices.Compact(ids)
+	return len(queryParams.IDs) > 0
 }
 
 func taskFailReasonIsLegacyResultURL(value string) bool {

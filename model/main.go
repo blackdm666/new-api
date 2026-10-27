@@ -386,6 +386,7 @@ func migrateDB() error {
 		&MarketingEvent{},
 		&QuotaData{},
 		&Task{},
+		&TaskSearchTerm{},
 		&TaskCallbackDelivery{},
 		&TaskPlugin{},
 		&Model{},
@@ -415,6 +416,9 @@ func migrateDB() error {
 		return err
 	}
 	if err := backfillAffiliateAccounts(); err != nil {
+		return err
+	}
+	if err := backfillTaskModelNames(); err != nil {
 		return err
 	}
 	if err := backfillEmailDeliveryStates(); err != nil {
@@ -509,6 +513,7 @@ func migrateDBFast() error {
 		{&MarketingEvent{}, "MarketingEvent"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
+		{&TaskSearchTerm{}, "TaskSearchTerm"},
 		{&TaskCallbackDelivery{}, "TaskCallbackDelivery"},
 		{&TaskPlugin{}, "TaskPlugin"},
 		{&Model{}, "Model"},
@@ -552,6 +557,9 @@ func migrateDBFast() error {
 		}
 	}
 	if err := backfillAffiliateAccounts(); err != nil {
+		return err
+	}
+	if err := backfillTaskModelNames(); err != nil {
 		return err
 	}
 	if err := backfillEmailDeliveryStates(); err != nil {

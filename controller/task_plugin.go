@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/plugins"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -877,6 +878,15 @@ func SyncTaskPluginsOnce() {
 
 func SyncTaskPlugins() {
 	SyncTaskPluginsOnce()
+	// Official task IDs come from plugins, so the search index backfill waits
+	// for the first plugin sync and runs on the master only.
+	if common.IsMasterNode {
+		gopool.Go(func() {
+			if err := model.BackfillTaskSearchTerms(context.Background()); err != nil {
+				common.SysError(common.LogText("task search terms backfill failed: %s", err.Error()))
+			}
+		})
+	}
 	for range time.NewTicker(30 * time.Second).C {
 		SyncTaskPluginsOnce()
 	}

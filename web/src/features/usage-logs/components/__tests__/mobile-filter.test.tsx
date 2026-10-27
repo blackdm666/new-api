@@ -345,3 +345,44 @@ it('shows the seconds of the selected range on the trigger', () => {
     })
   ).toBeVisible()
 })
+
+it('uses fixed desktop columns instead of auto-fit when a page provides them', () => {
+  function GridFixture(props: { gridClassName?: string }) {
+    const table = useReactTable({
+      data: [],
+      columns: [],
+      getCoreRowModel: getCoreRowModel(),
+    })
+    return (
+      <LogsFilterToolbar
+        table={table}
+        primaryGridClassName={props.gridClassName}
+        primaryFilters={<span>Task ID</span>}
+        hasActiveFilters={false}
+        onReset={() => {}}
+        onSearch={() => {}}
+      />
+    )
+  }
+  const view = render(<GridFixture />)
+  const grid = () =>
+    view.container.querySelector('[data-slot="logs-primary-filters"]')
+  expect(grid()?.className).toContain(
+    'sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'
+  )
+
+  view.rerender(
+    <GridFixture gridClassName='sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6' />
+  )
+  const classes = grid()?.className.split(' ') ?? []
+  expect(classes).toEqual(
+    expect.arrayContaining([
+      'sm:grid-cols-2',
+      'lg:grid-cols-3',
+      '2xl:grid-cols-6',
+    ])
+  )
+  expect(classes).not.toContain(
+    'sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'
+  )
+})

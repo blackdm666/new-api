@@ -787,6 +787,10 @@ func executeTaskSubmissionWith(
 	}
 	service.LogTaskConsumption(c, relayInfo, task)
 	diagnostics.complete(task, result.Quota)
+	// Index the official and upstream task IDs for task log search only after
+	// the task is durable and settled, so the extra write never sits between
+	// the insert and its billing.
+	model.SyncTaskSearchTerms(task)
 
 	return &taskSubmissionOutcome{Result: result, Task: task, RelayInfo: relayInfo}, nil
 }
