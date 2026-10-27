@@ -23,9 +23,12 @@ import {
   QUOTA_TYPE_VALUES,
   ENDPOINT_TYPES,
   EXCLUDED_GROUPS,
+  type QuotaTypeOption,
   type SortOption,
 } from '../constants'
 import type { PricingModel } from '../types'
+import { compileBillingExpression } from './billing-expression/parser'
+import { visitExpression } from './billing-expression/types'
 import {
   getCardExamplePrice,
   getDynamicPricingSummary,
@@ -80,6 +83,41 @@ export function filterByGroup(
   return models.filter((m) => m.enable_groups?.includes(group))
 }
 
+/** Pricing category of the active configuration, shared by filters and counts. */
+export function getModelQuotaType(
+  model: PricingModel
+): Exclude<QuotaTypeOption, 'all'> | undefined {
+  // Task-usage models retain their own category.
+  if (hasTaskUsageSchema(model)) return QUOTA_TYPES.TASK
+
+  if (model.billing_mode === 'tiered_expr' && model.billing_expr) {
+    const compiled = compileBillingExpression(model.billing_expr)
+    if (compiled.status === 'ready') {
+      if (!compiled.functions.has('fixed')) return QUOTA_TYPES.TOKEN
+
+      // Only models whose pricing leaves are all fixed count as per-request.
+      let hasTokenPricing = false
+      visitExpression(compiled.ast, (node) => {
+        if (node.kind !== 'call' || node.name !== 'tier') return
+        const price = node.args[1]
+        if (price.kind !== 'call' || price.name !== 'fixed') {
+          hasTokenPricing = true
+        }
+      })
+      return hasTokenPricing ? QUOTA_TYPES.TOKEN : QUOTA_TYPES.REQUEST
+    }
+  }
+
+  // Preserve legacy classification when the expression cannot be parsed.
+  if (model.quota_type === QUOTA_TYPE_VALUES.TOKEN) return QUOTA_TYPES.TOKEN
+  if (model.quota_type === QUOTA_TYPE_VALUES.REQUEST) {
+    return model.billing_unit === 'second'
+      ? QUOTA_TYPES.SECOND
+      : QUOTA_TYPES.REQUEST
+  }
+  return undefined
+}
+
 /**
  * Filter models by quota type
  */
@@ -88,28 +126,7 @@ export function filterByQuotaType(
   quotaType: string
 ): PricingModel[] {
   if (quotaType === QUOTA_TYPES.ALL) return models
-  if (quotaType === QUOTA_TYPES.TASK) {
-    return models.filter((m) => hasTaskUsageSchema(m))
-  }
-  if (quotaType === QUOTA_TYPES.TOKEN) {
-    return models.filter(
-      (m) => m.quota_type === QUOTA_TYPE_VALUES.TOKEN && !hasTaskUsageSchema(m)
-    )
-  }
-  if (quotaType === QUOTA_TYPES.SECOND) {
-    return models.filter(
-      (m) =>
-        m.quota_type === QUOTA_TYPE_VALUES.REQUEST &&
-        m.billing_unit === 'second' &&
-        !hasTaskUsageSchema(m)
-    )
-  }
-  return models.filter(
-    (m) =>
-      m.quota_type === QUOTA_TYPE_VALUES.REQUEST &&
-      m.billing_unit !== 'second' &&
-      !hasTaskUsageSchema(m)
-  )
+  return models.filter((model) => getModelQuotaType(model) === quotaType)
 }
 
 /**
