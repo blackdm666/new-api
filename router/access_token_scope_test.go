@@ -35,8 +35,10 @@ var accessTokenExemptRoutes = []string{
 	"GET /api/home_page_content",
 	"GET /api/ratio_config",
 	"GET /api/user/groups",
-	// 88API: official site referral program application form (anonymous).
+	// 88API: official site referral program and partner application forms
+	// (anonymous).
 	"POST /api/public/referral-application",
+	"POST /api/public/partner-application",
 
 	// Anonymous account entry points.
 	"GET /api/verification",

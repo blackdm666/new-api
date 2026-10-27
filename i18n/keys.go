@@ -488,6 +488,8 @@ const (
 	MsgReferralApplicationEmailValuePayout    = "referral_application.email.value.payout"
 	MsgReferralApplicationEmailStepsTitle     = "referral_application.email.steps_title"
 	MsgReferralApplicationEmailStepLink       = "referral_application.email.step.link"
+	MsgReferralApplicationEmailStepKit        = "referral_application.email.step.kit"
+	MsgReferralApplicationEmailStepKitLink    = "referral_application.email.step.kit_link"
 	MsgReferralApplicationEmailStepShare      = "referral_application.email.step.share"
 	MsgReferralApplicationEmailStepCommission = "referral_application.email.step.commission"
 	MsgReferralApplicationEmailSupportNote    = "referral_application.email.support_note"

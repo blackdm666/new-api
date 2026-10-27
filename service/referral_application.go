@@ -8,6 +8,7 @@ import (
 	"net/mail"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,11 @@ const ReferralApplicationEmailCategory = "referral_application_admin"
 // confirmation sent to the applicant.
 const ReferralApplicationReplyEmailCategory = "referral_application_user"
 
+// ReferralPromoKitPath is the fixed download address of the promotion kit on
+// the official site (88api-home-live site/downloads/). Updating the kit only
+// replaces the file, so the address in confirmation emails never changes.
+const ReferralPromoKitPath = "/downloads/88api-promo-kit.zip"
+
 type referralApplicationFieldKind int
 
 const (
@@ -39,6 +45,8 @@ const (
 	referralFieldChoice
 	referralFieldMultiChoice
 	referralFieldConsent
+	// referralFieldUID accepts only a numeric user id.
+	referralFieldUID
 )
 
 type referralApplicationOption struct {
@@ -54,6 +62,28 @@ type referralApplicationField struct {
 	MaxLength int
 	MaxLinks  int
 	Options   []referralApplicationOption
+	// RequiredWhen makes an optional field required when another field holds
+	// one of the listed option values.
+	RequiredWhen *applicationFieldCondition
+}
+
+type applicationFieldCondition struct {
+	Key    string
+	Values []string
+}
+
+// applicationForm describes one of the official site's public application
+// forms: the field table that drives validation and the notification email,
+// the contact fields of which at least one must be filled, and how the
+// notification is titled and queued.
+type applicationForm struct {
+	Fields          []referralApplicationField
+	ContactKeys     []string
+	ReferencePrefix string
+	Title           string
+	Intro           string
+	EmailCategory   string
+	DeliveryPrefix  string
 }
 
 // referralApplicationFields is the single definition of the official site's
@@ -100,6 +130,16 @@ var referralApplicationFields = []referralApplicationField{
 // referralApplicationContactKeys must contain at least one filled value.
 var referralApplicationContactKeys = []string{"telegram", "wechat", "email"}
 
+var referralApplicationForm = applicationForm{
+	Fields:          referralApplicationFields,
+	ContactKeys:     referralApplicationContactKeys,
+	ReferencePrefix: "RA-",
+	Title:           "推广返佣计划申请",
+	Intro:           "官网推广返佣页的申请表收到一份新申请。账号与联系方式由申请人自行填写，联系前请先核实。",
+	EmailCategory:   ReferralApplicationEmailCategory,
+	DeliveryPrefix:  "referral-application",
+}
+
 const (
 	referralApplicationMaxSourceLength = 500
 	referralApplicationEmailMaxLength  = 254
@@ -123,7 +163,8 @@ const (
 )
 
 // ReferralApplicationFieldError identifies the first invalid field so the
-// site can show its own localized message next to that field.
+// site can show its own localized message next to that field. Every official
+// site application form reports field errors with it.
 type ReferralApplicationFieldError struct {
 	Field string
 	Code  string
@@ -138,21 +179,32 @@ type referralApplicationEntry struct {
 	Value string
 }
 
-// ReferralApplication is a validated submission ready to be emailed.
-type ReferralApplication struct {
+// applicationSubmission is a validated application form submission ready to
+// be emailed.
+type applicationSubmission struct {
 	Reference string
 	Entries   []referralApplicationEntry
+	// Values holds the normalized value of every field by key: the option
+	// value of a single choice, comma-joined option values of a multiple
+	// choice, otherwise the text shown in the email; empty when not filled.
+	Values      map[string]string
+	SourcePage  string
+	Locale      string
+	ClientIP    string
+	SubmittedAt time.Time
+}
+
+// ReferralApplication is a validated submission ready to be emailed.
+type ReferralApplication struct {
+	applicationSubmission
 	// Account and ContactEmail are the normalized form values used to pick
 	// the confirmation recipient; empty when not filled.
 	Account      string
 	ContactEmail string
-	SourcePage   string
-	Locale       string
-	ClientIP     string
-	SubmittedAt  time.Time
 }
 
 // ReferralApplicationContext carries request facts that are not form fields.
+// Every official site application form uses it.
 type ReferralApplicationContext struct {
 	SourcePage string
 	Referer    string
@@ -162,7 +214,8 @@ type ReferralApplicationContext struct {
 }
 
 // IsReferralApplicationSpam reports whether the hidden honeypot field was
-// filled. Such submissions are accepted silently and never emailed.
+// filled. Such submissions are accepted silently and never emailed. Every
+// official site application form uses the same honeypot field.
 func IsReferralApplicationSpam(payload map[string]any) bool {
 	value, _ := payload["website"].(string)
 	return strings.TrimSpace(value) != ""
@@ -171,24 +224,43 @@ func IsReferralApplicationSpam(payload map[string]any) bool {
 // ValidateReferralApplication checks a decoded form payload against
 // referralApplicationFields and returns the normalized submission.
 func ValidateReferralApplication(payload map[string]any, request ReferralApplicationContext) (*ReferralApplication, error) {
-	entries := make([]referralApplicationEntry, 0, len(referralApplicationFields))
-	filled := make(map[string]bool, len(referralApplicationFields))
-	values := make(map[string]string, len(referralApplicationFields))
-	for _, field := range referralApplicationFields {
-		value, err := normalizeReferralApplicationField(field, payload[field.Key])
+	submission, err := validateApplicationForm(referralApplicationForm, payload, request)
+	if err != nil {
+		return nil, err
+	}
+	return &ReferralApplication{
+		applicationSubmission: *submission,
+		Account:               submission.Values["account"],
+		ContactEmail:          submission.Values["email"],
+	}, nil
+}
+
+// validateApplicationForm checks a decoded payload against the form's field
+// table: the format of every field first, then conditionally required fields,
+// then the contact fields. It reports the first invalid field.
+func validateApplicationForm(form applicationForm, payload map[string]any, request ReferralApplicationContext) (*applicationSubmission, error) {
+	entries := make([]referralApplicationEntry, 0, len(form.Fields))
+	values := make(map[string]string, len(form.Fields))
+	for _, field := range form.Fields {
+		value, display, err := normalizeReferralApplicationField(field, payload[field.Key])
 		if err != nil {
 			return nil, err
 		}
-		filled[field.Key] = value != ""
 		values[field.Key] = value
-		if value == "" {
-			value = "-"
+		if display == "" {
+			display = "-"
 		}
-		entries = append(entries, referralApplicationEntry{Label: field.Label, Value: value})
+		entries = append(entries, referralApplicationEntry{Label: field.Label, Value: display})
+	}
+	for _, field := range form.Fields {
+		condition := field.RequiredWhen
+		if condition != nil && values[field.Key] == "" && slices.Contains(condition.Values, values[condition.Key]) {
+			return nil, &ReferralApplicationFieldError{Field: field.Key, Code: ReferralApplicationErrorRequired}
+		}
 	}
 	contactFilled := false
-	for _, key := range referralApplicationContactKeys {
-		contactFilled = contactFilled || filled[key]
+	for _, key := range form.ContactKeys {
+		contactFilled = contactFilled || values[key] != ""
 	}
 	if !contactFilled {
 		return nil, &ReferralApplicationFieldError{Field: "contact", Code: ReferralApplicationErrorContactRequired}
@@ -206,19 +278,20 @@ func ValidateReferralApplication(payload map[string]any, request ReferralApplica
 	if submittedAt.IsZero() {
 		submittedAt = time.Now()
 	}
-	return &ReferralApplication{
-		Reference:    "RA-" + strings.ToUpper(common.GetRandomString(8)),
-		Entries:      entries,
-		Account:      values["account"],
-		ContactEmail: values["email"],
-		SourcePage:   sourcePage,
-		Locale:       locale,
-		ClientIP:     strings.TrimSpace(request.ClientIP),
-		SubmittedAt:  submittedAt,
+	return &applicationSubmission{
+		Reference:   form.ReferencePrefix + strings.ToUpper(common.GetRandomString(8)),
+		Entries:     entries,
+		Values:      values,
+		SourcePage:  sourcePage,
+		Locale:      locale,
+		ClientIP:    strings.TrimSpace(request.ClientIP),
+		SubmittedAt: submittedAt,
 	}, nil
 }
 
-func normalizeReferralApplicationField(field referralApplicationField, raw any) (string, error) {
+// normalizeReferralApplicationField returns the normalized value of one field
+// (see applicationSubmission.Values) and the text shown in the email.
+func normalizeReferralApplicationField(field referralApplicationField, raw any) (string, string, error) {
 	fieldError := func(code string) error {
 		return &ReferralApplicationFieldError{Field: field.Key, Code: code}
 	}
@@ -226,84 +299,88 @@ func normalizeReferralApplicationField(field referralApplicationField, raw any) 
 	case referralFieldConsent:
 		accepted, _ := raw.(bool)
 		if field.Required && !accepted {
-			return "", fieldError(ReferralApplicationErrorRequired)
+			return "", "", fieldError(ReferralApplicationErrorRequired)
 		}
 		if accepted {
-			return "是", nil
+			return "是", "是", nil
 		}
-		return "", nil
+		return "", "", nil
 	case referralFieldMultiChoice:
 		values, ok := raw.([]any)
 		if raw != nil && !ok {
-			return "", fieldError(ReferralApplicationErrorInvalid)
+			return "", "", fieldError(ReferralApplicationErrorInvalid)
 		}
+		selected := make([]string, 0, len(values))
 		labels := make([]string, 0, len(values))
-		seen := make(map[string]bool, len(values))
 		for _, item := range values {
 			value, _ := item.(string)
 			label, valid := referralApplicationOptionLabel(field, value)
 			if !valid {
-				return "", fieldError(ReferralApplicationErrorInvalid)
+				return "", "", fieldError(ReferralApplicationErrorInvalid)
 			}
-			if seen[value] {
+			if slices.Contains(selected, value) {
 				continue
 			}
-			seen[value] = true
+			selected = append(selected, value)
 			labels = append(labels, label)
 		}
 		if field.Required && len(labels) == 0 {
-			return "", fieldError(ReferralApplicationErrorRequired)
+			return "", "", fieldError(ReferralApplicationErrorRequired)
 		}
-		return strings.Join(labels, "、"), nil
+		return strings.Join(selected, ","), strings.Join(labels, "、"), nil
 	}
 
 	if raw != nil {
 		if _, ok := raw.(string); !ok {
-			return "", fieldError(ReferralApplicationErrorInvalid)
+			return "", "", fieldError(ReferralApplicationErrorInvalid)
 		}
 	}
 	value, _ := raw.(string)
 	value = strings.TrimSpace(value)
 	if value == "" {
 		if field.Required {
-			return "", fieldError(ReferralApplicationErrorRequired)
+			return "", "", fieldError(ReferralApplicationErrorRequired)
 		}
-		return "", nil
+		return "", "", nil
 	}
 	if field.MaxLength > 0 && utf8.RuneCountInString(value) > field.MaxLength {
-		return "", fieldError(ReferralApplicationErrorTooLong)
+		return "", "", fieldError(ReferralApplicationErrorTooLong)
 	}
 	if strings.ContainsFunc(value, func(r rune) bool {
 		return unicode.IsControl(r) && !(field.Kind == referralFieldMultiline && (r == '\n' || r == '\r' || r == '\t'))
 	}) {
-		return "", fieldError(ReferralApplicationErrorInvalid)
+		return "", "", fieldError(ReferralApplicationErrorInvalid)
 	}
 	if field.MaxLinks > 0 && len(referralApplicationLinkPattern.FindAllStringIndex(value, -1)) > field.MaxLinks {
-		return "", fieldError(ReferralApplicationErrorTooManyLinks)
+		return "", "", fieldError(ReferralApplicationErrorTooManyLinks)
 	}
 	switch field.Kind {
 	case referralFieldAccount:
 		if !referralApplicationUIDPattern.MatchString(value) && !isReferralApplicationEmail(value) {
-			return "", fieldError(ReferralApplicationErrorInvalid)
+			return "", "", fieldError(ReferralApplicationErrorInvalid)
+		}
+	case referralFieldUID:
+		if !referralApplicationUIDPattern.MatchString(value) {
+			return "", "", fieldError(ReferralApplicationErrorInvalid)
 		}
 	case referralFieldEmail:
 		if !isReferralApplicationEmail(value) {
-			return "", fieldError(ReferralApplicationErrorInvalid)
+			return "", "", fieldError(ReferralApplicationErrorInvalid)
 		}
 	case referralFieldTelegram:
 		normalized, ok := normalizeReferralApplicationTelegram(value)
 		if !ok {
-			return "", fieldError(ReferralApplicationErrorInvalid)
+			return "", "", fieldError(ReferralApplicationErrorInvalid)
 		}
 		value = normalized
 	case referralFieldChoice:
 		label, valid := referralApplicationOptionLabel(field, value)
 		if !valid {
-			return "", fieldError(ReferralApplicationErrorInvalid)
+			return "", "", fieldError(ReferralApplicationErrorInvalid)
 		}
-		value = label
+		return value, label, nil
 	}
-	return value, nil
+	return value, value, nil
 }
 
 func referralApplicationOptionLabel(field referralApplicationField, value string) (string, bool) {
@@ -397,38 +474,62 @@ func ValidateReferralApplicationRecipients(value string) error {
 // reference so no personal data remains once the outbox clears the body.
 // replyNote tells the administrator where the applicant's confirmation went.
 func RenderReferralApplicationEmail(application *ReferralApplication, replyNote string) (string, string) {
-	beijing := time.FixedZone("UTC+8", 8*60*60)
-	rows := make([]common.EmailTemplateRow, 0, len(application.Entries)+5)
-	for _, entry := range application.Entries {
+	return renderApplicationEmail(referralApplicationForm, &application.applicationSubmission, "", nil,
+		common.EmailTemplateRow{Label: "自动回信", Value: html.EscapeString(replyNote)})
+}
+
+// applicationEmailSection is an extra table of a notification email, shown
+// between the form answers and the submission facts.
+type applicationEmailSection struct {
+	Title string
+	Rows  []common.EmailTemplateRow
+}
+
+var applicationEmailLocation = time.FixedZone("UTC+8", 8*60*60)
+
+// renderApplicationEmail builds an application form's administrator
+// notification: the form answers, any extra sections, then the submission
+// facts followed by extraMeta. Section and extraMeta values must already be
+// HTML-safe. The subject carries only subjectTag and the reference.
+func renderApplicationEmail(form applicationForm, submission *applicationSubmission, subjectTag string, sections []applicationEmailSection, extraMeta ...common.EmailTemplateRow) (string, string) {
+	rows := make([]common.EmailTemplateRow, 0, len(submission.Entries))
+	for _, entry := range submission.Entries {
 		rows = append(rows, common.EmailTemplateRow{Label: entry.Label, Value: common.EscapeAndBreak(entry.Value)})
 	}
-	sourcePage := application.SourcePage
+	sourcePage := submission.SourcePage
 	if sourcePage == "" {
 		sourcePage = "-"
 	}
-	locale := application.Locale
+	locale := submission.Locale
 	if locale == "" {
 		locale = "-"
 	}
-	clientIP := application.ClientIP
+	clientIP := submission.ClientIP
 	if clientIP == "" {
 		clientIP = "-"
 	}
 	meta := []common.EmailTemplateRow{
-		{Label: "申请编号", Value: html.EscapeString(application.Reference)},
-		{Label: "提交时间", Value: html.EscapeString(application.SubmittedAt.In(beijing).Format("2006-01-02 15:04:05") + "（北京时间）")},
+		{Label: "申请编号", Value: html.EscapeString(submission.Reference)},
+		{Label: "提交时间", Value: html.EscapeString(submission.SubmittedAt.In(applicationEmailLocation).Format("2006-01-02 15:04:05") + "（北京时间）")},
 		{Label: "来源页面", Value: html.EscapeString(sourcePage)},
 		{Label: "页面语言", Value: html.EscapeString(locale)},
 		{Label: "IP", Value: html.EscapeString(clientIP)},
-		{Label: "自动回信", Value: html.EscapeString(replyNote)},
 	}
-	systemName := common.SystemNameOrDefault()
-	subject := fmt.Sprintf("[%s] 推广返佣计划申请 %s", systemName, application.Reference)
+	meta = append(meta, extraMeta...)
+	subjectReference := submission.Reference
+	if subjectTag != "" {
+		subjectReference = subjectTag + " " + subjectReference
+	}
+	subject := fmt.Sprintf("[%s] %s %s", common.SystemNameOrDefault(), form.Title, subjectReference)
 	var body strings.Builder
 	body.WriteString(`<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px;margin:0 auto;color:#1d1d1f;">`)
-	fmt.Fprintf(&body, `<h2 style="font-size:18px;margin:0 0 8px;">%s</h2>`, html.EscapeString("推广返佣计划申请"))
-	body.WriteString(`<p style="margin:0 0 16px;color:#6e6e73;font-size:14px;">官网推广返佣页的申请表收到一份新申请。账号与联系方式由申请人自行填写，联系前请先核实。</p>`)
+	fmt.Fprintf(&body, `<h2 style="font-size:18px;margin:0 0 8px;">%s</h2>`, html.EscapeString(form.Title))
+	fmt.Fprintf(&body, `<p style="margin:0 0 16px;color:#6e6e73;font-size:14px;">%s</p>`, html.EscapeString(form.Intro))
 	body.WriteString(common.RenderInfoTableHTML(rows))
+	for _, section := range sections {
+		fmt.Fprintf(&body, `<p style="margin:20px 0 8px;color:#8e8e93;font-size:13px;">%s</p>`, html.EscapeString(section.Title))
+		body.WriteString(common.RenderInfoTableHTML(section.Rows))
+	}
 	body.WriteString(`<p style="margin:20px 0 8px;color:#8e8e93;font-size:13px;">提交信息</p>`)
 	body.WriteString(common.RenderInfoTableHTML(meta))
 	body.WriteString(`</div>`)
@@ -446,10 +547,7 @@ var ErrReferralApplicationEmailNotConfigured = errors.New("referral application 
 // only when no administrator recipient could be queued; a confirmation that
 // cannot be queued is only logged.
 func QueueReferralApplicationEmail(application *ReferralApplication) error {
-	common.OptionMapRWMutex.RLock()
-	smtpServer := strings.TrimSpace(common.SMTPServer)
-	common.OptionMapRWMutex.RUnlock()
-	if smtpServer == "" {
+	if !applicationEmailConfigured() {
 		return ErrReferralApplicationEmailNotConfigured
 	}
 	replyTo, replyUserId := "", 0
@@ -463,21 +561,8 @@ func QueueReferralApplicationEmail(application *ReferralApplication) error {
 	}
 	subject, body := RenderReferralApplicationEmail(application, replyNote)
 	expires := application.SubmittedAt.Add(7 * 24 * time.Hour).Unix()
-	var queueErr error
-	queued := 0
-	for _, recipient := range ReferralApplicationRecipients() {
-		deliveryKey := fmt.Sprintf("referral-application:%s:%s", application.Reference, strings.ToLower(recipient))
-		if _, err := QueueSystemEmail(deliveryKey, ReferralApplicationEmailCategory, 0, 0, recipient, subject, body, expires); err != nil {
-			queueErr = errors.Join(queueErr, fmt.Errorf("%s: %w", recipient, err))
-			continue
-		}
-		queued++
-	}
-	if queued == 0 {
-		return queueErr
-	}
-	if queueErr != nil {
-		common.SysError("referral application " + application.Reference + " was not queued for every recipient: " + queueErr.Error())
+	if err := queueApplicationNotification(referralApplicationForm, application.Reference, subject, body, expires); err != nil {
+		return err
 	}
 	if replyTo == "" {
 		return nil
@@ -489,6 +574,38 @@ func QueueReferralApplicationEmail(application *ReferralApplication) error {
 	replySubject, replyBody := RenderEmailByKeyForLang(constant.EmailTemplateKeyReferralApplicationUser, lang, referralApplicationReplyVars(application.Reference, lang))
 	if _, err := QueueSystemEmail("referral-application-reply:"+application.Reference, ReferralApplicationReplyEmailCategory, 0, replyUserId, replyTo, replySubject, replyBody, expires); err != nil {
 		common.SysError("failed to queue referral application confirmation " + application.Reference + ": " + err.Error())
+	}
+	return nil
+}
+
+// applicationEmailConfigured reports whether the notification SMTP profile has
+// a server, without which no application can be delivered.
+func applicationEmailConfigured() bool {
+	common.OptionMapRWMutex.RLock()
+	defer common.OptionMapRWMutex.RUnlock()
+	return strings.TrimSpace(common.SMTPServer) != ""
+}
+
+// queueApplicationNotification stores an application form's administrator
+// notification in the email outbox for each configured recipient. The outbox
+// clears subject and body after delivery, so only delivery metadata stays in
+// the database. It fails only when no recipient could be queued.
+func queueApplicationNotification(form applicationForm, reference string, subject string, body string, expires int64) error {
+	var queueErr error
+	queued := 0
+	for _, recipient := range ReferralApplicationRecipients() {
+		deliveryKey := fmt.Sprintf("%s:%s:%s", form.DeliveryPrefix, reference, strings.ToLower(recipient))
+		if _, err := QueueSystemEmail(deliveryKey, form.EmailCategory, 0, 0, recipient, subject, body, expires); err != nil {
+			queueErr = errors.Join(queueErr, fmt.Errorf("%s: %w", recipient, err))
+			continue
+		}
+		queued++
+	}
+	if queued == 0 {
+		return queueErr
+	}
+	if queueErr != nil {
+		common.SysError(form.DeliveryPrefix + " " + reference + " was not queued for every recipient: " + queueErr.Error())
 	}
 	return nil
 }
@@ -562,8 +679,13 @@ func referralApplicationReplyVars(reference string, lang string) map[string]stri
 
 	var steps strings.Builder
 	steps.WriteString(`<ol style="margin:0;padding-left:20px;color:#27324d;font-size:14px;line-height:1.7;">`)
-	for _, key := range []string{appI18n.MsgReferralApplicationEmailStepLink, appI18n.MsgReferralApplicationEmailStepShare, appI18n.MsgReferralApplicationEmailStepCommission} {
-		fmt.Fprintf(&steps, `<li style="margin:0 0 6px;">%s</li>`, html.EscapeString(text(key, map[string]any{"SystemName": systemName})))
+	promoKitURL := baseURL + ReferralPromoKitPath
+	for _, key := range []string{appI18n.MsgReferralApplicationEmailStepLink, appI18n.MsgReferralApplicationEmailStepKit, appI18n.MsgReferralApplicationEmailStepShare, appI18n.MsgReferralApplicationEmailStepCommission} {
+		item := html.EscapeString(text(key, map[string]any{"SystemName": systemName}))
+		if key == appI18n.MsgReferralApplicationEmailStepKit {
+			item += fmt.Sprintf(` <a href="%s" style="color:#4f46e5;font-weight:650;">%s</a>`, html.EscapeString(promoKitURL), html.EscapeString(text(appI18n.MsgReferralApplicationEmailStepKitLink)))
+		}
+		fmt.Fprintf(&steps, `<li style="margin:0 0 6px;">%s</li>`, item)
 	}
 	steps.WriteString(`</ol>`)
 
@@ -581,6 +703,7 @@ func referralApplicationReplyVars(reference string, lang string) map[string]stri
 		"steps_title":    html.EscapeString(text(appI18n.MsgReferralApplicationEmailStepsTitle)),
 		"next_steps":     steps.String(),
 		"action_url":     html.EscapeString(baseURL + "/referral"),
+		"promo_kit_url":  html.EscapeString(promoKitURL),
 		"action_label":   html.EscapeString(text(appI18n.MsgReferralApplicationEmailAction)),
 		"support_note":   html.EscapeString(text(appI18n.MsgReferralApplicationEmailSupportNote)),
 		"rules_note":     html.EscapeString(text(appI18n.MsgReferralApplicationEmailRulesNote)),

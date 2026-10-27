@@ -219,6 +219,21 @@ func ReferralApplicationRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(ReferralApplicationRateLimitNum, ReferralApplicationRateLimitDuration, "RA")
 }
 
+const (
+	// PartnerApplicationRateLimitNum and PartnerApplicationRateLimitDuration
+	// bound anonymous partner applications per client IP.
+	PartnerApplicationRateLimitNum      = 5
+	PartnerApplicationRateLimitDuration = 60 * 60
+)
+
+// PartnerApplicationRateLimit limits the public partner application form per
+// client IP, separately from the referral application form. It runs before
+// human verification so rejected requests do not reach the verification
+// provider.
+func PartnerApplicationRateLimit() func(c *gin.Context) {
+	return rateLimitFactory(PartnerApplicationRateLimitNum, PartnerApplicationRateLimitDuration, "PA")
+}
+
 func DownloadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.DownloadRateLimitNum, common.DownloadRateLimitDuration, "DW")
 }
