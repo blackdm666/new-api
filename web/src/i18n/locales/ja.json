@@ -920,6 +920,8 @@
     "Audio Preview": "音声プレビュー",
     "Audio ratio": "音声倍率",
     "Audio requests": "音声リクエスト",
+    "Requests with explicit cache_control": "明示的 cache_control 付きリクエスト",
+    "Requests without explicit cache_control": "明示的 cache_control なしのリクエスト",
     "Audio Tokens": "音声トークン",
     "Audit access changed. Showing only your records.": "監査ログへのアクセス権限が変更されました。自分の記録のみ表示しています。",
     "Audit Logs": "監査ログ",

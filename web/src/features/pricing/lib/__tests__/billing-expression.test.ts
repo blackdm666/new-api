@@ -291,6 +291,45 @@ describe('local billing expression evaluation', () => {
     expect(readTokenTierChain(compiled.ast)).toBeNull()
   })
 
+  test('splits explicit cache_control branches into separate token tiers', async () => {
+    const probe =
+      '(param("messages.#.content|@flatten|#(cache_control.type==\\"ephemeral\\")|cache_control.type") == "ephemeral" || param("system.#(cache_control.type==\\"ephemeral\\")|cache_control.type") == "ephemeral")'
+    const compiled = compileBillingExpression(
+      `${probe} ? (len <= 256000 ? tier("explicit_short", p * 2 + c * 8 + cr * 0.2 + cc * 2.5) : tier("explicit_long", p * 6 + c * 24 + cr * 0.6 + cc * 7.5)) : (len <= 256000 ? tier("implicit_short", p * 2 + c * 8 + cr * 0.4 + cc * 2) : tier("implicit_long", p * 6 + c * 24 + cr * 1.2 + cc * 6))`
+    )
+    assert(compiled.status === 'ready')
+    const tiers = readTokenTierChain(compiled.ast)
+    assert(tiers)
+    expect(
+      tiers.map((tier) => [tier.label, tier.prices.cr, tier.prices.cc])
+    ).toEqual([
+      ['explicit_short', 0.2, 2.5],
+      ['explicit_long', 0.6, 7.5],
+      ['implicit_short', 0.4, 2],
+      ['implicit_long', 1.2, 6],
+    ])
+    const translations = createInstance()
+    await translations.init({ lng: 'zh', resources: { zh } })
+    expect(
+      tiers.map((tier) =>
+        formatBillingCondition(tier.conditionText ?? '', translations.t, 'zh')
+      )
+    ).toEqual([
+      '显式缓存请求（带 cache_control）且完整输入长度 <= 256,000',
+      '显式缓存请求（带 cache_control）',
+      '隐式缓存请求（不带 cache_control）且完整输入长度 <= 256,000',
+      '隐式缓存请求（不带 cache_control）',
+    ])
+  })
+
+  test('keeps other request-parameter branches out of the token tier summary', () => {
+    const compiled = compileBillingExpression(
+      'param("service_tier") == "priority" ? tier("priority", p * 4 + c * 16) : tier("default", p * 2 + c * 8)'
+    )
+    assert(compiled.status === 'ready')
+    expect(readTokenTierChain(compiled.ast)).toBeNull()
+  })
+
   test('distinguishes unknown requests from explicitly empty requests', () => {
     const expression = 'param("priority") == nil ? 2 : 3'
     expect(evaluateBillingExpression(expression).status).toBe('missing_context')

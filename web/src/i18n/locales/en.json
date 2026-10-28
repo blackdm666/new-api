@@ -921,6 +921,8 @@
     "Audio Preview": "Audio Preview",
     "Audio ratio": "Audio ratio",
     "Audio requests": "Audio requests",
+    "Requests with explicit cache_control": "Requests with explicit cache_control",
+    "Requests without explicit cache_control": "Requests without explicit cache_control",
     "Audio Tokens": "Audio Tokens",
     "Audit access changed. Showing only your records.": "Audit access changed. Showing only your records.",
     "Audit Logs": "Audit Logs",

@@ -20,7 +20,7 @@ import type { TOptions } from 'i18next'
 
 import { toIntlLocale } from '@/i18n/languages'
 
-import { flattenBinary } from './display'
+import { explicitCacheParamPaths, flattenBinary } from './display'
 import { compileBillingExpression } from './parser'
 import { TIME_FUNCTIONS, type ExpressionNode, type TimeFunction } from './types'
 
@@ -135,6 +135,24 @@ function describeBillingCondition(
   t: Translate,
   locale: string
 ): Description | null {
+  if (explicitCacheParamPaths(node)) {
+    return {
+      text: t('Requests with explicit cache_control'),
+      kind: 'combined',
+      timezone: '',
+    }
+  }
+  if (
+    node.kind === 'unary' &&
+    node.operator === '!' &&
+    explicitCacheParamPaths(node.operand)
+  ) {
+    return {
+      text: t('Requests without explicit cache_control'),
+      kind: 'combined',
+      timezone: '',
+    }
+  }
   if (node.kind === 'unary' && node.operator === '!') {
     const description = describeBillingCondition(node.operand, t, locale)
     if (!description) return null
