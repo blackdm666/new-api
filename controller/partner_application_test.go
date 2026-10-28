@@ -220,6 +220,29 @@ func TestSubmitPartnerApplicationLimitsRequestsPerIPSeparately(t *testing.T) {
 	assert.Equal(t, http.StatusOK, referral.Code)
 }
 
+// The partner form has its own daily email budget: past it a submission still
+// looks accepted but nothing is emailed, and the referral form is unaffected.
+func TestSubmitPartnerApplicationStopsEmailingAtDailyLimit(t *testing.T) {
+	router, db := setupReferralApplicationTest(t)
+	createPartnerApplicant(t, db)
+
+	for index := range service.ApplicationDailyLimit {
+		recorder, _ := postPartnerApplication(t, router, fmt.Sprintf("203.0.114.%d", index+1), validPartnerApplicationPayload())
+		require.Equal(t, http.StatusOK, recorder.Code)
+	}
+	recorder, response := postPartnerApplication(t, router, "203.0.114.200", validPartnerApplicationPayload())
+	referral, _ := postReferralApplication(t, router, "203.0.114.201", validReferralApplicationPayload())
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, true, response["success"])
+	assert.Equal(t, http.StatusOK, referral.Code)
+	var partner, referralNotified int64
+	require.NoError(t, db.Model(&model.EmailDelivery{}).Where("category = ?", service.PartnerApplicationEmailCategory).Count(&partner).Error)
+	require.NoError(t, db.Model(&model.EmailDelivery{}).Where("category = ?", service.ReferralApplicationEmailCategory).Count(&referralNotified).Error)
+	assert.EqualValues(t, service.ApplicationDailyLimit, partner)
+	assert.EqualValues(t, 1, referralNotified)
+}
+
 func TestSubmitPartnerApplicationReportsUnavailableWithoutSMTP(t *testing.T) {
 	router, db := setupReferralApplicationTest(t)
 	createPartnerApplicant(t, db)

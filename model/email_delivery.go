@@ -516,6 +516,17 @@ func DeferEmailDelivery(id int, nextAttemptTime int64) error {
 		}).Error
 }
 
+// CountRecentEmailDeliveries counts the outbox rows of one category queued for
+// userId (0 for rows not tied to a user) since the given Unix time, whatever
+// their delivery state.
+func CountRecentEmailDeliveries(category string, userId int, since int64) (int64, error) {
+	var count int64
+	err := DB.Model(&EmailDelivery{}).
+		Where("category = ? AND user_id = ? AND created_time >= ?", category, userId, since).
+		Count(&count).Error
+	return count, err
+}
+
 func GetEmailDeliveryById(id int) (*EmailDelivery, error) {
 	if id <= 0 {
 		return nil, ErrEmailDeliveryIdInvalid
