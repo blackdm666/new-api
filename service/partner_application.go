@@ -181,5 +181,5 @@ func QueuePartnerApplicationEmail(application *PartnerApplication) error {
 	}
 	subject, body := RenderPartnerApplicationEmail(application)
 	expires := application.SubmittedAt.Add(7 * 24 * time.Hour).Unix()
-	return queueApplicationNotification(partnerApplicationForm, application.Reference, subject, body, expires)
+	return queueApplicationNotification(partnerApplicationForm, ReferralApplicationRecipients(), application.Reference, subject, body, expires)
 }

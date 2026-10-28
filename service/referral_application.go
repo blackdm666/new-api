@@ -197,10 +197,9 @@ type applicationSubmission struct {
 // ReferralApplication is a validated submission ready to be emailed.
 type ReferralApplication struct {
 	applicationSubmission
-	// Account and ContactEmail are the normalized form values used to pick
-	// the confirmation recipient; empty when not filled.
-	Account      string
-	ContactEmail string
+	// Account is the normalized account value used to pick the confirmation
+	// recipient.
+	Account string
 }
 
 // ReferralApplicationContext carries request facts that are not form fields.
@@ -231,7 +230,6 @@ func ValidateReferralApplication(payload map[string]any, request ReferralApplica
 	return &ReferralApplication{
 		applicationSubmission: *submission,
 		Account:               submission.Values["account"],
-		ContactEmail:          submission.Values["email"],
 	}, nil
 }
 
@@ -540,28 +538,57 @@ func renderApplicationEmail(form applicationForm, submission *applicationSubmiss
 // profile has no server, so the application cannot be delivered.
 var ErrReferralApplicationEmailNotConfigured = errors.New("referral application email is not configured")
 
+const (
+	// ReferralApplicationDailyLimit bounds the applications emailed in any
+	// 24 hours. The form is public and scripted submissions rotate IPs past
+	// the per-IP limit, so later submissions are accepted but not emailed.
+	ReferralApplicationDailyLimit = 20
+	// ReferralApplicationReplyInterval is how long an account waits before it
+	// can receive another confirmation, so repeated submissions naming
+	// someone else's UID cannot flood that user's mailbox.
+	ReferralApplicationReplyInterval = 30 * 24 * time.Hour
+)
+
 // QueueReferralApplicationEmail stores the notification in the email outbox
 // for each configured recipient, then queues the applicant's confirmation
 // (see referralApplicationReplyRecipient). The outbox clears subject and body
 // after delivery, so only delivery metadata stays in the database. It fails
 // only when no administrator recipient could be queued; a confirmation that
-// cannot be queued is only logged.
+// cannot be queued is only logged. Past ReferralApplicationDailyLimit nothing
+// is queued and the submission is only logged.
 func QueueReferralApplicationEmail(application *ReferralApplication) error {
 	if !applicationEmailConfigured() {
 		return ErrReferralApplicationEmailNotConfigured
+	}
+	recipients := ReferralApplicationRecipients()
+	dayStart := application.SubmittedAt.Add(-24 * time.Hour).Unix()
+	if notified, err := model.CountRecentEmailDeliveries(ReferralApplicationEmailCategory, 0, dayStart); err != nil {
+		common.SysError("failed to count recent referral applications: " + err.Error())
+	} else if notified >= int64(ReferralApplicationDailyLimit*len(recipients)) {
+		common.SysError("referral application " + application.Reference + " from " + application.ClientIP + " was not emailed: daily limit reached")
+		return nil
 	}
 	replyTo, replyUserId := "", 0
 	replyNote := "未发送：推广返佣未开启"
 	if enabled, _, _, _ := model.GetAffiliatePolicyState(); enabled {
 		replyTo, replyUserId = referralApplicationReplyRecipient(application)
-		replyNote = "未发送：申请人没有留邮箱，账号也查不到邮箱"
+		replyNote = "未发送：只回信到所填账号的注册邮箱，这个账号查不到"
 		if replyTo != "" {
 			replyNote = "已发送「申请已通过」邮件至 " + replyTo
+			since := application.SubmittedAt.Add(-ReferralApplicationReplyInterval).Unix()
+			replied, err := model.CountRecentEmailDeliveries(ReferralApplicationReplyEmailCategory, replyUserId, since)
+			switch {
+			case err != nil:
+				common.SysError("failed to count referral application confirmations: " + err.Error())
+				replyTo, replyNote = "", "未发送：查询回信记录失败"
+			case replied > 0:
+				replyTo, replyNote = "", "未发送：这个账号 30 天内已收到过回信"
+			}
 		}
 	}
 	subject, body := RenderReferralApplicationEmail(application, replyNote)
 	expires := application.SubmittedAt.Add(7 * 24 * time.Hour).Unix()
-	if err := queueApplicationNotification(referralApplicationForm, application.Reference, subject, body, expires); err != nil {
+	if err := queueApplicationNotification(referralApplicationForm, recipients, application.Reference, subject, body, expires); err != nil {
 		return err
 	}
 	if replyTo == "" {
@@ -590,10 +617,10 @@ func applicationEmailConfigured() bool {
 // notification in the email outbox for each configured recipient. The outbox
 // clears subject and body after delivery, so only delivery metadata stays in
 // the database. It fails only when no recipient could be queued.
-func queueApplicationNotification(form applicationForm, reference string, subject string, body string, expires int64) error {
+func queueApplicationNotification(form applicationForm, recipients []string, reference string, subject string, body string, expires int64) error {
 	var queueErr error
 	queued := 0
-	for _, recipient := range ReferralApplicationRecipients() {
+	for _, recipient := range recipients {
 		deliveryKey := fmt.Sprintf("%s:%s:%s", form.DeliveryPrefix, reference, strings.ToLower(recipient))
 		if _, err := QueueSystemEmail(deliveryKey, form.EmailCategory, 0, 0, recipient, subject, body, expires); err != nil {
 			queueErr = errors.Join(queueErr, fmt.Errorf("%s: %w", recipient, err))
@@ -611,23 +638,23 @@ func queueApplicationNotification(form applicationForm, reference string, subjec
 }
 
 // referralApplicationReplyRecipient picks the address of the applicant's
-// confirmation: the contact email, else an account written as an email, else
-// the registered email of the enabled user whose UID was entered (returned
-// with that user's id). The form is public and the submitter never learns
-// which address was used, so the confirmation carries none of the submitted
-// text.
+// confirmation: only the registered email of the enabled user whose UID or
+// sign-up email was entered as the account (returned with that user's id).
+// The contact email is never used, so the public form cannot make the site
+// email arbitrary addresses. The submitter never learns which address was
+// used, and the confirmation carries none of the submitted text.
 func referralApplicationReplyRecipient(application *ReferralApplication) (string, int) {
-	if application.ContactEmail != "" {
-		return application.ContactEmail, 0
-	}
+	var user *model.User
+	var err error
 	if isReferralApplicationEmail(application.Account) {
-		return application.Account, 0
+		user, err = model.GetUniqueUserByEmail(application.Account)
+	} else {
+		userId, _ := strconv.Atoi(application.Account)
+		if userId <= 0 {
+			return "", 0
+		}
+		user, err = model.GetUserById(userId, false)
 	}
-	userId, err := strconv.Atoi(application.Account)
-	if err != nil || userId <= 0 {
-		return "", 0
-	}
-	user, err := model.GetUserById(userId, false)
 	if err != nil || user.Status != common.UserStatusEnabled {
 		return "", 0
 	}

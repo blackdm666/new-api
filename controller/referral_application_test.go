@@ -144,7 +144,7 @@ func TestSubmitReferralApplicationQueuesEscapedEmailToDefaultRecipient(t *testin
 		"Alice &lt;b&gt;Studio&lt;/b&gt;", "10086", "@alice_ai", "alice@example.com",
 		"B站、Telegram 群", "1 万–10 万", "Line one<br/>Line two",
 		"https://88api.ai/business/referral/", "198.51.100.10", "北京时间", "zh-CN", reference,
-		"自动回信", "已发送「申请已通过」邮件至 alice@example.com",
+		"自动回信", "未发送：只回信到所填账号的注册邮箱，这个账号查不到",
 	} {
 		assert.Contains(t, delivery.Body, expected)
 	}
@@ -304,10 +304,15 @@ func TestSubmitReferralApplicationSendsApprovalToApplicant(t *testing.T) {
 		userId    int
 		adminNote string
 	}{
-		{name: "contact email", recipient: "alice@example.com", adminNote: "已发送「申请已通过」邮件至 alice@example.com"},
-		{name: "account email", edit: func(p map[string]any) {
+		{name: "typed contact email is never used", user: &model.User{Id: 10086, Username: "alice", Status: common.UserStatusEnabled, AffCode: "alic"},
+			adminNote: "未发送：只回信到所填账号的注册邮箱，这个账号查不到"},
+		{name: "account written as an unregistered email", edit: func(p map[string]any) {
 			p["account"], p["email"], p["wechat"] = "bob@example.com", "", "bob_wx"
-		}, recipient: "bob@example.com"},
+		}, adminNote: "未发送：只回信到所填账号的注册邮箱，这个账号查不到"},
+		{name: "account written as a registered email", edit: func(p map[string]any) {
+			p["account"], p["email"], p["wechat"] = "Frank@Example.com", "attacker@example.com", ""
+		}, user: &model.User{Id: 20004, Username: "frank", Email: "frank@example.com", Status: common.UserStatusEnabled, AffCode: "frnk"},
+			recipient: "frank@example.com", userId: 20004},
 		{name: "registered email of the uid", edit: func(p map[string]any) {
 			p["account"], p["email"], p["wechat"] = "20001", "", "carol_wx"
 		}, user: &model.User{Id: 20001, Username: "carol", Email: "carol@example.com", Status: common.UserStatusEnabled, AffCode: "carl"},
@@ -315,10 +320,10 @@ func TestSubmitReferralApplicationSendsApprovalToApplicant(t *testing.T) {
 		{name: "disabled uid", edit: func(p map[string]any) {
 			p["account"], p["email"], p["wechat"] = "20002", "", "dave_wx"
 		}, user: &model.User{Id: 20002, Username: "dave", Email: "dave@example.com", Status: common.UserStatusDisabled, AffCode: "dave"},
-			adminNote: "未发送：申请人没有留邮箱，账号也查不到邮箱"},
+			adminNote: "未发送：只回信到所填账号的注册邮箱，这个账号查不到"},
 		{name: "unknown uid", edit: func(p map[string]any) {
 			p["account"], p["email"], p["wechat"] = "20003", "", "erin_wx"
-		}, adminNote: "未发送：申请人没有留邮箱，账号也查不到邮箱"},
+		}, adminNote: "未发送：只回信到所填账号的注册邮箱，这个账号查不到"},
 		{name: "program disabled", disabled: true, adminNote: "未发送：推广返佣未开启"},
 	}
 	for index, tc := range cases {
@@ -363,10 +368,71 @@ func TestSubmitReferralApplicationSendsApprovalToApplicant(t *testing.T) {
 	}
 }
 
+// Submissions naming the same UID from rotating IPs reach that user's mailbox
+// once per ReferralApplicationReplyInterval; the administrator still hears of
+// each one.
+func TestSubmitReferralApplicationRepliesToAnAccountOncePerInterval(t *testing.T) {
+	router, db := setupReferralApplicationTest(t)
+	require.NoError(t, db.Create(&model.User{Id: 12345, Username: "victim", Email: "victim@example.com", Status: common.UserStatusEnabled, AffCode: "vict"}).Error)
+	payload := validReferralApplicationPayload()
+	payload["account"] = "12345"
+
+	for index := range 3 {
+		recorder, _ := postReferralApplication(t, router, fmt.Sprintf("198.51.103.%d", index+1), payload)
+		require.Equal(t, http.StatusOK, recorder.Code)
+	}
+
+	replies := []string{}
+	require.NoError(t, db.Model(&model.EmailDelivery{}).Where("category = ?", service.ReferralApplicationReplyEmailCategory).Pluck("recipient", &replies).Error)
+	assert.Equal(t, []string{"victim@example.com"}, replies)
+	notes := []string{}
+	require.NoError(t, db.Model(&model.EmailDelivery{}).Where("category = ?", service.ReferralApplicationEmailCategory).Order("id ASC").Pluck("body", &notes).Error)
+	require.Len(t, notes, 3)
+	assert.Contains(t, notes[0], "已发送「申请已通过」邮件至 victim@example.com")
+	for _, note := range notes[1:] {
+		assert.Contains(t, note, "未发送：这个账号 30 天内已收到过回信")
+	}
+
+	require.NoError(t, db.Model(&model.EmailDelivery{}).Where("category = ?", service.ReferralApplicationReplyEmailCategory).
+		Update("created_time", time.Now().Add(-service.ReferralApplicationReplyInterval-time.Hour).Unix()).Error)
+	recorder, _ := postReferralApplication(t, router, "198.51.103.10", payload)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var count int64
+	require.NoError(t, db.Model(&model.EmailDelivery{}).Where("category = ?", service.ReferralApplicationReplyEmailCategory).Count(&count).Error)
+	assert.EqualValues(t, 2, count)
+}
+
+// Past the daily limit a submission still looks accepted, but nothing is
+// emailed to the administrator or the applicant.
+func TestSubmitReferralApplicationStopsEmailingAtDailyLimit(t *testing.T) {
+	router, db := setupReferralApplicationTest(t)
+	require.NoError(t, db.Create(&model.User{Id: 10086, Username: "alice", Email: "alice@example.com", Status: common.UserStatusEnabled, AffCode: "alic"}).Error)
+
+	for index := range service.ReferralApplicationDailyLimit {
+		recorder, _ := postReferralApplication(t, router, fmt.Sprintf("198.51.104.%d", index+1), validReferralApplicationPayload())
+		require.Equal(t, http.StatusOK, recorder.Code)
+	}
+	var before int64
+	require.NoError(t, db.Model(&model.EmailDelivery{}).Count(&before).Error)
+	require.NoError(t, db.Where("category = ?", service.ReferralApplicationReplyEmailCategory).Delete(&model.EmailDelivery{}).Error)
+
+	recorder, response := postReferralApplication(t, router, "198.51.104.200", validReferralApplicationPayload())
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, true, response["success"])
+	var admin, replies int64
+	require.NoError(t, db.Model(&model.EmailDelivery{}).Where("category = ?", service.ReferralApplicationEmailCategory).Count(&admin).Error)
+	require.NoError(t, db.Model(&model.EmailDelivery{}).Where("category = ?", service.ReferralApplicationReplyEmailCategory).Count(&replies).Error)
+	assert.EqualValues(t, service.ReferralApplicationDailyLimit, admin)
+	assert.Zero(t, replies)
+	assert.EqualValues(t, service.ReferralApplicationDailyLimit+1, before)
+}
+
 // The confirmation follows the page language, shows the live referral policy
 // and never echoes text the (unauthenticated) submitter typed into the form.
 func TestReferralApplicationApprovalEmailContent(t *testing.T) {
 	router, db := setupReferralApplicationTest(t)
+	require.NoError(t, db.Create(&model.User{Id: 10086, Username: "alice", Email: "alice@example.com", Status: common.UserStatusEnabled, AffCode: "alic"}).Error)
 	payload := validReferralApplicationPayload()
 	payload["locale"] = "en"
 	payload["display_name"] = "Visit spam.example now"
