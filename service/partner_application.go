@@ -174,12 +174,16 @@ func RenderPartnerApplicationEmail(application *PartnerApplication) (string, str
 // QueuePartnerApplicationEmail stores the notification in the email outbox
 // for each configured recipient (the referral application recipients). No
 // confirmation is sent to the applicant. It fails only when no recipient
-// could be queued.
+// could be queued. Past ApplicationDailyLimit nothing is queued.
 func QueuePartnerApplicationEmail(application *PartnerApplication) error {
 	if !applicationEmailConfigured() {
 		return ErrReferralApplicationEmailNotConfigured
 	}
+	recipients := ReferralApplicationRecipients()
+	if applicationDailyLimitReached(partnerApplicationForm, recipients, &application.applicationSubmission) {
+		return nil
+	}
 	subject, body := RenderPartnerApplicationEmail(application)
 	expires := application.SubmittedAt.Add(7 * 24 * time.Hour).Unix()
-	return queueApplicationNotification(partnerApplicationForm, ReferralApplicationRecipients(), application.Reference, subject, body, expires)
+	return queueApplicationNotification(partnerApplicationForm, recipients, application.Reference, subject, body, expires)
 }

@@ -408,7 +408,7 @@ func TestSubmitReferralApplicationStopsEmailingAtDailyLimit(t *testing.T) {
 	router, db := setupReferralApplicationTest(t)
 	require.NoError(t, db.Create(&model.User{Id: 10086, Username: "alice", Email: "alice@example.com", Status: common.UserStatusEnabled, AffCode: "alic"}).Error)
 
-	for index := range service.ReferralApplicationDailyLimit {
+	for index := range service.ApplicationDailyLimit {
 		recorder, _ := postReferralApplication(t, router, fmt.Sprintf("198.51.104.%d", index+1), validReferralApplicationPayload())
 		require.Equal(t, http.StatusOK, recorder.Code)
 	}
@@ -423,9 +423,9 @@ func TestSubmitReferralApplicationStopsEmailingAtDailyLimit(t *testing.T) {
 	var admin, replies int64
 	require.NoError(t, db.Model(&model.EmailDelivery{}).Where("category = ?", service.ReferralApplicationEmailCategory).Count(&admin).Error)
 	require.NoError(t, db.Model(&model.EmailDelivery{}).Where("category = ?", service.ReferralApplicationReplyEmailCategory).Count(&replies).Error)
-	assert.EqualValues(t, service.ReferralApplicationDailyLimit, admin)
+	assert.EqualValues(t, service.ApplicationDailyLimit, admin)
 	assert.Zero(t, replies)
-	assert.EqualValues(t, service.ReferralApplicationDailyLimit+1, before)
+	assert.EqualValues(t, service.ApplicationDailyLimit+1, before)
 }
 
 // The confirmation follows the page language, shows the live referral policy

@@ -538,34 +538,24 @@ func renderApplicationEmail(form applicationForm, submission *applicationSubmiss
 // profile has no server, so the application cannot be delivered.
 var ErrReferralApplicationEmailNotConfigured = errors.New("referral application email is not configured")
 
-const (
-	// ReferralApplicationDailyLimit bounds the applications emailed in any
-	// 24 hours. The form is public and scripted submissions rotate IPs past
-	// the per-IP limit, so later submissions are accepted but not emailed.
-	ReferralApplicationDailyLimit = 20
-	// ReferralApplicationReplyInterval is how long an account waits before it
-	// can receive another confirmation, so repeated submissions naming
-	// someone else's UID cannot flood that user's mailbox.
-	ReferralApplicationReplyInterval = 30 * 24 * time.Hour
-)
+// ReferralApplicationReplyInterval is how long an account waits before it
+// can receive another confirmation, so repeated submissions naming someone
+// else's UID cannot flood that user's mailbox.
+const ReferralApplicationReplyInterval = 30 * 24 * time.Hour
 
 // QueueReferralApplicationEmail stores the notification in the email outbox
 // for each configured recipient, then queues the applicant's confirmation
 // (see referralApplicationReplyRecipient). The outbox clears subject and body
 // after delivery, so only delivery metadata stays in the database. It fails
 // only when no administrator recipient could be queued; a confirmation that
-// cannot be queued is only logged. Past ReferralApplicationDailyLimit nothing
-// is queued and the submission is only logged.
+// cannot be queued is only logged. Past ApplicationDailyLimit nothing is
+// queued.
 func QueueReferralApplicationEmail(application *ReferralApplication) error {
 	if !applicationEmailConfigured() {
 		return ErrReferralApplicationEmailNotConfigured
 	}
 	recipients := ReferralApplicationRecipients()
-	dayStart := application.SubmittedAt.Add(-24 * time.Hour).Unix()
-	if notified, err := model.CountRecentEmailDeliveries(ReferralApplicationEmailCategory, 0, dayStart); err != nil {
-		common.SysError("failed to count recent referral applications: " + err.Error())
-	} else if notified >= int64(ReferralApplicationDailyLimit*len(recipients)) {
-		common.SysError("referral application " + application.Reference + " from " + application.ClientIP + " was not emailed: daily limit reached")
+	if applicationDailyLimitReached(referralApplicationForm, recipients, &application.applicationSubmission) {
 		return nil
 	}
 	replyTo, replyUserId := "", 0
@@ -611,6 +601,31 @@ func applicationEmailConfigured() bool {
 	common.OptionMapRWMutex.RLock()
 	defer common.OptionMapRWMutex.RUnlock()
 	return strings.TrimSpace(common.SMTPServer) != ""
+}
+
+// ApplicationDailyLimit bounds the applications of each official site form
+// emailed in any 24 hours. The forms are public and scripted submissions
+// rotate IPs past the per-IP limit, so later submissions are accepted but
+// not emailed.
+const ApplicationDailyLimit = 20
+
+// applicationDailyLimitReached reports whether the form already emailed
+// ApplicationDailyLimit applications in the 24 hours before the submission,
+// counting the administrator notifications in the outbox, and logs the
+// submission that is dropped. A failed count does not hold the application
+// back.
+func applicationDailyLimitReached(form applicationForm, recipients []string, submission *applicationSubmission) bool {
+	since := submission.SubmittedAt.Add(-24 * time.Hour).Unix()
+	notified, err := model.CountRecentEmailDeliveries(form.EmailCategory, 0, since)
+	if err != nil {
+		common.SysError("failed to count recent " + form.DeliveryPrefix + " emails: " + err.Error())
+		return false
+	}
+	if notified < int64(ApplicationDailyLimit*len(recipients)) {
+		return false
+	}
+	common.SysError(form.DeliveryPrefix + " " + submission.Reference + " from " + submission.ClientIP + " was not emailed: daily limit reached")
+	return true
 }
 
 // queueApplicationNotification stores an application form's administrator
