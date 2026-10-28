@@ -920,6 +920,8 @@
     "Audio Preview": "Xem trước âm thanh",
     "Audio ratio": "Tỷ lệ âm thanh",
     "Audio requests": "Yêu cầu âm thanh",
+    "Requests with explicit cache_control": "Yêu cầu có cache_control tường minh",
+    "Requests without explicit cache_control": "Yêu cầu không có cache_control tường minh",
     "Audio Tokens": "Token âm thanh",
     "Audit access changed. Showing only your records.": "Quyền truy cập kiểm toán đã thay đổi. Chỉ hiển thị bản ghi của bạn.",
     "Audit Logs": "Nhật ký kiểm toán",

@@ -920,6 +920,8 @@
     "Audio Preview": "Предпросмотр аудио",
     "Audio ratio": "Коэффициент аудио",
     "Audio requests": "Аудиозапросы",
+    "Requests with explicit cache_control": "Запросы с явным cache_control",
+    "Requests without explicit cache_control": "Запросы без явного cache_control",
     "Audio Tokens": "Аудио токены",
     "Audit access changed. Showing only your records.": "Права доступа к аудиту изменились. Показаны только ваши записи.",
     "Audit Logs": "Журнал аудита",

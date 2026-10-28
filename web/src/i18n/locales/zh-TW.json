@@ -921,6 +921,8 @@
     "Audio Preview": "音樂預覽",
     "Audio ratio": "音頻倍率",
     "Audio requests": "音訊請求",
+    "Requests with explicit cache_control": "顯式快取請求（帶 cache_control）",
+    "Requests without explicit cache_control": "隱式快取請求（不帶 cache_control）",
     "Audio Tokens": "語音 Token",
     "Audit access changed. Showing only your records.": "稽核存取權限已變更，現在僅顯示本人的記錄。",
     "Audit Logs": "稽核日誌",

@@ -921,6 +921,8 @@
     "Audio Preview": "音乐预览",
     "Audio ratio": "音频倍率",
     "Audio requests": "音频请求",
+    "Requests with explicit cache_control": "显式缓存请求（带 cache_control）",
+    "Requests without explicit cache_control": "隐式缓存请求（不带 cache_control）",
     "Audio Tokens": "语音 Token",
     "Audit access changed. Showing only your records.": "审计访问权限已变更，现仅显示本人的记录。",
     "Audit Logs": "审计日志",

@@ -181,8 +181,61 @@ function tokenTier(
   return { label: node.args[0].value, conditions, prices }
 }
 
+/** Body paths of an explicit prompt-cache probe: one or more
+ * `param("…cache_control.type…") == "ephemeral"` comparisons joined by `||`. */
+export function explicitCacheParamPaths(node: ExpressionNode): string[] | null {
+  const paths: string[] = []
+  for (const part of flattenBinary(node, '||')) {
+    if (
+      part.kind !== 'binary' ||
+      part.operator !== '==' ||
+      part.left.kind !== 'call' ||
+      part.left.name !== 'param' ||
+      part.left.args[0]?.kind !== 'literal' ||
+      typeof part.left.args[0].value !== 'string' ||
+      !part.left.args[0].value.includes('cache_control.type') ||
+      part.right.kind !== 'literal' ||
+      part.right.value !== 'ephemeral'
+    ) {
+      return null
+    }
+    paths.push(part.left.args[0].value)
+  }
+  return paths
+}
+
 /** Legacy token summary contract: ordered linear chain, never a minimum or partial price extraction. */
 export function readTokenTierChain(node: ExpressionNode): TokenTier[] | null {
+  const cachePaths =
+    node.kind === 'conditional' ? explicitCacheParamPaths(node.condition) : null
+  if (node.kind === 'conditional' && cachePaths) {
+    // Explicit and implicit caching price cr/cc independently, so each branch
+    // keeps its own token chain instead of becoming a request multiplier.
+    const explicit = readTokenTierChain(node.yes)
+    const implicit = readTokenTierChain(node.no)
+    if (!explicit || !implicit) return null
+    if ([...explicit, ...implicit].some((tier) => tier.conditionText)) {
+      return null
+    }
+    const cacheCondition = cachePaths
+      .map((path) => `param(${JSON.stringify(path)}) == "ephemeral"`)
+      .join(' || ')
+    const branches: [TokenTier[], string][] = [
+      [explicit, `(${cacheCondition})`],
+      [implicit, `!(${cacheCondition})`],
+    ]
+    return branches.flatMap(([tiers, requestCondition]) =>
+      tiers.map((tier) => ({
+        ...tier,
+        conditionText: [
+          requestCondition,
+          ...tier.conditions.map(
+            (condition) => `${condition.var} ${condition.op} ${condition.value}`
+          ),
+        ].join(' && '),
+      }))
+    )
+  }
   if (
     node.kind === 'conditional' &&
     node.condition.kind === 'binary' &&
