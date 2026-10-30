@@ -50,6 +50,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
 import { useStatus } from '@/hooks/use-status'
+import { localizeDocsLink } from '@/lib/docs-link'
 import { INFINITE_CANVAS_NAME } from '@/lib/external-links'
 import {
   parseHeaderNavModules,
@@ -270,7 +271,7 @@ export function buildSidebarData(
  * registered in `layout/lib/sidebar-view-registry.ts`.
  */
 export function useSidebarData(): SidebarData {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { status } = useStatus()
   const modules = useMemo(
     () =>
@@ -278,5 +279,10 @@ export function useSidebarData(): SidebarData {
     [status]
   )
   const docsLink = status?.docs_link as string | undefined
-  return buildSidebarData(t, modules, docsLink)
+  return buildSidebarData(
+    t,
+    modules,
+    docsLink &&
+      localizeDocsLink(docsLink, i18n.resolvedLanguage || i18n.language)
+  )
 }
