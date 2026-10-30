@@ -20,6 +20,7 @@ import type { TFunction } from 'i18next'
 import {
   Activity,
   BadgePercent,
+  BookOpen,
   Box,
   ClipboardList,
   CreditCard,
@@ -39,6 +40,7 @@ import {
   Share2,
   ShieldAlert,
   ShieldCheck,
+  Store,
   User,
   Users,
   Wallet,
@@ -50,16 +52,18 @@ import type { SidebarData } from '@/components/layout/types'
 import { useStatus } from '@/hooks/use-status'
 import { INFINITE_CANVAS_NAME } from '@/lib/external-links'
 import {
-  DEFAULT_INFINITE_CANVAS_LINK,
+  parseHeaderNavModules,
   parseHeaderNavModulesFromStatus,
-  type HeaderNavLink,
+  type HeaderNavModules,
 } from '@/lib/nav-modules'
 import { ROLE } from '@/lib/roles'
 
 export function buildSidebarData(
   t: TFunction,
-  infiniteCanvas: HeaderNavLink = DEFAULT_INFINITE_CANVAS_LINK
+  modules: HeaderNavModules = parseHeaderNavModules(null),
+  docsLink?: string
 ): SidebarData {
+  const infiniteCanvas = modules.infiniteCanvas
   return {
     navGroups: [
       {
@@ -79,6 +83,11 @@ export function buildSidebarData(
                 },
               ]
             : []),
+          // 88api: mobile hides the top navigation, so the sidebar repeats
+          // the Model Square and Docs header links.
+          ...(modules.pricing.enabled
+            ? [{ title: t('Model Square'), url: '/pricing', icon: Store }]
+            : []),
           {
             title: t('Playground'),
             url: '/playground',
@@ -89,6 +98,16 @@ export function buildSidebarData(
             icon: MessageSquare,
             type: 'chat-presets',
           },
+          ...(modules.docs !== false
+            ? [
+                {
+                  title: t('Docs'),
+                  url: docsLink || '/docs',
+                  icon: BookOpen,
+                  external: Boolean(docsLink),
+                },
+              ]
+            : []),
         ],
       },
       {
@@ -253,11 +272,11 @@ export function buildSidebarData(
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
   const { status } = useStatus()
-  const infiniteCanvas = useMemo(
+  const modules = useMemo(
     () =>
-      parseHeaderNavModulesFromStatus(status as Record<string, unknown> | null)
-        .infiniteCanvas,
+      parseHeaderNavModulesFromStatus(status as Record<string, unknown> | null),
     [status]
   )
-  return buildSidebarData(t, infiniteCanvas)
+  const docsLink = status?.docs_link as string | undefined
+  return buildSidebarData(t, modules, docsLink)
 }
