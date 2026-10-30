@@ -66,7 +66,7 @@ export function useModelStatCardsConfig(): StatCardConfig[] {
     {
       key: 'tokens',
       title: t('Total Tokens'),
-      description: t('Statistical tokens'),
+      description: t('Input (including cache) + output'),
       icon: Layers,
       iconTone: 'chart-4',
       getValue: (stat) => stat?.tpm ?? 0,

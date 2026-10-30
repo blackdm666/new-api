@@ -1,10 +1,12 @@
 package model
 
 import (
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -285,6 +287,58 @@ func TestRecordTaskBillingLogExportsSignedAdjustmentsWithoutCountingRequests(t *
 				require.Equal(t, 1, row.Count)
 				require.Equal(t, tt.expectedQuota, row.Quota)
 				require.Zero(t, row.TokenUsed)
+			}
+		})
+	}
+}
+
+func TestRecordConsumeLogCountsAnthropicCacheInDashboardTokens(t *testing.T) {
+	anthropic := NewLogOther()
+	anthropic.SetPublic("usage_semantic", "anthropic")
+	anthropic.SetPublic("cache_tokens", 1000)
+	anthropic.SetPublic("cache_write_tokens", 300)
+	openAI := NewLogOther()
+	openAI.SetPublic("cache_tokens", 600)
+	tests := []struct {
+		name       string
+		other      *LogOther
+		tokenUsed  int
+		cacheRead  int64
+		cacheWrite int64
+	}{
+		{name: "anthropic input excludes cache, so cache is added", other: anthropic, tokenUsed: 4 + 50 + 1000 + 300, cacheRead: 1000, cacheWrite: 300},
+		{name: "openai input already includes cached tokens", other: openAI, tokenUsed: 4 + 50, cacheRead: 600},
+		{name: "no usage details", other: nil, tokenUsed: 4 + 50},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			truncateTables(t)
+			oldConsume, oldExport := common.LogConsumeEnabled, common.DataExportEnabled
+			common.LogConsumeEnabled, common.DataExportEnabled = true, true
+			t.Cleanup(func() {
+				common.LogConsumeEnabled, common.DataExportEnabled = oldConsume, oldExport
+				CacheQuotaDataLock.Lock()
+				CacheQuotaData = make(map[string]*QuotaData)
+				CacheQuotaDataLock.Unlock()
+			})
+			CacheQuotaDataLock.Lock()
+			CacheQuotaData = make(map[string]*QuotaData)
+			CacheQuotaDataLock.Unlock()
+
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+			c.Set("username", "alice")
+			RecordConsumeLog(c, 1, RecordConsumeLogParams{
+				ModelName: "claude-opus-5-5", PromptTokens: 4, CompletionTokens: 50, Quota: 10, Group: "default", Other: tt.other,
+			})
+
+			CacheQuotaDataLock.Lock()
+			defer CacheQuotaDataLock.Unlock()
+			require.Len(t, CacheQuotaData, 1)
+			for _, row := range CacheQuotaData {
+				require.Equal(t, tt.tokenUsed, row.TokenUsed)
+				require.Equal(t, tt.cacheRead, row.CacheReadTokens)
+				require.Equal(t, tt.cacheWrite, row.CacheCreationTokens)
 			}
 		})
 	}

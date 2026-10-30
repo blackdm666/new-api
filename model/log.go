@@ -435,11 +435,18 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	}
 	if common.DataExportEnabled {
 		var cacheReadTokens, cacheCreationTokens int
+		tokenUsed := params.PromptTokens + params.CompletionTokens
 		if other != nil {
 			cacheReadTokens, _ = other.public["cache_tokens"].(int)
 			// The settlement path already normalizes the cache creation total.
 			// Do not add the 5m/1h breakdown again or infer tokens from prices.
 			cacheCreationTokens, _ = other.public["cache_write_tokens"].(int)
+			// 88api: OpenAI and Gemini input tokens already include cached
+			// input, but Anthropic input excludes cache reads and writes. Add
+			// them back so the dashboard total counts every token the same way.
+			if semantic, _ := other.public["usage_semantic"].(string); semantic == "anthropic" {
+				tokenUsed += max(0, cacheReadTokens) + max(0, cacheCreationTokens)
+			}
 		}
 		LogQuotaData(QuotaDataLogParams{
 			UserID:              userId,
@@ -447,7 +454,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			ModelName:           params.ModelName,
 			Quota:               params.Quota,
 			CreatedAt:           createdAt,
-			TokenUsed:           params.PromptTokens + params.CompletionTokens,
+			TokenUsed:           tokenUsed,
 			CacheReadTokens:     int64(cacheReadTokens),
 			CacheCreationTokens: int64(cacheCreationTokens),
 			UseGroup:            params.Group,
