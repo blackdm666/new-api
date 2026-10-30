@@ -102,10 +102,16 @@ func TestInvoiceWechatMessagesOmitEmptyLines(t *testing.T) {
 	}
 
 	assert.Equal(t, "【新开票申请 #42】\n"+
+		"开票类型：增值税电子普通发票（中国大陆）\n"+
 		"发票抬头：示例科技有限公司\n"+
 		"税号：91310000EXAMPLE\n"+
 		"电话：021-88888888\n"+
 		"开票金额：¥1,234,567.80", buildInvoiceWechatCreatedText(request))
+	hongKong := &model.InvoiceRequest{Id: 43, Region: model.InvoiceRegionHongKong, CompanyName: "Harbour Trading Limited", TotalMoneyCents: 95000}
+	assert.Equal(t, "【新开票申请 #43】\n"+
+		"开票类型：帳單 INVOICE（中国香港）\n"+
+		"发票抬头：Harbour Trading Limited\n"+
+		"开票金额：¥950.00", buildInvoiceWechatCreatedText(hongKong))
 	assert.Equal(t, "【开票请求作废 #42】\n"+
 		"发票抬头：示例科技有限公司\n"+
 		"开票金额：¥1,234,567.80\n"+

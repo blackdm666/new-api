@@ -17,6 +17,7 @@ import (
 )
 
 type CreateInvoiceRequestPayload struct {
+	Region         string `json:"region"`
 	CompanyName    string `json:"company_name"`
 	TaxNumber      string `json:"tax_number"`
 	BankName       string `json:"bank_name"`
@@ -25,6 +26,7 @@ type CreateInvoiceRequestPayload struct {
 	CompanyPhone   string `json:"company_phone"`
 	Remark         string `json:"remark"`
 	TopUpOrderIds  []int  `json:"topup_order_ids"`
+	SaveTitle      bool   `json:"save_title"`
 }
 
 type UpdateInvoiceRequestStatusPayload struct {
@@ -61,7 +63,7 @@ func GetInvoiceConfig(c *gin.Context) {
 		"minimum_amount_cents":    setting.InvoiceMinimumAmountCents,
 		"tax_rate_basis_points":   setting.InvoiceTaxRateBasisPoints,
 		"available_balance_cents": model.InvoiceQuotaToCNYCents(user.Quota),
-		"issue_day":               10,
+		"response_working_days":   3,
 		"email":                   email,
 		"email_bound":             email != "",
 		"pending_expiry_days":     setting.InvoicePendingExpiryDays,
@@ -150,6 +152,12 @@ func handleInvoiceError(c *gin.Context, err error, fallbackKeys ...string) {
 		common.ApiErrorI18n(c, i18n.MsgInvoiceWithdrawForbidden)
 	case errors.Is(err, model.ErrInvoicePurgeForbidden):
 		common.ApiErrorI18n(c, i18n.MsgInvoicePurgeForbidden)
+	case errors.Is(err, model.ErrInvoiceRegionInvalid):
+		common.ApiErrorI18n(c, i18n.MsgInvoiceRegionInvalid)
+	case errors.Is(err, model.ErrInvoiceTitleNotFound):
+		common.ApiErrorI18n(c, i18n.MsgInvoiceTitleNotFound)
+	case errors.Is(err, model.ErrInvoiceTitleLimit):
+		common.ApiErrorI18n(c, i18n.MsgInvoiceTitleLimit, map[string]any{"Max": model.InvoiceTitleMaxPerUser})
 	default:
 		fallbackKey := i18n.MsgInvoiceOperationFailed
 		if len(fallbackKeys) > 0 && fallbackKeys[0] != "" {
@@ -240,6 +248,7 @@ func CreateInvoiceRequest(c *gin.Context) {
 	request, orders, err := model.CreateInvoiceRequestWithNotifications(model.CreateInvoiceRequestParams{
 		UserId:         user.Id,
 		Username:       user.Username,
+		Region:         payload.Region,
 		CompanyName:    payload.CompanyName,
 		TaxNumber:      payload.TaxNumber,
 		BankName:       payload.BankName,
@@ -249,6 +258,7 @@ func CreateInvoiceRequest(c *gin.Context) {
 		Email:          user.Email,
 		Remark:         payload.Remark,
 		TopUpOrderIds:  payload.TopUpOrderIds,
+		SaveTitle:      payload.SaveTitle,
 	}, service.BuildInvoiceRequestCreatedNotifications)
 	if err != nil {
 		handleInvoiceError(c, err, i18n.MsgInvoiceSubmitFailed)

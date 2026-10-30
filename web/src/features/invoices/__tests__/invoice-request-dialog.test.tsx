@@ -25,7 +25,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { api } from '@/lib/api'
 
 import { InvoiceRequestDialog } from '../components/invoice-request-dialog'
-import type { EligibleTopUpOrder, InvoiceConfig } from '../types'
+import type { EligibleTopUpOrder, InvoiceConfig, InvoiceTitle } from '../types'
 
 vi.mock('@tanstack/react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-router')>()),
@@ -38,7 +38,7 @@ const config: InvoiceConfig = {
   minimum_amount_cents: 50_000,
   tax_rate_basis_points: 300,
   available_balance_cents: 100_000,
-  issue_day: 15,
+  response_working_days: 3,
   email: 'billing@example.com',
   email_bound: true,
   pending_expiry_days: 30,
@@ -74,14 +74,35 @@ function success(data: unknown) {
   return { data: { success: true, data } }
 }
 
+function savedTitle(overrides: Partial<InvoiceTitle>): InvoiceTitle {
+  return {
+    id: 1,
+    region: 'mainland',
+    company_name: 'Saved Mainland Ltd',
+    tax_number: '91310000MA1FL8XQ3B',
+    bank_name: 'Bank of Shanghai',
+    bank_account: '6222000011112222',
+    company_address: '',
+    company_phone: '',
+    is_default: false,
+    created_time: 1_760_000_000,
+    updated_time: 1_760_000_000,
+    ...overrides,
+  }
+}
+
 function mockInvoiceRequests(responses: {
   config: () => Promise<unknown>
   orders: () => Promise<unknown>
+  titles?: () => Promise<unknown>
 }) {
   return vi.spyOn(api, 'get').mockImplementation((url) => {
     if (url.startsWith('/api/invoice/config')) return responses.config()
     if (url.startsWith('/api/invoice/eligible_orders')) {
       return responses.orders()
+    }
+    if (url.startsWith('/api/invoice/titles')) {
+      return responses.titles?.() ?? Promise.resolve(success([]))
     }
     return Promise.reject(new Error(`unexpected GET ${url}`))
   })
@@ -128,7 +149,7 @@ describe('invoice request dialog', () => {
     expect(
       screen.getByText('The invoice will be sent to billing@example.com')
     ).toBeVisible()
-    expect(screen.getByText(/on day 15 of each month/)).toBeVisible()
+    expect(screen.getByText(/within 3 working days/)).toBeVisible()
     expect(
       screen.queryByText('Loading invoice information...')
     ).not.toBeInTheDocument()
@@ -185,7 +206,7 @@ describe('invoice request dialog', () => {
       '/security'
     )
 
-    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByRole('checkbox', { name: /PAY-/ }))
     await user.type(screen.getByLabelText(/Invoice title/), 'Example Ltd')
     await user.type(screen.getByLabelText(/Tax number/), '91310000MA1FL8XQ3B')
 
@@ -207,7 +228,7 @@ describe('invoice request dialog', () => {
 
     renderDialog()
 
-    await user.click(await screen.findByRole('checkbox'))
+    await user.click(await screen.findByRole('checkbox', { name: /PAY-/ }))
     await user.type(screen.getByLabelText(/Invoice title/), 'Example Ltd')
     await user.type(
       screen.getByLabelText(/Tax number/),
@@ -222,6 +243,108 @@ describe('invoice request dialog', () => {
       expect.objectContaining({
         tax_number: '91310000MA1FL8XQ3B',
         topup_order_ids: [order.id],
+      }),
+      expect.anything()
+    )
+  })
+
+  test('a Hong Kong invoice asks only for the recipient name and charges no tax fee', async () => {
+    mockInvoiceRequests({
+      config: () => Promise.resolve(success(config)),
+      orders: () => Promise.resolve(success([order])),
+    })
+    const post = vi
+      .spyOn(api, 'post')
+      .mockResolvedValue(success({ invoice: { id: 2 } }))
+    const user = userEvent.setup()
+
+    renderDialog()
+
+    await user.click(await screen.findByRole('checkbox', { name: /PAY-/ }))
+    expect(screen.getByText('Tax fee payable')).toBeVisible()
+
+    await user.click(screen.getByRole('radio', { name: /Hong Kong/ }))
+
+    expect(screen.queryByLabelText(/Tax number/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Tax fee payable')).not.toBeInTheDocument()
+    await user.type(
+      screen.getByLabelText(/Recipient name/),
+      '  Example HK Ltd '
+    )
+    await user.click(
+      screen.getByRole('button', { name: 'Submit invoice application' })
+    )
+
+    expect(post).toHaveBeenCalledTimes(1)
+    const payload = post.mock.calls[0][1] as Record<string, unknown>
+    expect(payload).toMatchObject({
+      region: 'hk',
+      company_name: 'Example HK Ltd',
+      topup_order_ids: [order.id],
+      save_title: false,
+    })
+    expect(payload).not.toHaveProperty('tax_number')
+  })
+
+  test('prefills the default saved title of the chosen invoice type and saves on request', async () => {
+    mockInvoiceRequests({
+      config: () => Promise.resolve(success(config)),
+      orders: () => Promise.resolve(success([order])),
+      titles: () =>
+        Promise.resolve(
+          success([
+            savedTitle({ id: 1, is_default: true }),
+            savedTitle({
+              id: 2,
+              region: 'hk',
+              company_name: 'Saved HK Ltd',
+              tax_number: '',
+              bank_name: '',
+              bank_account: '',
+              is_default: true,
+            }),
+          ])
+        ),
+    })
+    const post = vi
+      .spyOn(api, 'post')
+      .mockResolvedValue(success({ invoice: { id: 3 } }))
+    const user = userEvent.setup()
+
+    renderDialog()
+
+    expect(await screen.findByLabelText(/Invoice title/)).toHaveValue(
+      'Saved Mainland Ltd'
+    )
+    expect(screen.getByLabelText(/Tax number/)).toHaveValue(
+      '91310000MA1FL8XQ3B'
+    )
+
+    await user.click(screen.getByRole('radio', { name: /Hong Kong/ }))
+    expect(screen.getByLabelText(/Recipient name/)).toHaveValue('Saved HK Ltd')
+
+    await user.selectOptions(
+      screen.getByLabelText('Use a saved title'),
+      'Enter new details'
+    )
+    expect(screen.getByLabelText(/Recipient name/)).toHaveValue('')
+    await user.type(screen.getByLabelText(/Recipient name/), 'New HK Ltd')
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: 'Save these details as a saved title',
+      })
+    )
+    await user.click(screen.getByRole('checkbox', { name: /PAY-/ }))
+    await user.click(
+      screen.getByRole('button', { name: 'Submit invoice application' })
+    )
+
+    expect(post).toHaveBeenCalledWith(
+      '/api/invoice/requests',
+      expect.objectContaining({
+        region: 'hk',
+        company_name: 'New HK Ltd',
+        save_title: true,
       }),
       expect.anything()
     )

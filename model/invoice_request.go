@@ -23,6 +23,12 @@ const (
 	InvoiceStatusWithdrawn = 4
 	InvoiceStatusExpired   = 5
 
+	// 88api: mainland requests are ordinary VAT e-invoices; Hong Kong
+	// requests are billed as an INVOICE (帳單) with only the recipient name
+	// and no tax fee.
+	InvoiceRegionMainland = "mainland"
+	InvoiceRegionHongKong = "hk"
+
 	InvoiceCompanyNameMaxLength    = 255
 	InvoiceTaxNumberMaxLength      = 64
 	InvoiceBankNameMaxLength       = 255
@@ -55,6 +61,7 @@ var (
 	ErrInvoiceWithdrawForbidden       = errors.New("invoice withdrawal is not allowed")
 	ErrInvoicePurgeForbidden          = errors.New("invoice purge is not allowed")
 	ErrInvoiceFileRequired            = errors.New("invoice file required")
+	ErrInvoiceRegionInvalid           = errors.New("invoice region invalid")
 )
 
 type InvoiceTaxFeeInsufficientError struct {
@@ -74,6 +81,7 @@ type InvoiceRequest struct {
 	Id                 int     `json:"id"`
 	UserId             int     `json:"user_id" gorm:"index;not null"`
 	Username           string  `json:"username" gorm:"type:varchar(64);index"`
+	Region             string  `json:"region" gorm:"type:varchar(16);not null;default:'mainland'"`
 	CompanyName        string  `json:"company_name" gorm:"type:varchar(255);not null"`
 	TaxNumber          string  `json:"tax_number" gorm:"type:varchar(64);not null;index"`
 	BankName           string  `json:"bank_name" gorm:"type:varchar(255)"`
@@ -148,6 +156,7 @@ type InvoiceRequestQueryOptions struct {
 type CreateInvoiceRequestParams struct {
 	UserId         int
 	Username       string
+	Region         string
 	CompanyName    string
 	TaxNumber      string
 	BankName       string
@@ -157,6 +166,9 @@ type CreateInvoiceRequestParams struct {
 	Email          string
 	Remark         string
 	TopUpOrderIds  []int
+	// SaveTitle also keeps the billing details as one of the user's saved
+	// invoice titles.
+	SaveTitle bool
 }
 
 type InvoiceNotificationFactory func(request *InvoiceRequest) ([]*InvoiceNotificationDelivery, error)
@@ -428,19 +440,17 @@ func CreateInvoiceRequest(params CreateInvoiceRequestParams) (*InvoiceRequest, [
 }
 
 func CreateInvoiceRequestWithNotifications(params CreateInvoiceRequestParams, notificationFactory InvoiceNotificationFactory) (*InvoiceRequest, []*TopUp, error) {
-	companyName := strings.TrimSpace(params.CompanyName)
-	if companyName == "" {
-		return nil, nil, ErrInvoiceCompanyEmpty
-	}
-	if len([]rune(companyName)) > InvoiceCompanyNameMaxLength {
-		return nil, nil, ErrInvoiceCompanyInvalid
-	}
-	taxNumber := strings.TrimSpace(params.TaxNumber)
-	if taxNumber == "" {
-		return nil, nil, ErrInvoiceTaxNumberEmpty
-	}
-	if len([]rune(taxNumber)) > InvoiceTaxNumberMaxLength {
-		return nil, nil, ErrInvoiceTaxNumberInvalid
+	details, err := InvoiceTitleDetails{
+		Region:         params.Region,
+		CompanyName:    params.CompanyName,
+		TaxNumber:      params.TaxNumber,
+		BankName:       params.BankName,
+		BankAccount:    params.BankAccount,
+		CompanyAddress: params.CompanyAddress,
+		CompanyPhone:   params.CompanyPhone,
+	}.Normalize()
+	if err != nil {
+		return nil, nil, err
 	}
 	email := strings.TrimSpace(params.Email)
 	parsedEmail, parseErr := mail.ParseAddress(email)
@@ -450,11 +460,7 @@ func CreateInvoiceRequestWithNotifications(params CreateInvoiceRequestParams, no
 	if parseErr != nil || !strings.EqualFold(parsedEmail.Address, email) || len([]rune(email)) > InvoiceEmailMaxLength {
 		return nil, nil, ErrInvoiceEmailInvalid
 	}
-	if len([]rune(strings.TrimSpace(params.BankName))) > InvoiceBankNameMaxLength ||
-		len([]rune(strings.TrimSpace(params.BankAccount))) > InvoiceBankAccountMaxLength ||
-		len([]rune(strings.TrimSpace(params.CompanyAddress))) > InvoiceCompanyAddressMaxLength ||
-		len([]rune(strings.TrimSpace(params.CompanyPhone))) > InvoiceCompanyPhoneMaxLength ||
-		len([]rune(strings.TrimSpace(params.Remark))) > InvoiceRemarkMaxLength {
+	if len([]rune(strings.TrimSpace(params.Remark))) > InvoiceRemarkMaxLength {
 		return nil, nil, ErrInvoiceOptionalFieldInvalid
 	}
 	orderIds, err := normalizeInvoiceOrderIDs(params.TopUpOrderIds)
@@ -482,6 +488,9 @@ func CreateInvoiceRequestWithNotifications(params CreateInvoiceRequestParams, no
 			return ErrInvoiceAmountTooSmall
 		}
 		taxRateBasisPoints := setting.InvoiceTaxRateBasisPoints
+		if details.Region == InvoiceRegionHongKong {
+			taxRateBasisPoints = 0
+		}
 		taxFeeCents, taxFeeQuota, err := CalculateInvoiceTaxFee(totalCents, taxRateBasisPoints)
 		if err != nil {
 			return err
@@ -515,12 +524,13 @@ func CreateInvoiceRequestWithNotifications(params CreateInvoiceRequestParams, no
 		request = &InvoiceRequest{
 			UserId:             params.UserId,
 			Username:           strings.TrimSpace(params.Username),
-			CompanyName:        companyName,
-			TaxNumber:          taxNumber,
-			BankName:           strings.TrimSpace(params.BankName),
-			BankAccount:        strings.TrimSpace(params.BankAccount),
-			CompanyAddress:     strings.TrimSpace(params.CompanyAddress),
-			CompanyPhone:       strings.TrimSpace(params.CompanyPhone),
+			Region:             details.Region,
+			CompanyName:        details.CompanyName,
+			TaxNumber:          details.TaxNumber,
+			BankName:           details.BankName,
+			BankAccount:        details.BankAccount,
+			CompanyAddress:     details.CompanyAddress,
+			CompanyPhone:       details.CompanyPhone,
 			Email:              email,
 			Remark:             strings.TrimSpace(params.Remark),
 			OrderNumbers:       invoiceOrderNumbers(orderedTopUps),
@@ -544,6 +554,11 @@ func CreateInvoiceRequestWithNotifications(params CreateInvoiceRequestParams, no
 		}
 		if err := createInvoiceSearchTerms(tx, request, orderedTopUps); err != nil {
 			return err
+		}
+		if params.SaveTitle {
+			if err := rememberInvoiceTitleTx(tx, params.UserId, details); err != nil {
+				return err
+			}
 		}
 		if err := tx.Create(&InvoiceRequestEvent{
 			InvoiceRequestId: request.Id,

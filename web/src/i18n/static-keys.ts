@@ -1647,4 +1647,8 @@ export const STATIC_I18N_KEYS = [
   'Channel priorities changed. Refresh and try again.',
   'Invalid channel priority move',
   'Channel priority is outside the sortable range',
+  'VAT electronic ordinary invoice (Mainland China)',
+  'INVOICE (Hong Kong)',
+  'Requires the invoice title and tax number. A tax fee applies.',
+  'Only the recipient name is needed. No tax fee.',
 ] as const

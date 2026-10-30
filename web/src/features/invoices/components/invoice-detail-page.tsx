@@ -77,6 +77,10 @@ import {
 } from '../api'
 import { formatInvoiceCopyText } from '../lib/invoice-copy'
 import {
+  getInvoiceRegion,
+  INVOICE_REGION_LABEL_KEYS,
+} from '../lib/invoice-title'
+import {
   formatInvoiceAmount,
   formatInvoiceTimestamp,
   getInvoiceNotificationChannelLabel,
@@ -448,9 +452,17 @@ function InvoiceInformation(props: InvoiceInformationProps) {
   const orders = props.detail.orders
   const canCopy = props.admin && invoice.redacted_time === 0
   const paymentLabel = (method: string) => getPaymentMethodName(method, t)
+  const region = getInvoiceRegion(invoice)
+  const regionLabel = t(INVOICE_REGION_LABEL_KEYS[region])
+  const companyLabel =
+    region === 'hk'
+      ? t('Recipient name (company or individual)')
+      : t('Invoice title')
   const copyAll = () => {
     const text = formatInvoiceCopyText(invoice, {
-      companyName: t('Invoice title'),
+      invoiceType: t('Invoice type'),
+      invoiceTypeValue: regionLabel,
+      companyName: companyLabel,
       taxNumber: t('Tax number'),
       bankName: t('Bank name'),
       bankAccount: t('Bank account'),
@@ -462,7 +474,7 @@ function InvoiceInformation(props: InvoiceInformationProps) {
     void copyToClipboard(text)
   }
   const fields = [
-    [t('Invoice title'), invoice.company_name],
+    [companyLabel, invoice.company_name],
     [t('Tax number'), invoice.tax_number],
     [t('Bank name'), invoice.bank_name],
     [t('Bank account'), invoice.bank_account],
@@ -482,6 +494,10 @@ function InvoiceInformation(props: InvoiceInformationProps) {
         )}
       </div>
       <dl className='mt-4 grid gap-4 sm:grid-cols-2'>
+        <div className='sm:col-span-2'>
+          <dt className='text-muted-foreground text-xs'>{t('Invoice type')}</dt>
+          <dd className='mt-1 text-sm font-medium'>{regionLabel}</dd>
+        </div>
         {fields.map(([label, value]) => (
           <div key={label}>
             <dt className='text-muted-foreground text-xs'>{label}</dt>
@@ -504,28 +520,37 @@ function InvoiceInformation(props: InvoiceInformationProps) {
             {formatInvoiceAmount(invoice.total_money)}
           </dd>
         </div>
-        <div>
-          <dt className='text-muted-foreground text-xs'>
-            {t('Invoice tax rate')}
-          </dt>
-          <dd className='mt-1 text-sm font-semibold'>
-            {(Number(invoice.tax_rate_basis_points || 0) / 100).toFixed(2)}%
-          </dd>
-        </div>
-        <div>
-          <dt className='text-muted-foreground text-xs'>{t('Tax fee paid')}</dt>
-          <dd className='mt-1 text-sm font-semibold'>
-            ¥{(Number(invoice.tax_fee_cents || 0) / 100).toFixed(2)}
-          </dd>
-          {taxFeeRefundedTime > 0 && (
-            <dd className='mt-1 text-xs text-emerald-600 dark:text-emerald-400'>
-              {t('Tax fee refunded: ¥{{amount}} ({{time}})', {
-                amount: (Number(invoice.tax_fee_cents || 0) / 100).toFixed(2),
-                time: formatInvoiceTimestamp(taxFeeRefundedTime, props.locale),
-              })}
+        {region === 'mainland' && (
+          <div>
+            <dt className='text-muted-foreground text-xs'>
+              {t('Invoice tax rate')}
+            </dt>
+            <dd className='mt-1 text-sm font-semibold'>
+              {(Number(invoice.tax_rate_basis_points || 0) / 100).toFixed(2)}%
             </dd>
-          )}
-        </div>
+          </div>
+        )}
+        {region === 'mainland' && (
+          <div>
+            <dt className='text-muted-foreground text-xs'>
+              {t('Tax fee paid')}
+            </dt>
+            <dd className='mt-1 text-sm font-semibold'>
+              ¥{(Number(invoice.tax_fee_cents || 0) / 100).toFixed(2)}
+            </dd>
+            {taxFeeRefundedTime > 0 && (
+              <dd className='mt-1 text-xs text-emerald-600 dark:text-emerald-400'>
+                {t('Tax fee refunded: ¥{{amount}} ({{time}})', {
+                  amount: (Number(invoice.tax_fee_cents || 0) / 100).toFixed(2),
+                  time: formatInvoiceTimestamp(
+                    taxFeeRefundedTime,
+                    props.locale
+                  ),
+                })}
+              </dd>
+            )}
+          </div>
+        )}
         {invoice.remark && (
           <div className='sm:col-span-2'>
             <dt className='text-muted-foreground text-xs'>{t('Remark')}</dt>

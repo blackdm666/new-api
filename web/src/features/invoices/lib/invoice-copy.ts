@@ -20,6 +20,9 @@ import type { InvoiceRequest } from '../types'
 import { formatInvoiceAmount } from './invoice-utils'
 
 export type InvoiceCopyLabels = {
+  invoiceType: string
+  /** The translated invoice type, e.g. "VAT electronic ordinary invoice (Mainland China)". */
+  invoiceTypeValue: string
   companyName: string
   taxNumber: string
   bankName: string
@@ -44,6 +47,9 @@ export function formatInvoiceCopyText(
   labels: InvoiceCopyLabels
 ): string {
   const lines: string[] = []
+  // The invoice type comes first: it decides which system the details are
+  // typed into.
+  addLine(lines, labels.invoiceType, labels.invoiceTypeValue)
   addLine(lines, labels.companyName, invoice.company_name)
   addLine(lines, labels.taxNumber, invoice.tax_number)
   addLine(lines, labels.bankName, invoice.bank_name)

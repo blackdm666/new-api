@@ -34,10 +34,15 @@ export const INVOICE_STATUS_OPTIONS = [
 
 export type InvoiceStatus = (typeof INVOICE_STATUS)[keyof typeof INVOICE_STATUS]
 
+/** Where the invoice is issued: a mainland VAT e-invoice or a Hong Kong INVOICE. */
+export type InvoiceRegion = 'mainland' | 'hk'
+
 export type InvoiceRequest = {
   id: number
   user_id: number
   username?: string
+  /** Missing on responses from servers that predate regions; treat as mainland. */
+  region?: InvoiceRegion
   company_name: string
   tax_number: string
   bank_name: string
@@ -109,7 +114,8 @@ export type InvoiceConfig = {
   minimum_amount_cents: number
   tax_rate_basis_points: number
   available_balance_cents: number
-  issue_day: number
+  /** Working days within which a received application gets a response. */
+  response_working_days: number
   /** The current account email that receives invoice notifications. */
   email: string
   email_bound: boolean
@@ -127,14 +133,43 @@ export type InvoiceListResponse = {
 }
 
 export type CreateInvoiceRequestPayload = {
+  region: InvoiceRegion
   company_name: string
-  tax_number: string
+  /** Mainland only; Hong Kong invoices carry the recipient name alone. */
+  tax_number?: string
   bank_name?: string
   bank_account?: string
   company_address?: string
   company_phone?: string
   remark?: string
   topup_order_ids: number[]
+  /** Also keep these billing details as a saved title. */
+  save_title: boolean
+}
+
+export type InvoiceTitle = {
+  id: number
+  region: InvoiceRegion
+  company_name: string
+  tax_number: string
+  bank_name: string
+  bank_account: string
+  company_address: string
+  company_phone: string
+  is_default: boolean
+  created_time: number
+  updated_time: number
+}
+
+export type InvoiceTitlePayload = {
+  region: InvoiceRegion
+  company_name: string
+  tax_number: string
+  bank_name: string
+  bank_account: string
+  company_address: string
+  company_phone: string
+  is_default: boolean
 }
 
 export type InvoiceUserProfile = {
