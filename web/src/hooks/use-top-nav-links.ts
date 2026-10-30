@@ -21,6 +21,7 @@ import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useStatus } from '@/hooks/use-status'
+import { localizeDocsLink } from '@/lib/docs-link'
 import { INFINITE_CANVAS_NAME, INFINITE_CANVAS_URL } from '@/lib/external-links'
 import {
   DEFAULT_INFINITE_CANVAS_LINK,
@@ -124,7 +125,7 @@ export function buildTopNavLinks(
  * }
  */
 export function useTopNavLinks(): TopNavLink[] {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { status } = useStatus()
   const { auth } = useAuthStore()
 
@@ -136,7 +137,10 @@ export function useTopNavLinks(): TopNavLink[] {
   }, [status])
 
   // Documentation link (may be external)
-  const docsLink: string | undefined = status?.docs_link as string | undefined
+  const configuredDocsLink = status?.docs_link as string | undefined
+  const docsLink =
+    configuredDocsLink &&
+    localizeDocsLink(configuredDocsLink, i18n.resolvedLanguage || i18n.language)
 
   const isAuthed = !!auth?.user
 

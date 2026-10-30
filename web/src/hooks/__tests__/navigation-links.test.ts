@@ -78,7 +78,7 @@ test('uses the backend Infinite Canvas name and URL in both navigation entries',
     external: true,
   })
 
-  const sidebar = buildSidebarData(translate, modules.infiniteCanvas)
+  const sidebar = buildSidebarData(translate, modules)
   const sidebarCanvas = sidebar.navGroups.find((group) => group.id === 'chat')
     ?.items[0]
   assert.ok(sidebarCanvas && 'url' in sidebarCanvas)
@@ -103,7 +103,7 @@ test('hides Infinite Canvas from both navigation entries when disabled', () => {
     false
   )
 
-  const sidebar = buildSidebarData(translate, modules.infiniteCanvas)
+  const sidebar = buildSidebarData(translate, modules)
   const chatItems = sidebar.navGroups.find(
     (group) => group.id === 'chat'
   )?.items
@@ -115,10 +115,10 @@ test('hides Infinite Canvas from both navigation entries when disabled', () => {
     ),
     false
   )
-  assert.equal(chatItems[0]?.title, 'Playground')
+  assert.equal(chatItems[0]?.title, 'Model Square')
 })
 
-test('places Infinite Canvas immediately before Playground', () => {
+test('places Model Square between Infinite Canvas and Playground', () => {
   const sidebar = buildSidebarData(translate)
   const chatItems = sidebar.navGroups.find(
     (group) => group.id === 'chat'
@@ -138,14 +138,64 @@ test('places Infinite Canvas immediately before Playground', () => {
     }
   )
   assert.deepEqual(
-    {
-      title: chatItems[1]?.title,
-      url: chatItems[1]?.url,
-    },
-    {
-      title: 'Playground',
-      url: '/playground',
-    }
+    chatItems.slice(1, 3).map((item) => ({
+      title: item.title,
+      url: item.url,
+    })),
+    [
+      { title: 'Model Square', url: '/pricing' },
+      { title: 'Playground', url: '/playground' },
+    ]
+  )
+})
+
+test('hides the sidebar Model Square when the pricing module is disabled', () => {
+  const modules = parseHeaderNavModules(JSON.stringify({ pricing: false }))
+  const chatItems = buildSidebarData(translate, modules).navGroups.find(
+    (group) => group.id === 'chat'
+  )?.items
+
+  assert.ok(chatItems)
+  assert.equal(
+    chatItems.some((item) => item.url === '/pricing'),
+    false
+  )
+})
+
+test('places the external docs link after Chat and opens it in a new tab', () => {
+  const chatItems = buildSidebarData(
+    translate,
+    parseHeaderNavModules(null),
+    'https://docs.example.com/zh/'
+  ).navGroups.find((group) => group.id === 'chat')?.items
+
+  assert.ok(chatItems)
+  const chatIndex = chatItems.findIndex((item) => item.type === 'chat-presets')
+  const docs = chatItems[chatIndex + 1]
+  assert.deepEqual(
+    { title: docs?.title, url: docs?.url, external: docs?.external },
+    { title: 'Docs', url: 'https://docs.example.com/zh/', external: true }
+  )
+})
+
+test('falls back to the internal docs page and hides it when docs are disabled', () => {
+  const internalDocs = buildSidebarData(translate)
+    .navGroups.find((group) => group.id === 'chat')
+    ?.items.find((item) => item.title === 'Docs')
+  assert.deepEqual(
+    { url: internalDocs?.url, external: internalDocs?.external },
+    { url: '/docs', external: false }
+  )
+
+  const hidden = buildSidebarData(
+    translate,
+    parseHeaderNavModules(JSON.stringify({ docs: false })),
+    'https://docs.example.com/zh/'
+  ).navGroups.find((group) => group.id === 'chat')?.items
+  assert.ok(hidden)
+  assert.equal(
+    hidden.some((item) => item.title === 'Docs'),
+    false
   )
 })
 
