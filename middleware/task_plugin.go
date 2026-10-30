@@ -631,7 +631,6 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 		var resolved map[string]any
 		var resolvedBodyText json.RawMessage
 		var failures []string
-		rejectedPlugins := make(map[string][]string)
 		for _, candidate := range candidates {
 			candidateContext := protocolContext
 			candidateContext.Protocol = candidate.Protocol
@@ -668,10 +667,9 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 			if detail != "" {
 				logger.LogWarn(c, common.LogText("task_plugin subsystem=endpoint event=prepare_rejected generation=%d plugin=%q stage=parse_request reason=%s err=%q elapsed_ms=%d",
 					pinned.Generation.Number, candidate.Plugin.Meta.Key, reason, detail, time.Since(hookStarted).Milliseconds()))
-				if _, seen := rejectedPlugins[detail]; !seen {
+				if !slices.Contains(failures, detail) {
 					failures = append(failures, detail)
 				}
-				rejectedPlugins[detail] = append(rejectedPlugins[detail], candidate.Plugin.Meta.Key)
 				continue
 			}
 			accepted = append(accepted, candidate)
@@ -682,11 +680,8 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 			}
 		}
 		if len(accepted) == 0 {
-			if len(candidates) > 1 {
-				for index, detail := range failures {
-					failures[index] = strings.Join(rejectedPlugins[detail], ", ") + ": " + detail
-				}
-			}
+			// Plugin keys are internal routing names; the warning above records which
+			// plugin refused, so clients get only the distinct refusal messages.
 			abortWithOpenAiMessage(c, http.StatusBadRequest, strings.Join(failures, "; "))
 			return
 		}
