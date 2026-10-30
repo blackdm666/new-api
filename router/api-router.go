@@ -237,6 +237,10 @@ func SetApiRouter(router *gin.Engine) {
 			invoiceRoute.GET("/requests/:id", controller.GetUserInvoiceRequest)
 			invoiceRoute.POST("/requests/:id/withdraw", middleware.UserCriticalRateLimit("invoice-withdraw"), controller.WithdrawInvoiceRequest)
 			invoiceRoute.GET("/requests/:id/files/:file_id", controller.DownloadInvoiceFile)
+			invoiceRoute.GET("/titles", controller.ListInvoiceTitles)
+			invoiceRoute.POST("/titles", controller.CreateInvoiceTitle)
+			invoiceRoute.PUT("/titles/:id", controller.UpdateInvoiceTitle)
+			invoiceRoute.DELETE("/titles/:id", controller.DeleteInvoiceTitle)
 		}
 
 		// The finance group bot authenticates with its own token instead of a

@@ -68,6 +68,10 @@ var accessToken88APIRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/invoice/requests/:id":                accessTokenScopeRule("wallet:read"),
 	"POST /api/invoice/requests/:id/withdraw":      accessTokenScopeRule("wallet:write"),
 	"GET /api/invoice/requests/:id/files/:file_id": accessTokenScopeRule("wallet:read"),
+	"GET /api/invoice/titles":                      accessTokenScopeRule("wallet:read"),
+	"POST /api/invoice/titles":                     accessTokenScopeRule("wallet:write"),
+	"PUT /api/invoice/titles/:id":                  accessTokenScopeRule("wallet:write"),
+	"DELETE /api/invoice/titles/:id":               accessTokenScopeRule("wallet:write"),
 
 	// router/api-router.go: /api/invoice/admin (AdminAuth)
 	"GET /api/invoice/admin/requests":                                      accessTokenScopeRule("billing:read"),

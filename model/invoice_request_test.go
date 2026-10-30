@@ -1028,11 +1028,13 @@ func TestInvoiceRefundAndOrderRulesDatabaseMatrix(t *testing.T) {
 			tables := []any{
 				&User{}, &Log{}, &TopUp{}, &InvoiceRequest{}, &InvoiceOrderClaim{}, &InvoiceStorageProfile{},
 				&InvoiceFileUpload{}, &InvoiceFile{}, &InvoiceRequestEvent{}, &InvoiceSearchTerm{}, &InvoiceFileCleanup{},
-				&InvoiceNotificationDelivery{}, &EmailDelivery{},
+				&InvoiceNotificationDelivery{}, &EmailDelivery{}, &InvoiceTitle{},
 			}
 			require.NoError(t, db.Migrator().DropTable(tables...))
 			t.Cleanup(func() { _ = db.Migrator().DropTable(tables...) })
 			require.NoError(t, db.AutoMigrate(tables...))
+			require.NoError(t, db.Migrator().DropColumn(&InvoiceRequest{}, "region"))
+			require.NoError(t, db.Migrator().DropTable(&InvoiceTitle{}))
 			require.NoError(t, db.Migrator().DropColumn(&InvoiceRequest{}, "tax_fee_refunded_time"))
 			require.NoError(t, db.Migrator().DropColumn(&InvoiceNotificationDelivery{}, "failed_time"))
 			require.NoError(t, db.Migrator().DropColumn(&InvoiceNotificationDelivery{}, "send_started_time"))
@@ -1053,12 +1055,15 @@ func TestInvoiceRefundAndOrderRulesDatabaseMatrix(t *testing.T) {
 				require.NoError(t, db.AutoMigrate(tables...))
 			}
 			require.True(t, db.Migrator().HasColumn(&InvoiceRequest{}, "tax_fee_refunded_time"))
+			require.True(t, db.Migrator().HasColumn(&InvoiceRequest{}, "region"))
+			require.True(t, db.Migrator().HasTable(&InvoiceTitle{}))
 			require.True(t, db.Migrator().HasColumn(&InvoiceNotificationDelivery{}, "failed_time"))
 			require.True(t, db.Migrator().HasColumn(&InvoiceNotificationDelivery{}, "send_started_time"))
 
 			var legacy InvoiceRequest
 			require.NoError(t, db.Where("tax_number = ?", "91310000LEGACY").First(&legacy).Error)
 			assert.Zero(t, legacy.TaxFeeRefundedTime)
+			assert.Equal(t, InvoiceRegionMainland, legacy.Region, "requests from before regions existed are mainland invoices")
 			withdrawn, err := WithdrawInvoiceRequest(legacy.Id, user.Id, nil)
 			require.NoError(t, err)
 			assert.NotZero(t, withdrawn.TaxFeeRefundedTime)
@@ -1163,6 +1168,175 @@ func TestInvoiceRefundAndOrderRulesDatabaseMatrix(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, pending, 1)
 			assert.Equal(t, interrupted.Id, pending[0].Id)
+
+			hkOrder := &TopUp{UserId: user.Id, Money: 500, Amount: 100, TradeNo: "MATRIX-HK", Currency: "cny",
+				PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe, Status: common.TopUpStatusSuccess}
+			require.NoError(t, db.Create(hkOrder).Error)
+			require.NoError(t, db.First(&account, user.Id).Error)
+			quotaBeforeHK := account.Quota
+			hkRequest, _, err := CreateInvoiceRequest(CreateInvoiceRequestParams{
+				UserId: user.Id, Username: user.Username, Region: InvoiceRegionHongKong, CompanyName: "Matrix HK Ltd",
+				Email: "matrix@example.com", TopUpOrderIds: []int{hkOrder.Id}, SaveTitle: true,
+			})
+			require.NoError(t, err)
+			assert.Zero(t, hkRequest.TaxFeeQuota)
+			require.NoError(t, db.First(&account, user.Id).Error)
+			assert.Equal(t, quotaBeforeHK, account.Quota)
+
+			mainlandA, err := CreateInvoiceTitle(user.Id, InvoiceTitleDetails{CompanyName: "矩阵甲公司", TaxNumber: "91A"}, true)
+			require.NoError(t, err)
+			mainlandB, err := CreateInvoiceTitle(user.Id, InvoiceTitleDetails{CompanyName: "矩阵乙公司", TaxNumber: "91B"}, true)
+			require.NoError(t, err)
+			_, err = UpdateInvoiceTitle(mainlandA.Id, user.Id, InvoiceTitleDetails{CompanyName: "矩阵甲公司", TaxNumber: "91A", BankName: "招商银行"}, false)
+			require.NoError(t, err)
+			titles, err := ListInvoiceTitles(user.Id)
+			require.NoError(t, err)
+			require.Len(t, titles, 3)
+			assert.Equal(t, mainlandB.Id, titles[0].Id, "the default title is listed first")
+			assert.True(t, titles[0].IsDefault)
+			defaults := 0
+			for _, title := range titles {
+				if title.IsDefault {
+					defaults++
+				}
+			}
+			assert.Equal(t, 1, defaults)
+			require.NoError(t, DeleteInvoiceTitle(mainlandA.Id, user.Id))
+			require.ErrorIs(t, DeleteInvoiceTitle(mainlandA.Id, user.Id), ErrInvoiceTitleNotFound)
 		})
 	}
+}
+
+func TestHongKongInvoiceRequestKeepsOnlyTheNameAndChargesNoTaxFee(t *testing.T) {
+	truncateTables(t)
+	originalQuotaPerUnit := common.QuotaPerUnit
+	originalExchangeRate := operation_setting.USDExchangeRate
+	originalTaxRate := setting.InvoiceTaxRateBasisPoints
+	common.QuotaPerUnit = 500_000
+	operation_setting.USDExchangeRate = 1
+	setting.InvoiceTaxRateBasisPoints = 300
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+		operation_setting.USDExchangeRate = originalExchangeRate
+		setting.InvoiceTaxRateBasisPoints = originalTaxRate
+	})
+
+	user, order := seedInvoiceRequestUserAndOrder(t, "invoice-hk-order", 500)
+	_, _, err := CreateInvoiceRequest(CreateInvoiceRequestParams{
+		UserId: user.Id, Region: "us", CompanyName: "Wrong Region Ltd", Email: "hk@example.com", TopUpOrderIds: []int{order.Id},
+	})
+	require.ErrorIs(t, err, ErrInvoiceRegionInvalid)
+
+	request, _, err := CreateInvoiceRequest(CreateInvoiceRequestParams{
+		UserId:        user.Id,
+		Username:      user.Username,
+		Region:        InvoiceRegionHongKong,
+		CompanyName:   " Harbour Trading Limited ",
+		TaxNumber:     "IGNORED-TAX",
+		BankName:      "Ignored Bank",
+		CompanyPhone:  "12345678",
+		Email:         "hk@example.com",
+		TopUpOrderIds: []int{order.Id},
+		SaveTitle:     true,
+	})
+	require.NoError(t, err)
+
+	stored, err := GetInvoiceRequestById(request.Id)
+	require.NoError(t, err)
+	assert.Equal(t, InvoiceRegionHongKong, stored.Region)
+	assert.Equal(t, "Harbour Trading Limited", stored.CompanyName)
+	assert.Empty(t, stored.TaxNumber)
+	assert.Empty(t, stored.BankName)
+	assert.Empty(t, stored.CompanyPhone)
+	assert.Zero(t, stored.TaxRateBasisPoints)
+	assert.Zero(t, stored.TaxFeeCents)
+	assert.Zero(t, stored.TaxFeeQuota)
+	var owner User
+	require.NoError(t, DB.First(&owner, user.Id).Error)
+	assert.Equal(t, user.Quota, owner.Quota, "Hong Kong invoices charge no tax fee")
+
+	titles, err := ListInvoiceTitles(user.Id)
+	require.NoError(t, err)
+	require.Len(t, titles, 1)
+	assert.Equal(t, InvoiceRegionHongKong, titles[0].Region)
+	assert.Equal(t, "Harbour Trading Limited", titles[0].CompanyName)
+	assert.Empty(t, titles[0].TaxNumber)
+}
+
+func TestInvoiceRequestDefaultsToMainlandAndRefreshesTheSavedTitle(t *testing.T) {
+	truncateTables(t)
+	user, first := seedInvoiceRequestUserAndOrder(t, "invoice-title-order-1", 600)
+	second := &TopUp{UserId: user.Id, Money: 600, Amount: 100, TradeNo: "invoice-title-order-2", PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe, Status: common.TopUpStatusSuccess}
+	require.NoError(t, DB.Create(second).Error)
+
+	submit := func(orderId int, bankName string) *InvoiceRequest {
+		request, _, err := CreateInvoiceRequest(CreateInvoiceRequestParams{
+			UserId: user.Id, CompanyName: "上海示例科技有限公司", TaxNumber: "91310000TITLE", BankName: bankName,
+			Email: "title@example.com", TopUpOrderIds: []int{orderId}, SaveTitle: true,
+		})
+		require.NoError(t, err)
+		return request
+	}
+	request := submit(first.Id, "招商银行")
+	assert.Equal(t, InvoiceRegionMainland, request.Region)
+	submit(second.Id, "工商银行")
+
+	titles, err := ListInvoiceTitles(user.Id)
+	require.NoError(t, err)
+	require.Len(t, titles, 1, "the same region, name and tax number refresh one title")
+	assert.Equal(t, "工商银行", titles[0].BankName)
+
+	_, _, err = CreateInvoiceRequest(CreateInvoiceRequestParams{
+		UserId: user.Id, CompanyName: "上海示例科技有限公司", Email: "title@example.com", TopUpOrderIds: []int{first.Id},
+	})
+	require.ErrorIs(t, err, ErrInvoiceTaxNumberEmpty, "mainland invoices still require a tax number")
+}
+
+func TestInvoiceTitlesKeepOneDefaultPerRegionAndStayPrivate(t *testing.T) {
+	truncateTables(t)
+	owner, _ := seedInvoiceRequestUserAndOrder(t, "invoice-title-owner", 600)
+	other := &User{Username: "invoice-title-other", Email: "other@example.com", AffCode: "invoice-title-other", Status: common.UserStatusEnabled}
+	require.NoError(t, DB.Create(other).Error)
+
+	mainlandA, err := CreateInvoiceTitle(owner.Id, InvoiceTitleDetails{CompanyName: "甲公司", TaxNumber: "91A"}, true)
+	require.NoError(t, err)
+	assert.Equal(t, InvoiceRegionMainland, mainlandA.Region)
+	hk, err := CreateInvoiceTitle(owner.Id, InvoiceTitleDetails{Region: InvoiceRegionHongKong, CompanyName: "HK Ltd", TaxNumber: "dropped"}, true)
+	require.NoError(t, err)
+	assert.Empty(t, hk.TaxNumber)
+	mainlandB, err := CreateInvoiceTitle(owner.Id, InvoiceTitleDetails{CompanyName: "乙公司", TaxNumber: "91B"}, true)
+	require.NoError(t, err)
+
+	defaults := map[int]bool{}
+	titles, err := ListInvoiceTitles(owner.Id)
+	require.NoError(t, err)
+	for _, title := range titles {
+		defaults[title.Id] = title.IsDefault
+	}
+	assert.Equal(t, map[int]bool{mainlandA.Id: false, mainlandB.Id: true, hk.Id: true}, defaults, "a new default replaces only the one in its region")
+
+	updated, err := UpdateInvoiceTitle(mainlandA.Id, owner.Id, InvoiceTitleDetails{CompanyName: "甲公司（新）", TaxNumber: "91A2"}, true)
+	require.NoError(t, err)
+	assert.Equal(t, "甲公司（新）", updated.CompanyName)
+	titles, err = ListInvoiceTitles(owner.Id)
+	require.NoError(t, err)
+	for _, title := range titles {
+		if title.Id == mainlandB.Id {
+			assert.False(t, title.IsDefault)
+		}
+	}
+
+	_, err = UpdateInvoiceTitle(mainlandA.Id, other.Id, InvoiceTitleDetails{CompanyName: "x", TaxNumber: "y"}, false)
+	require.ErrorIs(t, err, ErrInvoiceTitleNotFound)
+	require.ErrorIs(t, DeleteInvoiceTitle(mainlandA.Id, other.Id), ErrInvoiceTitleNotFound)
+	_, err = CreateInvoiceTitle(owner.Id, InvoiceTitleDetails{CompanyName: "丙公司"}, false)
+	require.ErrorIs(t, err, ErrInvoiceTaxNumberEmpty)
+
+	require.NoError(t, DeleteInvoiceTitle(mainlandA.Id, owner.Id))
+	for index := len(titles) - 1; index < InvoiceTitleMaxPerUser; index++ {
+		_, err = CreateInvoiceTitle(owner.Id, InvoiceTitleDetails{Region: InvoiceRegionHongKong, CompanyName: "Filler " + strconv.Itoa(index)}, false)
+		require.NoError(t, err)
+	}
+	_, err = CreateInvoiceTitle(owner.Id, InvoiceTitleDetails{Region: InvoiceRegionHongKong, CompanyName: "One too many"}, false)
+	require.ErrorIs(t, err, ErrInvoiceTitleLimit)
 }

@@ -22,6 +22,8 @@ import { formatInvoiceCopyText } from '../lib/invoice-copy'
 import { INVOICE_STATUS, type InvoiceRequest } from '../types'
 
 const labels = {
+  invoiceType: '开票类型',
+  invoiceTypeValue: '增值税电子普通发票（中国大陆）',
   companyName: '发票抬头',
   taxNumber: '税号',
   bankName: '开户行',
@@ -50,6 +52,7 @@ describe('invoice information copy', () => {
     const text = formatInvoiceCopyText(invoice, labels)
 
     expect(text.split('\n')).toEqual([
+      '开票类型: 增值税电子普通发票（中国大陆）',
       '发票抬头: 上海示例科技有限公司',
       '税号: 91310000TEST2026',
       '开户行: 招商银行上海分行',
@@ -57,6 +60,32 @@ describe('invoice information copy', () => {
       '公司地址: 上海市浦东新区示例路 88 号',
       '公司电话: 021-88888888',
       '备注: 请备注项目名称',
+      '开票金额: ¥2,979.00',
+    ])
+  })
+
+  test('a Hong Kong invoice starts with its type and carries only the recipient name and amount', () => {
+    const text = formatInvoiceCopyText(
+      {
+        ...invoice,
+        region: 'hk',
+        tax_number: '',
+        bank_name: '',
+        bank_account: '',
+        company_address: '',
+        company_phone: '',
+        remark: '',
+      },
+      {
+        ...labels,
+        invoiceTypeValue: '帳單 INVOICE（中国香港）',
+        companyName: '收件人名称',
+      }
+    )
+
+    expect(text.split('\n')).toEqual([
+      '开票类型: 帳單 INVOICE（中国香港）',
+      '收件人名称: 上海示例科技有限公司',
       '开票金额: ¥2,979.00',
     ])
   })

@@ -116,8 +116,18 @@ func invoiceWechatLines(header string, fields [][2]string) string {
 	return strings.Join(lines, "\n")
 }
 
+// invoiceWechatRegionLabel names the kind of invoice the finance group has to
+// issue.
+func invoiceWechatRegionLabel(region string) string {
+	if region == model.InvoiceRegionHongKong {
+		return "帳單 INVOICE（中国香港）"
+	}
+	return "增值税电子普通发票（中国大陆）"
+}
+
 func buildInvoiceWechatCreatedText(request *model.InvoiceRequest) string {
 	return invoiceWechatLines(fmt.Sprintf("【新开票申请 #%d】", request.Id), [][2]string{
+		{"开票类型", invoiceWechatRegionLabel(request.Region)},
 		{"发票抬头", request.CompanyName},
 		{"税号", request.TaxNumber},
 		{"开户银行", request.BankName},

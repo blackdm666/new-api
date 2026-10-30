@@ -36,8 +36,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import { getPaymentMethodName } from '@/features/wallet/lib/billing'
 import { toIntlLocale } from '@/i18n/languages'
@@ -48,6 +48,7 @@ import {
   createInvoiceRequest,
   fetchEligibleInvoiceOrders,
   fetchInvoiceConfig,
+  fetchInvoiceTitles,
   invoiceQueryKeys,
 } from '../api'
 import {
@@ -55,28 +56,34 @@ import {
   selectInvoiceOrderIds,
 } from '../lib/invoice-selection'
 import {
+  buildInvoiceTitleFields,
+  invoiceTitleToFormValues,
+  isInvoiceTitleComplete,
+  pickDefaultInvoiceTitle,
+  type InvoiceTitleFormValues,
+} from '../lib/invoice-title'
+import {
   calculateInvoiceTaxFee,
   formatInvoiceTimestamp,
   getInvoiceAmountShortfall,
-  INVOICE_TAX_NUMBER_LENGTH,
-  normalizeInvoiceTaxNumber,
 } from '../lib/invoice-utils'
-import type { EligibleTopUpOrder, InvoiceConfig } from '../types'
+import type {
+  EligibleTopUpOrder,
+  InvoiceConfig,
+  InvoiceRegion,
+  InvoiceTitle,
+} from '../types'
+import { InvoiceSampleDialog } from './invoice-samples'
+import {
+  InvoiceFormField,
+  InvoiceRegionChoice,
+  InvoiceTitleFields,
+} from './invoice-title-fields'
 
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreated: () => void
-}
-
-const EMPTY_FORM = {
-  companyName: '',
-  taxNumber: '',
-  bankName: '',
-  bankAccount: '',
-  companyAddress: '',
-  companyPhone: '',
-  remark: '',
 }
 
 export function InvoiceRequestDialog(props: Props) {
@@ -108,6 +115,14 @@ function OpenInvoiceRequestDialog(props: Omit<Props, 'open'>) {
     retry: false,
     meta: { errorToast: false },
   })
+  // Saved titles only prefill the form, so failing to load them never blocks
+  // the application.
+  const titlesQuery = useQuery({
+    queryKey: invoiceQueryKeys.titles(),
+    queryFn: fetchInvoiceTitles,
+    retry: false,
+    meta: { errorToast: false },
+  })
   const config = configQuery.data
   const failedQuery = [configQuery, ordersQuery].find(
     (query) => query.isError && !query.isFetching
@@ -120,14 +135,14 @@ function OpenInvoiceRequestDialog(props: Omit<Props, 'open'>) {
     const rate = (config.tax_rate_basis_points / 100).toFixed(2)
     description = [
       t(
-        'Invoices are issued together on day {{day}} of each month. The minimum invoice amount is ¥{{amount}}, and multiple paid top-up orders can be combined. The issued invoice and notification will be sent to your account email, and the invoice can also be downloaded from the console.',
+        'We respond within {{days}} working days of receiving your application. The minimum invoice amount is ¥{{amount}}, and multiple paid top-up orders can be combined. The issued invoice and notification will be sent to your account email, and the invoice can also be downloaded from the console.',
         {
-          day: config.issue_day,
+          days: config.response_working_days,
           amount: (config.minimum_amount_cents / 100).toFixed(2),
         }
       ),
       t(
-        'A {{rate}}% tax fee is deducted from your balance when you submit. If no invoice is issued (the application is withdrawn, rejected, or expires), the tax fee is refunded to your balance in full.',
+        'Mainland China invoices: a {{rate}}% tax fee is deducted from your balance when you submit and is refunded in full if no invoice is issued (the application is withdrawn, rejected, or expires). Hong Kong invoices have no tax fee.',
         { rate }
       ),
       config.pending_expiry_days > 0
@@ -161,7 +176,7 @@ function OpenInvoiceRequestDialog(props: Omit<Props, 'open'>) {
         </DialogFooter>
       </>
     )
-  } else if (!config || !ordersQuery.data) {
+  } else if (!config || !ordersQuery.data || titlesQuery.isPending) {
     content = (
       <>
         <LoadingState
@@ -180,6 +195,7 @@ function OpenInvoiceRequestDialog(props: Omit<Props, 'open'>) {
       <InvoiceRequestForm
         config={config}
         orders={ordersQuery.data}
+        titles={titlesQuery.data ?? []}
         onCancel={() => props.onOpenChange(false)}
         onCreated={() => {
           props.onOpenChange(false)
@@ -208,6 +224,7 @@ function OpenInvoiceRequestDialog(props: Omit<Props, 'open'>) {
 type InvoiceRequestFormProps = {
   config: InvoiceConfig
   orders: EligibleTopUpOrder[]
+  titles: InvoiceTitle[]
   onCancel: () => void
   onCreated: () => void
 }
@@ -217,7 +234,16 @@ function InvoiceRequestForm(props: InvoiceRequestFormProps) {
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const orders = props.orders
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [form, setForm] = useState(EMPTY_FORM)
+  const [region, setRegion] = useState<InvoiceRegion>('mainland')
+  const initialTitle = pickDefaultInvoiceTitle(props.titles, 'mainland')
+  const [titleId, setTitleId] = useState(initialTitle?.id ?? 0)
+  const [form, setForm] = useState<InvoiceTitleFormValues>(
+    invoiceTitleToFormValues(initialTitle)
+  )
+  const [remark, setRemark] = useState('')
+  const [saveTitle, setSaveTitle] = useState(false)
+  const [sampleOpen, setSampleOpen] = useState(false)
+  const [sampleRegion, setSampleRegion] = useState<InvoiceRegion>('mainland')
   const [submitting, setSubmitting] = useState(false)
   const [attempted, setAttempted] = useState(false)
   const minimumAmount = props.config.minimum_amount_cents / 100
@@ -234,29 +260,36 @@ function InvoiceRequestForm(props: InvoiceRequestFormProps) {
       ),
     [orders, selected]
   )
-  const companyError =
-    attempted && form.companyName.trim() === ''
-      ? t('Invoice title is required')
-      : ''
-  const taxNumber = normalizeInvoiceTaxNumber(form.taxNumber)
-  const taxNumberError =
-    attempted && taxNumber === '' ? t('Tax number is required') : ''
-  const taxNumberLengthUnusual =
-    taxNumber !== '' &&
-    (taxNumber.length < INVOICE_TAX_NUMBER_LENGTH.min ||
-      taxNumber.length > INVOICE_TAX_NUMBER_LENGTH.max)
+  // Hong Kong invoices carry no tax fee.
   const taxFee = useMemo(
-    () => calculateInvoiceTaxFee(total, taxRateBasisPoints),
-    [taxRateBasisPoints, total]
+    () =>
+      region === 'hk' ? 0 : calculateInvoiceTaxFee(total, taxRateBasisPoints),
+    [region, taxRateBasisPoints, total]
   )
   const balanceInsufficient = taxFee > availableBalance
+  const regionTitles = props.titles.filter((title) => title.region === region)
   const canSubmit =
     emailBound &&
     selected.size > 0 &&
     total >= minimumAmount &&
     !balanceInsufficient &&
-    form.companyName.trim() !== '' &&
-    taxNumber !== ''
+    isInvoiceTitleComplete(region, form)
+
+  const changeRegion = (next: InvoiceRegion) => {
+    if (next === region) return
+    const nextTitle = pickDefaultInvoiceTitle(props.titles, next)
+    setRegion(next)
+    setTitleId(nextTitle?.id ?? 0)
+    setForm(invoiceTitleToFormValues(nextTitle))
+    setAttempted(false)
+  }
+
+  const applySavedTitle = (id: number) => {
+    setTitleId(id)
+    setForm(
+      invoiceTitleToFormValues(props.titles.find((title) => title.id === id))
+    )
+  }
 
   const submit = async () => {
     if (submitting) return
@@ -264,16 +297,24 @@ function InvoiceRequestForm(props: InvoiceRequestFormProps) {
     if (!canSubmit) return
     setSubmitting(true)
     try {
-      await createInvoiceRequest({
-        company_name: form.companyName.trim(),
-        tax_number: taxNumber,
-        bank_name: form.bankName.trim(),
-        bank_account: form.bankAccount.trim(),
-        company_address: form.companyAddress.trim(),
-        company_phone: form.companyPhone.trim(),
-        remark: form.remark.trim(),
-        topup_order_ids: [...selected],
-      })
+      const fields = buildInvoiceTitleFields(region, form)
+      await createInvoiceRequest(
+        region === 'hk'
+          ? {
+              region,
+              company_name: fields.company_name,
+              remark: remark.trim(),
+              topup_order_ids: [...selected],
+              save_title: saveTitle,
+            }
+          : {
+              region,
+              ...fields,
+              remark: remark.trim(),
+              topup_order_ids: [...selected],
+              save_title: saveTitle,
+            }
+      )
       toast.success(t('Invoice application submitted'))
       props.onCreated()
     } catch (error) {
@@ -282,9 +323,6 @@ function InvoiceRequestForm(props: InvoiceRequestFormProps) {
       setSubmitting(false)
     }
   }
-
-  const field = (key: keyof typeof EMPTY_FORM, value: string) =>
-    setForm((current) => ({ ...current, [key]: value }))
 
   let orderContent: React.ReactNode
   if (orders.length === 0) {
@@ -349,6 +387,15 @@ function InvoiceRequestForm(props: InvoiceRequestFormProps) {
   return (
     <>
       <div className='min-h-0 flex-1 space-y-5 overflow-y-auto pr-1'>
+        <InvoiceRegionChoice
+          value={region}
+          onChange={changeRegion}
+          idPrefix='invoice'
+          onViewSample={(next) => {
+            setSampleRegion(next)
+            setSampleOpen(true)
+          }}
+        />
         {emailBound ? (
           props.config.email && (
             <p className='text-muted-foreground flex items-center gap-2 text-sm'>
@@ -438,7 +485,7 @@ function InvoiceRequestForm(props: InvoiceRequestFormProps) {
               )}
             </p>
           )}
-          {selected.size > 0 && (
+          {selected.size > 0 && region === 'mainland' && (
             <div className='bg-muted/30 grid gap-2 rounded-lg border p-3 text-sm sm:grid-cols-3'>
               <div>
                 <p className='text-muted-foreground text-xs'>
@@ -483,100 +530,66 @@ function InvoiceRequestForm(props: InvoiceRequestFormProps) {
           className='grid min-w-0 gap-4 disabled:opacity-60 sm:grid-cols-2'
           disabled={orders.length === 0}
         >
-          <FormField
-            id='invoice-company-name'
-            label={t('Invoice title')}
-            required
-            error={companyError}
-          >
-            <Input
-              id='invoice-company-name'
-              aria-invalid={Boolean(companyError)}
-              aria-describedby={
-                companyError ? 'invoice-company-name-error' : undefined
-              }
-              value={form.companyName}
-              maxLength={255}
-              onChange={(event) => field('companyName', event.target.value)}
-            />
-          </FormField>
-          <FormField
-            id='invoice-tax-number'
-            label={t('Tax number')}
-            required
-            error={taxNumberError}
-            hint={
-              taxNumberLengthUnusual
-                ? t(
-                    'The tax number has {{length}} characters. A unified social credit code is usually 18 characters (15–20 accepted); please double-check it.',
-                    { length: taxNumber.length }
-                  )
-                : t(
-                    'A unified social credit code is usually 18 characters (15–20 accepted).'
-                  )
+          {regionTitles.length > 0 && (
+            <InvoiceFormField
+              id='invoice-saved-title'
+              label={t('Use a saved title')}
+              className='sm:col-span-2'
+            >
+              <NativeSelect
+                id='invoice-saved-title'
+                className='w-full'
+                value={String(titleId)}
+                onChange={(event) =>
+                  applySavedTitle(Number(event.target.value))
+                }
+              >
+                <NativeSelectOption value='0'>
+                  {t('Enter new details')}
+                </NativeSelectOption>
+                {regionTitles.map((title) => (
+                  <NativeSelectOption key={title.id} value={String(title.id)}>
+                    {title.tax_number
+                      ? `${title.company_name} · ${title.tax_number}`
+                      : title.company_name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </InvoiceFormField>
+          )}
+          <InvoiceTitleFields
+            region={region}
+            values={form}
+            attempted={attempted}
+            idPrefix='invoice'
+            onChange={(key, value) =>
+              setForm((current) => ({ ...current, [key]: value }))
             }
-            hintTone={taxNumberLengthUnusual ? 'warning' : 'muted'}
-          >
-            <Input
-              id='invoice-tax-number'
-              aria-invalid={Boolean(taxNumberError)}
-              aria-describedby={
-                taxNumberError
-                  ? 'invoice-tax-number-hint invoice-tax-number-error'
-                  : 'invoice-tax-number-hint'
-              }
-              autoCapitalize='characters'
-              spellCheck={false}
-              value={form.taxNumber}
-              maxLength={64}
-              onChange={(event) => field('taxNumber', event.target.value)}
-            />
-          </FormField>
-          <FormField id='invoice-bank-name' label={t('Bank name')}>
-            <Input
-              id='invoice-bank-name'
-              value={form.bankName}
-              maxLength={255}
-              onChange={(event) => field('bankName', event.target.value)}
-            />
-          </FormField>
-          <FormField id='invoice-bank-account' label={t('Bank account')}>
-            <Input
-              id='invoice-bank-account'
-              value={form.bankAccount}
-              maxLength={128}
-              onChange={(event) => field('bankAccount', event.target.value)}
-            />
-          </FormField>
-          <FormField id='invoice-company-address' label={t('Company address')}>
-            <Input
-              id='invoice-company-address'
-              value={form.companyAddress}
-              maxLength={512}
-              onChange={(event) => field('companyAddress', event.target.value)}
-            />
-          </FormField>
-          <FormField id='invoice-company-phone' label={t('Company phone')}>
-            <Input
-              id='invoice-company-phone'
-              value={form.companyPhone}
-              maxLength={32}
-              onChange={(event) => field('companyPhone', event.target.value)}
-            />
-          </FormField>
-          <FormField
+          />
+          <InvoiceFormField
             id='invoice-remark'
             label={t('Remark')}
             className='sm:col-span-2'
           >
             <Textarea
               id='invoice-remark'
-              value={form.remark}
+              value={remark}
               maxLength={2000}
-              onChange={(event) => field('remark', event.target.value)}
+              onChange={(event) => setRemark(event.target.value)}
               rows={3}
             />
-          </FormField>
+          </InvoiceFormField>
+          <Label
+            htmlFor='invoice-save-title'
+            className='flex items-center gap-2 font-normal sm:col-span-2'
+          >
+            <Checkbox
+              id='invoice-save-title'
+              checked={saveTitle}
+              onCheckedChange={(checked) => setSaveTitle(checked === true)}
+            />
+            {t('Save these details as a saved title')}
+          </Label>
         </fieldset>
       </div>
       <DialogFooter>
@@ -596,51 +609,12 @@ function InvoiceRequestForm(props: InvoiceRequestFormProps) {
           {t('Submit invoice application')}
         </Button>
       </DialogFooter>
+      <InvoiceSampleDialog
+        open={sampleOpen}
+        onOpenChange={setSampleOpen}
+        region={sampleRegion}
+        onRegionChange={setSampleRegion}
+      />
     </>
-  )
-}
-
-type FormFieldProps = {
-  id: string
-  label: string
-  required?: boolean
-  className?: string
-  error?: string
-  hint?: string
-  hintTone?: 'muted' | 'warning'
-  children: React.ReactNode
-}
-
-function FormField(props: FormFieldProps) {
-  return (
-    <div className={cn('space-y-1.5', props.className)}>
-      <Label htmlFor={props.id}>
-        {props.label}
-        {props.required && <span className='text-destructive ml-1'>*</span>}
-      </Label>
-      {props.children}
-      {props.hint && (
-        <p
-          id={`${props.id}-hint`}
-          className={cn(
-            'text-xs',
-            props.hintTone === 'warning'
-              ? 'text-amber-600 dark:text-amber-400'
-              : 'text-muted-foreground'
-          )}
-        >
-          {props.hint}
-        </p>
-      )}
-      {props.error && (
-        <p
-          id={`${props.id}-error`}
-          className='text-destructive text-xs'
-          role='alert'
-        >
-          {props.error}
-        </p>
-      )}
-    </div>
   )
 }

@@ -32,6 +32,8 @@ import type {
   InvoiceStorageKey,
   InvoiceStorageReconcileReport,
   InvoiceStatus,
+  InvoiceTitle,
+  InvoiceTitlePayload,
   InvoiceUserProfile,
 } from './types'
 
@@ -57,6 +59,7 @@ export const invoiceQueryKeys = {
     ['invoices', 'detail', admin ? 'admin' : 'user', id] as const,
   config: () => ['invoices', 'config'] as const,
   eligibleOrders: () => ['invoices', 'eligible-orders'] as const,
+  titles: () => ['invoices', 'titles'] as const,
 }
 
 export function buildInvoiceListQuery(params: InvoiceListParams): string {
@@ -145,6 +148,40 @@ export async function createInvoiceRequest(
     invoiceRequestConfig
   )
   return unwrap(response.data)
+}
+
+export async function fetchInvoiceTitles(): Promise<InvoiceTitle[]> {
+  const response = await api.get<ApiResponse<InvoiceTitle[] | null>>(
+    fresh('/api/invoice/titles'),
+    invoiceRequestConfig
+  )
+  return unwrap(response.data) ?? []
+}
+
+export async function saveInvoiceTitle(
+  payload: InvoiceTitlePayload,
+  id?: number
+): Promise<InvoiceTitle> {
+  const response = id
+    ? await api.put<ApiResponse<InvoiceTitle>>(
+        `/api/invoice/titles/${id}`,
+        payload,
+        invoiceRequestConfig
+      )
+    : await api.post<ApiResponse<InvoiceTitle>>(
+        '/api/invoice/titles',
+        payload,
+        invoiceRequestConfig
+      )
+  return unwrap(response.data)
+}
+
+export async function deleteInvoiceTitle(id: number): Promise<void> {
+  const response = await api.delete<ApiResponse<unknown>>(
+    `/api/invoice/titles/${id}`,
+    invoiceRequestConfig
+  )
+  unwrap(response.data)
 }
 
 export async function updateInvoiceStatus(

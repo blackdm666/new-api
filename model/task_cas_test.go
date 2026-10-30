@@ -79,6 +79,7 @@ func TestMain(m *testing.M) {
 		&InvoiceFile{},
 		&InvoiceRequestEvent{},
 		&InvoiceSearchTerm{},
+		&InvoiceTitle{},
 		&InvoiceFileCleanup{},
 		&InvoiceNotificationDelivery{},
 		&SubscriptionPlan{},
@@ -145,6 +146,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM invoice_search_terms")
 		DB.Exec("DELETE FROM invoice_order_claims")
 		DB.Exec("DELETE FROM invoice_requests")
+		DB.Exec("DELETE FROM invoice_titles")
 		DB.Exec("DELETE FROM top_ups")
 		DB.Exec("DELETE FROM affiliate_upgrade_notices")
 		DB.Exec("DELETE FROM affiliate_payouts")

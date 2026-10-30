@@ -87,7 +87,7 @@ const config = {
   minimum_amount_cents: 50_000,
   tax_rate_basis_points: 300,
   available_balance_cents: 0,
-  issue_day: 12,
+  response_working_days: 3,
   email: 'billing@example.com',
   email_bound: true,
   pending_expiry_days: 30,
@@ -308,13 +308,13 @@ describe('user invoice list quick download', () => {
     expect(router.state.location.hash).toBe('invoice-files')
   })
 
-  test('the banner uses the configured issue day', async () => {
+  test('the banner states the configured response time in working days', async () => {
     await renderInvoiceRoutes('/invoices/', {
       items: [invoice(5, INVOICE_STATUS.PENDING)],
     })
 
     expect(
-      await screen.findByText(/Invoices are issued together on day 12/)
+      await screen.findByText(/We respond within 3 working days/)
     ).toBeVisible()
     expect(
       screen.queryByRole('button', {

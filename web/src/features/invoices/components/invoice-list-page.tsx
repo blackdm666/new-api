@@ -23,8 +23,10 @@ import {
 } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
+  BookmarkCheck,
   CalendarDays,
   Download,
+  FileSearch,
   Loader2,
   Plus,
   RefreshCw,
@@ -77,6 +79,10 @@ import {
   type InvoiceListState,
 } from '../lib/invoice-list-search'
 import {
+  getInvoiceRegion,
+  INVOICE_REGION_LABEL_KEYS,
+} from '../lib/invoice-title'
+import {
   formatInvoiceAmount,
   formatInvoiceTimestamp,
   INVOICE_STATUS_META,
@@ -85,11 +91,14 @@ import {
 import {
   INVOICE_STATUS,
   INVOICE_STATUS_OPTIONS,
+  type InvoiceRegion,
   type InvoiceRequest,
   type InvoiceStatus,
 } from '../types'
 import { InvoiceMaintenanceDialog } from './invoice-maintenance-dialog'
 import { InvoiceRequestDialog } from './invoice-request-dialog'
+import { InvoiceSampleDialog } from './invoice-samples'
+import { InvoiceTitlesDialog } from './invoice-titles-dialog'
 
 type InvoiceListPageProps = {
   admin?: boolean
@@ -107,6 +116,9 @@ export function InvoiceListPage(props: InvoiceListPageProps) {
   const [keywordInput, setKeywordInput] = useState(state.keyword)
   const [createOpen, setCreateOpen] = useState(false)
   const [maintenanceOpen, setMaintenanceOpen] = useState(false)
+  const [titlesOpen, setTitlesOpen] = useState(false)
+  const [sampleOpen, setSampleOpen] = useState(false)
+  const [sampleRegion, setSampleRegion] = useState<InvoiceRegion>('mainland')
   const [downloadingId, setDownloadingId] = useState<number | null>(null)
   const debouncedKeyword = useDebounce(keywordInput, 300)
   const onSearchChange = props.onSearchChange
@@ -242,8 +254,8 @@ export function InvoiceListPage(props: InvoiceListPageProps) {
             />
             <p className='leading-6'>
               {t(
-                'Invoices are issued together on day {{day}} of each month. Please confirm all invoice information before submitting; completed electronic invoices can be downloaded from the application details.',
-                { day: configQuery.data.issue_day }
+                'We respond within {{days}} working days of receiving your application. Mainland China VAT ordinary e-invoices and Hong Kong invoices are available. Please confirm all invoice information before submitting; completed invoices can be downloaded from the application details.',
+                { days: configQuery.data.response_working_days }
               )}
             </p>
           </div>
@@ -253,6 +265,18 @@ export function InvoiceListPage(props: InvoiceListPageProps) {
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className='size-4' />
               {t('Request invoice')}
+            </Button>
+          )}
+          {!admin && (
+            <Button variant='outline' onClick={() => setSampleOpen(true)}>
+              <FileSearch className='size-4' />
+              {t('Invoice samples')}
+            </Button>
+          )}
+          {!admin && (
+            <Button variant='outline' onClick={() => setTitlesOpen(true)}>
+              <BookmarkCheck className='size-4' />
+              {t('Saved titles')}
             </Button>
           )}
           <Button variant='outline' onClick={() => void listQuery.refetch()}>
@@ -387,6 +411,17 @@ export function InvoiceListPage(props: InvoiceListPageProps) {
           }
         />
       )}
+      {!admin && (
+        <InvoiceTitlesDialog open={titlesOpen} onOpenChange={setTitlesOpen} />
+      )}
+      {!admin && (
+        <InvoiceSampleDialog
+          open={sampleOpen}
+          onOpenChange={setSampleOpen}
+          region={sampleRegion}
+          onRegionChange={setSampleRegion}
+        />
+      )}
       {admin && (
         <InvoiceMaintenanceDialog
           open={maintenanceOpen}
@@ -468,13 +503,18 @@ function InvoiceTable(props: InvoiceTableProps) {
           {props.admin && (
             <TableCell>{invoice.username || invoice.user_id}</TableCell>
           )}
-          <TableCell className='max-w-[260px] truncate'>
-            {invoice.redacted_time > 0
-              ? t('Archived invoice')
-              : invoice.company_name}
+          <TableCell className='max-w-[260px]'>
+            <div className='truncate'>
+              {invoice.redacted_time > 0
+                ? t('Archived invoice')
+                : invoice.company_name}
+            </div>
+            <div className='text-muted-foreground truncate text-xs'>
+              {t(INVOICE_REGION_LABEL_KEYS[getInvoiceRegion(invoice)])}
+            </div>
           </TableCell>
           <TableCell className='font-mono text-xs'>
-            {invoice.tax_number}
+            {invoice.tax_number || '—'}
           </TableCell>
           <TableCell className='text-right font-semibold'>
             {formatInvoiceAmount(invoice.total_money)}
