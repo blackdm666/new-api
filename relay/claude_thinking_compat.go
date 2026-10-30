@@ -57,15 +57,23 @@ func claudeAdaptiveSupportKey(channelID int, model string) string {
 //     manual mode and the adaptive replacement together:
 //     "thinking.type.enabled" is not supported for this model. Use
 //     "thinking.type.adaptive" and "output_config.effort" ...
+//     New API upstreams relay it with the dotted field paths masked as
+//     domains ("***.***.enabled" ... "***.***.adaptive"), so the masked
+//     paths match too.
 func isClaudeAdaptiveThinkingRequiredMessage(message string) bool {
 	message = strings.ToLower(message)
 	if strings.Contains(message, "requires adaptive thinking") ||
 		strings.Contains(message, "omit thinking or use type adaptive") {
 		return true
 	}
-	return (strings.Contains(message, "thinking.type.enabled") || strings.Contains(message, "thinking.type.disabled")) &&
+	return (containsThinkingTypePath(message, "enabled") || containsThinkingTypePath(message, "disabled")) &&
 		strings.Contains(message, "not supported") &&
-		strings.Contains(message, "thinking.type.adaptive")
+		containsThinkingTypePath(message, "adaptive")
+}
+
+func containsThinkingTypePath(message, thinkingType string) bool {
+	return strings.Contains(message, "thinking.type."+thinkingType) ||
+		strings.Contains(message, "***.***."+thinkingType)
 }
 
 // isClaudeAdaptiveThinkingRejectedMessage reports whether an upstream 400 for

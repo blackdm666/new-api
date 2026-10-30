@@ -233,7 +233,7 @@ func (e *NewAPIError) ToClaudeError(upstreamURLs ...string) ClaudeError {
 		if openAIError, ok := e.RelayError.(OpenAIError); ok {
 			result = ClaudeError{
 				Message: e.Error(),
-				Type:    fmt.Sprintf("%v", openAIError.Code),
+				Type:    claudeErrorTypeFromOpenAIError(openAIError, e.errorType),
 			}
 		}
 	case ErrorTypeClaudeError:
@@ -253,6 +253,23 @@ func (e *NewAPIError) ToClaudeError(upstreamURLs ...string) ClaudeError {
 		result.Message = string(e.errorType)
 	}
 	return result
+}
+
+// claudeErrorTypeFromOpenAIError keeps the OpenAI code as the Claude error
+// type, as before, but falls back to the error's own type when there is no
+// code. Anthropic-format upstream errors are parsed into OpenAIError with
+// only a type (invalid_request_error, ...), and formatting their nil code
+// sent the client the type "<nil>".
+func claudeErrorTypeFromOpenAIError(openAIError OpenAIError, errorType ErrorType) string {
+	if openAIError.Code != nil {
+		if code := fmt.Sprintf("%v", openAIError.Code); code != "" {
+			return code
+		}
+	}
+	if openAIError.Type != "" {
+		return openAIError.Type
+	}
+	return string(errorType)
 }
 
 type NewAPIErrorOptions func(*NewAPIError)
