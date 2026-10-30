@@ -16,11 +16,24 @@ func init() {
 		// relayconvert is gin-free; recover the gin context when the caller
 		// passed one so file caching/cleanup keeps working.
 		GetBase64Data: func(ctx context.Context, source types.FileSource, reason ...string) (string, string, error) {
-			ginCtx, _ := ctx.(*gin.Context)
-			return GetBase64Data(ginCtx, source, reason...)
+			return GetBase64Data(ginContextFrom(ctx), source, reason...)
 		},
 		DecodeBase64FileData: DecodeBase64FileData,
 	})
+}
+
+// ginContextFrom returns the request's gin context, also when relayconvert
+// wrapped it (the conversion diagnostics collector does). Without it, disk
+// cached files are never registered for cleanup at the end of the request.
+func ginContextFrom(ctx context.Context) *gin.Context {
+	if ctx == nil {
+		return nil
+	}
+	if ginCtx, ok := ctx.(*gin.Context); ok {
+		return ginCtx
+	}
+	ginCtx, _ := ctx.Value(gin.ContextKey).(*gin.Context)
+	return ginCtx
 }
 
 func ConvertRequest(c *gin.Context, info *relaycommon.RelayInfo, target types.RelayFormat, request any) (*relayconvert.RequestResult, error) {
