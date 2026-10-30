@@ -8871,6 +8871,8 @@
     "Task ID or official task ID": "ID tác vụ hoặc ID tác vụ chính thức",
     "Invoice type": "Loại hóa đơn",
     "VAT electronic ordinary invoice (Mainland China)": "Hóa đơn điện tử VAT thông thường (Trung Quốc đại lục)",
+    "Mainland": "Đại lục",
+    "Hong Kong": "Hồng Kông",
     "INVOICE (Hong Kong)": "Hóa đơn INVOICE (Hồng Kông)",
     "Requires the invoice title and tax number. A tax fee applies.": "Cần tên đơn vị và mã số thuế. Có tính phí thuế.",
     "Only the recipient name is needed. No tax fee.": "Chỉ cần tên người nhận. Không tính phí thuế.",

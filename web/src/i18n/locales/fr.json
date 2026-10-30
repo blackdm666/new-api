@@ -8871,6 +8871,8 @@
     "Task ID or official task ID": "ID de tâche ou ID de tâche officiel",
     "Invoice type": "Type de facture",
     "VAT electronic ordinary invoice (Mainland China)": "Facture électronique ordinaire de TVA (Chine continentale)",
+    "Mainland": "Chine continentale",
+    "Hong Kong": "Hong Kong",
     "INVOICE (Hong Kong)": "Facture INVOICE (Hong Kong)",
     "Requires the invoice title and tax number. A tax fee applies.": "Nécessite l’intitulé de facturation et le numéro fiscal. Des frais de taxe s’appliquent.",
     "Only the recipient name is needed. No tax fee.": "Seul le nom du destinataire est requis. Aucuns frais de taxe.",

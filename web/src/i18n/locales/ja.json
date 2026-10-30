@@ -8871,6 +8871,8 @@
     "Task ID or official task ID": "タスク ID または公式タスク ID",
     "Invoice type": "請求書の種類",
     "VAT electronic ordinary invoice (Mainland China)": "増値税電子普通発票（中国本土）",
+    "Mainland": "中国本土",
+    "Hong Kong": "香港",
     "INVOICE (Hong Kong)": "請求書 INVOICE（香港）",
     "Requires the invoice title and tax number. A tax fee applies.": "請求書の宛名と税番号が必要です。税費がかかります。",
     "Only the recipient name is needed. No tax fee.": "宛名のみ必要です。税費はかかりません。",

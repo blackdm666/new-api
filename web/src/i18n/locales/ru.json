@@ -8871,6 +8871,8 @@
     "Task ID or official task ID": "ID задачи или официальный ID задачи",
     "Invoice type": "Тип счёта",
     "VAT electronic ordinary invoice (Mainland China)": "Обычный электронный счёт-фактура НДС (материковый Китай)",
+    "Mainland": "Материковый Китай",
+    "Hong Kong": "Гонконг",
     "INVOICE (Hong Kong)": "Счёт INVOICE (Гонконг)",
     "Requires the invoice title and tax number. A tax fee applies.": "Нужны плательщик и ИНН. Взимается налоговый сбор.",
     "Only the recipient name is needed. No tax fee.": "Нужно только имя получателя. Без налогового сбора.",

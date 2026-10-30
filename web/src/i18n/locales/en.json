@@ -8965,6 +8965,8 @@
     "Task ID or official task ID": "Task ID or official task ID",
     "Invoice type": "Invoice type",
     "VAT electronic ordinary invoice (Mainland China)": "VAT electronic ordinary invoice (Mainland China)",
+    "Mainland": "Mainland",
+    "Hong Kong": "Hong Kong",
     "INVOICE (Hong Kong)": "INVOICE (Hong Kong)",
     "Requires the invoice title and tax number. A tax fee applies.": "Requires the invoice title and tax number. A tax fee applies.",
     "Only the recipient name is needed. No tax fee.": "Only the recipient name is needed. No tax fee.",

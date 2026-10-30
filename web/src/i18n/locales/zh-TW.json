@@ -8873,6 +8873,8 @@
     "Task ID or official task ID": "任務 ID 或官方任務 ID",
     "Invoice type": "開票類型",
     "VAT electronic ordinary invoice (Mainland China)": "增值稅電子普通發票（中國大陸）",
+    "Mainland": "大陸",
+    "Hong Kong": "香港",
     "INVOICE (Hong Kong)": "帳單 INVOICE（中國香港）",
     "Requires the invoice title and tax number. A tax fee applies.": "需填寫發票抬頭和稅號，需繳納稅費。",
     "Only the recipient name is needed. No tax fee.": "只需填寫收件人名稱，不收稅費。",

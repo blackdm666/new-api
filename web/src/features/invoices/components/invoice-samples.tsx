@@ -23,7 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
 import {
-  INVOICE_REGION_LABEL_KEYS,
+  INVOICE_REGION_SHORT_LABEL_KEYS,
   INVOICE_REGIONS,
 } from '../lib/invoice-title'
 import type { InvoiceRegion } from '../types'
@@ -63,7 +63,7 @@ export function InvoiceSampleDialog(props: InvoiceSampleDialogProps) {
               value={region}
               className='whitespace-normal'
             >
-              {t(INVOICE_REGION_LABEL_KEYS[region])}
+              {t(INVOICE_REGION_SHORT_LABEL_KEYS[region])}
             </TabsTrigger>
           ))}
         </TabsList>

@@ -32,6 +32,11 @@ export const INVOICE_REGION_LABEL_KEYS: Record<InvoiceRegion, string> = {
   hk: 'INVOICE (Hong Kong)',
 }
 
+export const INVOICE_REGION_SHORT_LABEL_KEYS: Record<InvoiceRegion, string> = {
+  mainland: 'Mainland',
+  hk: 'Hong Kong',
+}
+
 export function getInvoiceRegion(
   invoice: Pick<InvoiceRequest, 'region'>
 ): InvoiceRegion {

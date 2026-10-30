@@ -8966,6 +8966,8 @@
     "Task ID or official task ID": "任务 ID 或官方任务 ID",
     "Invoice type": "开票类型",
     "VAT electronic ordinary invoice (Mainland China)": "增值税电子普通发票（中国大陆）",
+    "Mainland": "大陆",
+    "Hong Kong": "香港",
     "INVOICE (Hong Kong)": "帳單 INVOICE（中国香港）",
     "Requires the invoice title and tax number. A tax fee applies.": "需填写发票抬头和税号，需缴纳税费。",
     "Only the recipient name is needed. No tax fee.": "只需填写收件人名称，不收税费。",

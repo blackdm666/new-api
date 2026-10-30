@@ -1648,6 +1648,8 @@ export const STATIC_I18N_KEYS = [
   'Invalid channel priority move',
   'Channel priority is outside the sortable range',
   'VAT electronic ordinary invoice (Mainland China)',
+  'Mainland',
+  'Hong Kong',
   'INVOICE (Hong Kong)',
   'Requires the invoice title and tax number. A tax fee applies.',
   'Only the recipient name is needed. No tax fee.',
