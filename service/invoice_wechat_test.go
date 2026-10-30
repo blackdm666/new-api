@@ -503,3 +503,65 @@ func TestIssueInvoiceFromWechatFile(t *testing.T) {
 		"开票金额：¥1,200.00\n"+
 		"发票文件：上海云帆网络信息技术有限公司(1).pdf")
 }
+
+func TestInvoiceWechatReminderFollowsTheWorkingDayCalendar(t *testing.T) {
+	require.NoError(t, model.DB.AutoMigrate(&model.InvoiceRequest{}, &model.InvoiceNotificationDelivery{}))
+	t.Cleanup(func() {
+		model.DB.Exec("DELETE FROM invoice_notification_deliveries")
+		model.DB.Exec("DELETE FROM invoice_requests")
+	})
+	withInvoiceWechatSettings(t, newFakeWechatAPI(t).server.URL+"/finder/v2/api")
+	calendar := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 2026-11-02 (Monday) is a day off and 2026-11-07 (Saturday) a working day.
+		_, _ = w.Write([]byte(`{"year":2026,"days":[{"date":"2026-11-02","isOffDay":true},{"date":"2026-11-07","isOffDay":false}]}`))
+	}))
+	t.Cleanup(calendar.Close)
+	previousURL, previousCache := chinaHolidayCalendarURL, chinaHolidayCalendar
+	chinaHolidayCalendarURL = calendar.URL + "/%d.json"
+	chinaHolidayCalendar = &holidayCalendarCache{years: map[int]holidayCalendarYear{}}
+	t.Cleanup(func() { chinaHolidayCalendarURL, chinaHolidayCalendar = previousURL, previousCache })
+
+	at := func(value string) time.Time {
+		parsed, err := time.ParseInLocation("2006-01-02 15:04", value, invoiceWechatLocation)
+		require.NoError(t, err)
+		return parsed
+	}
+	requests := []*model.InvoiceRequest{
+		{UserId: 1, CompanyName: "济南即刻创想网络科技有限公司", TotalMoneyCents: 130700, Status: model.InvoiceStatusPending, CreatedTime: at("2026-10-26 17:35").Unix()},
+		{UserId: 2, CompanyName: "已开票公司", TotalMoneyCents: 100, Status: model.InvoiceStatusIssued, CreatedTime: at("2026-10-27 10:00").Unix()},
+		{UserId: 3, CompanyName: "当天申请公司", TotalMoneyCents: 200, Status: model.InvoiceStatusPending, CreatedTime: at("2026-11-03 08:30").Unix()},
+	}
+	for _, request := range requests {
+		require.NoError(t, model.DB.Create(request).Error)
+	}
+	reminders := func() []*model.InvoiceNotificationDelivery {
+		var deliveries []*model.InvoiceNotificationDelivery
+		require.NoError(t, model.DB.Where("subject LIKE ?", "开票提醒%").Order("id ASC").Find(&deliveries).Error)
+		return deliveries
+	}
+
+	queueInvoiceWechatReminder(at("2026-10-31 10:00")) // Saturday
+	queueInvoiceWechatReminder(at("2026-11-02 10:00")) // holiday Monday
+	queueInvoiceWechatReminder(at("2026-11-03 08:59")) // before 09:00
+	queueInvoiceWechatReminder(at("2026-11-03 12:00")) // after the morning window
+	require.Empty(t, reminders())
+
+	queueInvoiceWechatReminder(at("2026-11-03 09:00"))
+	queueInvoiceWechatReminder(at("2026-11-03 09:01"))
+	queued := reminders()
+	require.Len(t, queued, 1, "one reminder per working day")
+	assert.Equal(t, "开票提醒 2026-11-03", queued[0].Subject)
+	assert.Equal(t, "finance@chatroom", queued[0].Recipient)
+	assert.Equal(t, requests[0].Id, queued[0].InvoiceRequestId)
+	assert.Equal(t, "【开票提醒】有 1 张发票申请还未完成，请及时跟进：\n#"+strconv.Itoa(requests[0].Id)+" 济南即刻创想网络科技有限公司 ¥1,307.00（2026-10-26 17:35 申请）", queued[0].Body)
+
+	queueInvoiceWechatReminder(at("2026-11-07 09:30")) // make-up working Saturday
+	queued = reminders()
+	require.Len(t, queued, 2)
+	assert.Contains(t, queued[1].Body, "有 2 张发票申请")
+	assert.Contains(t, queued[1].Body, "当天申请公司")
+
+	setting.InvoiceWechatNotifyEnabled = false
+	queueInvoiceWechatReminder(at("2026-11-09 09:30"))
+	assert.Len(t, reminders(), 2, "nothing is queued while the group notification is off")
+}

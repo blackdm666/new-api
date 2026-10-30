@@ -383,6 +383,7 @@ func InitResources() error {
 	service.StartEmailDelivery()
 	service.StartTaskCallbackDelivery()
 	service.StartInvoiceDataRetention()
+	service.StartInvoiceWechatReminder()
 	service.StartAffiliateUpgradeNotificationDelivery()
 
 	return nil
