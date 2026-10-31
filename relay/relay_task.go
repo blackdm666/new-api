@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -388,7 +389,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		// envelope, codes and URLs can identify the upstream. Only its error
 		// message is public; the body stays in the server log for diagnosis.
 		logger.LogWarn(c, fmt.Sprintf("task upstream rejected submission (channel #%d, status %d): %s", info.ChannelId, resp.StatusCode, common.LocalLogPreview(string(responseBody))))
-		return nil, upstreamTaskSubmitError(responseBody, resp.StatusCode)
+		return nil, upstreamTaskSubmitError(responseBody, resp.StatusCode, strings.HasPrefix(c.ContentType(), "multipart/"))
 	}
 
 	// 10. Parse only. The controller presents the response after the durable
@@ -566,8 +567,9 @@ func taskRequestFailedError(c *gin.Context, channelID int, err error) *dto.TaskE
 // gateway failures carry provider internals (HTML pages, key-scoped rate
 // limits) and become a generic busy message. An exhausted provider account is
 // not the customer's balance: it reads as a temporary outage and is flagged
-// so the submission is retried on the group's other channels.
-func upstreamTaskSubmitError(body []byte, statusCode int) *dto.TaskError {
+// so the submission is retried on the group's other channels. localUpload
+// reports a multipart submission, whose images were uploaded files.
+func upstreamTaskSubmitError(body []byte, statusCode int, localUpload bool) *dto.TaskError {
 	message := upstreamTaskErrorText(body)
 	billingDisabled := googleBillingDisabled(body, message)
 	if billingDisabled || upstreamQuotaExhausted(body, statusCode, message) {
@@ -581,11 +583,51 @@ func upstreamTaskSubmitError(body []byte, statusCode int) *dto.TaskError {
 		message = taskUpstreamBusyMessage
 	case message == "":
 		message = fmt.Sprintf("上游任务提交失败（状态码 %d），请稍后重试。", statusCode)
+	default:
+		if moderated := arkInputModerationMessage(message, localUpload); moderated != "" {
+			message = moderated
+		}
 	}
 	return service.TaskErrorWrapper(errors.New(message), "fail_to_fetch_task", statusCode)
 }
 
-// upstreamTaskErrorText extracts the provider's error message, if any.
+// Volcengine Ark (Seedance) refuses moderated input when the task is
+// submitted, before anything is created or charged:
+// "The request failed because the input image 'content[1]' may contain real person."
+var arkInputModerationPattern = regexp.MustCompile(`(?i)^the request failed because the input (image|video|audio|text)(?:\s*'content\[\d+\]')* may (contain sensitive information|be related to copyright restrictions|contain real person)`)
+
+// arkInputModerationMessage is the Chinese form of an Ark input moderation
+// refusal, or "" for any other message. Gateways with a Seedance asset
+// library accept real people from public image URLs, never from uploaded
+// files, so a real person in a local upload also names that way out.
+func arkInputModerationMessage(message string, localUpload bool) string {
+	match := arkInputModerationPattern.FindStringSubmatch(message)
+	if match == nil {
+		return ""
+	}
+	media := map[string]string{"image": "参考图片", "video": "参考视频", "audio": "参考音频", "text": "提示词"}[strings.ToLower(match[1])]
+	reason := strings.ToLower(match[2])
+	cause := "可能包含敏感内容"
+	switch reason {
+	case "contain real person":
+		cause = "可能包含真人或可识别人物"
+	case "be related to copyright restrictions":
+		cause = "可能涉及版权限制"
+	}
+	action := "请更换" + media + "后重试。"
+	if media == "提示词" {
+		action = "请修改提示词后重试。"
+	}
+	text := media + cause + "，未通过上游内容审核，任务未提交，不扣费。" + action
+	if localUpload && media == "参考图片" && reason == "contain real person" {
+		text += "本地上传的真人照片无法使用，如需使用真人照片，请改用公网图片网址提交。"
+	}
+	return text
+}
+
+// upstreamTaskErrorText extracts the provider's error message, if any. A New
+// API gateway in front of the provider passes the provider's error body on as
+// its message string; the provider's own message inside it is the public one.
 func upstreamTaskErrorText(body []byte) string {
 	envelope := upstreamErrorEnvelope(body)
 	if envelope == nil {
@@ -597,9 +639,15 @@ func upstreamTaskErrorText(body []byte) string {
 	}
 	candidates = append(candidates, envelope["error"], envelope["message"], envelope["msg"], envelope["detail"])
 	for _, candidate := range candidates {
-		if message, ok := candidate.(string); ok && strings.TrimSpace(message) != "" {
-			return strings.TrimSpace(message)
+		message, ok := candidate.(string)
+		message = strings.TrimSpace(message)
+		if !ok || message == "" {
+			continue
 		}
+		if inner := upstreamTaskErrorText([]byte(message)); inner != "" {
+			return inner
+		}
+		return message
 	}
 	return ""
 }
