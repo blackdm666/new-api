@@ -604,11 +604,52 @@ func TestUpstreamTaskSubmitErrorOmitsProviderEnvelope(t *testing.T) {
 		{"empty nested message falls through", `{"error":{"message":" "},"message":"fallback"}`, "fallback"},
 		{"no message", `{"error":{"code":"x"},"trace":"vendor"}`, "上游任务提交失败（状态码 400），请稍后重试。"},
 		{"not json", `<html>vendor gateway</html>`, "上游任务提交失败（状态码 400），请稍后重试。"},
+		// A New API gateway passes the provider's error body on as its message.
+		{"gateway wraps provider body", `{"code":"fail_to_fetch_task","message":"{\"error\":{\"code\":\"InvalidParameter\",\"message\":\"The parameter duration is invalid.\",\"type\":\"BadRequest\"}}","data":null}`, "The parameter duration is invalid."},
+		{"gateway message that only looks like json", `{"code":"fail_to_fetch_task","message":"{\"trace\":\"vendor\"}"}`, `{"trace":"vendor"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			taskErr := upstreamTaskSubmitError([]byte(tc.body), http.StatusBadRequest)
+			taskErr := upstreamTaskSubmitError([]byte(tc.body), http.StatusBadRequest, false)
 			assert.Equal(t, tc.want, taskErr.Message)
 			assert.Equal(t, tc.want, taskErr.Error.Error())
+			assert.Equal(t, "fail_to_fetch_task", taskErr.Code)
+			assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+			assert.False(t, taskErr.UpstreamQuotaExhausted)
+		})
+	}
+}
+
+func TestUpstreamTaskSubmitErrorTranslatesArkInputModeration(t *testing.T) {
+	realPerson := `{"error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation","message":"The request failed because the input image 'content[1]' may contain real person. Request id: 021793469344","param":"","type":"BadRequest"}}`
+	const realPersonText = "参考图片可能包含真人或可识别人物，未通过上游内容审核，任务未提交，不扣费。请更换参考图片后重试。"
+	for _, tc := range []struct {
+		name        string
+		body        string
+		localUpload bool
+		want        string
+	}{
+		{"real person from a URL", realPerson, false, realPersonText},
+		{"real person from an uploaded file", realPerson, true, realPersonText + "本地上传的真人照片无法使用，如需使用真人照片，请改用公网图片网址提交。"},
+		{
+			"real person behind a New API gateway",
+			`{"code":"fail_to_fetch_task","message":` + strconv.Quote(realPerson) + `,"data":null}`,
+			true, realPersonText + "本地上传的真人照片无法使用，如需使用真人照片，请改用公网图片网址提交。",
+		},
+		{
+			"copyright in several videos",
+			`{"error":{"message":"The request failed because the input video 'content[2]' 'content[3]' may be related to copyright restrictions."}}`,
+			true, "参考视频可能涉及版权限制，未通过上游内容审核，任务未提交，不扣费。请更换参考视频后重试。",
+		},
+		{
+			"sensitive prompt",
+			`{"error":{"message":"The request failed because the input text may contain sensitive information."}}`,
+			false, "提示词可能包含敏感内容，未通过上游内容审核，任务未提交，不扣费。请修改提示词后重试。",
+		},
+		{"other refusal stays as sent", `{"error":{"message":"The parameter ratio is invalid."}}`, true, "The parameter ratio is invalid."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			taskErr := upstreamTaskSubmitError([]byte(tc.body), http.StatusBadRequest, tc.localUpload)
+			assert.Equal(t, tc.want, taskErr.Message)
 			assert.Equal(t, "fail_to_fetch_task", taskErr.Code)
 			assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
 			assert.False(t, taskErr.UpstreamQuotaExhausted)
@@ -628,7 +669,7 @@ func TestUpstreamTaskSubmitErrorHidesOverloadAndGatewayDetails(t *testing.T) {
 		{"unavailable", http.StatusServiceUnavailable, `{"message":"vendor pool vp-3 drained"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			taskErr := upstreamTaskSubmitError([]byte(tc.body), tc.status)
+			taskErr := upstreamTaskSubmitError([]byte(tc.body), tc.status, false)
 			assert.Equal(t, taskUpstreamBusyMessage, taskErr.Message)
 			assert.Equal(t, taskUpstreamBusyMessage, taskErr.Error.Error())
 			assert.Equal(t, tc.status, taskErr.StatusCode, "the status still drives the retry rules")
@@ -661,7 +702,7 @@ func TestUpstreamTaskSubmitErrorReportsExhaustedProviderAccount(t *testing.T) {
 		{"credit balance", http.StatusBadRequest, `{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the API."}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			taskErr := upstreamTaskSubmitError([]byte(tc.body), tc.status)
+			taskErr := upstreamTaskSubmitError([]byte(tc.body), tc.status, false)
 			assert.True(t, taskErr.UpstreamQuotaExhausted)
 			assert.Equal(t, "upstream_unavailable", taskErr.Code)
 			assert.Equal(t, http.StatusServiceUnavailable, taskErr.StatusCode)
@@ -673,7 +714,7 @@ func TestUpstreamTaskSubmitErrorReportsExhaustedProviderAccount(t *testing.T) {
 	}
 	// Customer-side limits reported by the provider are not account exhaustion.
 	for _, body := range []string{`{"error":{"message":"The video duration exceeds the limit"}}`, `{"error":{"message":"prompt quota exceeded for this request"}}`} {
-		assert.False(t, upstreamTaskSubmitError([]byte(body), http.StatusBadRequest).UpstreamQuotaExhausted, body)
+		assert.False(t, upstreamTaskSubmitError([]byte(body), http.StatusBadRequest, false).UpstreamQuotaExhausted, body)
 	}
 }
 
@@ -689,7 +730,7 @@ func TestUpstreamTaskSubmitErrorMarksStoppedGoogleBilling(t *testing.T) {
 		{"sentence without details", `{"error":{"code":403,"message":"This API method requires billing to be enabled.","status":"PERMISSION_DENIED"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			taskErr := upstreamTaskSubmitError([]byte(tc.body), http.StatusForbidden)
+			taskErr := upstreamTaskSubmitError([]byte(tc.body), http.StatusForbidden, false)
 			assert.True(t, taskErr.UpstreamQuotaExhausted)
 			assert.True(t, taskErr.UpstreamBillingDisabled)
 			assert.Equal(t, http.StatusServiceUnavailable, taskErr.StatusCode)
@@ -697,7 +738,7 @@ func TestUpstreamTaskSubmitErrorMarksStoppedGoogleBilling(t *testing.T) {
 			assert.NotContains(t, taskErr.Error.Error(), "project")
 		})
 	}
-	other := upstreamTaskSubmitError([]byte(`{"error":{"code":403,"message":"Permission denied on resource.","status":"PERMISSION_DENIED","details":[{"reason":"IAM_PERMISSION_DENIED"}]}}`), http.StatusForbidden)
+	other := upstreamTaskSubmitError([]byte(`{"error":{"code":403,"message":"Permission denied on resource.","status":"PERMISSION_DENIED","details":[{"reason":"IAM_PERMISSION_DENIED"}]}}`), http.StatusForbidden, false)
 	assert.False(t, other.UpstreamBillingDisabled)
 	assert.False(t, other.UpstreamQuotaExhausted)
 }
