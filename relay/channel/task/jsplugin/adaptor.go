@@ -941,6 +941,12 @@ func (a *TaskAdaptor) GetModelList() []string { return append([]string(nil), a.p
 func (a *TaskAdaptor) GetChannelName() string { return a.plugin.Meta.Name }
 func (a *TaskAdaptor) FetchMode() string      { return a.plugin.Meta.FetchMode }
 
+// ParsesOwnTaskResults keeps the plugin's parseTaskResult in charge of every
+// poll response, including one from another New API site.
+func (a *TaskAdaptor) ParsesOwnTaskResults() bool { return true }
+
+var _ service.TaskResultParsingAdaptor = (*TaskAdaptor)(nil)
+
 func (a *TaskAdaptor) FetchBatchTasks(baseURL, key string, tasks []*model.Task, proxy string) (*http.Response, error) {
 	taskContexts := make([]map[string]any, 0, len(tasks))
 	for _, task := range tasks {

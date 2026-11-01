@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -839,6 +840,44 @@ func TestUpdateVideoTasksMixedChannelSleepSettings(t *testing.T) {
 
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.ElementsMatch(t, []string{"upstream_sleepy_1", "upstream_fast_1", "upstream_fast_2"}, adaptor.fetchedTaskIDs())
+}
+
+// ownResultPollingAdaptor answers with a New API task envelope, as a task
+// plugin behind another New API site does.
+type ownResultPollingAdaptor struct {
+	taskPollingFetchAdaptor
+	parsesOwn bool
+	parsed    int
+}
+
+func (a *ownResultPollingAdaptor) ParsesOwnTaskResults() bool { return a.parsesOwn }
+
+func (a *ownResultPollingAdaptor) ParseTaskResult(*model.Task, *http.Response, []byte) (*relaycommon.TaskInfo, error) {
+	a.parsed++
+	return &relaycommon.TaskInfo{Status: model.TaskStatusInProgress, Progress: "60%"}, nil
+}
+
+func TestUpdateVideoSingleTaskLetsOwnParserReadNewAPIEnvelope(t *testing.T) {
+	truncate(t)
+
+	const channelID = 106
+	seedTaskPollingChannel(t, channelID, true)
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, channelID).Error)
+
+	// A plugin's own parser sees the envelope (and so reports its usage facts);
+	// other adaptors keep the generic New API shortcut.
+	for _, parsesOwn := range []bool{true, false} {
+		task := seedPollingTask(t, channelID, fmt.Sprintf("task_own_parser_%t", parsesOwn), fmt.Sprintf("upstream_own_parser_%t", parsesOwn))
+		adaptor := &ownResultPollingAdaptor{parsesOwn: parsesOwn}
+		require.NoError(t, updateVideoSingleTask(context.Background(), adaptor, &channel,
+			task.GetUpstreamTaskID(), map[string]*model.Task{task.GetUpstreamTaskID(): task}))
+		if parsesOwn {
+			assert.Equal(t, 1, adaptor.parsed)
+		} else {
+			assert.Zero(t, adaptor.parsed)
+		}
+	}
 }
 
 func TestUpdateVideoSingleTaskRecordsTerminalMetrics(t *testing.T) {
