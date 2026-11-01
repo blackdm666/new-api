@@ -36,6 +36,15 @@ type TaskPollingAdaptor interface {
 	AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int
 }
 
+// TaskResultParsingAdaptor is implemented by adaptors that must parse every
+// poll response themselves. A task plugin may sit behind another New API site,
+// whose task envelope the generic shortcut in updateVideoSingleTask would
+// otherwise read on its own, dropping the plugin's completion usage facts
+// (so settlement keeps the submit estimate) and its failure wording.
+type TaskResultParsingAdaptor interface {
+	ParsesOwnTaskResults() bool
+}
+
 type BatchTaskPollingAdaptor interface {
 	TaskPollingAdaptor
 	FetchMode() string
@@ -616,9 +625,13 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassTransient, resp.StatusCode, "")
 	}
 	taskResult := &relaycommon.TaskInfo{}
+	parsesOwnResults := false
+	if parser, ok := adaptor.(TaskResultParsingAdaptor); ok {
+		parsesOwnResults = parser.ParsesOwnTaskResults()
+	}
 	// try parse as New API response format
 	var responseItems taskdto.TaskResponse[model.Task]
-	if err = common.Unmarshal(responseBody, &responseItems); err == nil && responseItems.IsSuccess() {
+	if !parsesOwnResults && common.Unmarshal(responseBody, &responseItems) == nil && responseItems.IsSuccess() {
 		logger.LogDebug(ctx, "updateVideoSingleTask parsed as new api response format: %+v", responseItems)
 		t := responseItems.Data
 		taskResult.TaskID = t.TaskID
