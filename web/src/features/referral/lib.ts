@@ -141,6 +141,7 @@ export const AFFILIATE_RISK_SIGNAL_LABEL_KEYS: Record<
   registered_within_day: 'Registered within 24 hours',
   inviter_idle: 'Promoter has no usage',
   similar_name: 'Similar username or email',
+  video_only: 'Only uses video models',
 }
 
 export function formatCents(cents: number | null | undefined): string {

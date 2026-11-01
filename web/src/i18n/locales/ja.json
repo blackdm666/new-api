@@ -8827,6 +8827,7 @@
     "Registered within 24 hours": "24 時間以内に登録",
     "Promoter has no usage": "紹介者自身の利用なし",
     "Similar username or email": "ユーザー名またはメールが類似",
+    "Only uses video models": "動画モデルのみ使用",
     "Balance transfer approved": "残高振替を承認しました",
     "Balance transfer rejected": "残高振替を却下しました",
     "Self-referral score: 5 or more is high risk, 3–4 is medium. Commission stays frozen until you approve or reject the transfer.": "自己紹介スコア：5 以上は高リスク、3–4 は中リスクです。承認または却下するまでコミッションは凍結されます。",

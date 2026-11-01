@@ -164,6 +164,7 @@ export type AffiliateRiskSignal =
   | 'registered_within_day'
   | 'inviter_idle'
   | 'similar_name'
+  | 'video_only'
 
 export type AffiliateRiskPair = {
   invitee_id: number

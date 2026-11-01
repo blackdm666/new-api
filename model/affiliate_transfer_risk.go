@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 )
 
 // Self-referral risk scoring for commission-to-balance review. The rules were
@@ -19,6 +20,7 @@ import (
 //	same browser UA on a shared cold IP            +1
 //	inviter has exactly one paying invitee         +1
 //	invitees of the inviter share cold IPs         +2
+//	invitee only consumed video models             +5 (added 2026-11-01, high risk on its own)
 //
 // A cold IP is one seen on at most affiliateRiskColdIPMaxUsers accounts, which
 // keeps proxies, company exits and our own servers from matching everyone.
@@ -42,6 +44,7 @@ const (
 	AffiliateRiskSignalRegisteredClose = "registered_within_day"
 	AffiliateRiskSignalInviterIdle     = "inviter_idle"
 	AffiliateRiskSignalSimilarName     = "similar_name"
+	AffiliateRiskSignalVideoOnly       = "video_only"
 )
 
 var affiliateRiskGeneratedUsername = regexp.MustCompile(`^[a-z]+_\d+$`)
@@ -75,6 +78,8 @@ type affiliateRiskUser struct {
 type affiliateRiskFootprint struct {
 	ips        map[string]bool
 	userAgents map[string]bool
+	// models holds the models consumed in the sampled recent logs.
+	models map[string]bool
 }
 
 // EvaluateAffiliateInviterRisk scores how likely the inviter's paying invitees
@@ -210,6 +215,20 @@ func EvaluateAffiliateInviterRisk(inviterId int) (int, *AffiliateRiskDetail, err
 			pair.Score += 2
 			pair.Signals = append(pair.Signals, AffiliateRiskSignalSimilarName)
 		}
+		if models := footprints[invitee.Id].models; len(models) > 0 {
+			generation := jsplugin.DefaultRegistry.Generation()
+			videoOnly := true
+			for modelName := range models {
+				if !IsVideoGenerationModel(generation, modelName) {
+					videoOnly = false
+					break
+				}
+			}
+			if videoOnly {
+				pair.Score += AffiliateRiskHighScore
+				pair.Signals = append(pair.Signals, AffiliateRiskSignalVideoOnly)
+			}
+		}
 		if pair.Score >= AffiliateRiskMediumScore {
 			detail.SuspiciousCommissionCents += pair.CommissionCents
 		}
@@ -240,12 +259,12 @@ func EvaluateAffiliateInviterRisk(inviterId int) (int, *AffiliateRiskDetail, err
 }
 
 // collectAffiliateRiskFootprints gathers login IPs and browsers for every
-// account plus a bounded sample of recent API-call IPs for the inviter and
-// the invitees that produced the most commission.
+// account plus a bounded sample of recent API-call IPs and consumed models for
+// the inviter and the invitees that produced the most commission.
 func collectAffiliateRiskFootprints(ids []int) (map[int]*affiliateRiskFootprint, error) {
 	footprints := map[int]*affiliateRiskFootprint{}
 	for _, id := range ids {
-		footprints[id] = &affiliateRiskFootprint{ips: map[string]bool{}, userAgents: map[string]bool{}}
+		footprints[id] = &affiliateRiskFootprint{ips: map[string]bool{}, userAgents: map[string]bool{}, models: map[string]bool{}}
 	}
 	add := func(userId int, ip string, userAgent string) {
 		footprint := footprints[userId]
@@ -288,13 +307,21 @@ func collectAffiliateRiskFootprints(ids []int) (map[int]*affiliateRiskFootprint,
 	if LOG_DB == nil {
 		return footprints, nil
 	}
+	type logRow struct {
+		Ip        string
+		Type      int
+		ModelName string
+	}
 	for _, id := range ids[:min(len(ids), affiliateRiskLogSampleUsers+1)] {
-		ips := []string{}
-		if err := LOG_DB.Model(&Log{}).Where("user_id = ? AND ip <> ?", id, "").Order("id DESC").Limit(affiliateRiskLogSampleRows).Pluck("ip", &ips).Error; err != nil {
+		logs := []logRow{}
+		if err := LOG_DB.Model(&Log{}).Select("ip", "type", "model_name").Where("user_id = ? AND ip <> ?", id, "").Order("id DESC").Limit(affiliateRiskLogSampleRows).Scan(&logs).Error; err != nil {
 			return nil, err
 		}
-		for _, ip := range ips {
-			add(id, ip, "")
+		for _, row := range logs {
+			add(id, row.Ip, "")
+			if modelName := strings.TrimSpace(row.ModelName); row.Type == LogTypeConsume && modelName != "" {
+				footprints[id].models[modelName] = true
+			}
 		}
 	}
 	return footprints, nil
