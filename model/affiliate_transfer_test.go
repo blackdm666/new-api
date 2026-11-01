@@ -205,6 +205,7 @@ func TestAffiliateInviterRiskScoresSelfReferralAndHidesEvidenceFromUser(t *testi
 	t.Cleanup(func() {
 		DB.Exec("DELETE FROM affiliate_commissions")
 		LOG_DB.Exec("DELETE FROM audit_logs")
+		LOG_DB.Exec("DELETE FROM logs")
 	})
 	quotaPerUnit := int(common.QuotaPerUnit)
 	require.NoError(t, DB.Model(user).Updates(map[string]any{"username": "rainc", "created_at": int64(1_000_000), "used_quota": 0}).Error)
@@ -228,6 +229,20 @@ func TestAffiliateInviterRiskScoresSelfReferralAndHidesEvidenceFromUser(t *testi
 		require.NoError(t, DB.Create(&UserSession{SID: "risk-session-" + strconv.Itoa(i), UserID: session.userId, Status: "active", RefreshHash: "hash", LoginMethod: "password", IP: session.ip, UserAgent: "Mozilla/5.0 Test", ExpiresAt: 1, LastActiveAt: 1}).Error)
 	}
 
+	// Only invitees whose consumption is entirely video models get the signal;
+	// error logs do not count as consumption.
+	consumeLogs := []struct {
+		userId    int
+		logType   int
+		modelName string
+	}{
+		{selfAccount.Id, LogTypeConsume, "veo-3.1-fast"}, {selfAccount.Id, LogTypeConsume, "claude-opus-5-5"},
+		{friend.Id, LogTypeConsume, "veo-3.1-fast"}, {friend.Id, LogTypeConsume, "grok-imagine-video"}, {friend.Id, LogTypeError, "claude-opus-5-5"},
+	}
+	for _, row := range consumeLogs {
+		require.NoError(t, LOG_DB.Create(&Log{UserId: row.userId, Type: row.logType, ModelName: row.modelName, Ip: "192.168.1.9", CreatedAt: 1}).Error)
+	}
+
 	score, detail, err := EvaluateAffiliateInviterRisk(user.Id)
 	require.NoError(t, err)
 	// shared IP 3 + same UA 1 + registered within a day 2 + idle inviter 2 + similar name 2
@@ -236,7 +251,10 @@ func TestAffiliateInviterRiskScoresSelfReferralAndHidesEvidenceFromUser(t *testi
 	assert.False(t, detail.SingleInvitee)
 	assert.Zero(t, detail.InviteeClusterCount)
 	assert.Equal(t, int64(500), detail.SuspiciousCommissionCents)
-	require.Len(t, detail.Pairs, 1)
+	require.Len(t, detail.Pairs, 2)
+	assert.Equal(t, friend.Id, detail.Pairs[1].InviteeId)
+	assert.Equal(t, 2, detail.Pairs[1].Score)
+	assert.Equal(t, []string{AffiliateRiskSignalVideoOnly}, detail.Pairs[1].Signals)
 	assert.Equal(t, selfAccount.Id, detail.Pairs[0].InviteeId)
 	assert.Equal(t, "203.0.113.7", detail.Pairs[0].SharedIp)
 	assert.Equal(t, []string{AffiliateRiskSignalSharedIP, AffiliateRiskSignalSameUserAgent, AffiliateRiskSignalRegisteredClose, AffiliateRiskSignalInviterIdle, AffiliateRiskSignalSimilarName}, detail.Pairs[0].Signals)
