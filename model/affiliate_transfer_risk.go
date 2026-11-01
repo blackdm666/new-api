@@ -20,7 +20,7 @@ import (
 //	same browser UA on a shared cold IP            +1
 //	inviter has exactly one paying invitee         +1
 //	invitees of the inviter share cold IPs         +2
-//	invitee only consumed video models             +2 (added 2026-11-01)
+//	invitee only consumed video models             +5 (added 2026-11-01, high risk on its own)
 //
 // A cold IP is one seen on at most affiliateRiskColdIPMaxUsers accounts, which
 // keeps proxies, company exits and our own servers from matching everyone.
@@ -225,7 +225,7 @@ func EvaluateAffiliateInviterRisk(inviterId int) (int, *AffiliateRiskDetail, err
 				}
 			}
 			if videoOnly {
-				pair.Score += 2
+				pair.Score += AffiliateRiskHighScore
 				pair.Signals = append(pair.Signals, AffiliateRiskSignalVideoOnly)
 			}
 		}
