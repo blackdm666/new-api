@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -218,6 +219,39 @@ func TestGetUserModelsFiltersByRequestedGroup(t *testing.T) {
 	GetUserModels(vipContext)
 
 	require.Empty(t, decodeUserModelsResponse(t, vipRecorder))
+}
+
+func TestGetUserModelsPinsModelsOnlyForASelectedGroup(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.User{
+		Id:       1003,
+		Username: "pinned-model-user",
+		Password: "password",
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "default", Model: "pin-a", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "pin-b", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "pin-c", ChannelId: 1, Enabled: true},
+	}).Error)
+	pins := config.GlobalConfig.Get("model_pin_setting")
+	require.NoError(t, config.UpdateConfigFromMap(pins, map[string]string{"pin_top": `["pin-c"]`, "pin_bottom": `["pin-a"]`}))
+	t.Cleanup(func() {
+		require.NoError(t, config.UpdateConfigFromMap(pins, map[string]string{"pin_top": "[]", "pin_bottom": "[]"}))
+	})
+
+	request := func(query string) []string {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodGet, "/api/user/models"+query, nil)
+		context.Set("id", 1003)
+		GetUserModels(context)
+		return decodeUserModelsResponse(t, recorder)
+	}
+
+	assert.Equal(t, []string{"pin-c", "pin-b", "pin-a"}, request("?group=default"))
+	assert.Equal(t, service.GetGroupsEnabledModels([]string{"default"}), request(""))
 }
 
 func TestGetUserModelsReturnsPlaygroundModesWhenRequested(t *testing.T) {

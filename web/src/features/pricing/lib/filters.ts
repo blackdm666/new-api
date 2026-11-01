@@ -299,9 +299,9 @@ export function filterAndSortModels(
   result = filterByEndpointType(result, filters.endpointType)
   result = filterByTag(result, filters.tag)
   result = sortModels(result, filters.sortBy)
-  // Pins set the default order; an explicit price sort takes precedence.
-  // Pinned models stay within the pinned-group part they belong to.
-  if (filters.sortBy === SORT_OPTIONS.NAME) {
+  // Pins order the models of a selected group; all groups and an explicit
+  // price sort keep the regular order.
+  if (filters.group !== FILTER_ALL && filters.sortBy === SORT_OPTIONS.NAME) {
     result = orderPinnedModels(result, modelPins)
   }
   result = sinkPinnedGroupModels(result, pinnedGroups)
