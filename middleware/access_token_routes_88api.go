@@ -148,6 +148,9 @@ var accessToken88APIRouteRules = map[string]accessTokenRouteRule{
 	// router/api-router.go: /api/task
 	"GET /api/task/:task_id/preview-url": accessTokenScopeRule("usage:read"),
 
+	// router/api-router.go: /api/models (AdminAuth)
+	"POST /api/models/pin": accessTokenScopeRule("model:write"),
+
 	// router/channel-router.go: the balance query token route is RootAuth, not
 	// Casbin-guarded, and reveals a channel secret like the key route.
 	"POST /api/channel/:id/balance_query/token": accessTokenScopeRule(service.AccessTokenScopeOf(authz.ChannelSecretView)),
