@@ -25,6 +25,7 @@ import type {
   GetVendorsResponse,
   GetVendorResponse,
   Model,
+  ModelPinPosition,
   Vendor,
   SearchModelsParams,
   SyncUpstreamResponse,
@@ -104,6 +105,20 @@ export async function updateModelStatus(
   status: number
 ): Promise<{ success: boolean; message?: string }> {
   const res = await api.put('/api/models/?status_only=true', { id, status })
+  return res.data
+}
+
+/**
+ * Pin a model to the top or bottom of its groups, or unpin it
+ */
+export async function setModelPin(
+  modelName: string,
+  position: ModelPinPosition
+): Promise<{ success: boolean; message?: string }> {
+  const res = await api.post('/api/models/pin', {
+    model_name: modelName,
+    position,
+  })
   return res.data
 }
 

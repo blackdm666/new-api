@@ -26,7 +26,7 @@ import {
   type QuotaTypeOption,
   type SortOption,
 } from '../constants'
-import type { PricingModel } from '../types'
+import type { ModelPins, PricingModel } from '../types'
 import { compileBillingExpression } from './billing-expression/parser'
 import { visitExpression } from './billing-expression/types'
 import {
@@ -228,6 +228,26 @@ export function sortModels(
 }
 
 /**
+ * Move models an administrator pinned to the top first and pinned to the
+ * bottom last, in the pinned order. Other models keep the current order.
+ */
+export function orderPinnedModels(
+  models: PricingModel[],
+  pins: ModelPins
+): PricingModel[] {
+  if (pins.top.length === 0 && pins.bottom.length === 0) return models
+  const byName = new Map(models.map((model) => [model.model_name, model]))
+  const top = pins.top
+    .map((name) => byName.get(name))
+    .filter((model): model is PricingModel => model !== undefined)
+  const bottom = pins.bottom
+    .map((name) => byName.get(name))
+    .filter((model): model is PricingModel => model !== undefined)
+  const pinned = new Set([...top, ...bottom])
+  return [...top, ...models.filter((model) => !pinned.has(model)), ...bottom]
+}
+
+/**
  * Move models offered only in groups pinned to the bottom after the other
  * models, keeping the current order within both parts.
  */
@@ -253,6 +273,8 @@ export function sinkPinnedGroupModels(
   return [...regular, ...pinnedOnly]
 }
 
+const NO_MODEL_PINS: ModelPins = { top: [], bottom: [] }
+
 /**
  * Apply all filters and sorting to models
  */
@@ -267,7 +289,8 @@ export function filterAndSortModels(
     tag: string
     sortBy: string
   },
-  pinnedGroups: readonly string[] = []
+  pinnedGroups: readonly string[] = [],
+  modelPins: ModelPins = NO_MODEL_PINS
 ): PricingModel[] {
   let result = filterBySearch(models, filters.search)
   result = filterByVendor(result, filters.vendor)
@@ -276,6 +299,11 @@ export function filterAndSortModels(
   result = filterByEndpointType(result, filters.endpointType)
   result = filterByTag(result, filters.tag)
   result = sortModels(result, filters.sortBy)
+  // Pins set the default order; an explicit price sort takes precedence.
+  // Pinned models stay within the pinned-group part they belong to.
+  if (filters.sortBy === SORT_OPTIONS.NAME) {
+    result = orderPinnedModels(result, modelPins)
+  }
   result = sinkPinnedGroupModels(result, pinnedGroups)
 
   return result

@@ -132,8 +132,16 @@ export type PricingData = {
   group_ratio: Record<string, number>
   usable_group: Record<string, string>
   group_pin_bottom?: string[]
+  model_pin_top?: string[]
+  model_pin_bottom?: string[]
   supported_endpoint: Record<string, string>
   auto_groups: string[]
+}
+
+/** Models an administrator moved to the top or bottom of their groups. */
+export type ModelPins = {
+  top: readonly string[]
+  bottom: readonly string[]
 }
 
 export type TokenUnit = 'M' | 'K'

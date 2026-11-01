@@ -48,6 +48,7 @@ export function Pricing() {
     groupRatio,
     usableGroup,
     groupPinBottom,
+    modelPins,
     endpointMap,
     autoGroups,
     isLoading,
@@ -82,7 +83,7 @@ export function Pricing() {
     availableTags,
     clearFilters,
     clearSearch,
-  } = useFilters(models || [], groupPinBottom)
+  } = useFilters(models || [], groupPinBottom, modelPins)
 
   const handleModelClick = useCallback((modelName: string) => {
     setSelectedModelName(modelName)

@@ -8998,6 +8998,13 @@
     "Delete {{name}}": "Delete {{name}}",
     "Delete saved title?": "Delete saved title?",
     "Submitted invoice applications are not affected. This cannot be undone.": "Submitted invoice applications are not affected. This cannot be undone.",
-    "Use as the default for this invoice type": "Use as the default for this invoice type"
+    "Use as the default for this invoice type": "Use as the default for this invoice type",
+    "Pin to top of groups": "Pin to top of groups",
+    "Pin to bottom of groups": "Pin to bottom of groups",
+    "Restore default order": "Restore default order",
+    "Pinned to top": "Pinned to top",
+    "Model order updated": "Model order updated",
+    "Failed to update model order": "Failed to update model order",
+    "Invalid pin position": "Invalid pin position"
   }
 }

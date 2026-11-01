@@ -5,9 +5,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -242,6 +244,55 @@ func BatchDeleteModelMeta(c *gin.Context) {
 	common.ApiSuccess(c, result)
 }
 
+var modelPinMutex sync.Mutex
+
+// SetModelPin moves a model to the top or bottom of every group it belongs
+// to, or back to its normal place when position is empty.
+func SetModelPin(c *gin.Context) {
+	var request struct {
+		ModelName string `json:"model_name"`
+		Position  string `json:"position"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	name := strings.TrimSpace(request.ModelName)
+	if name == "" {
+		common.ApiErrorT(c, "Model name cannot be empty")
+		return
+	}
+	switch request.Position {
+	case "", model_setting.ModelPinTop, model_setting.ModelPinBottom:
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid pin position"})
+		return
+	}
+
+	modelPinMutex.Lock()
+	defer modelPinMutex.Unlock()
+	top, bottom := model_setting.PinnedModelLists(name, request.Position)
+	topJSON, err := common.Marshal(top)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	bottomJSON, err := common.Marshal(bottom)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.UpdateOptionsBulk(map[string]string{
+		"model_pin_setting.pin_top":    string(topJSON),
+		"model_pin_setting.pin_bottom": string(bottomJSON),
+	}); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "model.pin", map[string]any{"model_name": name, "position": request.Position})
+	common.ApiSuccess(c, gin.H{"model_name": name, "pin_position": request.Position})
+}
+
 // enrichModels keeps configured endpoints intact and derives connections from
 // enabled routes, including hidden or unpriced models absent from the catalog.
 func enrichModels(models []*model.Model) error {
@@ -257,6 +308,7 @@ func enrichModels(models []*model.Model) error {
 			continue
 		}
 		metadata.HasMetadata = metadata.Id > 0
+		metadata.PinPosition = model_setting.GetModelPin(metadata.ModelName)
 		channelIDs := make(map[int]struct{})
 		for name, ids := range configured {
 			if metadata.MatchesName(name) {

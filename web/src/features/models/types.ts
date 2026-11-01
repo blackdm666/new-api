@@ -59,7 +59,11 @@ export interface Model {
   quota_types?: number[]
   matched_models?: string[]
   matched_count?: number
+  pin_position?: ModelPinPosition
 }
+
+/** Where a model is listed within its groups; '' keeps the normal order. */
+export type ModelPinPosition = 'top' | 'bottom' | ''
 
 /**
  * Vendor entity from API

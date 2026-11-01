@@ -31,7 +31,7 @@ import {
   type ViewMode,
 } from '../constants'
 import { filterAndSortModels, extractAllTags } from '../lib/filters'
-import type { PricingModel, TokenUnit } from '../types'
+import type { ModelPins, PricingModel, TokenUnit } from '../types'
 
 type FilterState = {
   search?: string
@@ -47,6 +47,7 @@ type FilterState = {
 }
 
 const NO_PINNED_GROUPS: readonly string[] = []
+const NO_MODEL_PINS: ModelPins = { top: [], bottom: [] }
 
 function normalizeViewMode(value: unknown): ViewMode {
   if (value === VIEW_MODES.TABLE) {
@@ -57,7 +58,8 @@ function normalizeViewMode(value: unknown): ViewMode {
 
 export function useFilters(
   models: PricingModel[],
-  pinnedGroups: readonly string[] = NO_PINNED_GROUPS
+  pinnedGroups: readonly string[] = NO_PINNED_GROUPS,
+  modelPins: ModelPins = NO_MODEL_PINS
 ) {
   const search = useSearch({ from: '/pricing/' })
   const [filterState, setFilterState] = useState<FilterState>(() => ({
@@ -165,11 +167,13 @@ export function useFilters(
         tag: tagFilter,
         sortBy,
       },
-      pinnedGroups
+      pinnedGroups,
+      modelPins
     )
   }, [
     models,
     pinnedGroups,
+    modelPins,
     debouncedSearchInput,
     vendorFilter,
     groupFilter,

@@ -27,6 +27,7 @@ import {
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { getPricing } from '../api'
+import type { ModelPins } from '../types'
 
 export function usePricingData(enabled = true) {
   const { status } = useStatus()
@@ -73,6 +74,13 @@ export function usePricingData(enabled = true) {
   }, [data])
 
   const groupPinBottom = useMemo(() => data?.group_pin_bottom ?? [], [data])
+  const modelPins = useMemo<ModelPins>(
+    () => ({
+      top: data?.model_pin_top ?? [],
+      bottom: data?.model_pin_bottom ?? [],
+    }),
+    [data]
+  )
 
   const usableGroup = useMemo(
     () =>
@@ -86,6 +94,7 @@ export function usePricingData(enabled = true) {
     groupRatio: data?.group_ratio ?? {},
     usableGroup,
     groupPinBottom,
+    modelPins,
     endpointMap: data?.supported_endpoint ?? {},
     autoGroups: data?.auto_groups ?? [],
     isLoading,

@@ -8904,6 +8904,13 @@
     "Delete {{name}}": "Xóa {{name}}",
     "Delete saved title?": "Xóa thông tin đã lưu này?",
     "Submitted invoice applications are not affected. This cannot be undone.": "Các yêu cầu hóa đơn đã gửi không bị ảnh hưởng. Không thể hoàn tác thao tác này.",
-    "Use as the default for this invoice type": "Dùng làm mặc định cho loại hóa đơn này"
+    "Use as the default for this invoice type": "Dùng làm mặc định cho loại hóa đơn này",
+    "Pin to top of groups": "Ghim lên đầu nhóm",
+    "Pin to bottom of groups": "Ghim xuống cuối nhóm",
+    "Restore default order": "Khôi phục thứ tự mặc định",
+    "Pinned to top": "Đã ghim đầu",
+    "Model order updated": "Đã cập nhật thứ tự mô hình",
+    "Failed to update model order": "Không thể cập nhật thứ tự mô hình",
+    "Invalid pin position": "Vị trí ghim không hợp lệ"
   }
 }

@@ -133,6 +133,22 @@ export function useModelsColumns(
                       ? (vendor?.name ?? t('No vendor'))
                       : t('Missing metadata')}
                   </span>
+                  {model.pin_position === 'top' && (
+                    <StatusBadge
+                      label={t('Pinned to top')}
+                      variant='info'
+                      size='sm'
+                      copyable={false}
+                    />
+                  )}
+                  {model.pin_position === 'bottom' && (
+                    <StatusBadge
+                      label={t('Pinned to bottom')}
+                      variant='neutral'
+                      size='sm'
+                      copyable={false}
+                    />
+                  )}
                   {model.name_rule !== 0 && (
                     <span className='shrink-0'>
                       {rules[model.name_rule as 0 | 1 | 2 | 3]?.label} ·{' '}

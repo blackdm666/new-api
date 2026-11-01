@@ -159,3 +159,76 @@ describe('pinned group sorting', () => {
     ).toEqual(['az-gpt-image-2', 'claude-fable-5', 'gpt-5.5', 'gpt-6-sol'])
   })
 })
+
+describe('pinned model sorting', () => {
+  const catalog = [
+    pricingModel('az-gpt-image-2', { enable_groups: ['AZ-GPT-T6号池'] }),
+    pricingModel('az-gpt-image-3', { enable_groups: ['AZ-GPT-T6号池'] }),
+    pricingModel('claude-fable-5', { enable_groups: ['Claude Kiro'] }),
+    pricingModel('gpt-5.5', { enable_groups: ['GPT-Plus'] }),
+    pricingModel('gpt-6-sol', { enable_groups: ['GPT-Plus'] }),
+  ]
+  const filters = {
+    search: '',
+    vendor: 'all',
+    group: 'all',
+    quotaType: 'all',
+    endpointType: 'all',
+    tag: 'all',
+    sortBy: SORT_OPTIONS.NAME,
+  }
+  const pins = {
+    top: ['gpt-6-sol', 'az-gpt-image-3'],
+    bottom: ['claude-fable-5'],
+  }
+
+  test('pinned models move to the top and bottom in pinned order', () => {
+    expect(
+      filterAndSortModels(catalog, filters, [], pins).map((m) => m.model_name)
+    ).toEqual([
+      'gpt-6-sol',
+      'az-gpt-image-3',
+      'az-gpt-image-2',
+      'gpt-5.5',
+      'claude-fable-5',
+    ])
+  })
+
+  test('pinned models stay inside the pinned-group part they belong to', () => {
+    expect(
+      filterAndSortModels(catalog, filters, ['AZ-GPT-T6号池'], pins).map(
+        (m) => m.model_name
+      )
+    ).toEqual([
+      'gpt-6-sol',
+      'gpt-5.5',
+      'claude-fable-5',
+      'az-gpt-image-3',
+      'az-gpt-image-2',
+    ])
+  })
+
+  test('a selected group lists its pinned models first and last', () => {
+    expect(
+      filterAndSortModels(catalog, { ...filters, group: 'GPT-Plus' }, [], {
+        top: ['gpt-6-sol'],
+        bottom: ['gpt-5.5', 'claude-fable-5'],
+      }).map((m) => m.model_name)
+    ).toEqual(['gpt-6-sol', 'gpt-5.5'])
+  })
+
+  test('an explicit price sort ignores model pins', () => {
+    const priced = [
+      pricingModel('cheap', { model_ratio: 0.5 }),
+      pricingModel('pricey', { model_ratio: 5 }),
+    ]
+    expect(
+      filterAndSortModels(
+        priced,
+        { ...filters, sortBy: SORT_OPTIONS.INPUT_PRICE_LOW },
+        [],
+        { top: ['pricey'], bottom: [] }
+      ).map((m) => m.model_name)
+    ).toEqual(['cheap', 'pricey'])
+  })
+})
