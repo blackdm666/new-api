@@ -12,9 +12,10 @@ const (
 )
 
 // ModelPinSetting lists models an administrator moved to the top or bottom of
-// every group they belong to. PinTop is ordered first to last; the most
-// recently pinned model is placed first. PinBottom is ordered first to last;
-// the most recently pinned model is placed last.
+// every group they belong to. Pins apply when a single group is listed; lists
+// across all groups keep the regular order. PinTop is ordered first to last;
+// the most recently pinned model is placed first. PinBottom is ordered first
+// to last; the most recently pinned model is placed last.
 type ModelPinSetting struct {
 	PinTop    []string `json:"pin_top"`
 	PinBottom []string `json:"pin_bottom"`

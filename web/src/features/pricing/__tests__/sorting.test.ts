@@ -182,29 +182,15 @@ describe('pinned model sorting', () => {
     bottom: ['claude-fable-5'],
   }
 
-  test('pinned models move to the top and bottom in pinned order', () => {
+  test('all groups keep the name order whatever the pins', () => {
     expect(
       filterAndSortModels(catalog, filters, [], pins).map((m) => m.model_name)
     ).toEqual([
-      'gpt-6-sol',
-      'az-gpt-image-3',
       'az-gpt-image-2',
-      'gpt-5.5',
-      'claude-fable-5',
-    ])
-  })
-
-  test('pinned models stay inside the pinned-group part they belong to', () => {
-    expect(
-      filterAndSortModels(catalog, filters, ['AZ-GPT-T6号池'], pins).map(
-        (m) => m.model_name
-      )
-    ).toEqual([
-      'gpt-6-sol',
-      'gpt-5.5',
-      'claude-fable-5',
       'az-gpt-image-3',
-      'az-gpt-image-2',
+      'claude-fable-5',
+      'gpt-5.5',
+      'gpt-6-sol',
     ])
   })
 
@@ -217,6 +203,21 @@ describe('pinned model sorting', () => {
     ).toEqual(['gpt-6-sol', 'gpt-5.5'])
   })
 
+  test('in a selected group pinned models stay inside the pinned-group part they belong to', () => {
+    const shared = [
+      ...catalog,
+      pricingModel('gpt-7', { enable_groups: ['AZ-GPT-T6号池', 'GPT-Plus'] }),
+    ]
+    expect(
+      filterAndSortModels(
+        shared,
+        { ...filters, group: 'AZ-GPT-T6号池' },
+        ['AZ-GPT-T6号池'],
+        { top: ['az-gpt-image-3'], bottom: [] }
+      ).map((m) => m.model_name)
+    ).toEqual(['gpt-7', 'az-gpt-image-3', 'az-gpt-image-2'])
+  })
+
   test('an explicit price sort ignores model pins', () => {
     const priced = [
       pricingModel('cheap', { model_ratio: 0.5 }),
@@ -225,7 +226,7 @@ describe('pinned model sorting', () => {
     expect(
       filterAndSortModels(
         priced,
-        { ...filters, sortBy: SORT_OPTIONS.INPUT_PRICE_LOW },
+        { ...filters, group: 'default', sortBy: SORT_OPTIONS.INPUT_PRICE_LOW },
         [],
         { top: ['pricey'], bottom: [] }
       ).map((m) => m.model_name)

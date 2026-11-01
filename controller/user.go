@@ -723,7 +723,11 @@ func GetUserModels(c *gin.Context) {
 			groupsToQuery = []string{group}
 		}
 	}
-	models := model_setting.OrderModelsPinned(service.GetGroupsEnabledModels(groupsToQuery))
+	models := service.GetGroupsEnabledModels(groupsToQuery)
+	// Pins order the models of a selected group; all groups keep the regular order.
+	if group != "" {
+		models = model_setting.OrderModelsPinned(models)
+	}
 	data := any(models)
 	if c.Query("details") == "true" {
 		data = getPlaygroundModelDetails(models, groupsToQuery)
