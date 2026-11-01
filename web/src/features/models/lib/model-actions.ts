@@ -22,7 +22,8 @@ import { toast } from 'sonner'
 
 import { handleServerError } from '@/lib/handle-server-error'
 
-import { updateModelStatus } from '../api'
+import { setModelPin, updateModelStatus } from '../api'
+import type { ModelPinPosition } from '../types'
 import { invalidateVendorData } from '../vendor-api'
 
 // ============================================================================
@@ -95,6 +96,27 @@ export async function handleToggleModelStatus(
     await handleDisableModel(id, queryClient, onSuccess)
   } else {
     await handleEnableModel(id, queryClient, onSuccess)
+  }
+}
+
+/**
+ * Pin a model to the top or bottom of its groups, or unpin it
+ */
+export async function handleSetModelPin(
+  modelName: string,
+  position: ModelPinPosition,
+  queryClient?: QueryClient
+): Promise<void> {
+  try {
+    const response = await setModelPin(modelName, position)
+    if (response.success) {
+      toast.success(i18next.t('Model order updated'))
+      if (queryClient) await invalidateVendorData(queryClient)
+    } else {
+      handleServerError(response, i18next.t('Failed to update model order'))
+    }
+  } catch (error: unknown) {
+    handleServerError(error, i18next.t('Failed to update model order'))
   }
 }
 

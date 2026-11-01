@@ -75,6 +75,65 @@ function renderModelActions(currentModel: Model = model, role = 100) {
   return client
 }
 
+describe('model pin actions', () => {
+  it('offers only ordering actions for a channel model without metadata and posts the pin', async () => {
+    const post = vi
+      .spyOn(api, 'post')
+      .mockResolvedValue({ data: { success: true } })
+    renderModelActions({ ...model, id: 0, model_name: 'channel-only' })
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('button', { name: 'Open menu' }))
+    expect(
+      screen.getByRole('menuitem', { name: 'Pin to bottom of groups' })
+    ).toBeVisible()
+    expect(
+      screen.queryByRole('menuitem', { name: 'Delete' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('menuitem', { name: 'Restore default order' })
+    ).not.toBeInTheDocument()
+    await user.click(
+      screen.getByRole('menuitem', { name: 'Pin to top of groups' })
+    )
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/models/pin', {
+        model_name: 'channel-only',
+        position: 'top',
+      })
+    )
+    post.mockRestore()
+  })
+
+  it('lets a pinned-to-top model restore the default order or move to the bottom', async () => {
+    renderModelActions({ ...model, pin_position: 'top' })
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('button', { name: 'Open menu' }))
+    expect(
+      screen.queryByRole('menuitem', { name: 'Pin to top of groups' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('menuitem', { name: 'Pin to bottom of groups' })
+    ).toBeVisible()
+    expect(
+      screen.getByRole('menuitem', { name: 'Restore default order' })
+    ).toBeVisible()
+  })
+
+  it('has no ordering actions for a name-rule row', async () => {
+    renderModelActions({ ...model, name_rule: 1 })
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('button', { name: 'Open menu' }))
+    expect(
+      screen.queryByRole('menuitem', { name: 'Pin to top of groups' })
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeVisible()
+  })
+})
+
 describe('model pricing entry', () => {
   it('saves pricing and opens connections for a channel model without creating metadata', async () => {
     const channelModel = { ...model, id: 0, model_name: 'channel-only' }
@@ -110,9 +169,6 @@ describe('model pricing entry', () => {
     const client = renderModelActions(channelModel)
     const user = userEvent.setup()
     expect(screen.getByRole('button', { name: 'Add metadata' })).toBeVisible()
-    expect(
-      screen.queryByRole('button', { name: 'Open menu' })
-    ).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Pricing' }))
     expect(screen.getByRole('tab', { name: 'Pricing' })).not.toHaveAttribute(
       'aria-disabled',

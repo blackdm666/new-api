@@ -8904,6 +8904,13 @@
     "Delete {{name}}": "{{name}} を削除",
     "Delete saved title?": "この宛名を削除しますか？",
     "Submitted invoice applications are not affected. This cannot be undone.": "送信済みの申請には影響しません。この操作は元に戻せません。",
-    "Use as the default for this invoice type": "この種類の請求書のデフォルトにする"
+    "Use as the default for this invoice type": "この種類の請求書のデフォルトにする",
+    "Pin to top of groups": "所属グループの先頭に固定",
+    "Pin to bottom of groups": "所属グループの末尾に固定",
+    "Restore default order": "既定の並び順に戻す",
+    "Pinned to top": "先頭固定",
+    "Model order updated": "モデルの並び順を更新しました",
+    "Failed to update model order": "モデルの並び順を更新できませんでした",
+    "Invalid pin position": "固定位置が無効です"
   }
 }

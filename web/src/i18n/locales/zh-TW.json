@@ -8906,6 +8906,13 @@
     "Delete {{name}}": "刪除 {{name}}",
     "Delete saved title?": "刪除這筆開票資訊？",
     "Submitted invoice applications are not affected. This cannot be undone.": "已提交的發票申請不受影響。此操作無法復原。",
-    "Use as the default for this invoice type": "設為該發票類型的預設開票資訊"
+    "Use as the default for this invoice type": "設為該發票類型的預設開票資訊",
+    "Pin to top of groups": "在所在分組中置頂",
+    "Pin to bottom of groups": "在所在分組中置底",
+    "Restore default order": "恢復預設排序",
+    "Pinned to top": "置頂",
+    "Model order updated": "模型排序已更新",
+    "Failed to update model order": "更新模型排序失敗",
+    "Invalid pin position": "置頂/置底位置無效"
   }
 }

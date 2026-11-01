@@ -8904,6 +8904,13 @@
     "Delete {{name}}": "Supprimer {{name}}",
     "Delete saved title?": "Supprimer cet intitulé enregistré ?",
     "Submitted invoice applications are not affected. This cannot be undone.": "Les demandes de facture déjà envoyées ne sont pas affectées. Cette action est irréversible.",
-    "Use as the default for this invoice type": "Utiliser par défaut pour ce type de facture"
+    "Use as the default for this invoice type": "Utiliser par défaut pour ce type de facture",
+    "Pin to top of groups": "Épingler en haut des groupes",
+    "Pin to bottom of groups": "Épingler en bas des groupes",
+    "Restore default order": "Rétablir l’ordre par défaut",
+    "Pinned to top": "Épinglé en haut",
+    "Model order updated": "Ordre du modèle mis à jour",
+    "Failed to update model order": "Échec de la mise à jour de l’ordre du modèle",
+    "Invalid pin position": "Position d’épinglage invalide"
   }
 }

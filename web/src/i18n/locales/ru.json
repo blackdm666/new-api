@@ -8904,6 +8904,13 @@
     "Delete {{name}}": "Удалить {{name}}",
     "Delete saved title?": "Удалить эти реквизиты?",
     "Submitted invoice applications are not affected. This cannot be undone.": "Уже поданные заявки не изменятся. Действие нельзя отменить.",
-    "Use as the default for this invoice type": "Использовать по умолчанию для этого типа счёта"
+    "Use as the default for this invoice type": "Использовать по умолчанию для этого типа счёта",
+    "Pin to top of groups": "Закрепить вверху групп",
+    "Pin to bottom of groups": "Закрепить внизу групп",
+    "Restore default order": "Вернуть порядок по умолчанию",
+    "Pinned to top": "Вверху",
+    "Model order updated": "Порядок модели обновлён",
+    "Failed to update model order": "Не удалось обновить порядок модели",
+    "Invalid pin position": "Недопустимая позиция закрепления"
   }
 }

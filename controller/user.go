@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/QuantumNous/new-api/constant"
@@ -722,7 +723,7 @@ func GetUserModels(c *gin.Context) {
 			groupsToQuery = []string{group}
 		}
 	}
-	models := service.GetGroupsEnabledModels(groupsToQuery)
+	models := model_setting.OrderModelsPinned(service.GetGroupsEnabledModels(groupsToQuery))
 	data := any(models)
 	if c.Query("details") == "true" {
 		data = getPlaygroundModelDetails(models, groupsToQuery)

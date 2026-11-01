@@ -59,6 +59,7 @@ type Model struct {
 	HasMetadata            bool             `json:"has_metadata" gorm:"-"`
 	ConfiguredChannelCount int              `json:"configured_channel_count" gorm:"-"`
 	SquareState            ModelSquareState `json:"square_state" gorm:"-"`
+	PinPosition            string           `json:"pin_position,omitempty" gorm:"-"`
 }
 
 // MatchesName applies a metadata rule to a concrete channel model name.

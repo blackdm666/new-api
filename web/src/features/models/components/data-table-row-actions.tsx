@@ -18,7 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQueryClient } from '@tanstack/react-query'
 import type { Row } from '@tanstack/react-table'
-import { Eye, EyeOff, Trash2 } from 'lucide-react'
+import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  Eye,
+  EyeOff,
+  PinOff,
+  Trash2,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -30,7 +37,11 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useCanEditModelPricing } from '@/features/model-pricing/api'
 
-import { handleToggleModelStatus, isModelEnabled } from '../lib'
+import {
+  handleSetModelPin,
+  handleToggleModelStatus,
+  isModelEnabled,
+} from '../lib'
 import type { Model } from '../types'
 import { ModelDeleteDialog } from './dialogs/model-delete-dialog'
 import { useModels } from './models-provider'
@@ -48,6 +59,9 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
   const isEnabled = isModelEnabled(model)
+  // Pins match exact model names; rule rows cover several names.
+  const canPin = model.name_rule === 0
+  const pin = model.pin_position ?? ''
 
   const handleEdit = () => {
     setCurrentRow(model)
@@ -88,26 +102,66 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </Button>
       )}
 
-      {model.id > 0 && (
+      {(model.id > 0 || canPin) && (
         <DataTableRowActionMenu ariaLabel={t('Open menu')}>
-          <DropdownMenuItem onClick={handleToggleStatus}>
-            {toggleLabel}
-            <DropdownMenuShortcut>
-              {isEnabled ? <EyeOff size={16} /> : <Eye size={16} />}
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={(e) => {
-              e.preventDefault()
-              setDeleteConfirmOpen(true)
-            }}
-            className='text-destructive focus:text-destructive'
-          >
-            {t('Delete')}
-            <DropdownMenuShortcut>
-              <Trash2 size={16} />
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
+          {canPin && pin !== 'top' && (
+            <DropdownMenuItem
+              onClick={() =>
+                handleSetModelPin(model.model_name, 'top', queryClient)
+              }
+            >
+              {t('Pin to top of groups')}
+              <DropdownMenuShortcut>
+                <ArrowUpToLine size={16} />
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+          {canPin && pin !== 'bottom' && (
+            <DropdownMenuItem
+              onClick={() =>
+                handleSetModelPin(model.model_name, 'bottom', queryClient)
+              }
+            >
+              {t('Pin to bottom of groups')}
+              <DropdownMenuShortcut>
+                <ArrowDownToLine size={16} />
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+          {canPin && pin !== '' && (
+            <DropdownMenuItem
+              onClick={() =>
+                handleSetModelPin(model.model_name, '', queryClient)
+              }
+            >
+              {t('Restore default order')}
+              <DropdownMenuShortcut>
+                <PinOff size={16} />
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+          {model.id > 0 && (
+            <DropdownMenuItem onClick={handleToggleStatus}>
+              {toggleLabel}
+              <DropdownMenuShortcut>
+                {isEnabled ? <EyeOff size={16} /> : <Eye size={16} />}
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+          {model.id > 0 && (
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault()
+                setDeleteConfirmOpen(true)
+              }}
+              className='text-destructive focus:text-destructive'
+            >
+              {t('Delete')}
+              <DropdownMenuShortcut>
+                <Trash2 size={16} />
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
         </DataTableRowActionMenu>
       )}
 
