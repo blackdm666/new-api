@@ -114,3 +114,22 @@ func SetTaskPluginDisabledFactoryKeysOption(keys []string) error {
 func IsTaskPluginFactoryDisabled(key string) bool {
 	return slices.Contains(GetTaskPluginDisabledFactoryKeys(), key)
 }
+
+// TaskPluginReferenceImageURLKeysKey lists plugins whose upstreams fetch
+// reference images by URL. For them the host stores inline and uploaded
+// images as public reference media instead of forwarding base64.
+const TaskPluginReferenceImageURLKeysKey = "TaskPluginReferenceImageURLKeys"
+
+func IsTaskPluginReferenceImageURLEnabled(key string) bool {
+	common.OptionMapRWMutex.RLock()
+	raw := ""
+	if common.OptionMap != nil {
+		raw = common.OptionMap[TaskPluginReferenceImageURLKeysKey]
+	}
+	common.OptionMapRWMutex.RUnlock()
+	var keys []string
+	if err := common.UnmarshalJsonStr(raw, &keys); err != nil {
+		return false
+	}
+	return slices.Contains(keys, key)
+}

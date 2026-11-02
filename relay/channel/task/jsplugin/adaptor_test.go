@@ -29,6 +29,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -217,6 +218,119 @@ export function parseSubmitResponse(){return {taskId:"1"}} export function build
 		require.NoError(t, common.Unmarshal(requestBytes, &decoded))
 		assert.Equal(t, []any{"request_file:image[]", "request_file:image[]#1"}, decoded["refs"])
 		assert.Equal(t, []any{encoded, second}, decoded["images"])
+	})
+}
+
+func TestTaskAdaptorStoresReferenceImagesAsURLs(t *testing.T) {
+	png := []byte("\x89PNG\r\n\x1a\n-reference")
+	pngDataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+	heicDataURL := "data:image/heic;base64," + base64.StdEncoding.EncodeToString([]byte("heic"))
+	uploads := 0
+	previousUpload := uploadTaskReferenceImage
+	uploadTaskReferenceImage = func(_ context.Context, image io.ReadSeeker) (string, error) {
+		content, err := io.ReadAll(image)
+		require.NoError(t, err)
+		if !bytes.HasPrefix(content, []byte("\x89PNG")) {
+			return "", service.ErrUnsupportedReferenceImage
+		}
+		uploads++
+		return fmt.Sprintf("https://assets.example/reference-media/%d.png", len(content)), nil
+	}
+	common.OptionMapRWMutex.Lock()
+	previousOptions := common.OptionMap
+	common.OptionMap = map[string]string{}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		uploadTaskReferenceImage = previousUpload
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = previousOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+	enable := func(keys string) {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap[setting.TaskPluginReferenceImageURLKeysKey] = keys
+		common.OptionMapRWMutex.Unlock()
+	}
+	source := `
+export const meta = {apiVersion:1,key:"url-refs",name:"URL Refs",version:"1.0.0",author:{name:"Test"},models:["m"],fetchMode:"per_task"};
+export function buildSubmitRequest(ctx) {
+  return {url:ctx.baseUrl+"/submit",body:{
+    content:ctx.requestBody.content,
+    images:ctx.requestBody.images,
+    files:ctx.files.map(function(file){return {__fileRef:file.ref,encoding:"dataUrl"};}),
+    raw:ctx.files.map(function(file){return {__fileRef:file.ref,encoding:"base64"};})
+  }};
+}
+export function parseSubmitResponse(){return {taskId:"1"}} export function buildQueryRequest(){return {url:"https://example.com"}} export function parseTaskResult(){return {status:"SUCCESS"}}
+`
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	submit := func(c *gin.Context) map[string]any {
+		adaptor := New(plugin)
+		info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://provider.example"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+		adaptor.Init(info)
+		require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+		body, err := adaptor.BuildRequestBody(c, info)
+		require.NoError(t, err)
+		requestBytes, err := io.ReadAll(body)
+		require.NoError(t, err)
+		var decoded map[string]any
+		require.NoError(t, common.Unmarshal(requestBytes, &decoded))
+		return decoded
+	}
+	clientContent := func() []any {
+		return []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": pngDataURL}},
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": pngDataURL}},
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": heicDataURL}},
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://client.example/a.png"}},
+		}
+	}
+	storedURL := fmt.Sprintf("https://assets.example/reference-media/%d.png", len(png))
+	imageURLs := func(decoded map[string]any) []any {
+		var urls []any
+		for _, item := range decoded["content"].([]any) {
+			urls = append(urls, item.(map[string]any)["image_url"].(map[string]any)["url"])
+		}
+		return urls
+	}
+
+	t.Run("plugins not listed keep base64", func(t *testing.T) {
+		enable(`["other-plugin"]`)
+		c := newMultipartFileContext(t, "image", "ref.png", "image/png", png)
+		c.Set("task_request", map[string]any{"content": clientContent()})
+		decoded := submit(c)
+		assert.Equal(t, []any{pngDataURL, pngDataURL, heicDataURL, "https://client.example/a.png"}, imageURLs(decoded))
+		assert.Nil(t, decoded["images"])
+		assert.Equal(t, []any{pngDataURL}, decoded["files"])
+		assert.Zero(t, uploads)
+	})
+
+	t.Run("listed plugins send stored image URLs", func(t *testing.T) {
+		enable(`["url-refs"]`)
+		c := newMultipartFileContext(t, "image", "ref.png", "image/png", png)
+		// A decoder's file placeholder is stored before preflight, so hooks
+		// that only accept HTTPS images see it too.
+		request := map[string]any{"content": clientContent(), "images": []any{map[string]any{"__fileRef": "request_file:image", "encoding": "dataUrl", "mimeType": "image/png"}}}
+		c.Set("task_request", request)
+		decoded := submit(c)
+		// One upload per distinct data URL; unsupported images and HTTPS stay as sent.
+		assert.Equal(t, []any{storedURL, storedURL, heicDataURL, "https://client.example/a.png"}, imageURLs(decoded))
+		assert.Equal(t, []any{storedURL}, decoded["images"])
+		assert.Equal(t, []any{storedURL}, decoded["files"])
+		assert.Equal(t, 3, uploads, "the data URL, the decoded placeholder and the submit placeholder")
+		assert.Equal(t, []any{base64.StdEncoding.EncodeToString(png)}, decoded["raw"], "raw base64 placeholders are not URLs")
+		assert.Equal(t, pngDataURL, request["content"].([]any)[0].(map[string]any)["image_url"].(map[string]any)["url"], "the client value is not modified")
+	})
+
+	t.Run("failed uploads stay inline", func(t *testing.T) {
+		enable(`["url-refs"]`)
+		uploadTaskReferenceImage = func(context.Context, io.ReadSeeker) (string, error) { return "", errors.New("worker unavailable") }
+		c := newMultipartFileContext(t, "image", "ref.png", "image/png", png)
+		c.Set("task_request", map[string]any{"content": clientContent()[:1]})
+		decoded := submit(c)
+		assert.Equal(t, []any{pngDataURL}, imageURLs(decoded))
+		assert.Equal(t, []any{pngDataURL}, decoded["files"])
 	})
 }
 
