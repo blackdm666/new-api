@@ -156,6 +156,21 @@ func InvoiceFileExists(requestId int, sha256Value string) (bool, error) {
 	return count > 0, err
 }
 
+// ListInvoiceRequestIdsHoldingInvoice returns the requests that already hold
+// this invoice: a file with this SHA-256 digest, or, when invoiceNumber is
+// set, a file whose name contains the invoice number.
+func ListInvoiceRequestIdsHoldingInvoice(sha256Value string, invoiceNumber string) ([]int, error) {
+	query := DB.Model(&InvoiceFile{})
+	if invoiceNumber == "" {
+		query = query.Where("sha256 = ?", sha256Value)
+	} else {
+		query = query.Where("sha256 = ? OR file_name LIKE ?", sha256Value, "%"+invoiceNumber+"%")
+	}
+	var requestIds []int
+	err := query.Distinct().Pluck("invoice_request_id", &requestIds).Error
+	return requestIds, err
+}
+
 func CountInvoiceFiles(requestId int) (int64, error) {
 	var count int64
 	err := DB.Model(&InvoiceFile{}).Where("invoice_request_id = ?", requestId).Count(&count).Error

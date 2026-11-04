@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -387,6 +389,48 @@ func TestInvoiceWechatFileNameNamesCompany(t *testing.T) {
 	}
 }
 
+// invoiceTestPDF builds a one-page PDF laid out like a fully digitalized
+// e-invoice: the invoice number and each "¥" amount on lines of their own.
+func invoiceTestPDF(number string, amounts ...string) []byte {
+	var stream strings.Builder
+	for i, line := range append([]string{number}, amounts...) {
+		line = strings.ReplaceAll(line, "¥", `\245`)
+		fmt.Fprintf(&stream, "BT /F1 12 Tf 50 %d Td (%s) Tj ET\n", 750-20*i, line)
+	}
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", stream.Len(), stream.String()),
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+	}
+	var out strings.Builder
+	out.WriteString("%PDF-1.7\n")
+	offsets := make([]int, len(objects))
+	for i, object := range objects {
+		offsets[i] = out.Len()
+		fmt.Fprintf(&out, "%d 0 obj\n%s\nendobj\n", i+1, object)
+	}
+	xref := out.Len()
+	fmt.Fprintf(&out, "xref\n0 %d\n0000000000 65535 f \n", len(objects)+1)
+	for _, offset := range offsets {
+		fmt.Fprintf(&out, "%010d 00000 n \n", offset)
+	}
+	fmt.Fprintf(&out, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xref)
+	return []byte(out.String())
+}
+
+func TestReadInvoicePDF(t *testing.T) {
+	invoice, ok := readInvoicePDF(invoiceTestPDF("26612000002217482656", "¥940.59", "¥9.41", "¥ 1,950.00"))
+	require.True(t, ok)
+	assert.Equal(t, invoicePDF{number: "26612000002217482656", totalCents: 195000}, invoice)
+
+	_, ok = readInvoicePDF([]byte("%PDF-1.7\n% scanned invoice"))
+	assert.False(t, ok, "a PDF without text has no total")
+	_, ok = readInvoicePDF(invoiceTestPDF("26612000002217482656"))
+	assert.False(t, ok, "a PDF without amounts has no total")
+}
+
 func TestIssueInvoiceFromWechatFile(t *testing.T) {
 	require.NoError(t, model.DB.AutoMigrate(
 		&model.InvoiceRequest{}, &model.InvoiceRequestEvent{}, &model.InvoiceNotificationDelivery{},
@@ -444,6 +488,17 @@ func TestIssueInvoiceFromWechatFile(t *testing.T) {
 	yunfanSuffix := pendingRequest(other, "云帆网络信息技术有限公司")
 	headOffice := pendingRequest(other, "成都蜀道智能科技有限公司")
 	branch := pendingRequest(other, "成都蜀道智能科技有限公司北京分公司")
+	splitRequest := func(totalCents int64) *model.InvoiceRequest {
+		request := &model.InvoiceRequest{
+			UserId: other.Id, Username: other.Username, CompanyName: "浙江拆单大学", TaxNumber: "12330000TEST",
+			TotalMoneyCents: totalCents, Status: model.InvoiceStatusPending,
+		}
+		require.NoError(t, model.DB.Create(request).Error)
+		return request
+	}
+	splitSmall := splitRequest(68800)
+	splitOlder := splitRequest(95000)
+	splitNewer := splitRequest(95000)
 	pdf := []byte("%PDF-1.7\n% issued invoice")
 	digest := sha256.Sum256(pdf)
 	require.NoError(t, model.DB.Create(&model.InvoiceFile{
@@ -471,6 +526,20 @@ func TestIssueInvoiceFromWechatFile(t *testing.T) {
 		issue("dzfp_26442000000012345678_成都蜀道智能科技有限公司北京分公司_20261012.pdf", pdf),
 		"the head office name inside the branch name does not count")
 
+	firstInvoice := invoiceTestPDF("26612000000000000001", "¥940.59", "¥9.41", "¥950.00")
+	firstName := "dzfp_26612000000000000001_浙江拆单大学_20261104102159.pdf"
+	assert.Equal(t, InvoiceWechatFileAmbiguous, issue(firstName, invoiceTestPDF("26612000000000000009", "¥123.00")).Outcome,
+		"no split request has the invoice total")
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: splitOlder.Id},
+		issue(firstName, firstInvoice), "the oldest request with the invoice total is issued")
+	assert.Equal(t, InvoiceWechatFileAmbiguous, issue(firstName, firstInvoice).Outcome,
+		"sending the same invoice again does not issue the next request")
+	assert.Equal(t, InvoiceWechatFileAmbiguous,
+		issue("dzfp_26612000000000000001_浙江拆单大学_20261104110000.pdf", invoiceTestPDF("26612000000000000001", "¥950.00")).Outcome,
+		"a regenerated file of the same invoice number does not either")
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: splitNewer.Id},
+		issue("dzfp_26612000000000000002_浙江拆单大学_20261104102211.pdf", invoiceTestPDF("26612000000000000002", "¥940.59", "¥9.41", "¥950.00")))
+
 	statuses := map[int]int{}
 	var requests []*model.InvoiceRequest
 	require.NoError(t, model.DB.Find(&requests).Error)
@@ -481,6 +550,7 @@ func TestIssueInvoiceFromWechatFile(t *testing.T) {
 		yunfan.Id: model.InvoiceStatusIssued, acmeFirst.Id: model.InvoiceStatusPending,
 		acmeSecond.Id: model.InvoiceStatusIssued, retried.Id: model.InvoiceStatusIssued,
 		yunfanSuffix.Id: model.InvoiceStatusPending, headOffice.Id: model.InvoiceStatusPending, branch.Id: model.InvoiceStatusIssued,
+		splitSmall.Id: model.InvoiceStatusPending, splitOlder.Id: model.InvoiceStatusIssued, splitNewer.Id: model.InvoiceStatusIssued,
 	}, statuses)
 	for _, request := range []*model.InvoiceRequest{yunfan, retried} {
 		files, err := model.ListInvoiceFiles(request.Id)
@@ -503,7 +573,7 @@ func TestIssueInvoiceFromWechatFile(t *testing.T) {
 		assert.Equal(t, "finance@chatroom", message["toWxid"])
 		contents = append(contents, message["content"])
 	}
-	assert.Len(t, contents, 4, "one completion message per issued request")
+	assert.Len(t, contents, 6, "one completion message per issued request")
 	assert.Contains(t, contents, "【开票工单已完成 #"+strconv.Itoa(yunfan.Id)+"】\n"+
 		"发票抬头：上海云帆网络信息技术有限公司\n"+
 		"开票金额：¥1,200.00\n"+

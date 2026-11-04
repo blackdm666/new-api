@@ -23,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service/invoicefile"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/ledongthuc/pdf"
 	"github.com/shopspring/decimal"
 	"golang.org/x/text/width"
 	"gorm.io/gorm"
@@ -450,6 +451,53 @@ func invoiceCompanyMatchKey(name string) string {
 	return builder.String()
 }
 
+var (
+	invoicePDFNumber = regexp.MustCompile(`(?m)^\s*(\d{20})\s*$`)
+	invoicePDFAmount = regexp.MustCompile(`[¥￥]\s*(\d[\d,]*(?:\.\d{1,2})?)`)
+)
+
+// invoicePDF is what an e-invoice PDF says about itself.
+type invoicePDF struct {
+	number     string
+	totalCents int64
+}
+
+// readInvoicePDF reads the 20-digit invoice number and the total including
+// tax from a fully digitalized e-invoice (数电票) PDF. The total is its largest
+// "¥" amount: line items carry no currency sign, and the amount and tax totals
+// are smaller. ok is false when there is no amount, as in a scanned invoice.
+func readInvoicePDF(content []byte) (invoice invoicePDF, ok bool) {
+	defer func() {
+		// The PDF reader panics on some malformed files.
+		if recover() != nil {
+			invoice, ok = invoicePDF{}, false
+		}
+	}()
+	reader, err := pdf.NewReader(bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		return invoice, false
+	}
+	plain, err := reader.GetPlainText()
+	if err != nil {
+		return invoice, false
+	}
+	text, err := io.ReadAll(plain)
+	if err != nil {
+		return invoice, false
+	}
+	if match := invoicePDFNumber.FindSubmatch(text); match != nil {
+		invoice.number = string(match[1])
+	}
+	for _, match := range invoicePDFAmount.FindAllSubmatch(text, -1) {
+		amount, err := decimal.NewFromString(strings.ReplaceAll(string(match[1]), ",", ""))
+		if err != nil {
+			continue
+		}
+		invoice.totalCents = max(invoice.totalCents, amount.Shift(2).Round(0).IntPart())
+	}
+	return invoice, invoice.totalCents > 0
+}
+
 // InvoiceWechatAutoIssueReady reports whether invoice PDFs from the finance
 // group can be issued: the switch is on, invoice files are enabled, and the
 // group notification that announces the result is enabled and configured.
@@ -462,8 +510,10 @@ func InvoiceWechatAutoIssueReady() bool {
 // request, the file is attached to it, the request is marked issued, the
 // applicant is emailed as for a manual issue, and the group is told the order
 // is complete. A company name found only inside a longer matching one (a head
-// office inside its branch) does not count. A file that matches no request,
-// or several, changes nothing. Sending the same file again never attaches it
+// office inside its branch) does not count. Among several requests for the
+// same company, the oldest one whose amount equals the invoice total is
+// issued. A file that matches no request, or several of which none has the
+// invoice total, changes nothing. Sending the same file again never attaches it
 // twice.
 func IssueInvoiceFromWechatFile(ctx context.Context, fileName string, content []byte) (*InvoiceWechatFileResult, error) {
 	name, ok := parseInvoiceWechatFileName(fileName)
@@ -497,13 +547,37 @@ func IssueInvoiceFromWechatFile(ctx context.Context, fileName string, content []
 	if len(matched) == 0 {
 		return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileNoMatch}, nil
 	}
+	digest := sha256.Sum256(content)
+	sha256Value := hex.EncodeToString(digest[:])
 	if len(matched) > 1 {
-		return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileAmbiguous}, nil
+		// An applicant may split orders into several requests for one
+		// company. The total printed on the invoice picks among them, oldest
+		// request first. An invoice some request already holds (the same file
+		// or invoice number sent again) only resumes that request, so a resend
+		// never issues the next one.
+		invoice, ok := readInvoicePDF(content)
+		if !ok {
+			return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileAmbiguous}, nil
+		}
+		holders, err := model.ListInvoiceRequestIdsHoldingInvoice(sha256Value, invoice.number)
+		if err != nil {
+			return nil, err
+		}
+		var picked *model.InvoiceRequest
+		for _, request := range matched {
+			if request.TotalMoneyCents == invoice.totalCents && (len(holders) == 0 || slices.Contains(holders, request.Id)) {
+				picked = request
+				break
+			}
+		}
+		if picked == nil {
+			return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileAmbiguous}, nil
+		}
+		matched = []*model.InvoiceRequest{picked}
 	}
 	request := matched[0]
 
-	digest := sha256.Sum256(content)
-	attached, err := model.InvoiceFileExists(request.Id, hex.EncodeToString(digest[:]))
+	attached, err := model.InvoiceFileExists(request.Id, sha256Value)
 	if err != nil {
 		return nil, err
 	}
