@@ -189,6 +189,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.16
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.99.1
 	github.com/braheezy/shine-mp3 v0.2.0
+	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.73
 )
 
