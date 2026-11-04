@@ -33,6 +33,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -138,6 +139,9 @@ type TaskAdaptor struct {
 	requestBodyText json.RawMessage
 }
 
+// Replaced in tests; production stores inputs as public reference media.
+var uploadTaskReferenceImage = service.UploadReferenceImage
+
 func New(plugin *pluginruntime.LoadedPlugin) *TaskAdaptor { return &TaskAdaptor{plugin: plugin} }
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo)   { a.info = info }
 
@@ -176,6 +180,10 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		if taskErr := relaycommon.ValidateBasicTaskRequest(c, info, "image_to_video"); taskErr != nil {
 			return taskErr
 		}
+	}
+	// Before preflight, so hooks that register HTTPS images also see these.
+	if setting.IsTaskPluginReferenceImageURLEnabled(a.plugin.Meta.Key) {
+		storeInlineReferenceImages(c)
 	}
 	request, hasRequest := c.Get("task_request")
 	hasUsageProfiles := len(a.plugin.Meta.UsageProfiles) > 0
@@ -670,7 +678,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 			return nil, err
 		}
 	}
-	inlined, err := inlineJSONFilePlaceholders(c, value)
+	inlined, err := inlineJSONFilePlaceholders(c, value, setting.IsTaskPluginReferenceImageURLEnabled(a.plugin.Meta.Key))
 	if err != nil {
 		return nil, err
 	}
@@ -689,7 +697,141 @@ func maxInlineFileBytes() int64 {
 	return int64(limitMB) << 20
 }
 
-func inlineJSONFilePlaceholders(c *gin.Context, body any) (any, error) {
+// storeInlineReferenceImages replaces each data:image URL and each dataUrl
+// file placeholder in the decoded request with a public reference media URL,
+// for plugins whose upstreams fetch images by URL and should not receive
+// base64. Images that are not PNG, JPEG, WebP or GIF, or that fail to store,
+// stay inline: the plugin and upstream accepted them before, so the request
+// is never failed for this.
+func storeInlineReferenceImages(c *gin.Context) {
+	request, exists := c.Get("task_request")
+	if !exists {
+		return
+	}
+	// Built-in adaptors read a TaskSubmitReq back; only plugin JSON is rewritten.
+	switch request.(type) {
+	case map[string]any, []any:
+	default:
+		return
+	}
+	text, _ := c.Get(pluginruntime.ContextKeyRequestBodyText)
+	requestText, hasText := text.(json.RawMessage)
+	// json-order@1 plugins read the decoded text instead, where only data
+	// URLs are rewritten; their file placeholders are stored on submission.
+	var form *multipart.Form
+	if !hasText && strings.Contains(c.GetHeader("Content-Type"), "multipart/form-data") {
+		parsed, err := common.ParseMultipartFormReusable(c)
+		if err == nil {
+			defer parsed.RemoveAll()
+			form = parsed
+		}
+	}
+	stored := map[string]string{}
+	// The request was handed to the protocol decoder, so rewrite a copy.
+	replaced := replaceInlineReferenceImages(c, jsonValue(request), form, stored)
+	changed := 0
+	for source, publicURL := range stored {
+		if publicURL != source {
+			changed++
+		}
+	}
+	if changed == 0 {
+		return
+	}
+	c.Set("task_request", replaced)
+	// A data URL written with escaped slashes is not found in the text and
+	// stays inline.
+	if hasText {
+		rewritten := requestText
+		for dataURL, publicURL := range stored {
+			from, fromErr := common.Marshal(dataURL)
+			to, toErr := common.Marshal(publicURL)
+			if fromErr == nil && toErr == nil && dataURL != publicURL {
+				rewritten = bytes.ReplaceAll(rewritten, from, to)
+			}
+		}
+		c.Set(pluginruntime.ContextKeyRequestBodyText, json.RawMessage(rewritten))
+	}
+	logger.LogDebug(c, "task_plugin subsystem=adaptor event=reference_images_stored count=%d", changed)
+}
+
+// replaceInlineReferenceImages stores each distinct data:image URL and file
+// once and records it in stored, mapped to itself when it stays inline. File
+// placeholders are keyed by their ref, which never starts with "data:".
+func replaceInlineReferenceImages(c *gin.Context, value any, form *multipart.Form, stored map[string]string) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		if _, isPlaceholder := typed["__fileRef"]; isPlaceholder {
+			ref, _ := typed["__fileRef"].(string)
+			if form == nil || typed["encoding"] != "dataUrl" {
+				return typed
+			}
+			if publicURL, done := stored[ref]; done {
+				if publicURL == ref {
+					return typed
+				}
+				return publicURL
+			}
+			stored[ref] = ref
+			field, index, validRef := pluginruntime.ParseFileReference(ref)
+			files := form.File[field]
+			// Invalid and oversize placeholders fail on submission as before.
+			if !validRef || index >= len(files) || files[index].Size > maxInlineFileBytes() {
+				return typed
+			}
+			if maxBytes, ok := usageNumber(typed["maxBytes"], false); ok && float64(files[index].Size) > maxBytes {
+				return typed
+			}
+			file, err := files[index].Open()
+			if err != nil {
+				return typed
+			}
+			publicURL, err := uploadTaskReferenceImage(c.Request.Context(), file)
+			file.Close()
+			if err != nil {
+				if !errors.Is(err, service.ErrUnsupportedReferenceImage) {
+					logger.LogWarn(c, "task_plugin subsystem=adaptor event=reference_image_inline_kept bytes=%d error=%q", files[index].Size, err.Error())
+				}
+				return typed
+			}
+			stored[ref] = publicURL
+			return publicURL
+		}
+		for key, item := range typed {
+			typed[key] = replaceInlineReferenceImages(c, item, form, stored)
+		}
+	case []any:
+		for index, item := range typed {
+			typed[index] = replaceInlineReferenceImages(c, item, form, stored)
+		}
+	case string:
+		header, payload, found := strings.Cut(typed, ",")
+		header = strings.ToLower(header)
+		if !found || !strings.HasPrefix(header, "data:image/") || !strings.HasSuffix(header, ";base64") {
+			return typed
+		}
+		if publicURL, done := stored[typed]; done {
+			return publicURL
+		}
+		stored[typed] = typed
+		content, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(payload), ""))
+		if err != nil || len(content) == 0 {
+			return typed
+		}
+		publicURL, err := uploadTaskReferenceImage(c.Request.Context(), bytes.NewReader(content))
+		if err != nil {
+			if !errors.Is(err, service.ErrUnsupportedReferenceImage) {
+				logger.LogWarn(c, "task_plugin subsystem=adaptor event=reference_image_inline_kept bytes=%d error=%q", len(content), err.Error())
+			}
+			return typed
+		}
+		stored[typed] = publicURL
+		return publicURL
+	}
+	return value
+}
+
+func inlineJSONFilePlaceholders(c *gin.Context, body any, storeImages bool) (any, error) {
 	cloned := jsonValue(body)
 	var form *multipart.Form
 	if c != nil && c.Request != nil && strings.Contains(c.GetHeader("Content-Type"), "multipart/form-data") {
@@ -702,17 +844,17 @@ func inlineJSONFilePlaceholders(c *gin.Context, body any) (any, error) {
 	}
 	limit := maxInlineFileBytes()
 	var total int64
-	return replaceJSONFilePlaceholders(cloned, form, limit, &total)
+	return replaceJSONFilePlaceholders(c, cloned, form, limit, &total, storeImages)
 }
 
-func replaceJSONFilePlaceholders(value any, form *multipart.Form, limit int64, total *int64) (any, error) {
+func replaceJSONFilePlaceholders(c *gin.Context, value any, form *multipart.Form, limit int64, total *int64, storeImages bool) (any, error) {
 	switch typed := value.(type) {
 	case map[string]any:
 		if _, isPlaceholder := typed["__fileRef"]; isPlaceholder {
-			return encodeFilePlaceholder(typed, form, limit, total)
+			return encodeFilePlaceholder(c, typed, form, limit, total, storeImages)
 		}
 		for key, item := range typed {
-			replaced, err := replaceJSONFilePlaceholders(item, form, limit, total)
+			replaced, err := replaceJSONFilePlaceholders(c, item, form, limit, total, storeImages)
 			if err != nil {
 				return nil, err
 			}
@@ -721,7 +863,7 @@ func replaceJSONFilePlaceholders(value any, form *multipart.Form, limit int64, t
 		return typed, nil
 	case []any:
 		for index, item := range typed {
-			replaced, err := replaceJSONFilePlaceholders(item, form, limit, total)
+			replaced, err := replaceJSONFilePlaceholders(c, item, form, limit, total, storeImages)
 			if err != nil {
 				return nil, err
 			}
@@ -733,7 +875,10 @@ func replaceJSONFilePlaceholders(value any, form *multipart.Form, limit int64, t
 	}
 }
 
-func encodeFilePlaceholder(placeholder map[string]any, form *multipart.Form, limit int64, total *int64) (string, error) {
+// With storeImages, a dataUrl placeholder for a PNG, JPEG, WebP or GIF file
+// becomes a public reference media URL instead; other files, and images that
+// fail to store, are inlined as before.
+func encodeFilePlaceholder(c *gin.Context, placeholder map[string]any, form *multipart.Form, limit int64, total *int64, storeImages bool) (string, error) {
 	for key := range placeholder {
 		switch key {
 		case "__fileRef", "encoding", "mimeType", "maxBytes":
@@ -770,6 +915,20 @@ func encodeFilePlaceholder(placeholder map[string]any, form *multipart.Form, lim
 	}
 	if header.Size > maxBytes {
 		return "", fmt.Errorf("file %q exceeds the %d byte limit", ref, maxBytes)
+	}
+	if storeImages && encoding == "dataUrl" {
+		file, openErr := header.Open()
+		if openErr != nil {
+			return "", openErr
+		}
+		publicURL, uploadErr := uploadTaskReferenceImage(c.Request.Context(), file)
+		file.Close()
+		if uploadErr == nil {
+			return publicURL, nil
+		}
+		if !errors.Is(uploadErr, service.ErrUnsupportedReferenceImage) {
+			logger.LogWarn(c, "task_plugin subsystem=adaptor event=reference_image_inline_kept bytes=%d error=%q", header.Size, uploadErr.Error())
+		}
 	}
 	file, openErr := header.Open()
 	if openErr != nil {
