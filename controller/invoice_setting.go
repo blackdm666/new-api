@@ -81,6 +81,11 @@ type InvoiceSettingsPayload struct {
 	// its digest is stored, and nil keeps the stored digest.
 	InvoiceWechatInboundToken *string `json:"InvoiceWechatInboundToken,omitempty"`
 
+	InvoiceHongKongAutoBillEnabled      *bool   `json:"InvoiceHongKongAutoBillEnabled,omitempty"`
+	InvoiceHongKongIssuerName           *string `json:"InvoiceHongKongIssuerName,omitempty"`
+	InvoiceHongKongIssuerRegistrationNo *string `json:"InvoiceHongKongIssuerRegistrationNo,omitempty"`
+	InvoiceHongKongIssuerAddress        *string `json:"InvoiceHongKongIssuerAddress,omitempty"`
+
 	inboundTokenDigest string
 }
 
@@ -91,7 +96,9 @@ func validateInvoiceSettingsPayload(payload *InvoiceSettingsPayload) error {
 	if payload.InvoiceRejectedNotifyUserEnabled == nil || payload.InvoiceExpiredNotifyUserEnabled == nil ||
 		payload.InvoiceWechatNotifyEnabled == nil || payload.InvoiceWechatApiBaseUrl == nil ||
 		payload.InvoiceWechatApiToken == nil || payload.InvoiceWechatAppId == nil || payload.InvoiceWechatGroupId == nil ||
-		payload.InvoiceWechatAutoIssueEnabled == nil {
+		payload.InvoiceWechatAutoIssueEnabled == nil || payload.InvoiceHongKongAutoBillEnabled == nil ||
+		payload.InvoiceHongKongIssuerName == nil || payload.InvoiceHongKongIssuerRegistrationNo == nil ||
+		payload.InvoiceHongKongIssuerAddress == nil {
 		return errors.New("invoice settings must be merged with the stored values before validation")
 	}
 	payload.InvoiceAdminEmail = strings.TrimSpace(payload.InvoiceAdminEmail)
@@ -205,6 +212,29 @@ func validateInvoiceWechatSettings(payload *InvoiceSettingsPayload) error {
 		(!*payload.InvoiceWechatNotifyEnabled || payload.inboundTokenDigest == "" || !payload.InvoiceFileEnabled) {
 		return errors.New("WeChat auto-issue requires WeChat notifications, a bot token and invoice files")
 	}
+	return validateInvoiceHongKongBillSettings(payload)
+}
+
+// validateInvoiceHongKongBillSettings checks the Hong Kong issuer printed on
+// generated bills. Generating bills needs invoice files and an issuer name.
+func validateInvoiceHongKongBillSettings(payload *InvoiceSettingsPayload) error {
+	for _, field := range []struct {
+		value *string
+		limit int
+		label string
+	}{
+		{payload.InvoiceHongKongIssuerName, setting.InvoiceHongKongIssuerNameMaxLength, "Hong Kong issuer name"},
+		{payload.InvoiceHongKongIssuerRegistrationNo, setting.InvoiceHongKongIssuerRegistrationNoMaxLength, "Hong Kong issuer registration number"},
+		{payload.InvoiceHongKongIssuerAddress, setting.InvoiceHongKongIssuerAddressMaxLength, "Hong Kong issuer address"},
+	} {
+		*field.value = strings.TrimSpace(*field.value)
+		if len([]rune(*field.value)) > field.limit {
+			return fmt.Errorf("%s must be at most %d characters", field.label, field.limit)
+		}
+	}
+	if *payload.InvoiceHongKongAutoBillEnabled && (!payload.InvoiceFileEnabled || *payload.InvoiceHongKongIssuerName == "") {
+		return errors.New("Hong Kong auto-billing requires invoice files and an issuer name")
+	}
 	return nil
 }
 
@@ -240,6 +270,18 @@ func preserveStoredInvoiceSettings(payload *InvoiceSettingsPayload) {
 	}
 	if payload.InvoiceWechatAutoIssueEnabled == nil {
 		payload.InvoiceWechatAutoIssueEnabled = common.GetPointer(setting.InvoiceWechatAutoIssueEnabled)
+	}
+	if payload.InvoiceHongKongAutoBillEnabled == nil {
+		payload.InvoiceHongKongAutoBillEnabled = common.GetPointer(setting.InvoiceHongKongAutoBillEnabled)
+	}
+	if payload.InvoiceHongKongIssuerName == nil {
+		payload.InvoiceHongKongIssuerName = common.GetPointer(setting.InvoiceHongKongIssuerName)
+	}
+	if payload.InvoiceHongKongIssuerRegistrationNo == nil {
+		payload.InvoiceHongKongIssuerRegistrationNo = common.GetPointer(setting.InvoiceHongKongIssuerRegistrationNo)
+	}
+	if payload.InvoiceHongKongIssuerAddress == nil {
+		payload.InvoiceHongKongIssuerAddress = common.GetPointer(setting.InvoiceHongKongIssuerAddress)
 	}
 	// Like the API token, an omitted, empty or masked bot token keeps the
 	// stored digest.
@@ -401,6 +443,10 @@ func (payload *InvoiceSettingsPayload) optionValues() map[string]string {
 		"InvoiceWechatGroupId":                 *payload.InvoiceWechatGroupId,
 		"InvoiceWechatAutoIssueEnabled":        strconv.FormatBool(*payload.InvoiceWechatAutoIssueEnabled),
 		"InvoiceWechatInboundToken":            payload.inboundTokenDigest,
+		"InvoiceHongKongAutoBillEnabled":       strconv.FormatBool(*payload.InvoiceHongKongAutoBillEnabled),
+		"InvoiceHongKongIssuerName":            *payload.InvoiceHongKongIssuerName,
+		"InvoiceHongKongIssuerRegistrationNo":  *payload.InvoiceHongKongIssuerRegistrationNo,
+		"InvoiceHongKongIssuerAddress":         *payload.InvoiceHongKongIssuerAddress,
 	}
 }
 

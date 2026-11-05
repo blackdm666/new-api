@@ -43,6 +43,10 @@ const defaults: DefaultValues = {
   InvoiceWechatAppId: 'wx-app',
   InvoiceWechatGroupId: '12345678901@chatroom',
   InvoiceWechatAutoIssueEnabled: false,
+  InvoiceHongKongAutoBillEnabled: false,
+  InvoiceHongKongIssuerName: '',
+  InvoiceHongKongIssuerRegistrationNo: '',
+  InvoiceHongKongIssuerAddress: '',
   InvoiceAdminEmail: 'billing@example.com',
   InvoiceMinimumAmountCents: '50000',
   InvoiceTaxRateBasisPoints: '300',
@@ -344,5 +348,69 @@ describe('invoice settings notifications', () => {
       'Turn on WeChat group notifications and invoice file delivery before auto-issuing from group PDFs.'
     )
     expect(put).not.toHaveBeenCalled()
+  })
+})
+
+describe('invoice settings Hong Kong bills', () => {
+  test('turning on auto-billing without an issuer name blocks saving', async () => {
+    const put = vi.spyOn(api, 'put')
+    const error = vi.spyOn(toast, 'error')
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(
+      screen.getByRole('switch', {
+        name: 'Generate Hong Kong bills automatically',
+      })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Save invoice settings' })
+    )
+
+    expect(error).toHaveBeenCalledWith(
+      'Enter the issuer name printed on Hong Kong bills.'
+    )
+    expect(screen.getByLabelText('Issuer name')).toHaveAttribute(
+      'aria-invalid',
+      'true'
+    )
+    expect(put).not.toHaveBeenCalled()
+  })
+
+  test('saving sends the switch and the trimmed issuer details', async () => {
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true, message: '' } })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(
+      screen.getByRole('switch', {
+        name: 'Generate Hong Kong bills automatically',
+      })
+    )
+    await user.type(
+      screen.getByLabelText('Issuer name'),
+      ' DAYFOLD HK LIMITED '
+    )
+    await user.type(
+      screen.getByLabelText('Business registration number'),
+      '78129797'
+    )
+    await user.type(
+      screen.getByLabelText('Issuer address'),
+      'SUITE 6503, 65/F, CENTRAL PLAZA'
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Save invoice settings' })
+    )
+
+    await waitFor(() => expect(put).toHaveBeenCalledOnce())
+    expect(put.mock.calls[0][1]).toMatchObject({
+      InvoiceHongKongAutoBillEnabled: true,
+      InvoiceHongKongIssuerName: 'DAYFOLD HK LIMITED',
+      InvoiceHongKongIssuerRegistrationNo: '78129797',
+      InvoiceHongKongIssuerAddress: 'SUITE 6503, 65/F, CENTRAL PLAZA',
+    })
   })
 })

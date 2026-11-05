@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -18,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/ledongthuc/pdf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -640,4 +642,130 @@ func TestInvoiceWechatReminderFollowsTheWorkingDayCalendar(t *testing.T) {
 	setting.InvoiceWechatNotifyEnabled = false
 	queueInvoiceWechatReminder(at("2026-11-09 09:30"))
 	assert.Len(t, reminders(), 2, "nothing is queued while the group notification is off")
+}
+
+func TestIssueInvoiceHongKongBill(t *testing.T) {
+	require.NoError(t, model.DB.AutoMigrate(
+		&model.InvoiceRequest{}, &model.InvoiceRequestEvent{}, &model.InvoiceNotificationDelivery{},
+		&model.InvoiceFile{}, &model.InvoiceFileUpload{}, &model.InvoiceFileCleanup{}, &model.InvoiceStorageProfile{},
+	))
+	t.Cleanup(func() {
+		for _, table := range []string{
+			"invoice_notification_deliveries", "invoice_request_events", "invoice_files", "invoice_file_uploads",
+			"invoice_requests", "invoice_storage_profiles", "email_deliveries", "users",
+		} {
+			model.DB.Exec("DELETE FROM " + table)
+		}
+	})
+	api := newFakeWechatAPI(t)
+	withInvoiceWechatSettings(t, api.server.URL+"/finder/v2/api")
+	previous := []any{
+		setting.InvoiceFileEnabled, setting.InvoiceFileStorage, setting.InvoiceFileLocalPath, setting.InvoiceFileAllowedExts,
+		setting.InvoiceFileAllowedMimes, setting.InvoiceFileMaxSize, setting.InvoiceFileMaxCount, common.InvoiceIssuedNotifyUserEnabled,
+		setting.InvoiceHongKongAutoBillEnabled, setting.InvoiceHongKongIssuerName, setting.InvoiceHongKongIssuerRegistrationNo,
+		setting.InvoiceHongKongIssuerAddress,
+	}
+	t.Cleanup(func() {
+		setting.InvoiceFileEnabled = previous[0].(bool)
+		setting.InvoiceFileStorage = previous[1].(string)
+		setting.InvoiceFileLocalPath = previous[2].(string)
+		setting.InvoiceFileAllowedExts = previous[3].(string)
+		setting.InvoiceFileAllowedMimes = previous[4].(string)
+		setting.InvoiceFileMaxSize = previous[5].(int64)
+		setting.InvoiceFileMaxCount = previous[6].(int)
+		common.InvoiceIssuedNotifyUserEnabled = previous[7].(bool)
+		setting.InvoiceHongKongAutoBillEnabled = previous[8].(bool)
+		setting.InvoiceHongKongIssuerName = previous[9].(string)
+		setting.InvoiceHongKongIssuerRegistrationNo = previous[10].(string)
+		setting.InvoiceHongKongIssuerAddress = previous[11].(string)
+	})
+	setting.InvoiceFileEnabled = true
+	setting.InvoiceFileStorage = "local"
+	setting.InvoiceFileLocalPath = t.TempDir()
+	setting.InvoiceFileAllowedExts = "pdf"
+	setting.InvoiceFileAllowedMimes = "application/pdf"
+	setting.InvoiceFileMaxSize = 5 * 1024 * 1024
+	setting.InvoiceFileMaxCount = 5
+	common.InvoiceIssuedNotifyUserEnabled = true
+	setting.InvoiceHongKongAutoBillEnabled = true
+	setting.InvoiceHongKongIssuerName = ""
+	assert.False(t, InvoiceHongKongAutoBillReady(), "a bill needs its issuer")
+	setting.InvoiceHongKongIssuerName = "DAYFOLD HK LIMITED"
+	setting.InvoiceHongKongIssuerRegistrationNo = "78129797"
+	setting.InvoiceHongKongIssuerAddress = "SUITE 6503, 65/F, CENTRAL PLAZA, 18 HARBOUR ROAD, WAN CHAI, HONG KONG"
+	assert.True(t, InvoiceHongKongAutoBillReady())
+
+	applicant := &model.User{Username: "harbour", Email: "accounts@harbour.example", AffCode: "harbour", Status: common.UserStatusEnabled}
+	require.NoError(t, model.DB.Create(applicant).Error)
+	// 24 orders of ¥875 run past the first page.
+	orders := make([]*model.TopUp, 24)
+	for index := range orders {
+		orders[index] = &model.TopUp{
+			Id: index + 1, UserId: applicant.Id, Money: 875, TradeNo: fmt.Sprintf("USR%dNOHK%03d", applicant.Id, index+1),
+			CompleteTime: time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC).Unix(), Status: common.TopUpStatusSuccess,
+		}
+	}
+	request := &model.InvoiceRequest{
+		UserId: applicant.Id, Username: applicant.Username, Region: model.InvoiceRegionHongKong,
+		CompanyName: "海港貿易有限公司 Harbour Trading Limited", TotalMoney: 21000, TotalMoneyCents: 2100000,
+		Status: model.InvoiceStatusPending,
+	}
+	require.NoError(t, model.DB.Create(request).Error)
+
+	content, number, err := RenderInvoiceHongKongBill(request, orders, time.Date(2026, 10, 27, 20, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	assert.Equal(t, fmt.Sprintf("88API-HK-20261028-%06d", request.Id), number, "the bill is dated in Hong Kong time")
+	reader, err := pdf.NewReader(bytes.NewReader(content), int64(len(content)))
+	require.NoError(t, err)
+	assert.Greater(t, reader.NumPage(), 1)
+	plain, err := reader.GetPlainText()
+	require.NoError(t, err)
+	text, err := io.ReadAll(plain)
+	require.NoError(t, err)
+	for _, want := range []string{
+		number, "2026-10-28", "DAYFOLD HK LIMITED", "78129797", "CENTRAL PLAZA", "Harbour Trading Limited",
+		"CNY 875.00", "CNY 21,000.00", orders[0].TradeNo, orders[23].TradeNo,
+	} {
+		assert.Contains(t, string(text), want)
+	}
+	_, _, err = RenderInvoiceHongKongBill(&model.InvoiceRequest{Region: model.InvoiceRegionMainland}, orders, time.Now())
+	assert.Error(t, err, "mainland requests get a VAT e-invoice from finance")
+
+	issued, err := IssueInvoiceHongKongBill(context.Background(), request, orders)
+	require.NoError(t, err)
+	assert.Equal(t, model.InvoiceStatusIssued, issued.Status)
+	files, err := model.ListInvoiceFiles(request.Id)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Regexp(t, fmt.Sprintf(`^帳單-88API-HK-\d{8}-%06d\.pdf$`, request.Id), files[0].FileName)
+	assert.Equal(t, "application/pdf", files[0].MimeType)
+
+	var deliveries []*model.InvoiceNotificationDelivery
+	require.NoError(t, model.DB.Where("invoice_request_id = ?", request.Id).Order("id ASC").Find(&deliveries).Error)
+	require.Len(t, deliveries, 2)
+	assert.Equal(t, model.InvoiceNotificationKindUserEmail, deliveries[0].Kind)
+	assert.Equal(t, "accounts@harbour.example", deliveries[0].Recipient)
+	assert.Equal(t, model.InvoiceNotificationKindWechatGroup, deliveries[1].Kind)
+	deliverPendingInvoiceWechatNotifications()
+	messages := api.received()
+	require.Len(t, messages, 1)
+	assert.Equal(t, "【帳單已自动开具 #"+strconv.Itoa(request.Id)+"】\n"+
+		"开票类型：帳單 INVOICE（中国香港）\n"+
+		"收件人：海港貿易有限公司 Harbour Trading Limited\n"+
+		"开票金额：¥21,000.00\n"+
+		"帳單文件："+files[0].FileName+"\n"+
+		"系统已生成帳單并发给用户，无需人工开具。", messages[0]["content"])
+
+	// A bill that cannot be generated leaves the request to finance.
+	failed := &model.InvoiceRequest{
+		UserId: applicant.Id, Username: applicant.Username, Region: model.InvoiceRegionHongKong,
+		CompanyName: "Kowloon Supplies Limited", TotalMoney: 600, TotalMoneyCents: 60000, Status: model.InvoiceStatusPending,
+	}
+	require.NoError(t, model.DB.Create(failed).Error)
+	require.NoError(t, QueueInvoiceRequestCreatedNotifications(failed))
+	deliverPendingInvoiceWechatNotifications()
+	messages = api.received()
+	require.Len(t, messages, 2)
+	assert.True(t, strings.HasPrefix(messages[1]["content"], "【新开票申请 #"+strconv.Itoa(failed.Id)+"】"))
+	assert.True(t, strings.HasSuffix(messages[1]["content"], "\n系统自动生成帳單失败，请人工开具。"))
 }

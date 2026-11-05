@@ -8913,6 +8913,17 @@
     "Pinned to top": "置頂",
     "Model order updated": "模型排序已更新",
     "Failed to update model order": "更新模型排序失敗",
-    "Invalid pin position": "置頂/置底位置無效"
+    "Invalid pin position": "置頂/置底位置無效",
+    "Hong Kong bills": "香港帳單",
+    "Generate Hong Kong bills automatically": "自動產生香港帳單",
+    "When a Hong Kong application is submitted, the system generates the INVOICE PDF, marks the application issued and emails the applicant at once, and tells the finance group. If generation fails, the application waits for finance as usual.": "使用者提交香港開票申請後，系統立即產生帳單（INVOICE）PDF、標記為已開票並以電郵寄給使用者，同時通知財務群。產生失敗時，申請照常留給財務處理。",
+    "Issuer name": "開票方名稱",
+    "Business registration number": "商業登記證號碼",
+    "Issuer address": "開票方地址",
+    "Printed in the issuer column of every generated bill.": "印在每張自動產生的帳單的開票方一欄。",
+    "Enter the issuer name printed on Hong Kong bills.": "請填寫印在香港帳單上的開票方名稱。",
+    "Turn on invoice file delivery before generating Hong Kong bills automatically.": "請先開啟發票檔案交付，再開啟自動產生香港帳單。",
+    "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "香港帳單在提交後立即產生，可直接在申請詳情中下載。",
+    "Invoice issued. Download it from the application details.": "發票已開具，可在申請詳情中下載。"
   }
 }

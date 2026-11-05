@@ -8911,6 +8911,17 @@
     "Pinned to top": "先頭固定",
     "Model order updated": "モデルの並び順を更新しました",
     "Failed to update model order": "モデルの並び順を更新できませんでした",
-    "Invalid pin position": "固定位置が無効です"
+    "Invalid pin position": "固定位置が無効です",
+    "Hong Kong bills": "香港向け請求書",
+    "Generate Hong Kong bills automatically": "香港向け請求書を自動発行",
+    "When a Hong Kong application is submitted, the system generates the INVOICE PDF, marks the application issued and emails the applicant at once, and tells the finance group. If generation fails, the application waits for finance as usual.": "香港向けの申請が送信されると、システムが請求書（INVOICE）PDF をすぐに作成し、申請を発行済みにして申請者にメールで送り、経理グループにも通知します。作成に失敗した場合は、通常どおり経理の処理を待ちます。",
+    "Issuer name": "発行者名",
+    "Business registration number": "商業登記証番号",
+    "Issuer address": "発行者住所",
+    "Printed in the issuer column of every generated bill.": "自動作成されるすべての請求書の発行者欄に印字されます。",
+    "Enter the issuer name printed on Hong Kong bills.": "香港向け請求書に印字する発行者名を入力してください。",
+    "Turn on invoice file delivery before generating Hong Kong bills automatically.": "香港向け請求書を自動発行する前に、請求書ファイルの提供を有効にしてください。",
+    "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "香港向け請求書は送信後すぐに作成され、申請の詳細からすぐにダウンロードできます。",
+    "Invoice issued. Download it from the application details.": "請求書を発行しました。申請の詳細からダウンロードしてください。"
   }
 }

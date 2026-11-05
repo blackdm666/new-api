@@ -8911,6 +8911,17 @@
     "Pinned to top": "Đã ghim đầu",
     "Model order updated": "Đã cập nhật thứ tự mô hình",
     "Failed to update model order": "Không thể cập nhật thứ tự mô hình",
-    "Invalid pin position": "Vị trí ghim không hợp lệ"
+    "Invalid pin position": "Vị trí ghim không hợp lệ",
+    "Hong Kong bills": "Hóa đơn Hồng Kông",
+    "Generate Hong Kong bills automatically": "Tự động tạo hóa đơn Hồng Kông",
+    "When a Hong Kong application is submitted, the system generates the INVOICE PDF, marks the application issued and emails the applicant at once, and tells the finance group. If generation fails, the application waits for finance as usual.": "Khi có đơn xin hóa đơn Hồng Kông, hệ thống lập ngay hóa đơn PDF (INVOICE), đánh dấu đơn là đã xuất, gửi email cho người yêu cầu và báo cho nhóm tài chính. Nếu lập hóa đơn thất bại, đơn sẽ chờ bộ phận tài chính xử lý như thường lệ.",
+    "Issuer name": "Tên bên xuất hóa đơn",
+    "Business registration number": "Số đăng ký kinh doanh",
+    "Issuer address": "Địa chỉ bên xuất hóa đơn",
+    "Printed in the issuer column of every generated bill.": "In ở cột bên xuất của mọi hóa đơn được tạo.",
+    "Enter the issuer name printed on Hong Kong bills.": "Nhập tên bên xuất in trên hóa đơn Hồng Kông.",
+    "Turn on invoice file delivery before generating Hong Kong bills automatically.": "Hãy bật gửi tệp hóa đơn trước khi tự động tạo hóa đơn Hồng Kông.",
+    "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "Hóa đơn Hồng Kông được tạo ngay khi bạn gửi và có thể tải xuống ngay trong chi tiết đơn.",
+    "Invoice issued. Download it from the application details.": "Đã xuất hóa đơn. Tải xuống trong chi tiết đơn."
   }
 }

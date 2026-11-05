@@ -9005,6 +9005,17 @@
     "Pinned to top": "Pinned to top",
     "Model order updated": "Model order updated",
     "Failed to update model order": "Failed to update model order",
-    "Invalid pin position": "Invalid pin position"
+    "Invalid pin position": "Invalid pin position",
+    "Hong Kong bills": "Hong Kong bills",
+    "Generate Hong Kong bills automatically": "Generate Hong Kong bills automatically",
+    "When a Hong Kong application is submitted, the system generates the INVOICE PDF, marks the application issued and emails the applicant at once, and tells the finance group. If generation fails, the application waits for finance as usual.": "When a Hong Kong application is submitted, the system generates the INVOICE PDF, marks the application issued and emails the applicant at once, and tells the finance group. If generation fails, the application waits for finance as usual.",
+    "Issuer name": "Issuer name",
+    "Business registration number": "Business registration number",
+    "Issuer address": "Issuer address",
+    "Printed in the issuer column of every generated bill.": "Printed in the issuer column of every generated bill.",
+    "Enter the issuer name printed on Hong Kong bills.": "Enter the issuer name printed on Hong Kong bills.",
+    "Turn on invoice file delivery before generating Hong Kong bills automatically.": "Turn on invoice file delivery before generating Hong Kong bills automatically.",
+    "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.",
+    "Invoice issued. Download it from the application details.": "Invoice issued. Download it from the application details."
   }
 }

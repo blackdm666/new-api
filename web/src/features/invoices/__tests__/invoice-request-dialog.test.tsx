@@ -20,6 +20,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ComponentProps } from 'react'
+import { toast } from 'sonner'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -284,6 +285,37 @@ describe('invoice request dialog', () => {
       save_title: false,
     })
     expect(payload).not.toHaveProperty('tax_number')
+  })
+
+  test('with Hong Kong auto-billing on, the dialog says the bill is issued at once and confirms it', async () => {
+    mockInvoiceRequests({
+      config: () =>
+        Promise.resolve(success({ ...config, hong_kong_auto_bill: true })),
+      orders: () => Promise.resolve(success([order])),
+    })
+    vi.spyOn(api, 'post').mockResolvedValue(
+      success({ invoice: { id: 3, status: 2 }, orders: [], files: [] })
+    )
+    const notice = vi.spyOn(toast, 'success')
+    const user = userEvent.setup()
+
+    renderDialog()
+
+    expect(
+      await screen.findByText(
+        /Hong Kong invoices are generated as soon as you submit/
+      )
+    ).toBeVisible()
+    await user.click(await screen.findByRole('checkbox', { name: /PAY-/ }))
+    await user.click(screen.getByRole('radio', { name: /Hong Kong/ }))
+    await user.type(screen.getByLabelText(/Recipient name/), 'Example HK Ltd')
+    await user.click(
+      screen.getByRole('button', { name: 'Submit invoice application' })
+    )
+
+    expect(notice).toHaveBeenCalledWith(
+      'Invoice issued. Download it from the application details.'
+    )
   })
 
   test('prefills the default saved title of the chosen invoice type and saves on request', async () => {

@@ -64,6 +64,20 @@ var (
 	// InvoiceWechatInboundToken holds the SHA-256 hex digest of the token the
 	// bot presents. The token itself is never stored.
 	InvoiceWechatInboundToken = ""
+
+	// InvoiceHongKongAutoBillEnabled issues a Hong Kong request as soon as it
+	// is submitted, with a generated INVOICE (帳單) PDF, instead of leaving it
+	// to finance. The issuer printed on the bill is the Hong Kong entity below.
+	InvoiceHongKongAutoBillEnabled      = false
+	InvoiceHongKongIssuerName           = ""
+	InvoiceHongKongIssuerRegistrationNo = ""
+	InvoiceHongKongIssuerAddress        = ""
+)
+
+const (
+	InvoiceHongKongIssuerNameMaxLength           = 255
+	InvoiceHongKongIssuerRegistrationNoMaxLength = 64
+	InvoiceHongKongIssuerAddressMaxLength        = 512
 )
 
 // InvoiceWechatInboundTokenMinLength keeps bot tokens at 128 bits or more
