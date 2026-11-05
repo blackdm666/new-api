@@ -426,6 +426,11 @@ func TestReadInvoicePDF(t *testing.T) {
 	invoice, ok := readInvoicePDF(invoiceTestPDF("26612000002217482656", "¥940.59", "¥9.41", "¥ 1,950.00"))
 	require.True(t, ok)
 	assert.Equal(t, invoicePDF{number: "26612000002217482656", totalCents: 195000}, invoice)
+	invoice, ok = readInvoicePDF(invoiceTestPDF("26612000002005097971", "91330109MAG0554P7G", "91610132396092369H", "¥10,000.00"))
+	require.True(t, ok)
+	assert.Equal(t, []string{"91330109MAG0554P7G", "91610132396092369H"}, invoice.taxNumbers)
+	assert.True(t, invoice.namesTaxNumber(" 91330109mag0554p7g"), "the number an applicant typed matches whatever its case")
+	assert.False(t, invoice.namesTaxNumber(""))
 
 	_, ok = readInvoicePDF([]byte("%PDF-1.7\n% scanned invoice"))
 	assert.False(t, ok, "a PDF without text has no total")
@@ -475,37 +480,34 @@ func TestIssueInvoiceFromWechatFile(t *testing.T) {
 	other := &model.User{Username: "acme", AffCode: "acme", Status: common.UserStatusEnabled}
 	require.NoError(t, model.DB.Create(applicant).Error)
 	require.NoError(t, model.DB.Create(other).Error)
-	pendingRequest := func(user *model.User, company string) *model.InvoiceRequest {
+	submitted := time.Date(2026, 11, 5, 10, 0, 0, 0, invoiceWechatLocation).Unix()
+	pendingRequest := func(user *model.User, company string, taxNumber string, totalCents int64) *model.InvoiceRequest {
 		request := &model.InvoiceRequest{
-			UserId: user.Id, Username: user.Username, CompanyName: company, TaxNumber: "91310000TEST",
-			TotalMoney: 1200, TotalMoneyCents: 120000, Status: model.InvoiceStatusPending,
+			UserId: user.Id, Username: user.Username, CompanyName: company, TaxNumber: taxNumber,
+			TotalMoneyCents: totalCents, Status: model.InvoiceStatusPending, CreatedTime: submitted,
 		}
 		require.NoError(t, model.DB.Create(request).Error)
 		return request
 	}
-	yunfan := pendingRequest(applicant, "上海云帆网络信息技术有限公司")
-	acmeFirst := pendingRequest(other, "Acme Trading Co")
-	acmeSecond := pendingRequest(other, "Acme Trading Co")
-	retried := pendingRequest(other, "重试科技有限公司")
-	yunfanSuffix := pendingRequest(other, "云帆网络信息技术有限公司")
-	headOffice := pendingRequest(other, "成都蜀道智能科技有限公司")
-	branch := pendingRequest(other, "成都蜀道智能科技有限公司北京分公司")
-	splitRequest := func(totalCents int64) *model.InvoiceRequest {
-		request := &model.InvoiceRequest{
-			UserId: other.Id, Username: other.Username, CompanyName: "浙江拆单大学", TaxNumber: "12330000TEST",
-			TotalMoneyCents: totalCents, Status: model.InvoiceStatusPending,
-		}
-		require.NoError(t, model.DB.Create(request).Error)
-		return request
-	}
-	splitSmall := splitRequest(68800)
-	splitOlder := splitRequest(95000)
-	splitNewer := splitRequest(95000)
-	pdf := []byte("%PDF-1.7\n% issued invoice")
-	digest := sha256.Sum256(pdf)
+	yunfan := pendingRequest(applicant, "上海云帆网络信息技术有限公司", "91310000YUNFAN", 120000)
+	acmeFirst := pendingRequest(other, "Acme Trading Co", "91310000ACME", 120000)
+	acmeSecond := pendingRequest(other, "Acme Trading Co", "91310000ACME", 120000)
+	retried := pendingRequest(other, "重试科技有限公司", "91310000RETRY", 120000)
+	yunfanSuffix := pendingRequest(other, "云帆网络信息技术有限公司", "91310000SUFFIX", 120000)
+	headOffice := pendingRequest(other, "成都蜀道智能科技有限公司", "91510000HEAD", 120000)
+	branch := pendingRequest(other, "成都蜀道智能科技有限公司北京分公司", "91110000BRANCH", 120000)
+	splitSmall := pendingRequest(other, "浙江拆单大学", "12330000SPLIT", 68800)
+	splitOlder := pendingRequest(other, "浙江拆单大学", "12330000SPLIT", 95000)
+	splitNewer := pendingRequest(other, "浙江拆单大学", "12330000SPLIT", 95000)
+	hiyou := pendingRequest(other, "杭州嗨游米网络科技有限公司", " 91330109mag0554p7g", 624900)
+
+	// Files without text stand for scanned invoices, one per invoice.
+	scanned := func(name string) []byte { return []byte("%PDF-1.7\n% scanned " + name) }
+	retriedPDF := scanned("retried")
+	retriedDigest := sha256.Sum256(retriedPDF)
 	require.NoError(t, model.DB.Create(&model.InvoiceFile{
 		InvoiceRequestId: retried.Id, FileName: "重试科技有限公司.pdf", StoredName: "attached.pdf", MimeType: "application/pdf",
-		Size: int64(len(pdf)), StorageType: "local", StorageKey: "attached.pdf", Sha256: hex.EncodeToString(digest[:]),
+		Size: int64(len(retriedPDF)), StorageType: "local", StorageKey: "attached.pdf", Sha256: hex.EncodeToString(retriedDigest[:]),
 	}).Error)
 
 	issue := func(fileName string, content []byte) *InvoiceWechatFileResult {
@@ -513,34 +515,56 @@ func TestIssueInvoiceFromWechatFile(t *testing.T) {
 		require.NoError(t, err)
 		return result
 	}
-	assert.Equal(t, InvoiceWechatFileNoMatch, issue("未知公司.pdf", pdf).Outcome)
-	assert.Equal(t, InvoiceWechatFileAmbiguous, issue("acme trading co.pdf", pdf).Outcome)
+	assert.Equal(t, InvoiceWechatFileNoMatch, issue("未知公司.pdf", scanned("unknown")).Outcome)
+	assert.Equal(t, InvoiceWechatFileAmbiguous, issue("acme trading co.pdf", scanned("acme")).Outcome,
+		"a scanned invoice cannot pick among several requests")
 	assert.Equal(t, InvoiceWechatFileNotPDF, issue("Acme Trading Co.pdf", []byte("plain text")).Outcome)
-	assert.Equal(t, InvoiceWechatFileNotPDF, issue("Acme Trading Co.png", pdf).Outcome)
+	assert.Equal(t, InvoiceWechatFileNotPDF, issue("Acme Trading Co.png", scanned("acme")).Outcome)
 	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: acmeSecond.Id},
-		issue("Acme Trading Co#"+strconv.Itoa(acmeSecond.Id)+".pdf", pdf))
+		issue("Acme Trading Co#"+strconv.Itoa(acmeSecond.Id)+".pdf", scanned("acme second")))
+	yunfanPDF := scanned("yunfan")
 	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: yunfan.Id},
-		issue("上海云帆网络信息技术有限公司(1).pdf", pdf))
-	assert.Equal(t, InvoiceWechatFileNoMatch, issue("上海云帆网络信息技术有限公司.pdf", pdf).Outcome, "an issued request takes no more files")
+		issue("上海云帆网络信息技术有限公司(1).pdf", yunfanPDF))
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: yunfan.Id},
+		issue("上海云帆网络信息技术有限公司(1).pdf", yunfanPDF), "the bot posting the file again right after the issue")
+	assert.Equal(t, InvoiceWechatFileNoMatch, issue("上海云帆网络信息技术有限公司.pdf", scanned("another")).Outcome,
+		"an issued request takes no more files")
+	issuedAt := time.Date(2026, 11, 4, 14, 2, 0, 0, invoiceWechatLocation).Unix()
+	require.NoError(t, model.DB.Model(yunfan).Update("issued_time", issuedAt).Error)
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileDuplicate, RequestId: yunfan.Id},
+		issue("上海云帆网络信息技术有限公司(1).pdf", yunfanPDF), "the finance group sending the file again later")
 	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: retried.Id},
-		issue("重试科技有限公司.pdf", pdf), "a file attached before a failed issue is reused")
+		issue("重试科技有限公司.pdf", retriedPDF), "a file attached before a failed issue is reused")
 	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: branch.Id},
-		issue("dzfp_26442000000012345678_成都蜀道智能科技有限公司北京分公司_20261012.pdf", pdf),
+		issue("dzfp_26442000000012345678_成都蜀道智能科技有限公司北京分公司_20261012.pdf", scanned("branch")),
 		"the head office name inside the branch name does not count")
 
 	firstInvoice := invoiceTestPDF("26612000000000000001", "¥940.59", "¥9.41", "¥950.00")
 	firstName := "dzfp_26612000000000000001_浙江拆单大学_20261104102159.pdf"
-	assert.Equal(t, InvoiceWechatFileAmbiguous, issue(firstName, invoiceTestPDF("26612000000000000009", "¥123.00")).Outcome,
-		"no split request has the invoice total")
+	wrongTotal := invoiceTestPDF("26612000000000000009", "¥123.00")
+	assert.Equal(t, InvoiceWechatFileAmountMismatch, issue(firstName, wrongTotal).Outcome, "no split request has the invoice total")
+	assert.Equal(t, InvoiceWechatFileAmountMismatch, issue(firstName, wrongTotal).Outcome, "the group is asked only once")
 	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: splitOlder.Id},
 		issue(firstName, firstInvoice), "the oldest request with the invoice total is issued")
-	assert.Equal(t, InvoiceWechatFileAmbiguous, issue(firstName, firstInvoice).Outcome,
-		"sending the same invoice again does not issue the next request")
-	assert.Equal(t, InvoiceWechatFileAmbiguous,
-		issue("dzfp_26612000000000000001_浙江拆单大学_20261104110000.pdf", invoiceTestPDF("26612000000000000001", "¥950.00")).Outcome,
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: splitOlder.Id},
+		issue(firstName, firstInvoice), "posting the same invoice again does not issue the next request")
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileDuplicate, RequestId: splitOlder.Id},
+		issue("dzfp_26612000000000000001_浙江拆单大学_20261104110000.pdf", invoiceTestPDF("26612000000000000001", "¥950.00")),
 		"a regenerated file of the same invoice number does not either")
 	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: splitNewer.Id},
 		issue("dzfp_26612000000000000002_浙江拆单大学_20261104102211.pdf", invoiceTestPDF("26612000000000000002", "¥940.59", "¥9.41", "¥950.00")))
+
+	offline := invoiceTestPDF("26612000002005097971", "91330109MAG0554P7G", "91610132396092369H", "¥9,900.99", "¥99.01", "¥10,000.00")
+	offlineName := "dzfp_26612000002005097971_杭州嗨游米网络科技有限公司_20261009110422.pdf"
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileAmountMismatch},
+		issue(offlineName, offline), "an offline invoice does not issue the pending online request")
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: hiyou.Id},
+		issue("发票.pdf", invoiceTestPDF("26612000002004948151", "91330109MAG0554P7G", "91610132396092369H", "¥6,187.13", "¥61.87", "¥6,249.00")),
+		"the taxpayer number on the invoice finds the request")
+	assert.Equal(t, &InvoiceWechatFileResult{Outcome: InvoiceWechatFileNoMatch},
+		issue("dzfp_26612000002061024076_杭州嗨游米网络科技有限公司_20261016090741.pdf",
+			invoiceTestPDF("26612000002061024076", "91330109MAG0554P7G", "91610132396092369H", "¥10,000.00")),
+		"an offline invoice for a company with no pending request is ignored")
 
 	statuses := map[int]int{}
 	var requests []*model.InvoiceRequest
@@ -553,33 +577,69 @@ func TestIssueInvoiceFromWechatFile(t *testing.T) {
 		acmeSecond.Id: model.InvoiceStatusIssued, retried.Id: model.InvoiceStatusIssued,
 		yunfanSuffix.Id: model.InvoiceStatusPending, headOffice.Id: model.InvoiceStatusPending, branch.Id: model.InvoiceStatusIssued,
 		splitSmall.Id: model.InvoiceStatusPending, splitOlder.Id: model.InvoiceStatusIssued, splitNewer.Id: model.InvoiceStatusIssued,
+		hiyou.Id: model.InvoiceStatusIssued,
 	}, statuses)
-	for _, request := range []*model.InvoiceRequest{yunfan, retried} {
+	for request, content := range map[*model.InvoiceRequest][]byte{yunfan: yunfanPDF, retried: retriedPDF} {
 		files, err := model.ListInvoiceFiles(request.Id)
 		require.NoError(t, err)
 		require.Len(t, files, 1)
+		digest := sha256.Sum256(content)
 		assert.Equal(t, hex.EncodeToString(digest[:]), files[0].Sha256)
 	}
 
+	olderIssued, err := model.GetInvoiceRequestById(splitOlder.Id)
+	require.NoError(t, err)
+
 	var deliveries []*model.InvoiceNotificationDelivery
 	require.NoError(t, model.DB.Where("invoice_request_id = ?", yunfan.Id).Order("id ASC").Find(&deliveries).Error)
-	require.Len(t, deliveries, 2)
+	require.Len(t, deliveries, 3)
 	assert.Equal(t, model.InvoiceNotificationKindUserEmail, deliveries[0].Kind)
 	assert.Equal(t, "finance@yunfan.example", deliveries[0].Recipient)
 	assert.Equal(t, model.InvoiceNotificationKindWechatGroup, deliveries[1].Kind)
 	assert.Equal(t, "finance@chatroom", deliveries[1].Recipient)
+	assert.Equal(t, "重复发票 #"+strconv.Itoa(yunfan.Id), deliveries[2].Subject)
 
 	deliverPendingInvoiceWechatNotifications()
-	contents := make([]string, 0)
+	var contents []string
 	for _, message := range api.received() {
 		assert.Equal(t, "finance@chatroom", message["toWxid"])
 		contents = append(contents, message["content"])
 	}
-	assert.Len(t, contents, 6, "one completion message per issued request")
+	completions := 0
+	for _, content := range contents {
+		if strings.HasPrefix(content, "【开票工单已完成 #") {
+			completions++
+		}
+	}
+	assert.Equal(t, 7, completions, "one completion message per issued request")
+	assert.Len(t, contents, 12, "plus one reply for each file the group has to look at")
 	assert.Contains(t, contents, "【开票工单已完成 #"+strconv.Itoa(yunfan.Id)+"】\n"+
 		"发票抬头：上海云帆网络信息技术有限公司\n"+
 		"开票金额：¥1,200.00\n"+
 		"发票文件：上海云帆网络信息技术有限公司(1).pdf")
+	assert.Contains(t, contents, "【重复发票，未处理】\n"+
+		"发票文件：上海云帆网络信息技术有限公司(1).pdf\n"+
+		"这张发票已于 2026-11-04 14:02 开给 #"+strconv.Itoa(yunfan.Id)+"（上海云帆网络信息技术有限公司 ¥1,200.00），本次不重复处理。")
+	assert.Contains(t, contents, "【重复发票，未处理】\n"+
+		"发票号码：26612000000000000001\n"+
+		"这张发票已于 "+formatInvoiceWechatTime(olderIssued.IssuedTime)+" 开给 #"+strconv.Itoa(splitOlder.Id)+"（浙江拆单大学 ¥950.00），本次不重复处理。")
+	assert.Contains(t, contents, "【未开票：金额对不上】\n"+
+		"发票抬头：杭州嗨游米网络科技有限公司\n"+
+		"发票号码：26612000002005097971\n"+
+		"价税合计：¥10,000.00\n"+
+		"待开申请：#"+strconv.Itoa(hiyou.Id)+" ¥6,249.00（11-05 提交）\n"+
+		"没有金额相等的申请，未自动开票。线下付款的票无需处理；如果是开给这张申请的，请核对金额后重开。")
+	assert.Contains(t, contents, "【未开票：金额对不上】\n"+
+		"发票抬头：浙江拆单大学\n"+
+		"发票号码：26612000000000000009\n"+
+		"价税合计：¥123.00\n"+
+		"待开申请：#"+strconv.Itoa(splitSmall.Id)+" ¥688.00（11-05 提交）、#"+strconv.Itoa(splitOlder.Id)+" ¥950.00（11-05 提交）、#"+
+		strconv.Itoa(splitNewer.Id)+" ¥950.00（11-05 提交）\n"+
+		"没有金额相等的申请，未自动开票。线下付款的票无需处理；如果是开给其中一张申请的，请核对金额后重开。")
+	assert.Contains(t, contents, "【未开票：读不出发票内容】\n"+
+		"发票文件：acme trading co.pdf\n"+
+		"同一抬头有 2 张待开申请：#"+strconv.Itoa(acmeFirst.Id)+" ¥1,200.00（11-05 提交）、#"+strconv.Itoa(acmeSecond.Id)+" ¥1,200.00（11-05 提交）\n"+
+		"文件里读不到发票金额（可能是扫描件），请在文件名末尾加上申请号重新发送，例如：acme trading co_#"+strconv.Itoa(acmeFirst.Id)+".pdf")
 }
 
 func TestInvoiceWechatReminderFollowsTheWorkingDayCalendar(t *testing.T) {

@@ -170,6 +170,76 @@ func buildInvoiceWechatAutoBilledText(request *model.InvoiceRequest, fileName st
 	return text + "\n系统已生成帳單并发给用户，无需人工开具。"
 }
 
+// invoiceWechatRepostWindowSeconds is how long after an invoice PDF issued a
+// request the same file is taken as the bot posting it again, not as a resend
+// by the finance group.
+const invoiceWechatRepostWindowSeconds = 10 * 60
+
+// invoiceWechatPendingList lists pending requests for the finance group, at
+// most five of them.
+func invoiceWechatPendingList(requests []*model.InvoiceRequest) string {
+	const shown = 5
+	items := make([]string, 0, shown)
+	for _, request := range requests[:min(len(requests), shown)] {
+		items = append(items, fmt.Sprintf("#%d ¥%s（%s 提交）", request.Id,
+			formatInvoiceAmountCNY(invoiceTotalCents(request)),
+			time.Unix(request.CreatedTime, 0).In(invoiceWechatLocation).Format("01-02")))
+	}
+	list := strings.Join(items, "、")
+	if len(requests) > shown {
+		list += fmt.Sprintf(" 等 %d 张", len(requests))
+	}
+	return list
+}
+
+func buildInvoiceWechatDuplicateText(holder *model.InvoiceRequest, invoiceNumber string, fileName string) string {
+	field := [2]string{"发票号码", invoiceNumber}
+	if invoiceNumber == "" {
+		field = [2]string{"发票文件", fileName}
+	}
+	text := invoiceWechatLines("【重复发票，未处理】", [][2]string{field})
+	target := fmt.Sprintf("#%d（%s ¥%s）", holder.Id, holder.CompanyName, formatInvoiceAmountCNY(invoiceTotalCents(holder)))
+	if holder.Status == model.InvoiceStatusIssued && holder.IssuedTime > 0 {
+		return text + fmt.Sprintf("\n这张发票已于 %s 开给 %s，本次不重复处理。", formatInvoiceWechatTime(holder.IssuedTime), target)
+	}
+	return text + fmt.Sprintf("\n这张发票已上传到 %s，本次不重复处理。", target)
+}
+
+func buildInvoiceWechatAmountMismatchText(pending []*model.InvoiceRequest, invoice invoicePDF) string {
+	text := invoiceWechatLines("【未开票：金额对不上】", [][2]string{
+		{"发票抬头", pending[0].CompanyName},
+		{"发票号码", invoice.number},
+		{"价税合计", "¥" + formatInvoiceAmountCNY(invoice.totalCents)},
+		{"待开申请", invoiceWechatPendingList(pending)},
+	})
+	target := "这张申请"
+	if len(pending) > 1 {
+		target = "其中一张申请"
+	}
+	return text + fmt.Sprintf("\n没有金额相等的申请，未自动开票。线下付款的票无需处理；如果是开给%s的，请核对金额后重开。", target)
+}
+
+func buildInvoiceWechatUnreadableText(pending []*model.InvoiceRequest, fileName string) string {
+	base := path.Base(strings.ReplaceAll(strings.TrimSpace(fileName), "\\", "/"))
+	ext := path.Ext(base)
+	example := fmt.Sprintf("%s_#%d%s", strings.TrimSuffix(base, ext), pending[0].Id, ext)
+	text := invoiceWechatLines("【未开票：读不出发票内容】", [][2]string{{"发票文件", base}})
+	return text + fmt.Sprintf("\n同一抬头有 %d 张待开申请：%s\n文件里读不到发票金额（可能是扫描件），请在文件名末尾加上申请号重新发送，例如：%s",
+		len(pending), invoiceWechatPendingList(pending), example)
+}
+
+// enqueueInvoiceWechatFileReply tells the finance group why an invoice PDF it
+// posted was not issued. The reply is filed under the request it is about and
+// sent once per file.
+func enqueueInvoiceWechatFileReply(request *model.InvoiceRequest, event string, sha256Value string, subject string, body string) error {
+	delivery := newInvoiceWechatDelivery(request, event+":"+sha256Value, fmt.Sprintf("%s #%d", subject, request.Id), body)
+	if _, _, err := model.EnqueueInvoiceNotification(delivery); err != nil {
+		return err
+	}
+	WakeInvoiceWechatDelivery()
+	return nil
+}
+
 func newInvoiceWechatDelivery(request *model.InvoiceRequest, event string, subject string, body string) *model.InvoiceNotificationDelivery {
 	groupID := strings.TrimSpace(setting.InvoiceWechatGroupId)
 	seed := fmt.Sprintf("invoice:%d:%s:wechat:%s", request.Id, event, groupID)
@@ -374,14 +444,17 @@ func postInvoiceWechatText(ctx context.Context, client *http.Client, endpoint st
 
 // Outcomes of an invoice PDF posted in the finance group.
 const (
-	InvoiceWechatFileIssued    = "issued"
-	InvoiceWechatFileNoMatch   = "no_match"
-	InvoiceWechatFileAmbiguous = "ambiguous"
-	InvoiceWechatFileNotPDF    = "not_pdf"
+	InvoiceWechatFileIssued         = "issued"
+	InvoiceWechatFileNoMatch        = "no_match"
+	InvoiceWechatFileAmbiguous      = "ambiguous"
+	InvoiceWechatFileAmountMismatch = "amount_mismatch"
+	InvoiceWechatFileDuplicate      = "duplicate"
+	InvoiceWechatFileNotPDF         = "not_pdf"
 )
 
 // InvoiceWechatFileResult reports what an invoice PDF posted in the finance
-// group did. RequestId is set when a request was issued.
+// group did. RequestId is set when a request was issued, or for a resend, the
+// request that already holds the invoice.
 type InvoiceWechatFileResult struct {
 	Outcome   string `json:"outcome"`
 	RequestId int    `json:"request_id,omitempty"`
@@ -464,20 +537,32 @@ func invoiceCompanyMatchKey(name string) string {
 }
 
 var (
-	invoicePDFNumber = regexp.MustCompile(`(?m)^\s*(\d{20})\s*$`)
-	invoicePDFAmount = regexp.MustCompile(`[¥￥]\s*(\d[\d,]*(?:\.\d{1,2})?)`)
+	invoicePDFNumber    = regexp.MustCompile(`(?m)^\s*(\d{20})\s*$`)
+	invoicePDFAmount    = regexp.MustCompile(`[¥￥]\s*(\d[\d,]*(?:\.\d{1,2})?)`)
+	invoicePDFTaxNumber = regexp.MustCompile(`(?m)^\s*([0-9A-Z]{15,20})\s*$`)
 )
 
 // invoicePDF is what an e-invoice PDF says about itself.
 type invoicePDF struct {
 	number     string
 	totalCents int64
+	// taxNumbers holds every taxpayer number printed on the invoice: the
+	// buyer's, when the buyer has one, and the seller's.
+	taxNumbers []string
 }
 
-// readInvoicePDF reads the 20-digit invoice number and the total including
-// tax from a fully digitalized e-invoice (数电票) PDF. The total is its largest
-// "¥" amount: line items carry no currency sign, and the amount and tax totals
-// are smaller. ok is false when there is no amount, as in a scanned invoice.
+// namesTaxNumber reports whether the invoice carries the taxpayer number an
+// applicant typed, ignoring spaces, letter case and full-width characters.
+func (invoice invoicePDF) namesTaxNumber(taxNumber string) bool {
+	key := strings.ToUpper(invoiceCompanyMatchKey(taxNumber))
+	return key != "" && slices.Contains(invoice.taxNumbers, key)
+}
+
+// readInvoicePDF reads the 20-digit invoice number, the taxpayer numbers and
+// the total including tax from a fully digitalized e-invoice (数电票) PDF. The
+// total is its largest "¥" amount: line items carry no currency sign, and the
+// amount and tax totals are smaller. ok is false when there is no amount, as
+// in a scanned invoice.
 func readInvoicePDF(content []byte) (invoice invoicePDF, ok bool) {
 	defer func() {
 		// The PDF reader panics on some malformed files.
@@ -500,6 +585,11 @@ func readInvoicePDF(content []byte) (invoice invoicePDF, ok bool) {
 	if match := invoicePDFNumber.FindSubmatch(text); match != nil {
 		invoice.number = string(match[1])
 	}
+	for _, match := range invoicePDFTaxNumber.FindAllSubmatch(text, -1) {
+		if taxNumber := string(match[1]); taxNumber != invoice.number && !slices.Contains(invoice.taxNumbers, taxNumber) {
+			invoice.taxNumbers = append(invoice.taxNumbers, taxNumber)
+		}
+	}
 	for _, match := range invoicePDFAmount.FindAllSubmatch(text, -1) {
 		amount, err := decimal.NewFromString(strings.ReplaceAll(string(match[1]), ",", ""))
 		if err != nil {
@@ -518,15 +608,26 @@ func InvoiceWechatAutoIssueReady() bool {
 }
 
 // IssueInvoiceFromWechatFile handles an invoice PDF posted in the finance
-// group. When the file name contains the company name of exactly one pending
-// request, the file is attached to it, the request is marked issued, the
-// applicant is emailed as for a manual issue, and the group is told the order
-// is complete. A company name found only inside a longer matching one (a head
-// office inside its branch) does not count. Among several requests for the
-// same company, the oldest one whose amount equals the invoice total is
-// issued. A file that matches no request, or several of which none has the
-// invoice total, changes nothing. Sending the same file again never attaches it
-// twice.
+// group and attaches it to a pending request: the request is marked issued,
+// the applicant is emailed as for a manual issue, and the group is told the
+// order is complete.
+//
+// A pending request is a candidate when the invoice carries its taxpayer
+// number or the file name contains its company name (a company name found
+// only inside a longer matching one, such as a head office inside its branch,
+// does not count). A "#<request id>" in the file name limits the candidates to
+// that request and issues it whatever the amount.
+//
+// When the invoice total can be read, the oldest candidate with that amount is
+// issued. Candidates of which none has the amount are left alone and the group
+// is asked to check them; an invoice for a company with no pending request was
+// paid offline and is ignored. When the total cannot be read, as in a scanned
+// invoice, a single candidate is issued and several are left for the group to
+// pick with "#<request id>".
+//
+// An invoice some request already holds (the same file or invoice number sent
+// again) only resumes that request if it is a candidate. Otherwise the group
+// is told it was a resend, so a resend never issues another request.
 func IssueInvoiceFromWechatFile(ctx context.Context, fileName string, content []byte) (*InvoiceWechatFileResult, error) {
 	name, ok := parseInvoiceWechatFileName(fileName)
 	if !ok || invoicefile.DetectMime(content) != "application/pdf" {
@@ -536,56 +637,85 @@ func IssueInvoiceFromWechatFile(ctx context.Context, fileName string, content []
 	if err != nil {
 		return nil, err
 	}
+	invoice, readable := readInvoicePDF(content)
 	var named []*model.InvoiceRequest
 	for _, request := range pending {
-		if name.requestId != 0 && request.Id != name.requestId {
-			continue
-		}
 		if name.namesCompany(request.CompanyName) {
 			named = append(named, request)
 		}
 	}
 	var matched []*model.InvoiceRequest
-	for _, request := range named {
+	for _, request := range pending {
+		if name.requestId != 0 && request.Id != name.requestId {
+			continue
+		}
 		key := invoiceCompanyMatchKey(request.CompanyName)
-		insideLonger := slices.ContainsFunc(named, func(other *model.InvoiceRequest) bool {
+		byName := slices.Contains(named, request) && !slices.ContainsFunc(named, func(other *model.InvoiceRequest) bool {
 			otherKey := invoiceCompanyMatchKey(other.CompanyName)
 			return len(otherKey) > len(key) && strings.Contains(otherKey, key)
 		})
-		if !insideLonger {
+		if byName || invoice.namesTaxNumber(request.TaxNumber) {
 			matched = append(matched, request)
 		}
+	}
+	digest := sha256.Sum256(content)
+	sha256Value := hex.EncodeToString(digest[:])
+
+	holders, err := model.ListInvoiceRequestIdsHoldingInvoice(sha256Value, invoice.number)
+	if err != nil {
+		return nil, err
+	}
+	if len(holders) > 0 {
+		resumed := slices.IndexFunc(matched, func(request *model.InvoiceRequest) bool {
+			return slices.Contains(holders, request.Id)
+		})
+		if resumed < 0 {
+			holder, err := model.GetInvoiceRequestById(holders[0])
+			if err != nil {
+				return nil, err
+			}
+			// The bot posts a file again when it lost the answer to a post
+			// that went through; the group already has the completion message.
+			sameFile, err := model.InvoiceFileExists(holder.Id, sha256Value)
+			if err != nil {
+				return nil, err
+			}
+			if sameFile && holder.Status == model.InvoiceStatusIssued && common.GetTimestamp()-holder.IssuedTime < invoiceWechatRepostWindowSeconds {
+				return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileIssued, RequestId: holder.Id}, nil
+			}
+			err = enqueueInvoiceWechatFileReply(holder, "duplicate", sha256Value, "重复发票",
+				buildInvoiceWechatDuplicateText(holder, invoice.number, fileName))
+			if err != nil {
+				return nil, err
+			}
+			return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileDuplicate, RequestId: holder.Id}, nil
+		}
+		matched = []*model.InvoiceRequest{matched[resumed]}
 	}
 	if len(matched) == 0 {
 		return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileNoMatch}, nil
 	}
-	digest := sha256.Sum256(content)
-	sha256Value := hex.EncodeToString(digest[:])
-	if len(matched) > 1 {
-		// An applicant may split orders into several requests for one
-		// company. The total printed on the invoice picks among them, oldest
-		// request first. An invoice some request already holds (the same file
-		// or invoice number sent again) only resumes that request, so a resend
-		// never issues the next one.
-		invoice, ok := readInvoicePDF(content)
-		if !ok {
-			return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileAmbiguous}, nil
+	if readable && name.requestId == 0 && len(holders) == 0 {
+		picked := slices.IndexFunc(matched, func(request *model.InvoiceRequest) bool {
+			return invoiceTotalCents(request) == invoice.totalCents
+		})
+		if picked < 0 {
+			err := enqueueInvoiceWechatFileReply(matched[0], "amount-mismatch", sha256Value, "未开票：金额对不上",
+				buildInvoiceWechatAmountMismatchText(matched, invoice))
+			if err != nil {
+				return nil, err
+			}
+			return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileAmountMismatch}, nil
 		}
-		holders, err := model.ListInvoiceRequestIdsHoldingInvoice(sha256Value, invoice.number)
+		matched = []*model.InvoiceRequest{matched[picked]}
+	}
+	if len(matched) > 1 {
+		err := enqueueInvoiceWechatFileReply(matched[0], "unreadable", sha256Value, "未开票：读不出发票内容",
+			buildInvoiceWechatUnreadableText(matched, fileName))
 		if err != nil {
 			return nil, err
 		}
-		var picked *model.InvoiceRequest
-		for _, request := range matched {
-			if request.TotalMoneyCents == invoice.totalCents && (len(holders) == 0 || slices.Contains(holders, request.Id)) {
-				picked = request
-				break
-			}
-		}
-		if picked == nil {
-			return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileAmbiguous}, nil
-		}
-		matched = []*model.InvoiceRequest{picked}
+		return &InvoiceWechatFileResult{Outcome: InvoiceWechatFileAmbiguous}, nil
 	}
 	request := matched[0]
 
