@@ -67,11 +67,12 @@ import {
   formatInvoiceTimestamp,
   getInvoiceAmountShortfall,
 } from '../lib/invoice-utils'
-import type {
-  EligibleTopUpOrder,
-  InvoiceConfig,
-  InvoiceRegion,
-  InvoiceTitle,
+import {
+  INVOICE_STATUS,
+  type EligibleTopUpOrder,
+  type InvoiceConfig,
+  type InvoiceRegion,
+  type InvoiceTitle,
 } from '../types'
 import { InvoiceSampleDialog } from './invoice-samples'
 import {
@@ -145,6 +146,11 @@ function OpenInvoiceRequestDialog(props: Omit<Props, 'open'>) {
         'Mainland China invoices: a {{rate}}% tax fee is deducted from your balance when you submit and is refunded in full if no invoice is issued (the application is withdrawn, rejected, or expires). Hong Kong invoices have no tax fee.',
         { rate }
       ),
+      config.hong_kong_auto_bill
+        ? t(
+            'Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.'
+          )
+        : '',
       config.pending_expiry_days > 0
         ? t(
             'Applications that are not processed within {{days}} days expire automatically.',
@@ -298,7 +304,7 @@ function InvoiceRequestForm(props: InvoiceRequestFormProps) {
     setSubmitting(true)
     try {
       const fields = buildInvoiceTitleFields(region, form)
-      await createInvoiceRequest(
+      const created = await createInvoiceRequest(
         region === 'hk'
           ? {
               region,
@@ -315,7 +321,11 @@ function InvoiceRequestForm(props: InvoiceRequestFormProps) {
               save_title: saveTitle,
             }
       )
-      toast.success(t('Invoice application submitted'))
+      toast.success(
+        created?.invoice?.status === INVOICE_STATUS.ISSUED
+          ? t('Invoice issued. Download it from the application details.')
+          : t('Invoice application submitted')
+      )
       props.onCreated()
     } catch (error) {
       toast.error(getUserFacingErrorMessage(error))

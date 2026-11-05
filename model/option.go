@@ -177,6 +177,10 @@ func InitOptionMap() {
 	common.OptionMap["InvoiceWechatGroupId"] = setting.InvoiceWechatGroupId
 	common.OptionMap["InvoiceWechatAutoIssueEnabled"] = strconv.FormatBool(setting.InvoiceWechatAutoIssueEnabled)
 	common.OptionMap["InvoiceWechatInboundToken"] = setting.InvoiceWechatInboundToken
+	common.OptionMap["InvoiceHongKongAutoBillEnabled"] = strconv.FormatBool(setting.InvoiceHongKongAutoBillEnabled)
+	common.OptionMap["InvoiceHongKongIssuerName"] = setting.InvoiceHongKongIssuerName
+	common.OptionMap["InvoiceHongKongIssuerRegistrationNo"] = setting.InvoiceHongKongIssuerRegistrationNo
+	common.OptionMap["InvoiceHongKongIssuerAddress"] = setting.InvoiceHongKongIssuerAddress
 	common.OptionMap["Notice"] = ""
 	common.OptionMap["About"] = ""
 	common.OptionMap["HomePageContent"] = ""
@@ -952,6 +956,8 @@ func updateOptionMap(key string, value string) (err error) {
 			setting.InvoiceWechatNotifyEnabled = boolValue
 		case "InvoiceWechatAutoIssueEnabled":
 			setting.InvoiceWechatAutoIssueEnabled = boolValue
+		case "InvoiceHongKongAutoBillEnabled":
+			setting.InvoiceHongKongAutoBillEnabled = boolValue
 		case "WorkerAllowHttpImageRequestEnabled":
 			system_setting.WorkerAllowHttpImageRequestEnabled = boolValue
 		case "DefaultUseAutoGroup":
@@ -1096,6 +1102,12 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.InvoiceWechatGroupId = strings.TrimSpace(value)
 	case "InvoiceWechatInboundToken":
 		setting.InvoiceWechatInboundToken = strings.TrimSpace(value)
+	case "InvoiceHongKongIssuerName":
+		setting.InvoiceHongKongIssuerName = strings.TrimSpace(value)
+	case "InvoiceHongKongIssuerRegistrationNo":
+		setting.InvoiceHongKongIssuerRegistrationNo = strings.TrimSpace(value)
+	case "InvoiceHongKongIssuerAddress":
+		setting.InvoiceHongKongIssuerAddress = strings.TrimSpace(value)
 	case "ServerAddress":
 		system_setting.ServerAddress = value
 	case "TaskPublicAddress":

@@ -46,6 +46,10 @@ func validInvoiceSettingsPayload() InvoiceSettingsPayload {
 	payload.InvoiceWechatAppId = common.GetPointer("")
 	payload.InvoiceWechatGroupId = common.GetPointer("")
 	payload.InvoiceWechatAutoIssueEnabled = common.GetPointer(false)
+	payload.InvoiceHongKongAutoBillEnabled = common.GetPointer(false)
+	payload.InvoiceHongKongIssuerName = common.GetPointer("")
+	payload.InvoiceHongKongIssuerRegistrationNo = common.GetPointer("")
+	payload.InvoiceHongKongIssuerAddress = common.GetPointer("")
 	return payload
 }
 
@@ -182,6 +186,29 @@ func TestValidateInvoiceSettingsWechatAutoIssue(t *testing.T) {
 	}
 }
 
+func TestValidateInvoiceSettingsHongKongAutoBill(t *testing.T) {
+	payload := validInvoiceSettingsPayload()
+	payload.InvoiceHongKongAutoBillEnabled = common.GetPointer(true)
+	payload.InvoiceHongKongIssuerName = common.GetPointer("   ")
+	require.ErrorContains(t, validateInvoiceSettingsPayload(&payload), "issuer name", "the bill must name its issuer")
+
+	payload.InvoiceHongKongIssuerName = common.GetPointer(" DAYFOLD HK LIMITED ")
+	payload.InvoiceHongKongIssuerRegistrationNo = common.GetPointer(" 78129797 ")
+	payload.InvoiceHongKongIssuerAddress = common.GetPointer(strings.Repeat("地", setting.InvoiceHongKongIssuerAddressMaxLength+1))
+	require.ErrorContains(t, validateInvoiceSettingsPayload(&payload), "address")
+
+	payload.InvoiceHongKongIssuerAddress = common.GetPointer("SUITE 6503, 65/F, CENTRAL PLAZA")
+	payload.InvoiceFileEnabled = false
+	require.ErrorContains(t, validateInvoiceSettingsPayload(&payload), "invoice files", "the bill is stored as an invoice file")
+
+	payload.InvoiceFileEnabled = true
+	require.NoError(t, validateInvoiceSettingsPayload(&payload))
+	values := payload.optionValues()
+	assert.Equal(t, "true", values["InvoiceHongKongAutoBillEnabled"])
+	assert.Equal(t, "DAYFOLD HK LIMITED", values["InvoiceHongKongIssuerName"])
+	assert.Equal(t, "78129797", values["InvoiceHongKongIssuerRegistrationNo"])
+}
+
 func TestUpdateInvoiceSettingsKeepsSettingsAnOlderConsoleOmits(t *testing.T) {
 	require.NoError(t, i18n.Init())
 	setupInvoiceControllerTest(t)
@@ -191,7 +218,8 @@ func TestUpdateInvoiceSettingsKeepsSettingsAnOlderConsoleOmits(t *testing.T) {
 	// Every global an invoice settings PUT writes.
 	restoreAfterTest(t, &common.InvoiceApplicationNotifyAdminEnabled, &common.InvoiceIssuedNotifyUserEnabled,
 		&common.InvoiceRejectedNotifyUserEnabled, &common.InvoiceExpiredNotifyUserEnabled,
-		&setting.InvoiceFileEnabled, &setting.InvoiceWechatNotifyEnabled, &setting.InvoiceWechatAutoIssueEnabled)
+		&setting.InvoiceFileEnabled, &setting.InvoiceWechatNotifyEnabled, &setting.InvoiceWechatAutoIssueEnabled,
+		&setting.InvoiceHongKongAutoBillEnabled)
 	restoreAfterTest(t, &setting.InvoiceTaxRateBasisPoints, &setting.InvoiceDataRetentionDays,
 		&setting.InvoicePendingExpiryDays, &setting.InvoiceFileMaxCount)
 	restoreAfterTest(t, &setting.InvoiceMinimumAmountCents, &setting.InvoiceFileMaxSize, &setting.InvoiceFileSignedURLTTL)
@@ -204,7 +232,8 @@ func TestUpdateInvoiceSettingsKeepsSettingsAnOlderConsoleOmits(t *testing.T) {
 		&setting.InvoiceFileCOSEndpoint, &setting.InvoiceFileCOSBucket, &setting.InvoiceFileCOSRegion,
 		&setting.InvoiceFileCOSSecretId, &setting.InvoiceFileCOSSecretKey, &setting.InvoiceFileCOSCustomDomain,
 		&setting.InvoiceWechatApiBaseUrl, &setting.InvoiceWechatApiToken, &setting.InvoiceWechatAppId, &setting.InvoiceWechatGroupId,
-		&setting.InvoiceWechatInboundToken)
+		&setting.InvoiceWechatInboundToken, &setting.InvoiceHongKongIssuerName,
+		&setting.InvoiceHongKongIssuerRegistrationNo, &setting.InvoiceHongKongIssuerAddress)
 	common.OptionMapRWMutex.Lock()
 	previousOptions := common.OptionMap
 	common.OptionMap = map[string]string{}

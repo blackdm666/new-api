@@ -112,6 +112,10 @@ type Props = {
     InvoiceWechatAutoIssueEnabled: boolean
     // Reported by the server; only a digest of the bot token is stored.
     InvoiceWechatInboundTokenConfigured?: boolean
+    InvoiceHongKongAutoBillEnabled: boolean
+    InvoiceHongKongIssuerName: string
+    InvoiceHongKongIssuerRegistrationNo: string
+    InvoiceHongKongIssuerAddress: string
     InvoiceAdminEmail: string
     InvoiceMinimumAmountCents: string
     InvoiceTaxRateBasisPoints: string
@@ -182,6 +186,11 @@ function buildPayload(values: FormValues): InvoiceSettingsPayload {
     InvoiceWechatGroupId: values.InvoiceWechatGroupId.trim(),
     InvoiceWechatAutoIssueEnabled: values.InvoiceWechatAutoIssueEnabled,
     InvoiceWechatInboundToken: values.InvoiceWechatInboundToken.trim(),
+    InvoiceHongKongAutoBillEnabled: values.InvoiceHongKongAutoBillEnabled,
+    InvoiceHongKongIssuerName: values.InvoiceHongKongIssuerName.trim(),
+    InvoiceHongKongIssuerRegistrationNo:
+      values.InvoiceHongKongIssuerRegistrationNo.trim(),
+    InvoiceHongKongIssuerAddress: values.InvoiceHongKongIssuerAddress.trim(),
     InvoiceAdminEmail: values.InvoiceAdminEmail,
     InvoiceMinimumAmountCents: Math.round(
       Number(values.InvoiceMinimumAmountYuan) * 100
@@ -293,6 +302,12 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
         )
       : ''
 
+  const hongKongIssuerNameError =
+    values.InvoiceHongKongAutoBillEnabled &&
+    values.InvoiceHongKongIssuerName.trim() === ''
+      ? t('Enter the issuer name printed on Hong Kong bills.')
+      : ''
+
   const save = () => {
     if (!dirty) {
       toast.info(t('No changes to save'))
@@ -348,6 +363,18 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
       toast.error(
         t('Generate a bot token before auto-issuing from group PDFs.')
       )
+      return
+    }
+    if (values.InvoiceHongKongAutoBillEnabled && !values.InvoiceFileEnabled) {
+      toast.error(
+        t(
+          'Turn on invoice file delivery before generating Hong Kong bills automatically.'
+        )
+      )
+      return
+    }
+    if (hongKongIssuerNameError) {
+      toast.error(hongKongIssuerNameError)
       return
     }
     saveMutation.mutate()
@@ -639,6 +666,47 @@ export function InvoiceSettingsSection({ defaultValues }: Props) {
                 tooltip={t('Copy bot endpoint')}
               />
             </div>
+          </div>
+        </section>
+
+        <section className='bg-card space-y-4 rounded-xl border p-4'>
+          <h4 className='text-sm font-semibold'>{t('Hong Kong bills')}</h4>
+          <SettingSwitch
+            label={t('Generate Hong Kong bills automatically')}
+            description={t(
+              'When a Hong Kong application is submitted, the system generates the INVOICE PDF, marks the application issued and emails the applicant at once, and tells the finance group. If generation fails, the application waits for finance as usual.'
+            )}
+            checked={values.InvoiceHongKongAutoBillEnabled}
+            onCheckedChange={(value) =>
+              update('InvoiceHongKongAutoBillEnabled', value)
+            }
+          />
+          <div className='grid gap-3 sm:grid-cols-2'>
+            <TextField
+              label={t('Issuer name')}
+              value={values.InvoiceHongKongIssuerName}
+              onChange={(value) => update('InvoiceHongKongIssuerName', value)}
+              placeholder='DAYFOLD HK LIMITED'
+              error={hongKongIssuerNameError}
+            />
+            <TextField
+              label={t('Business registration number')}
+              value={values.InvoiceHongKongIssuerRegistrationNo}
+              onChange={(value) =>
+                update('InvoiceHongKongIssuerRegistrationNo', value)
+              }
+            />
+            <TextField
+              label={t('Issuer address')}
+              value={values.InvoiceHongKongIssuerAddress}
+              onChange={(value) =>
+                update('InvoiceHongKongIssuerAddress', value)
+              }
+              className='sm:col-span-2'
+              description={t(
+                'Printed in the issuer column of every generated bill.'
+              )}
+            />
           </div>
         </section>
 

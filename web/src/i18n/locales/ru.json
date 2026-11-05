@@ -8911,6 +8911,17 @@
     "Pinned to top": "Вверху",
     "Model order updated": "Порядок модели обновлён",
     "Failed to update model order": "Не удалось обновить порядок модели",
-    "Invalid pin position": "Недопустимая позиция закрепления"
+    "Invalid pin position": "Недопустимая позиция закрепления",
+    "Hong Kong bills": "Счета для Гонконга",
+    "Generate Hong Kong bills automatically": "Автоматически формировать счета для Гонконга",
+    "When a Hong Kong application is submitted, the system generates the INVOICE PDF, marks the application issued and emails the applicant at once, and tells the finance group. If generation fails, the application waits for finance as usual.": "После отправки заявки для Гонконга система сразу формирует PDF-счёт (INVOICE), отмечает заявку выставленной, отправляет его заявителю по почте и уведомляет финансовую группу. Если сформировать счёт не удалось, заявка, как обычно, ждёт обработки финансовым отделом.",
+    "Issuer name": "Название выставителя",
+    "Business registration number": "Номер регистрации предприятия",
+    "Issuer address": "Адрес выставителя",
+    "Printed in the issuer column of every generated bill.": "Печатается в графе выставителя каждого сформированного счёта.",
+    "Enter the issuer name printed on Hong Kong bills.": "Укажите название выставителя, которое печатается на счетах для Гонконга.",
+    "Turn on invoice file delivery before generating Hong Kong bills automatically.": "Сначала включите выдачу файлов счетов, затем автоматическое формирование счетов для Гонконга.",
+    "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "Счета для Гонконга формируются сразу после отправки, и их можно сразу скачать в сведениях о заявке.",
+    "Invoice issued. Download it from the application details.": "Счёт выставлен. Скачайте его в сведениях о заявке."
   }
 }

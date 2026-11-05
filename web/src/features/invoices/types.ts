@@ -116,6 +116,8 @@ export type InvoiceConfig = {
   available_balance_cents: number
   /** Working days within which a received application gets a response. */
   response_working_days: number
+  /** Hong Kong applications are issued with a generated bill on submit. */
+  hong_kong_auto_bill?: boolean
   /** The current account email that receives invoice notifications. */
   email: string
   email_bound: boolean

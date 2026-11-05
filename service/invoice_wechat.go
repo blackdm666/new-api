@@ -158,6 +158,18 @@ func buildInvoiceWechatIssuedText(request *model.InvoiceRequest, fileName string
 	})
 }
 
+// buildInvoiceWechatAutoBilledText tells the finance group that the system
+// generated and sent a Hong Kong bill, so nothing is left to issue.
+func buildInvoiceWechatAutoBilledText(request *model.InvoiceRequest, fileName string) string {
+	text := invoiceWechatLines(fmt.Sprintf("【帳單已自动开具 #%d】", request.Id), [][2]string{
+		{"开票类型", invoiceWechatRegionLabel(request.Region)},
+		{"收件人", request.CompanyName},
+		{"开票金额", "¥" + formatInvoiceAmountCNY(invoiceTotalCents(request))},
+		{"帳單文件", fileName},
+	})
+	return text + "\n系统已生成帳單并发给用户，无需人工开具。"
+}
+
 func newInvoiceWechatDelivery(request *model.InvoiceRequest, event string, subject string, body string) *model.InvoiceNotificationDelivery {
 	groupID := strings.TrimSpace(setting.InvoiceWechatGroupId)
 	seed := fmt.Sprintf("invoice:%d:%s:wechat:%s", request.Id, event, groupID)

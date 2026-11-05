@@ -8911,6 +8911,17 @@
     "Pinned to top": "Épinglé en haut",
     "Model order updated": "Ordre du modèle mis à jour",
     "Failed to update model order": "Échec de la mise à jour de l’ordre du modèle",
-    "Invalid pin position": "Position d’épinglage invalide"
+    "Invalid pin position": "Position d’épinglage invalide",
+    "Hong Kong bills": "Factures Hong Kong",
+    "Generate Hong Kong bills automatically": "Générer automatiquement les factures Hong Kong",
+    "When a Hong Kong application is submitted, the system generates the INVOICE PDF, marks the application issued and emails the applicant at once, and tells the finance group. If generation fails, the application waits for finance as usual.": "Lorsqu’une demande Hong Kong est envoyée, le système génère aussitôt la facture PDF (INVOICE), marque la demande comme émise, l’envoie par e-mail au demandeur et prévient le groupe financier. En cas d’échec, la demande attend le service financier comme d’habitude.",
+    "Issuer name": "Nom de l’émetteur",
+    "Business registration number": "Numéro d’enregistrement de l’entreprise",
+    "Issuer address": "Adresse de l’émetteur",
+    "Printed in the issuer column of every generated bill.": "Imprimé dans la colonne émetteur de chaque facture générée.",
+    "Enter the issuer name printed on Hong Kong bills.": "Saisissez le nom de l’émetteur imprimé sur les factures Hong Kong.",
+    "Turn on invoice file delivery before generating Hong Kong bills automatically.": "Activez la remise des fichiers de facture avant de générer automatiquement les factures Hong Kong.",
+    "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "Les factures Hong Kong sont générées dès l’envoi et peuvent être téléchargées immédiatement depuis le détail de la demande.",
+    "Invoice issued. Download it from the application details.": "Facture émise. Téléchargez-la depuis le détail de la demande."
   }
 }

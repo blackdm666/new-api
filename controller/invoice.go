@@ -1,11 +1,13 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -70,6 +72,7 @@ func GetInvoiceConfig(c *gin.Context) {
 		"file_allowed_exts":       setting.InvoiceFileAllowedExtList(),
 		"file_max_count":          setting.InvoiceFileMaxCount,
 		"file_max_size":           setting.InvoiceFileMaxSize,
+		"hong_kong_auto_bill":     service.InvoiceHongKongAutoBillReady(),
 	})
 }
 
@@ -245,6 +248,13 @@ func CreateInvoiceRequest(c *gin.Context) {
 		respondInvoiceInternalError(c, i18n.MsgInvoiceSubmitFailed, err)
 		return
 	}
+	// A Hong Kong request with auto-billing on is issued right away below, so
+	// finance is only told about it once the bill is out, or if it fails.
+	autoBill := strings.TrimSpace(payload.Region) == model.InvoiceRegionHongKong && service.InvoiceHongKongAutoBillReady()
+	createdNotifications := service.BuildInvoiceRequestCreatedNotifications
+	if autoBill {
+		createdNotifications = nil
+	}
 	request, orders, err := model.CreateInvoiceRequestWithNotifications(model.CreateInvoiceRequestParams{
 		UserId:         user.Id,
 		Username:       user.Username,
@@ -259,10 +269,25 @@ func CreateInvoiceRequest(c *gin.Context) {
 		Remark:         payload.Remark,
 		TopUpOrderIds:  payload.TopUpOrderIds,
 		SaveTitle:      payload.SaveTitle,
-	}, service.BuildInvoiceRequestCreatedNotifications)
+	}, createdNotifications)
 	if err != nil {
 		handleInvoiceError(c, err, i18n.MsgInvoiceSubmitFailed)
 		return
+	}
+	if autoBill {
+		// The request is already saved: a client that disconnects must not
+		// leave it half billed.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), time.Minute)
+		issued, billErr := service.IssueInvoiceHongKongBill(ctx, request, orders)
+		cancel()
+		if billErr == nil {
+			request = issued
+		} else {
+			common.SysError(fmt.Sprintf("invoice request #%d: Hong Kong bill generation failed, left to finance: %v", request.Id, billErr))
+			if err := service.QueueInvoiceRequestCreatedNotifications(request); err != nil {
+				common.SysError(fmt.Sprintf("invoice request #%d: queue created notifications: %v", request.Id, err))
+			}
+		}
 	}
 	service.WakeInvoiceWechatDelivery()
 	detail, err := buildInvoiceRequestDetail(request, false)
