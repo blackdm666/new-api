@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -537,9 +538,15 @@ func invoiceCompanyMatchKey(name string) string {
 }
 
 var (
+	invoicePDFAmount = regexp.MustCompile(`[¥￥]\s*(\d[\d,]*(?:\.\d{1,2})?)`)
+	// In the plain text of most invoices the invoice number and taxpayer
+	// numbers are lines of their own.
 	invoicePDFNumber    = regexp.MustCompile(`(?m)^\s*(\d{20})\s*$`)
-	invoicePDFAmount    = regexp.MustCompile(`[¥￥]\s*(\d[\d,]*(?:\.\d{1,2})?)`)
 	invoicePDFTaxNumber = regexp.MustCompile(`(?m)^\s*([0-9A-Z]{15,20})\s*$`)
+	// In lines rebuilt from glyph positions they follow their labels, as in
+	// "发票号码：26922000001306725946".
+	invoicePDFLineNumber    = regexp.MustCompile(`\b(\d{20})\b`)
+	invoicePDFLineTaxNumber = regexp.MustCompile(`\b([0-9A-Z]{15,20})\b`)
 )
 
 // invoicePDF is what an e-invoice PDF says about itself.
@@ -582,12 +589,28 @@ func readInvoicePDF(content []byte) (invoice invoicePDF, ok bool) {
 	if err != nil {
 		return invoice, false
 	}
-	if match := invoicePDFNumber.FindSubmatch(text); match != nil {
+	invoice = parseInvoicePDFText(text, invoicePDFNumber, invoicePDFTaxNumber)
+	if invoice.number == "" {
+		// Some issuers draw every character on its own, so the plain text has
+		// one character per line and "¥\n1\n4\n4\n6" reads as ¥1.
+		positioned := parseInvoicePDFText(invoicePDFPositionedText(reader), invoicePDFLineNumber, invoicePDFLineTaxNumber)
+		if positioned.number != "" {
+			invoice = positioned
+		}
+	}
+	return invoice, invoice.totalCents > 0
+}
+
+// parseInvoicePDFText reads an invoice from PDF text, finding the invoice
+// number and taxpayer numbers with the patterns that suit how the text was
+// extracted.
+func parseInvoicePDFText(text []byte, number *regexp.Regexp, taxNumber *regexp.Regexp) (invoice invoicePDF) {
+	if match := number.FindSubmatch(text); match != nil {
 		invoice.number = string(match[1])
 	}
-	for _, match := range invoicePDFTaxNumber.FindAllSubmatch(text, -1) {
-		if taxNumber := string(match[1]); taxNumber != invoice.number && !slices.Contains(invoice.taxNumbers, taxNumber) {
-			invoice.taxNumbers = append(invoice.taxNumbers, taxNumber)
+	for _, match := range taxNumber.FindAllSubmatch(text, -1) {
+		if value := string(match[1]); value != invoice.number && !slices.Contains(invoice.taxNumbers, value) {
+			invoice.taxNumbers = append(invoice.taxNumbers, value)
 		}
 	}
 	for _, match := range invoicePDFAmount.FindAllSubmatch(text, -1) {
@@ -597,7 +620,40 @@ func readInvoicePDF(content []byte) (invoice invoicePDF, ok bool) {
 		}
 		invoice.totalCents = max(invoice.totalCents, amount.Shift(2).Round(0).IntPart())
 	}
-	return invoice, invoice.totalCents > 0
+	return invoice
+}
+
+// invoicePDFLineTolerance is how far apart, in points, glyphs printed on one
+// line may sit vertically.
+const invoicePDFLineTolerance = 2.0
+
+// invoicePDFPositionedText rebuilds the printed lines of every page from the
+// glyph positions, top to bottom and left to right, joining the glyphs of a
+// line without spaces.
+func invoicePDFPositionedText(reader *pdf.Reader) []byte {
+	var text bytes.Buffer
+	for page := 1; page <= reader.NumPage(); page++ {
+		glyphs := slices.Clone(reader.Page(page).Content().Text)
+		slices.SortStableFunc(glyphs, func(a, b pdf.Text) int {
+			return cmp.Compare(b.Y, a.Y)
+		})
+		for start := 0; start < len(glyphs); {
+			end := start + 1
+			for end < len(glyphs) && glyphs[start].Y-glyphs[end].Y <= invoicePDFLineTolerance {
+				end++
+			}
+			line := glyphs[start:end]
+			slices.SortStableFunc(line, func(a, b pdf.Text) int {
+				return cmp.Compare(a.X, b.X)
+			})
+			for _, glyph := range line {
+				text.WriteString(glyph.S)
+			}
+			text.WriteByte('\n')
+			start = end
+		}
+	}
+	return text.Bytes()
 }
 
 // InvoiceWechatAutoIssueReady reports whether invoice PDFs from the finance

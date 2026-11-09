@@ -399,11 +399,31 @@ func invoiceTestPDF(number string, amounts ...string) []byte {
 		line = strings.ReplaceAll(line, "¥", `\245`)
 		fmt.Fprintf(&stream, "BT /F1 12 Tf 50 %d Td (%s) Tj ET\n", 750-20*i, line)
 	}
+	return invoiceTestPDFDocument(stream.String())
+}
+
+// invoiceTestGlyphPDF draws every character of every line on its own, as some
+// e-invoice issuers do, so the plain text has one character per line.
+func invoiceTestGlyphPDF(lines ...string) []byte {
+	var stream strings.Builder
+	for i, line := range lines {
+		for j, char := range []rune(line) {
+			glyph := string(char)
+			if char == '¥' {
+				glyph = `\245`
+			}
+			fmt.Fprintf(&stream, "BT /F1 12 Tf %d %d Td (%s) Tj ET\n", 50+8*j, 750-20*i, glyph)
+		}
+	}
+	return invoiceTestPDFDocument(stream.String())
+}
+
+func invoiceTestPDFDocument(stream string) []byte {
 	objects := []string{
 		"<< /Type /Catalog /Pages 2 0 R >>",
 		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
 		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
-		fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", stream.Len(), stream.String()),
+		fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", len(stream), stream),
 		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
 	}
 	var out strings.Builder
@@ -431,6 +451,21 @@ func TestReadInvoicePDF(t *testing.T) {
 	assert.Equal(t, []string{"91330109MAG0554P7G", "91610132396092369H"}, invoice.taxNumbers)
 	assert.True(t, invoice.namesTaxNumber(" 91330109mag0554p7g"), "the number an applicant typed matches whatever its case")
 	assert.False(t, invoice.namesTaxNumber(""))
+
+	// Read character by character, "¥1446.00" would be ¥1; the lines rebuilt
+	// from glyph positions give the printed values.
+	invoice, ok = readInvoicePDF(invoiceTestGlyphPDF(
+		"No:26922000001306725946",
+		"ID:121500004600293062 ID:91370264MAKRGAB530",
+		"Total:¥1403.88 ¥42.12",
+		"(Total) ¥1446.00",
+	))
+	require.True(t, ok)
+	assert.Equal(t, invoicePDF{
+		number:     "26922000001306725946",
+		totalCents: 144600,
+		taxNumbers: []string{"121500004600293062", "91370264MAKRGAB530"},
+	}, invoice)
 
 	_, ok = readInvoicePDF([]byte("%PDF-1.7\n% scanned invoice"))
 	assert.False(t, ok, "a PDF without text has no total")
