@@ -20,16 +20,18 @@ const PartnerApplicationEmailCategory = "partner_application_admin"
 // Partner application validation error codes returned to the site form, in
 // addition to the referral application codes.
 const (
-	PartnerApplicationErrorNotEligible     = "not_eligible"
-	PartnerApplicationErrorAccountNotFound = "account_not_found"
+	PartnerApplicationErrorNotEligible = "not_eligible"
 )
+
+// ErrPartnerApplicationAccountUnavailable means the signed-in account vanished
+// or was disabled between authentication and validation.
+var ErrPartnerApplicationAccountUnavailable = errors.New("partner application account unavailable")
 
 // partnerApplicationForm is the single definition of the official site's
 // partner application form. Validation and the notification email both follow
 // its field table, like referralApplicationFields.
 var partnerApplicationForm = applicationForm{
 	Fields: []referralApplicationField{
-		{Key: "account", Label: "88API UID", Kind: referralFieldUID, Required: true, MaxLength: 254},
 		{Key: "display_name", Label: "称呼或公司", Kind: referralFieldText, Required: true, MaxLength: 50},
 		{Key: "business_type", Label: "业务类型", Kind: referralFieldChoice, Required: true, Options: []referralApplicationOption{
 			{Value: "relay_running", Label: "已在运营 API 中转站"},
@@ -85,7 +87,7 @@ var partnerApplicationForm = applicationForm{
 	ContactKeys:     referralApplicationContactKeys,
 	ReferencePrefix: "PA-",
 	Title:           "代理合作申请",
-	Intro:           "官网代理合作页收到一份新申请；评级只按申请人自报的月消耗，联系前请结合账号概况核实。",
+	Intro:           "官网代理合作页收到一份新申请；账号概况取自提交时登录的账号，评级只按申请人自报的月消耗，联系前请结合账号概况核实。",
 	EmailCategory:   PartnerApplicationEmailCategory,
 	DeliveryPrefix:  "partner-application",
 }
@@ -95,16 +97,17 @@ type PartnerApplication struct {
 	applicationSubmission
 	// Grade is "A" or "B", from the self-reported monthly spend only.
 	Grade string
-	// User is the enabled account whose UID the applicant entered.
+	// User is the signed-in account that submitted the application.
 	User *model.User
 }
 
 // ValidatePartnerApplication checks a decoded form payload against the
-// partner application form, then the eligibility threshold, and finally looks
-// up the entered UID, so malformed or ineligible submissions never reach the
-// database. Only a numeric UID of an enabled user is accepted; the form does
-// not take emails, so it cannot be used to probe which emails are registered.
-func ValidatePartnerApplication(payload map[string]any, request ReferralApplicationContext) (*PartnerApplication, error) {
+// partner application form and the eligibility threshold, then loads the
+// signed-in applicant. The account always comes from the session (userId), never
+// from the payload, so an application cannot be filed under someone else's UID
+// and the form cannot be used to probe which UIDs exist. Malformed or
+// ineligible submissions never reach the database.
+func ValidatePartnerApplication(payload map[string]any, userId int, request ReferralApplicationContext) (*PartnerApplication, error) {
 	submission, err := validateApplicationForm(partnerApplicationForm, payload, request)
 	if err != nil {
 		return nil, err
@@ -127,20 +130,15 @@ func ValidatePartnerApplication(payload map[string]any, request ReferralApplicat
 	if submission.Values["prepay"] == "decline" {
 		return nil, &ReferralApplicationFieldError{Field: "prepay", Code: PartnerApplicationErrorNotEligible}
 	}
-	notFound := &ReferralApplicationFieldError{Field: "account", Code: PartnerApplicationErrorAccountNotFound}
-	userId, err := strconv.Atoi(submission.Values["account"])
-	if err != nil || userId <= 0 {
-		return nil, notFound
-	}
 	user, err := model.GetUserById(userId, false)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, notFound
+		return nil, ErrPartnerApplicationAccountUnavailable
 	}
 	if err != nil {
 		return nil, err
 	}
 	if user.Status != common.UserStatusEnabled {
-		return nil, notFound
+		return nil, ErrPartnerApplicationAccountUnavailable
 	}
 	return &PartnerApplication{applicationSubmission: *submission, Grade: grade, User: user}, nil
 }
@@ -155,6 +153,7 @@ func RenderPartnerApplicationEmail(application *PartnerApplication) (string, str
 		return html.EscapeString(fmt.Sprintf("$%.2f", float64(quota)/common.QuotaPerUnit))
 	}
 	account := []common.EmailTemplateRow{
+		{Label: "88API UID", Value: strconv.Itoa(user.Id)},
 		{Label: "用户名", Value: html.EscapeString(user.Username)},
 		{Label: "分组", Value: html.EscapeString(user.Group)},
 		{Label: "已用额度", Value: quotaUSD(user.UsedQuota)},
