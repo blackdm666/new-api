@@ -156,6 +156,7 @@ user.password_login_disabled: "Password login has been disabled by administrator
 user.register_disabled: "New user registration has been disabled by administrator"
 user.password_register_disabled: "Password registration has been disabled by administrator, please use third-party account verification"
 user.username_or_password_error: "Username or password is incorrect"
+user.login_too_many_attempts: "Too many failed login attempts. Please try again later or sign in another way"
 user.exists: "Username already exists or has been deleted"
 user.not_exists: "User does not exist"
 user.inviter_invalid: "The inviter selection is invalid"

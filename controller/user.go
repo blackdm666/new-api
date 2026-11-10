@@ -73,6 +73,15 @@ func Login(c *gin.Context) {
 	}
 	username := loginRequest.Username
 	password := loginRequest.Password
+	if strings.TrimSpace(username) == "" {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	lockoutKeys := []string{service.LoginIdentifierLockoutKey(username)}
+	if service.LoginLocked(lockoutKeys...) {
+		writeLoginFailure(c, "AUTH_TOO_MANY_ATTEMPTS", i18n.MsgUserLoginTooManyAttempts)
+		return
+	}
 	if common.PasswordLoginEncryptionEnabled {
 		if loginRequest.PasswordEncrypted == "" || loginRequest.EncryptionKeyID == "" {
 			common.ApiErrorT(c, "Invalid parameters")
@@ -80,11 +89,12 @@ func Login(c *gin.Context) {
 		}
 		password, err = common.DecryptPassword(loginRequest.PasswordEncrypted, loginRequest.EncryptionKeyID)
 		if err != nil {
+			service.RecordLoginFailure(lockoutKeys...)
 			writeLoginFailure(c, "AUTH_INVALID_CREDENTIALS", i18n.MsgUserUsernameOrPasswordError)
 			return
 		}
 	}
-	if username == "" || password == "" {
+	if password == "" {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
@@ -93,6 +103,16 @@ func Login(c *gin.Context) {
 		Password: password,
 	}
 	err = user.ValidateAndFill()
+	if user.Id > 0 {
+		lockoutKeys = append(lockoutKeys, service.LoginUserLockoutKey(user.Id))
+		// The identifier was checked above; the account is checked after the
+		// lookup so that its username and email share one budget. A correct
+		// password does not get past an active lock.
+		if !errors.Is(err, model.ErrDatabase) && service.LoginLocked(lockoutKeys[1]) {
+			writeLoginFailure(c, "AUTH_TOO_MANY_ATTEMPTS", i18n.MsgUserLoginTooManyAttempts)
+			return
+		}
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, model.ErrDatabase):
@@ -103,11 +123,19 @@ func Login(c *gin.Context) {
 		case errors.Is(err, model.ErrUserDisabled):
 			writeLoginFailure(c, "AUTH_USER_DISABLED", i18n.MsgAuthUserBanned)
 		default:
+			if service.RecordLoginFailure(lockoutKeys...) {
+				common.SysLog(common.LogText("Password login locked after repeated failures: user_id=%d, ip=%s", user.Id, c.ClientIP()))
+			}
 			writeLoginFailure(c, "AUTH_INVALID_CREDENTIALS", i18n.MsgUserUsernameOrPasswordError)
 		}
 		return
 	}
 
+	lockoutKeys = append(lockoutKeys, service.LoginIdentifierLockoutKey(user.Username))
+	if user.Email != "" {
+		lockoutKeys = append(lockoutKeys, service.LoginIdentifierLockoutKey(user.Email))
+	}
+	service.ClearLoginFailures(lockoutKeys...)
 	setupLogin(&user, nil, c)
 }
 

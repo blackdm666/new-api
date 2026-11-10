@@ -195,6 +195,7 @@ const (
 	MsgUserRegisterDisabled          = "user.register_disabled"
 	MsgUserPasswordRegisterDisabled  = "user.password_register_disabled"
 	MsgUserUsernameOrPasswordError   = "user.username_or_password_error"
+	MsgUserLoginTooManyAttempts      = "user.login_too_many_attempts"
 	MsgUserExists                    = "user.exists"
 	MsgUserNotExists                 = "user.not_exists"
 	MsgUserEmailVerificationRequired = "user.email_verification_required"
