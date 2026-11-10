@@ -317,7 +317,9 @@ export const meta = {
     en: "Volcengine Doubao Seedance video generation and Seedream image generation",
     zh: "火山引擎豆包 Seedance 视频生成与 Seedream 图片生成",
   },
-  version: "1.3.1",
+  // 1.4.0's Seedance native changes on the current host; Seedream streaming,
+  // Base64 output and the unprefixed vendor paths need the newer host.
+  version: "1.4.0-88api.1",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -425,7 +427,7 @@ function videoProfile(ctx) {
 // completion overlays the delivered resolution.
 function videoResolution(ctx) {
   const req = ctx.requestBody || {};
-  const metadata = req.metadata || {};
+  const metadata = req.vendorBody || req.metadata || {};
   const profile = videoProfile(ctx);
   const raw = trimmed(metadata.resolution || req.size).toLowerCase();
   const recognized = SEEDANCE_RESOLUTIONS.includes(raw) || raw.replace("*", "x").split("x").length === 2;
@@ -748,36 +750,33 @@ function responsesOutputText(ctx, task) {
   return parts.join("\n\n");
 }
 
+// Ark's error codes for the statuses the gateway answers with
+// (docs.volcengine.com/docs/ark/error-codes).
+const ERROR_CODES = {
+  400: "InvalidParameter",
+  401: "AuthenticationError",
+  403: "AccessDenied",
+  404: "NotFound",
+  408: "RequestTimeout",
+  413: "InvalidParameter",
+  429: "AccountRateLimitExceeded",
+};
+
 export const native = {
+  // Ark's own body, sent as is for Ark to check. Ark would call callback_url
+  // back with its own task ids, which the gateway does not hand out.
   createTask: function (ctx) {
     if (!ctx.body || ctx.body.kind !== "json") throw new Error("JSON body required");
     const body = ctx.body.value;
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("request body must be an object");
     const model = trimmed(body.model);
     if (!model) throw new Error("model is required");
+    if (body.callback_url !== undefined && body.callback_url !== null) throw new Error("callback_url is not supported; query the task instead");
     if (body.content !== undefined && !Array.isArray(body.content)) throw new Error("content must be an array");
-    const content = Array.isArray(body.content) ? body.content : [];
-    const texts = [];
-    let hasReference = false;
-    for (const item of content) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-      if (item.type === "text" && typeof item.text === "string") texts.push(item.text);
-      else hasReference = true;
-    }
-    if (!texts.length && !hasReference) throw new Error("content is required");
-    const requestBody = {
-      model: model,
-      prompt: texts
-        .filter(function (text) {
-          return trimmed(text);
-        })
-        .join("\n"),
-      metadata: body,
-    };
-    const seconds = Number(body.duration);
-    if (Number.isFinite(seconds) && seconds > 0) requestBody.seconds = seconds;
-    const intent = { kind: "submit", model: model, action: hasReference ? "image_to_video" : "text_to_video", requestBody: requestBody };
-    const originTaskIds = draftTaskIds(content);
+    if (!(body.content || []).some((item) => item && typeof item === "object" && !Array.isArray(item))) throw new Error("content is required");
+    const hasReference = body.content.some((item) => item && typeof item === "object" && item.type !== "text");
+    const intent = { kind: "submit", model: model, action: hasReference ? "image_to_video" : "text_to_video", requestBody: { model: model, vendorBody: body } };
+    const originTaskIds = draftTaskIds(body.content);
     if (originTaskIds.length) intent.originTaskIds = originTaskIds;
     return intent;
   },
@@ -785,11 +784,18 @@ export const native = {
     const data = task.data && typeof task.data === "object" && !Array.isArray(task.data) ? task.data : {};
     return Object.assign({}, data, { id: task.task_id });
   },
+  // Ark's last query reply. Before the first poll the task holds the create
+  // reply, {id}, which has no status yet; the gateway can fail a task Ark
+  // still reports as queued or running (poll failures or the task timeout).
   taskStatus: function (ctx, task) {
-    if (task.data && typeof task.data === "object" && !Array.isArray(task.data)) return Object.assign({}, task.data, { id: task.task_id });
     const statusMap = { NOT_START: "queued", SUBMITTED: "queued", QUEUED: "queued", IN_PROGRESS: "running", SUCCESS: "succeeded", FAILURE: "failed" };
-    const output = { id: task.task_id, status: statusMap[task.status] || "queued" };
-    if (task.fail_reason) output.error = { message: task.fail_reason };
+    const data = task.data && typeof task.data === "object" && !Array.isArray(task.data) ? task.data : {};
+    const output = Object.assign({}, data, { id: task.task_id });
+    if (typeof output.status !== "string") output.status = statusMap[task.status] || "queued";
+    if (task.status === "FAILURE" && (output.status === "queued" || output.status === "running")) {
+      output.status = "failed";
+      output.error = { code: "InternalServiceError", message: task.fail_reason || "task failed" };
+    }
     return output;
   },
   createImage: function (ctx) {
@@ -809,7 +815,7 @@ export const native = {
     return task.data && typeof task.data === "object" && !Array.isArray(task.data) ? task.data : {};
   },
   error: function (ctx, error) {
-    return { error: { code: error.code, message: error.message } };
+    return { error: { code: ERROR_CODES[error.httpStatus] || "InternalServiceError", message: error.message } };
   },
 };
 
@@ -826,9 +832,22 @@ export function buildSubmitRequest(ctx) {
     };
   }
   const req = ctx.requestBody;
-  const metadata = req.metadata || {};
   // Reject output tiers the model does not offer before any quota is reserved.
   videoResolution(ctx);
+  if (req.vendorBody) {
+    const sent = Object.assign({}, req.vendorBody, { model: ctx.upstreamModel || req.vendorBody.model });
+    sent.content = rewriteDraftTaskContent(sent.content, ctx.originTasks);
+    return {
+      url: apiRoot(ctx) + "/api/v3/contents/generations/tasks",
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + ctx.apiKey },
+      body: sent,
+      action: sent.content.some((item) => item && typeof item === "object" && item.type !== "text") ? "image_to_video" : "text_to_video",
+      rewriteModel: sent.model,
+    };
+  }
+  // The host protocols map the prompt, images and seconds onto Ark's fields.
+  const metadata = req.metadata || {};
   const body = Object.assign({ model: req.model || "", content: [] }, metadata);
   const imageContent = [];
   const images = Array.isArray(req.images) ? req.images : [];
@@ -879,7 +898,7 @@ export function extractUsage(ctx) {
     return facts;
   }
   const req = ctx.requestBody || {};
-  const metadata = req.metadata || {};
+  const metadata = req.vendorBody || req.metadata || {};
   if (ctx.usagePurpose === "billing_ratios") {
     const ratio = videoInputRatio(ctx.upstreamModel || ctx.model, metadata.resolution, metadata.content);
     return ratio === 1 ? null : { video_input_ratio: ratio };
@@ -887,7 +906,8 @@ export function extractUsage(ctx) {
   const profile = videoProfile(ctx);
   // A missing duration or -1 (the model picks the length; Seedance 2.5
   // defaults to it) reserves the longest duration the model can produce.
-  let seconds = Number(req.seconds || req.duration || metadata.duration || 0);
+  const stated = req.seconds || req.duration || metadata.duration;
+  let seconds = typeof stated === "number" || typeof stated === "string" ? Number(stated) : 0;
   if (!Number.isFinite(seconds) || seconds <= 0) {
     const frames = Number(metadata.frames);
     seconds = Number.isFinite(frames) && frames > 0 ? Math.floor(frames / 24) : profile.maxDuration;
@@ -1187,6 +1207,8 @@ protocols.openai_video = {
       if (seconds !== undefined && Number(seconds) !== -1 && (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0 || Number(seconds) > 3600))
         throw new Error("seconds must be -1 or between 1 and 3600");
       const requestBody = Object.assign({}, req, { model: ctx.model });
+      // vendorBody carries a native request's own body; clients of this protocol cannot set it.
+      delete requestBody.vendorBody;
       // buildSubmitRequest reads seconds; duration is accepted as its alias.
       if (seconds !== undefined) requestBody.seconds = seconds;
       return {
@@ -1222,6 +1244,8 @@ protocols.openai_video = {
     const seconds = req.seconds === undefined ? req.duration : req.seconds;
     if (seconds !== undefined && Number(seconds) !== -1 && (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0 || Number(seconds) > 3600))
       throw new Error("seconds must be -1 or between 1 and 3600");
+    // vendorBody carries a native request's own body; clients of this protocol cannot set it.
+    delete req.vendorBody;
     return {
       kind: "submit",
       model: ctx.model,

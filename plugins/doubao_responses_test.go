@@ -1029,3 +1029,104 @@ func TestDoubaoImageEndpointMappingKeepsDeclaredModel(t *testing.T) {
 		})
 	}
 }
+
+func TestDoubaoNativeOfficialBodies(t *testing.T) {
+	_, plugin := newDoubaoPlugin(t)
+	const seedance = "doubao-seedance-2-0-260128"
+	call := func(path []string, args ...any) (map[string]any, error) {
+		value, err := plugin.Engine.CallPath(t.Context(), path[0], path[1:], args...)
+		if err != nil {
+			return nil, err
+		}
+		return alibabaObject(t, value), nil
+	}
+	jsonBody := func(body map[string]any) map[string]any {
+		return map[string]any{"body": map[string]any{"kind": "json", "value": body}}
+	}
+
+	t.Run("video content keeps the client's order and texts", func(t *testing.T) {
+		content := []any{
+			map[string]any{"type": "text", "text": "a cat"},
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://cdn.example/a.png"}, "role": "first_frame"},
+			map[string]any{"type": "text", "text": "turns around"},
+		}
+		body := map[string]any{"model": seedance, "content": content, "duration": float64(6), "ratio": "16:9"}
+		intent, err := call([]string{"native", "createTask"}, jsonBody(body))
+		require.NoError(t, err)
+		assert.Equal(t, "image_to_video", intent["action"])
+		driver := map[string]any{"model": seedance, "upstreamModel": seedance, "requestBody": intent["requestBody"], "baseUrl": doubaoBaseURL, "apiKey": "key"}
+		descriptor, err := call([]string{"buildSubmitRequest"}, driver)
+		require.NoError(t, err)
+		assert.Equal(t, alibabaObject(t, body), descriptor["body"])
+		facts, err := call([]string{"extractUsage"}, driver)
+		require.NoError(t, err)
+		assert.Equal(t, "1080p", facts["resolution"], "an omitted resolution reserves the model's highest tier up to 1080p")
+		assert.InDelta(t, 6*1920*1080*24/1024.0, facts["tokens"], 1e-6)
+	})
+
+	// Ark checks the duration, which goes as sent. The reservation reads the
+	// number when it can and takes the model's longest duration otherwise.
+	for _, tc := range []struct {
+		name     string
+		duration any
+		seconds  float64
+	}{
+		{"a fractional duration", 5.9, 5.9},
+		{"a duration given as a string", "5", 5},
+		{"a duration that is not a number", true, 15},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := map[string]any{"model": seedance, "content": []any{map[string]any{"type": "text", "text": "a cat"}}, "duration": tc.duration}
+			intent, err := call([]string{"native", "createTask"}, jsonBody(body))
+			require.NoError(t, err)
+			driver := map[string]any{"model": seedance, "upstreamModel": seedance, "requestBody": intent["requestBody"], "baseUrl": doubaoBaseURL, "apiKey": "key"}
+			descriptor, err := call([]string{"buildSubmitRequest"}, driver)
+			require.NoError(t, err)
+			assert.Equal(t, alibabaObject(t, body), descriptor["body"])
+			facts, err := call([]string{"extractUsage"}, driver)
+			require.NoError(t, err)
+			assert.InDelta(t, tc.seconds*1920*1080*24/1024.0, facts["tokens"], 1e-6)
+		})
+	}
+
+	for _, tc := range []struct {
+		name    string
+		body    map[string]any
+		wantErr string
+	}{
+		{"the model names the price", map[string]any{"content": []any{map[string]any{"type": "text", "text": "a cat"}}}, "model is required"},
+		{"callbacks carry Ark's task ids", map[string]any{"model": seedance, "content": []any{map[string]any{"type": "text", "text": "a cat"}}, "callback_url": "https://client.example/hook"}, "callback_url is not supported"},
+		{"content is required", map[string]any{"model": seedance}, "content is required"},
+		{"content needs an item", map[string]any{"model": seedance, "content": []any{nil}}, "content is required"},
+		{"content is an array", map[string]any{"model": seedance, "content": "a cat"}, "content must be an array"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := call([]string{"native", "createTask"}, jsonBody(tc.body))
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+
+	// A /v1/videos client cannot pass a body off as a native one.
+	t.Run("a vendorBody field is not a native body", func(t *testing.T) {
+		intent, err := call([]string{"protocols", "openai_video", "decodeRequest"}, map[string]any{"model": seedance, "body": map[string]any{"kind": "json", "value": map[string]any{
+			"model": seedance, "prompt": "a cat", "vendorBody": map[string]any{"model": seedance, "content": []any{map[string]any{"type": "text", "text": "x"}}, "callback_url": "https://client.example/hook"},
+		}}})
+		require.NoError(t, err)
+		descriptor, err := call([]string{"buildSubmitRequest"}, map[string]any{"model": seedance, "upstreamModel": seedance, "requestBody": intent["requestBody"], "baseUrl": doubaoBaseURL, "apiKey": "key"})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"model": seedance, "content": []any{map[string]any{"type": "text", "text": "a cat"}}}, descriptor["body"])
+	})
+
+	t.Run("query replies", func(t *testing.T) {
+		created, err := call([]string{"native", "taskStatus"}, map[string]any{}, map[string]any{"task_id": "task_pub", "status": "SUBMITTED", "data": map[string]any{"id": "task_pub"}})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"id": "task_pub", "status": "queued"}, created)
+		failed, err := call([]string{"native", "taskStatus"}, map[string]any{}, map[string]any{"task_id": "task_pub", "status": "FAILURE", "fail_reason": "task timed out",
+			"data": map[string]any{"id": "task_pub", "model": seedance, "status": "running"}})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"id": "task_pub", "model": seedance, "status": "failed", "error": map[string]any{"code": "InternalServiceError", "message": "task timed out"}}, failed)
+		rendered, err := call([]string{"native", "error"}, map[string]any{}, map[string]any{"httpStatus": 400, "message": "content is required"})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"error": map[string]any{"code": "InvalidParameter", "message": "content is required"}}, rendered)
+	})
+}
