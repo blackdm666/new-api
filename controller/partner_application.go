@@ -11,7 +11,8 @@ import (
 )
 
 // SubmitPartnerApplication accepts the official site's partner application
-// form and emails it to the referral application recipients. Like the
+// form from a signed-in user (UserAuth) and emails it, with that account's
+// overview, to the referral application recipients. Like the
 // referral application nothing is stored apart from the email outbox row,
 // whose subject and body are cleared after delivery; unlike it, the applicant
 // gets no confirmation email.
@@ -28,7 +29,7 @@ func SubmitPartnerApplication(c *gin.Context) {
 	}
 	sourcePage, _ := payload["source_page"].(string)
 	locale, _ := payload["locale"].(string)
-	application, err := service.ValidatePartnerApplication(payload, service.ReferralApplicationContext{
+	application, err := service.ValidatePartnerApplication(payload, c.GetInt("id"), service.ReferralApplicationContext{
 		SourcePage: sourcePage,
 		Referer:    c.Request.Referer(),
 		Locale:     locale,
@@ -42,6 +43,10 @@ func SubmitPartnerApplication(c *gin.Context) {
 			"message": "Please check the application form",
 			"data":    gin.H{"field": fieldErr.Field, "code": fieldErr.Code},
 		})
+		return
+	}
+	if errors.Is(err, service.ErrPartnerApplicationAccountUnavailable) {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "This account cannot submit a partner application"})
 		return
 	}
 	if err != nil {

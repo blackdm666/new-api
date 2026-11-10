@@ -1,10 +1,13 @@
 package controller
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -17,22 +20,59 @@ import (
 	"gorm.io/gorm"
 )
 
-const partnerApplicationPath = "/api/public/partner-application"
+const (
+	partnerApplicationPath = "/api/public/partner-application"
+	// partnerApplicationTestUserHeader carries the signed-in user ID in tests.
+	partnerApplicationTestUserHeader = "X-Test-User-Id"
+)
 
-// createPartnerApplicant stores the enabled account that
-// validPartnerApplicationPayload refers to.
-func createPartnerApplicant(t *testing.T, db *gorm.DB) {
+// nextPartnerApplicantID hands every test its own account IDs, because the
+// in-memory per-account rate limit outlives each test's database.
+var nextPartnerApplicantID atomic.Int64
+
+func init() { nextPartnerApplicantID.Store(30000) }
+
+// partnerApplicationTestAuth stands in for UserAuth on the test router: it
+// sets the signed-in user ID like UserAuth does, or answers 401 when the
+// request carries none. UserAuth itself is covered by the auth tests, and the
+// route table test requires the real route to declare a session rule.
+func partnerApplicationTestAuth(c *gin.Context) {
+	id, err := strconv.Atoi(c.GetHeader(partnerApplicationTestUserHeader))
+	if err != nil || id <= 0 {
+		c.AbortWithStatus(http.StatusUnauthorized)
+		return
+	}
+	c.Set("id", id)
+}
+
+// createPartnerApplicants stores count enabled accounts with consecutive IDs
+// and returns the first, for tests that submit more often than one account may.
+func createPartnerApplicants(t *testing.T, db *gorm.DB, count int) int {
 	t.Helper()
+	first := int(nextPartnerApplicantID.Add(int64(count))) - count + 1
+	for index := range count {
+		id := first + index
+		require.NoError(t, db.Create(&model.User{
+			Id: id, Username: fmt.Sprintf("partner_%d", id), Status: common.UserStatusEnabled, AffCode: fmt.Sprintf("pb%d", id),
+		}).Error)
+	}
+	return first
+}
+
+// createPartnerApplicant stores an enabled signed-in applicant and returns its ID.
+func createPartnerApplicant(t *testing.T, db *gorm.DB) int {
+	t.Helper()
+	id := int(nextPartnerApplicantID.Add(1))
 	require.NoError(t, db.Create(&model.User{
-		Id: 30001, Username: "partner_a", Group: "vip", Status: common.UserStatusEnabled, AffCode: "pa01",
+		Id: id, Username: fmt.Sprintf("partner_a%d", id), Group: "vip", Status: common.UserStatusEnabled, AffCode: fmt.Sprintf("pa%d", id),
 		Quota: int(10 * common.QuotaPerUnit), UsedQuota: int(2.5 * common.QuotaPerUnit), RequestCount: 42,
 		CreatedAt: 1767196800, // 2026-01-01 00:00:00 UTC+8
 	}).Error)
+	return id
 }
 
 func validPartnerApplicationPayload() map[string]any {
 	return map[string]any{
-		"account":         "30001",
 		"display_name":    "Acme <b>Relay</b>",
 		"business_type":   "relay_running",
 		"site_url":        "https://relay.example.com",
@@ -52,16 +92,36 @@ func validPartnerApplicationPayload() map[string]any {
 	}
 }
 
-func postPartnerApplication(t *testing.T, router *gin.Engine, ip string, payload map[string]any) (*httptest.ResponseRecorder, map[string]any) {
+func postPartnerApplication(t *testing.T, router *gin.Engine, ip string, userID int, payload map[string]any) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
-	return postApplicationForm(t, router, partnerApplicationPath, ip, payload)
+	body, err := common.Marshal(payload)
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost, partnerApplicationPath, bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	if userID > 0 {
+		request.Header.Set(partnerApplicationTestUserHeader, strconv.Itoa(userID))
+	}
+	request.RemoteAddr = ip + ":40000"
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	response := map[string]any{}
+	if recorder.Body.Len() > 0 {
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	}
+	return recorder, response
 }
 
+// The account overview always describes the signed-in applicant: a UID in the
+// payload (the old form field) is ignored, so nobody can file under another
+// account.
 func TestSubmitPartnerApplicationQueuesGradedEmailWithAccountOverview(t *testing.T) {
 	router, db := setupReferralApplicationTest(t)
-	createPartnerApplicant(t, db)
+	applicant := createPartnerApplicant(t, db)
+	require.NoError(t, db.Create(&model.User{Id: 1, Username: "site_owner", Group: "internal", Status: common.UserStatusEnabled, AffCode: "own1"}).Error)
+	payload := validPartnerApplicationPayload()
+	payload["account"] = "1"
 
-	recorder, response := postPartnerApplication(t, router, "203.0.113.10", validPartnerApplicationPayload())
+	recorder, response := postPartnerApplication(t, router, "203.0.113.10", applicant, payload)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, true, response["success"])
@@ -78,8 +138,8 @@ func TestSubmitPartnerApplicationQueuesGradedEmailWithAccountOverview(t *testing
 	assert.Equal(t, "laohei@88fk.org", delivery.Recipient)
 	assert.Equal(t, fmt.Sprintf("[%s] 代理合作申请 A级 %s", common.SystemNameOrDefault(), reference), delivery.Subject)
 	for _, expected := range []string{
-		"官网代理合作页收到一份新申请；评级只按申请人自报的月消耗，联系前请结合账号概况核实。",
-		"88API UID", "30001", "Acme &lt;b&gt;Relay&lt;/b&gt;", "已在运营 API 中转站", "https://relay.example.com",
+		"官网代理合作页收到一份新申请；账号概况取自提交时登录的账号，评级只按申请人自报的月消耗，联系前请结合账号概况核实。",
+		"88API UID", strconv.Itoa(applicant), "Acme &lt;b&gt;Relay&lt;/b&gt;", "已在运营 API 中转站", "https://relay.example.com",
 		"New API", "¥1 万–5 万", "单次预存不少于 ¥2,000", "已预存 ¥2,000 以上", "Claude、GPT / Codex", "专属价格、开发票", "@acme_relay", "Line one<br/>Line two",
 		"账号概况", "partner_a", "vip", "$2.50", "$10.00", "42", "2026-01-01 00:00:00（北京时间）",
 		"https://88api.ai/business/partner/", "203.0.113.10", reference,
@@ -87,6 +147,7 @@ func TestSubmitPartnerApplicationQueuesGradedEmailWithAccountOverview(t *testing
 		assert.Contains(t, delivery.Body, expected)
 	}
 	assert.NotContains(t, delivery.Body, "<b>Relay</b>")
+	assert.NotContains(t, delivery.Body, "site_owner")
 	assert.NotContains(t, delivery.Body, "utm_source")
 	assert.NotContains(t, delivery.Body, "自动回信")
 	assert.Less(t, strings.Index(delivery.Body, "账号概况"), strings.Index(delivery.Body, "提交信息"))
@@ -107,11 +168,11 @@ func TestSubmitPartnerApplicationGradeAndOptionalSite(t *testing.T) {
 	for index, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			router, db := setupReferralApplicationTest(t)
-			createPartnerApplicant(t, db)
+			applicant := createPartnerApplicant(t, db)
 			payload := validPartnerApplicationPayload()
 			tc.edit(payload)
 
-			recorder, response := postPartnerApplication(t, router, fmt.Sprintf("203.0.113.%d", 20+index), payload)
+			recorder, response := postPartnerApplication(t, router, fmt.Sprintf("203.0.113.%d", 20+index), applicant, payload)
 
 			require.Equal(t, http.StatusOK, recorder.Code)
 			data, _ := response["data"].(map[string]any)
@@ -125,17 +186,12 @@ func TestSubmitPartnerApplicationGradeAndOptionalSite(t *testing.T) {
 
 func TestSubmitPartnerApplicationRejectsInvalidFieldsWithoutSending(t *testing.T) {
 	router, db := setupReferralApplicationTest(t)
-	createPartnerApplicant(t, db)
-	require.NoError(t, db.Create(&model.User{Id: 30002, Username: "partner_off", Status: common.UserStatusDisabled, AffCode: "pa02"}).Error)
 	cases := []struct {
 		name  string
 		edit  func(payload map[string]any)
 		field string
 		code  string
 	}{
-		{"missing account", func(p map[string]any) { p["account"] = " " }, "account", service.ReferralApplicationErrorRequired},
-		{"email as account", func(p map[string]any) { p["account"] = "partner@example.com" }, "account", service.ReferralApplicationErrorInvalid},
-		{"uid over 12 digits", func(p map[string]any) { p["account"] = "1234567890123" }, "account", service.ReferralApplicationErrorInvalid},
 		{"missing name", func(p map[string]any) { delete(p, "display_name") }, "display_name", service.ReferralApplicationErrorRequired},
 		{"name too long", func(p map[string]any) { p["display_name"] = strings.Repeat("名", 51) }, "display_name", service.ReferralApplicationErrorTooLong},
 		{"missing business type", func(p map[string]any) { p["business_type"] = "" }, "business_type", service.ReferralApplicationErrorRequired},
@@ -162,20 +218,17 @@ func TestSubmitPartnerApplicationRejectsInvalidFieldsWithoutSending(t *testing.T
 		{"old 3k tier value", func(p map[string]any) { p["monthly_spend"] = "3k-10k" }, "monthly_spend", service.ReferralApplicationErrorInvalid},
 		{"missing prepay", func(p map[string]any) { p["prepay"] = "" }, "prepay", service.ReferralApplicationErrorRequired},
 		{"prepay declined", func(p map[string]any) { p["prepay"] = "decline" }, "prepay", service.PartnerApplicationErrorNotEligible},
-		{"unknown uid", func(p map[string]any) { p["account"] = "99999" }, "account", service.PartnerApplicationErrorAccountNotFound},
-		{"zero uid", func(p map[string]any) { p["account"] = "0" }, "account", service.PartnerApplicationErrorAccountNotFound},
-		{"disabled uid", func(p map[string]any) { p["account"] = "30002" }, "account", service.PartnerApplicationErrorAccountNotFound},
-		// Order: field formats, then contact, then eligibility, then the UID lookup.
+		// Order: field formats, then contact, then eligibility.
 		{"site checked before contact", func(p map[string]any) { p["site_url"], p["telegram"] = "", "" }, "site_url", service.ReferralApplicationErrorRequired},
 		{"contact checked before eligibility", func(p map[string]any) { p["business_type"], p["telegram"] = "personal", "" }, "contact", service.ReferralApplicationErrorContactRequired},
-		{"eligibility checked before uid", func(p map[string]any) { p["monthly_spend"], p["account"] = "lt5k", "99999" }, "monthly_spend", service.PartnerApplicationErrorNotEligible},
 	}
 	for index, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			applicant := createPartnerApplicant(t, db)
 			payload := validPartnerApplicationPayload()
 			tc.edit(payload)
 
-			recorder, response := postPartnerApplication(t, router, fmt.Sprintf("203.0.114.%d", index+1), payload)
+			recorder, response := postPartnerApplication(t, router, fmt.Sprintf("203.0.114.%d", index+1), applicant, payload)
 
 			assert.Equal(t, http.StatusBadRequest, recorder.Code)
 			assert.Equal(t, false, response["success"])
@@ -191,10 +244,11 @@ func TestSubmitPartnerApplicationRejectsInvalidFieldsWithoutSending(t *testing.T
 
 func TestSubmitPartnerApplicationDropsHoneypotSubmissionsSilently(t *testing.T) {
 	router, db := setupReferralApplicationTest(t)
+	applicant := createPartnerApplicant(t, db)
 	payload := validPartnerApplicationPayload()
 	payload["website"] = "https://spam.example"
 
-	recorder, response := postPartnerApplication(t, router, "203.0.113.30", payload)
+	recorder, response := postPartnerApplication(t, router, "203.0.113.30", applicant, payload)
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, true, response["success"])
@@ -207,13 +261,13 @@ func TestSubmitPartnerApplicationDropsHoneypotSubmissionsSilently(t *testing.T) 
 // the referral form's budget.
 func TestSubmitPartnerApplicationLimitsRequestsPerIPSeparately(t *testing.T) {
 	router, db := setupReferralApplicationTest(t)
-	createPartnerApplicant(t, db)
+	first := createPartnerApplicants(t, db, middleware.PartnerApplicationRateLimitNum+1)
 
-	for range middleware.PartnerApplicationRateLimitNum {
-		recorder, _ := postPartnerApplication(t, router, "203.0.113.31", validPartnerApplicationPayload())
+	for index := range middleware.PartnerApplicationRateLimitNum {
+		recorder, _ := postPartnerApplication(t, router, "203.0.113.31", first+index, validPartnerApplicationPayload())
 		require.Equal(t, http.StatusOK, recorder.Code)
 	}
-	limited, _ := postPartnerApplication(t, router, "203.0.113.31", validPartnerApplicationPayload())
+	limited, _ := postPartnerApplication(t, router, "203.0.113.31", first+middleware.PartnerApplicationRateLimitNum, validPartnerApplicationPayload())
 	referral, _ := postReferralApplication(t, router, "203.0.113.31", validReferralApplicationPayload())
 
 	assert.Equal(t, http.StatusTooManyRequests, limited.Code)
@@ -224,13 +278,13 @@ func TestSubmitPartnerApplicationLimitsRequestsPerIPSeparately(t *testing.T) {
 // looks accepted but nothing is emailed, and the referral form is unaffected.
 func TestSubmitPartnerApplicationStopsEmailingAtDailyLimit(t *testing.T) {
 	router, db := setupReferralApplicationTest(t)
-	createPartnerApplicant(t, db)
+	first := createPartnerApplicants(t, db, service.ApplicationDailyLimit+1)
 
 	for index := range service.ApplicationDailyLimit {
-		recorder, _ := postPartnerApplication(t, router, fmt.Sprintf("203.0.114.%d", index+1), validPartnerApplicationPayload())
+		recorder, _ := postPartnerApplication(t, router, fmt.Sprintf("203.0.114.%d", index+1), first+index, validPartnerApplicationPayload())
 		require.Equal(t, http.StatusOK, recorder.Code)
 	}
-	recorder, response := postPartnerApplication(t, router, "203.0.114.200", validPartnerApplicationPayload())
+	recorder, response := postPartnerApplication(t, router, "203.0.114.200", first+service.ApplicationDailyLimit, validPartnerApplicationPayload())
 	referral, _ := postReferralApplication(t, router, "203.0.114.201", validReferralApplicationPayload())
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
@@ -245,14 +299,42 @@ func TestSubmitPartnerApplicationStopsEmailingAtDailyLimit(t *testing.T) {
 
 func TestSubmitPartnerApplicationReportsUnavailableWithoutSMTP(t *testing.T) {
 	router, db := setupReferralApplicationTest(t)
-	createPartnerApplicant(t, db)
+	applicant := createPartnerApplicant(t, db)
 	common.SMTPServer = ""
 
-	recorder, response := postPartnerApplication(t, router, "203.0.113.32", validPartnerApplicationPayload())
+	recorder, response := postPartnerApplication(t, router, "203.0.113.32", applicant, validPartnerApplicationPayload())
 
 	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	assert.Equal(t, false, response["success"])
 	var count int64
 	require.NoError(t, db.Model(&model.EmailDelivery{}).Count(&count).Error)
 	assert.Zero(t, count)
+}
+
+// Without a signed-in account nothing is validated or emailed; a disabled
+// account is refused; and one account cannot repeat the form from rotating
+// IPs past its own budget.
+func TestSubmitPartnerApplicationRequiresEnabledSignedInAccount(t *testing.T) {
+	router, db := setupReferralApplicationTest(t)
+	applicant := createPartnerApplicant(t, db)
+	disabledID := createPartnerApplicant(t, db)
+	require.NoError(t, db.Model(&model.User{}).Where("id = ?", disabledID).Update("status", common.UserStatusDisabled).Error)
+
+	anonymous, _ := postPartnerApplication(t, router, "203.0.115.1", 0, validPartnerApplicationPayload())
+	disabled, disabledResponse := postPartnerApplication(t, router, "203.0.115.2", disabledID, validPartnerApplicationPayload())
+
+	assert.Equal(t, http.StatusUnauthorized, anonymous.Code)
+	assert.Equal(t, http.StatusForbidden, disabled.Code)
+	assert.Equal(t, false, disabledResponse["success"])
+
+	for index := range middleware.PartnerApplicationUserRateLimitNum {
+		recorder, _ := postPartnerApplication(t, router, fmt.Sprintf("203.0.115.%d", 10+index), applicant, validPartnerApplicationPayload())
+		require.Equal(t, http.StatusOK, recorder.Code)
+	}
+	limited, _ := postPartnerApplication(t, router, "203.0.115.99", applicant, validPartnerApplicationPayload())
+	assert.Equal(t, http.StatusTooManyRequests, limited.Code)
+
+	var count int64
+	require.NoError(t, db.Model(&model.EmailDelivery{}).Where("category = ?", service.PartnerApplicationEmailCategory).Count(&count).Error)
+	assert.EqualValues(t, middleware.PartnerApplicationUserRateLimitNum, count)
 }

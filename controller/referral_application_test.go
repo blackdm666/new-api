@@ -75,6 +75,8 @@ func setupReferralApplicationTest(t *testing.T) (*gin.Engine, *gorm.DB) {
 	)
 	router.POST("/api/public/partner-application",
 		middleware.PartnerApplicationRateLimit(),
+		partnerApplicationTestAuth,
+		middleware.PartnerApplicationUserRateLimit(),
 		middleware.AnonymousRequestBodyLimit(),
 		middleware.TurnstileCheckFromBody(),
 		SubmitPartnerApplication,
