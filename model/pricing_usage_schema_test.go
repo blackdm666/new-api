@@ -168,21 +168,23 @@ export function parseTaskResult(){return {};}
 	require.NoError(t, err)
 	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(key) })
 	for index, mapping := range []string{
-		`{"image-alias":"profile-image","video-alias":"profile-video","ambiguous-alias":"profile-image"}`,
+		// endpoint-alias reaches an undeclared endpoint ID past profile-video;
+		// endpoint-only never passes a declared model and stays unpriced.
+		`{"image-alias":"profile-image","video-alias":"profile-video","ambiguous-alias":"profile-image","endpoint-alias":"profile-video","profile-video":"ep-video","endpoint-only":"ep-other"}`,
 		`{"ambiguous-alias":"profile-video"}`,
 	} {
 		id := 920 + index
 		require.NoError(t, DB.Create(&Channel{
 			Id: id, Type: constant.ChannelTypeTaskPlugin, Status: 1, Name: fmt.Sprintf("channel-%d", id),
-			Models: "profile-image,profile-video,image-alias,video-alias,ambiguous-alias", ModelMapping: &mapping,
+			Models: "profile-image,profile-video,image-alias,video-alias,ambiguous-alias,endpoint-alias,endpoint-only", ModelMapping: &mapping,
 		}).Error)
-		for _, name := range []string{"profile-image", "profile-video", "image-alias", "video-alias", "ambiguous-alias"} {
+		for _, name := range []string{"profile-image", "profile-video", "image-alias", "video-alias", "ambiguous-alias", "endpoint-alias", "endpoint-only"} {
 			insertPricingEndpointAbility(t, id, name)
 		}
 	}
 	InitChannelCache()
 	pricing := pricingByModel(GetPricing())
-	names := []string{"profile-image", "profile-video", "image-alias", "video-alias", "ambiguous-alias"}
+	names := []string{"profile-image", "profile-video", "image-alias", "video-alias", "ambiguous-alias", "endpoint-alias", "endpoint-only"}
 	snapshot, err := GetModelPricingSnapshot(names)
 	require.NoError(t, err)
 	entries := make(map[string]ModelPricingEntry, len(snapshot.Entries))
@@ -198,6 +200,7 @@ export function parseTaskResult(){return {};}
 		{"image-alias", "image_count", "count", 0},
 		{"video-alias", "seconds", "second", 1},
 		{"ambiguous-alias", "fallback", "count", 1},
+		{"endpoint-alias", "seconds", "second", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			expected := map[string]jsplugin.UsageFieldSchema{tc.field: {Type: "number", Unit: tc.unit}}
@@ -208,6 +211,10 @@ export function parseTaskResult(){return {};}
 			require.ErrorContains(t, ValidateModelPricing(tc.name, PricingValues{"billing_setting.billing_expr": `u("missing")`}), "not declared")
 		})
 	}
+	assert.Empty(t, entries["endpoint-only"].UsageSchema)
+	target, ok := ResolveTaskModelAlias(jsplugin.DefaultRegistry.Generation(), "endpoint-alias")
+	require.True(t, ok)
+	assert.Equal(t, TaskAliasTarget{Alias: "endpoint-alias", Declared: "profile-video", PluginKey: key}, target)
 	require.ErrorContains(t, ValidateModelPricing("profile-image", PricingValues{"billing_setting.billing_expr": `u("seconds")`}), "not declared")
 	require.ErrorContains(t, ValidateModelPricing("video-alias", PricingValues{"billing_setting.billing_expr": `u("image_count")`}), "not declared")
 

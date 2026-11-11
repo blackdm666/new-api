@@ -218,13 +218,24 @@ func buildTaskAliasView(generation *jsplugin.RoutingGeneration) *taskAliasView {
 			if _, declared := generation.CanonicalModel(alias); declared {
 				continue
 			}
-			tail, cyclic := followChannelModelMapping(modelMap, alias)
-			if cyclic {
+			if _, cyclic := followChannelModelMapping(modelMap, alias); cyclic {
 				common.SysError(common.LogText("task alias mapping cycle dropped: channel=%d key=%q", channel.Id, alias))
 				continue
 			}
-			declared, ok := generation.CanonicalModel(tail)
-			if !ok {
+			// The chain may end past the declared model, e.g. at a vendor
+			// endpoint ID; the last declared hop names the model it serves.
+			declared := ""
+			for current := alias; ; {
+				next := modelMap[current]
+				if next == "" || next == current {
+					break
+				}
+				if name, ok := generation.CanonicalModel(next); ok {
+					declared = name
+				}
+				current = next
+			}
+			if declared == "" {
 				continue
 			}
 			plugin, ok := generation.GetByModel(declared)
