@@ -1117,6 +1117,47 @@ func TestDoubaoNativeOfficialBodies(t *testing.T) {
 		assert.Equal(t, map[string]any{"model": seedance, "content": []any{map[string]any{"type": "text", "text": "a cat"}}}, descriptor["body"])
 	})
 
+	// The protocols send metadata's fields to Ark as they are, so they hold
+	// the same callback and draft rules as a native body.
+	protocolBodies := []struct {
+		name     string
+		protocol string
+		body     func(metadata map[string]any) map[string]any
+	}{
+		{"OpenAI video JSON", "openai_video", func(metadata map[string]any) map[string]any {
+			return map[string]any{"kind": "json", "value": map[string]any{"model": seedance, "prompt": "a cat", "metadata": metadata}}
+		}},
+		{"OpenAI video multipart", "openai_video", func(metadata map[string]any) map[string]any {
+			encoded, err := common.Marshal(metadata)
+			require.NoError(t, err)
+			return map[string]any{"kind": "multipart", "fields": map[string]any{"prompt": []any{"a cat"}, "metadata": []any{string(encoded)}}, "files": []any{}}
+		}},
+		{"Responses", "openai_responses", func(metadata map[string]any) map[string]any {
+			return map[string]any{"kind": "json", "value": map[string]any{"model": seedance, "input": "a cat", "metadata": metadata}}
+		}},
+	}
+	for _, tc := range protocolBodies {
+		t.Run(tc.name+" rejects callbacks", func(t *testing.T) {
+			_, err := call([]string{"protocols", tc.protocol, "decodeRequest"}, map[string]any{"model": seedance, "body": tc.body(map[string]any{"callback_url": "https://client.example/hook"})})
+			require.ErrorContains(t, err, "callback_url is not supported")
+		})
+		t.Run(tc.name+" turns a draft into its formal video", func(t *testing.T) {
+			draft := map[string]any{"type": "draft_task", "draft_task": map[string]any{"id": "task_draft_pub"}}
+			intent, err := call([]string{"protocols", tc.protocol, "decodeRequest"}, map[string]any{"model": seedance, "body": tc.body(map[string]any{"content": []any{draft}})})
+			require.NoError(t, err)
+			assert.Equal(t, []any{"task_draft_pub"}, intent["originTaskIds"])
+			descriptor, err := call([]string{"buildSubmitRequest"}, map[string]any{
+				"model": seedance, "upstreamModel": seedance, "requestBody": intent["requestBody"], "baseUrl": doubaoBaseURL, "apiKey": "key",
+				"originTasks": []any{map[string]any{"taskId": "task_draft_pub", "upstreamTaskId": "cgt-draft-1", "status": "SUCCESS"}},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, []any{
+				map[string]any{"type": "draft_task", "draft_task": map[string]any{"id": "cgt-draft-1"}},
+				map[string]any{"type": "text", "text": "a cat"},
+			}, descriptor["body"].(map[string]any)["content"])
+		})
+	}
+
 	t.Run("query replies", func(t *testing.T) {
 		created, err := call([]string{"native", "taskStatus"}, map[string]any{}, map[string]any{"task_id": "task_pub", "status": "SUBMITTED", "data": map[string]any{"id": "task_pub"}})
 		require.NoError(t, err)
