@@ -319,7 +319,7 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.1",
+  version: "1.4.0-88api.2",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -373,6 +373,17 @@ function draftTaskIds(content) {
     if (id) ids.push(id);
   }
   return ids;
+}
+
+// The Ark fields of a video request: Ark would call callback_url back with
+// its own task ids, which the gateway does not hand out, and draft_task items
+// name gateway task ids the host resolves to Ark's before submission.
+function videoSubmitIntent(intent, arkFields) {
+  const fields = arkFields && typeof arkFields === "object" && !Array.isArray(arkFields) ? arkFields : {};
+  if (fields.callback_url !== undefined && fields.callback_url !== null) throw new Error("callback_url is not supported; query the task instead");
+  const originTaskIds = draftTaskIds(fields.content);
+  if (originTaskIds.length) intent.originTaskIds = originTaskIds;
+  return intent;
 }
 
 function rewriteDraftTaskContent(content, originTasks) {
@@ -763,22 +774,17 @@ const ERROR_CODES = {
 };
 
 export const native = {
-  // Ark's own body, sent as is for Ark to check. Ark would call callback_url
-  // back with its own task ids, which the gateway does not hand out.
+  // Ark's own body, sent as is for Ark to check.
   createTask: function (ctx) {
     if (!ctx.body || ctx.body.kind !== "json") throw new Error("JSON body required");
     const body = ctx.body.value;
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("request body must be an object");
     const model = trimmed(body.model);
     if (!model) throw new Error("model is required");
-    if (body.callback_url !== undefined && body.callback_url !== null) throw new Error("callback_url is not supported; query the task instead");
     if (body.content !== undefined && !Array.isArray(body.content)) throw new Error("content must be an array");
     if (!(body.content || []).some((item) => item && typeof item === "object" && !Array.isArray(item))) throw new Error("content is required");
     const hasReference = body.content.some((item) => item && typeof item === "object" && item.type !== "text");
-    const intent = { kind: "submit", model: model, action: hasReference ? "image_to_video" : "text_to_video", requestBody: { model: model, vendorBody: body } };
-    const originTaskIds = draftTaskIds(body.content);
-    if (originTaskIds.length) intent.originTaskIds = originTaskIds;
-    return intent;
+    return videoSubmitIntent({ kind: "submit", model: model, action: hasReference ? "image_to_video" : "text_to_video", requestBody: { model: model, vendorBody: body } }, body);
   },
   taskCreated: function (ctx, task) {
     const data = task.data && typeof task.data === "object" && !Array.isArray(task.data) ? task.data : {};
@@ -1069,10 +1075,7 @@ export const protocols = {
       if (Object.prototype.hasOwnProperty.call(req, "seconds")) requestBody.seconds = req.seconds;
       else if (Object.prototype.hasOwnProperty.call(req, "duration")) requestBody.seconds = req.duration;
       if (Object.prototype.hasOwnProperty.call(req, "size")) requestBody.size = req.size;
-      const intent = { kind: "submit", model: model, action: images.length ? "image_to_video" : "text_to_video", requestBody: requestBody };
-      const originTaskIds = draftTaskIds(metadata.content);
-      if (originTaskIds.length) intent.originTaskIds = originTaskIds;
-      return intent;
+      return videoSubmitIntent({ kind: "submit", model: model, action: images.length ? "image_to_video" : "text_to_video", requestBody: requestBody }, metadata);
     },
     renderEvents: function (ctx, task, previousState) {
       const status = String(task.status || "UNKNOWN").toUpperCase();
@@ -1211,12 +1214,11 @@ protocols.openai_video = {
       delete requestBody.vendorBody;
       // buildSubmitRequest reads seconds; duration is accepted as its alias.
       if (seconds !== undefined) requestBody.seconds = seconds;
-      return {
-        kind: "submit",
-        model: ctx.model,
-        action: req.input_reference || req.image ? "image_to_video" : "text_to_video",
-        requestBody: requestBody,
-      };
+      // buildSubmitRequest sends metadata's fields to Ark as they are.
+      return videoSubmitIntent(
+        { kind: "submit", model: ctx.model, action: req.input_reference || req.image ? "image_to_video" : "text_to_video", requestBody: requestBody },
+        req.metadata,
+      );
     }
     const first = function (name) {
       const values = (ctx.body.fields || {})[name] || [];
@@ -1246,12 +1248,10 @@ protocols.openai_video = {
       throw new Error("seconds must be -1 or between 1 and 3600");
     // vendorBody carries a native request's own body; clients of this protocol cannot set it.
     delete req.vendorBody;
-    return {
-      kind: "submit",
-      model: ctx.model,
-      action: req.input_reference || req.image ? "image_to_video" : "text_to_video",
-      requestBody: Object.assign({}, req, { model: ctx.model }),
-    };
+    return videoSubmitIntent(
+      { kind: "submit", model: ctx.model, action: req.input_reference || req.image ? "image_to_video" : "text_to_video", requestBody: Object.assign({}, req, { model: ctx.model }) },
+      req.metadata,
+    );
   },
   render: function (ctx, task) {
     return legacyRenderers.openai_video(task);
