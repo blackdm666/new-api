@@ -1171,3 +1171,117 @@ func TestDoubaoNativeOfficialBodies(t *testing.T) {
 		assert.Equal(t, map[string]any{"error": map[string]any{"code": "InvalidParameter", "message": "content is required"}}, rendered)
 	})
 }
+
+// A channel key that names an asset library turns the request's reference
+// images into Ark assets before submission, since Seedance refuses photos of
+// real people sent as links. Images whose asset is refused or never becomes
+// Active keep their links.
+func TestDoubaoAssetLibraryReferences(t *testing.T) {
+	_, plugin := newDoubaoPlugin(t)
+	const seedance = "doubao-seedance-2-0-260128"
+	const libraryKey = "ark-key|AKLT-test|secret|proj|group-1"
+	requestBody := map[string]any{"model": seedance, "prompt": "图片1中的人挥手", "metadata": map[string]any{"content": []any{
+		map[string]any{"type": "image_url", "role": "reference_image", "image_url": map[string]any{"url": "https://cdn.example/a.png"}},
+		map[string]any{"type": "image_url", "role": "reference_image", "image_url": map[string]any{"url": "https://cdn.example/b.png"}},
+		map[string]any{"type": "image_url", "role": "reference_image", "image_url": map[string]any{"url": "asset://asset-own"}},
+		map[string]any{"type": "image_url", "role": "reference_image", "image_url": map[string]any{"url": "https://cdn.example/a.png"}},
+	}}}
+	driver := func(apiKey string, round int, responses []any) map[string]any {
+		return map[string]any{"model": seedance, "upstreamModel": seedance, "requestBody": requestBody, "baseUrl": doubaoBaseURL, "apiKey": apiKey,
+			"publicTaskId": "task_pub", "preflightRound": round, "preflightResponses": responses}
+	}
+	preflight := func(ctx map[string]any) map[string]any {
+		value, err := plugin.Engine.Call(t.Context(), "buildPreflightRequest", ctx)
+		require.NoError(t, err)
+		if value == nil {
+			return nil
+		}
+		return alibabaObject(t, value)
+	}
+	created := func(id string) map[string]any {
+		return map[string]any{"status": 200, "body": map[string]any{"Result": map[string]any{"Id": id}}}
+	}
+	read := func(id, status string) map[string]any {
+		return map[string]any{"status": 200, "body": map[string]any{"Result": map[string]any{"Id": id, "Status": status}}}
+	}
+	refused := map[string]any{"status": 400, "body": map[string]any{"ResponseMetadata": map[string]any{"Error": map[string]any{"Code": "InvalidParameter.WidthTooSmall"}}}}
+	submit := func(responses []any) map[string]any {
+		value, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", driver(libraryKey, len(responses), responses))
+		require.NoError(t, err)
+		return alibabaObject(t, value)
+	}
+	urls := func(descriptor map[string]any) []any {
+		var result []any
+		for _, item := range descriptor["body"].(map[string]any)["content"].([]any) {
+			if image, ok := item.(map[string]any)["image_url"]; ok {
+				result = append(result, image.(map[string]any)["url"])
+			}
+		}
+		return result
+	}
+
+	t.Run("each distinct link becomes an asset, then each asset is read until Active", func(t *testing.T) {
+		first := preflight(driver(libraryKey, 0, []any{}))
+		assert.Equal(t, "https://ark.cn-beijing.volcengineapi.com/?Action=CreateAsset&Version=2024-01-01", first["url"])
+		assert.Equal(t, true, first["acceptErrorStatus"])
+		assert.Equal(t, float64(0), first["delayMs"])
+		assert.True(t, strings.HasPrefix(first["headers"].(map[string]any)["Authorization"].(string), "HMAC-SHA256 Credential=AKLT-test/"))
+		var body map[string]any
+		require.NoError(t, common.UnmarshalJsonStr(first["body"].(string), &body))
+		assert.Equal(t, map[string]any{"ProjectName": "proj", "GroupId": "group-1", "URL": "https://cdn.example/a.png", "AssetType": "Image", "Name": "task_pub-1"}, body)
+
+		second := preflight(driver(libraryKey, 1, []any{created("asset-a")}))
+		var upload map[string]any
+		require.NoError(t, common.UnmarshalJsonStr(second["body"].(string), &upload))
+		assert.Equal(t, "https://cdn.example/b.png", upload["URL"], "a repeated link and an asset:// reference are not uploaded")
+
+		for _, tc := range []struct {
+			name      string
+			responses []any
+			id        string
+			delay     float64
+		}{
+			{"the first read waits for processing", []any{created("asset-a"), created("asset-b")}, "asset-a", 1500},
+			{"a processing asset is read again after a wait", []any{created("asset-a"), created("asset-b"), read("asset-a", "Processing")}, "asset-a", 1500},
+			{"the next asset is read at once", []any{created("asset-a"), created("asset-b"), read("asset-a", "Active")}, "asset-b", 0},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				poll := preflight(driver(libraryKey, len(tc.responses), tc.responses))
+				assert.Equal(t, "https://ark.cn-beijing.volcengineapi.com/?Action=GetAsset&Version=2024-01-01", poll["url"])
+				assert.Equal(t, tc.delay, poll["delayMs"])
+				var read map[string]any
+				require.NoError(t, common.UnmarshalJsonStr(poll["body"].(string), &read))
+				assert.Equal(t, map[string]any{"ProjectName": "proj", "Id": tc.id}, read)
+			})
+		}
+
+		done := []any{created("asset-a"), created("asset-b"), read("asset-a", "Active"), read("asset-b", "Active")}
+		assert.Nil(t, preflight(driver(libraryKey, len(done), done)))
+		descriptor := submit(done)
+		assert.Equal(t, "Bearer ark-key", descriptor["headers"].(map[string]any)["Authorization"])
+		assert.Equal(t, []any{"asset://asset-a", "asset://asset-b", "asset://asset-own", "asset://asset-a"}, urls(descriptor))
+	})
+
+	t.Run("refused, failed and unfinished assets keep their links", func(t *testing.T) {
+		failed := []any{created("asset-a"), created("asset-b"), read("asset-a", "Failed"), read("asset-b", "Active")}
+		assert.Nil(t, preflight(driver(libraryKey, len(failed), failed)))
+		assert.Equal(t, []any{"https://cdn.example/a.png", "asset://asset-b", "asset://asset-own", "https://cdn.example/a.png"}, urls(submit(failed)))
+
+		withRefusal := []any{refused, created("asset-b"), read("asset-b", "Processing")}
+		assert.Equal(t, []any{"https://cdn.example/a.png", "https://cdn.example/b.png", "asset://asset-own", "https://cdn.example/a.png"}, urls(submit(withRefusal)))
+	})
+
+	t.Run("a plain Ark key submits links without preparation", func(t *testing.T) {
+		assert.Nil(t, preflight(driver("ark-key", 0, []any{})))
+		value, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", driver("ark-key", 0, []any{}))
+		require.NoError(t, err)
+		descriptor := alibabaObject(t, value)
+		assert.Equal(t, "Bearer ark-key", descriptor["headers"].(map[string]any)["Authorization"])
+		assert.Equal(t, "https://cdn.example/a.png", urls(descriptor)[0])
+	})
+
+	t.Run("a malformed key names the expected form", func(t *testing.T) {
+		_, err := plugin.Engine.Call(t.Context(), "buildPreflightRequest", driver("ark-key|ak|sk", 0, []any{}))
+		require.ErrorContains(t, err, "<ark api key>|<access key>|<secret key>|<project>|<asset group id>")
+	})
+}

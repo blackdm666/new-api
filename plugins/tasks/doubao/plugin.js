@@ -308,6 +308,9 @@ function capabilityUsageProfiles(models, usageSchema, usageExamples) {
   return profiles.map((profile) => ({ models: profile.models, schema: profile.schema, examples: profile.examples }));
 }
 
+// The Ark OpenAPI host of the asset library (see channelKey).
+const ASSET_API_HOST = "ark.cn-beijing.volcengineapi.com";
+
 export const meta = {
   apiVersion: 1,
   key: "doubao",
@@ -319,13 +322,15 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.2",
+  version: "1.4.0-88api.3",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
   fetchMode: "per_task",
   upstreams: ["vendor", "new_api"],
-  requiredCapabilities: ["duration-auto@1"],
+  // Asset-library rounds (see channelKey) run before submission.
+  requiredCapabilities: ["duration-auto@1", "task-preflight@2"],
+  allowedHosts: [ASSET_API_HOST],
   usageSchema: seedanceUsageSchema(DEFAULT_VIDEO_PROFILE),
   usageExamples: seedanceUsageExamples(DEFAULT_VIDEO_PROFILE),
   usageProfiles: capabilityUsageProfiles(VIDEO_MODELS, seedanceUsageSchema, seedanceUsageExamples).concat(
@@ -384,6 +389,93 @@ function videoSubmitIntent(intent, arkFields) {
   const originTaskIds = draftTaskIds(fields.content);
   if (originTaskIds.length) intent.originTaskIds = originTaskIds;
   return intent;
+}
+
+// Seedance refuses reference photos of real people sent as links but takes the
+// same images from the Ark asset library. A channel key of the form
+// "<ark api key>|<access key>|<secret key>|<project>|<asset group id>" turns
+// the http(s) reference images of a video request into assets of that group
+// before submission: one CreateAsset round per image, then GetAsset rounds
+// until each is Active (Ark refuses an asset that is still processing). An
+// image whose asset is refused, or not ready when the rounds run out, keeps
+// its link. The project must be the one the Ark API key belongs to.
+// Leaves rounds for polling within the host's 32 preflight rounds.
+const MAX_ASSET_IMAGES = 12;
+const ASSET_POLL_DELAY_MS = 1500;
+
+function channelKey(apiKey) {
+  const parts = String(apiKey || "").split("|").map(trimmed);
+  if (parts.length === 1) return { arkKey: parts[0], library: null };
+  if (parts.length !== 5 || parts.some((part) => !part))
+    throw new Error("channel key must be <ark api key> or <ark api key>|<access key>|<secret key>|<project>|<asset group id>");
+  return { arkKey: parts[0], library: { accessKey: parts[1], secretKey: parts[2], project: parts[3], groupId: parts[4] } };
+}
+
+function assetRequest(library, action, params, delayMs) {
+  const url = "https://" + ASSET_API_HOST + "/?Action=" + action + "&Version=2024-01-01";
+  const body = JSON.stringify(Object.assign({ ProjectName: library.project }, params));
+  const headers = { "Content-Type": "application/json" };
+  const signed = utils.volcSignV4({
+    Method: "POST",
+    URL: url,
+    Headers: headers,
+    Body: body,
+    AccessKey: library.accessKey,
+    SecretKey: library.secretKey,
+    Region: "cn-beijing",
+    Service: "ark",
+  });
+  // A refused upload falls back to the link, so its answer reaches the plugin.
+  return { url: url, method: "POST", headers: Object.assign(headers, signed), body: body, acceptErrorStatus: true, delayMs: delayMs || 0 };
+}
+
+// The images of an Ark video body that become assets, in content order.
+function assetPlan(ctx, content) {
+  const library = channelKey(ctx.apiKey).library;
+  if (!library || !Array.isArray(content)) return null;
+  const urls = [];
+  for (const item of content) {
+    if (!item || typeof item !== "object" || item.type !== "image_url" || !item.image_url) continue;
+    const url = trimmed(item.image_url.url);
+    if (/^https?:\/\//i.test(url) && !urls.includes(url)) urls.push(url);
+  }
+  return urls.length ? { library: library, urls: urls.slice(0, MAX_ASSET_IMAGES) } : null;
+}
+
+// What the rounds so far established: the asset each planned image became
+// ("" when refused) and the last status read for each asset.
+function assetRounds(plan, responses) {
+  const assets = [];
+  const statuses = {};
+  (responses || []).forEach(function (response, round) {
+    const body = response && response.body;
+    const result = body && typeof body === "object" && !Array.isArray(body) ? body.Result : null;
+    const id = response && response.status >= 200 && response.status < 300 && result ? trimmed(result.Id) : "";
+    if (round < plan.urls.length) assets.push(id);
+    else if (id) statuses[id] = trimmed(result.Status);
+  });
+  return { assets: assets, statuses: statuses };
+}
+
+export function buildPreflightRequest(ctx) {
+  if (imageTask(ctx)) return null;
+  // A tier the model does not offer fails here, before anything is uploaded.
+  videoResolution(ctx);
+  const plan = assetPlan(ctx, videoSubmitBody(ctx).content);
+  if (!plan) return null;
+  const round = ctx.preflightRound || 0;
+  if (round < plan.urls.length) {
+    const name = trimmed(ctx.publicTaskId) + "-" + (round + 1);
+    return assetRequest(plan.library, "CreateAsset", { GroupId: plan.library.groupId, URL: plan.urls[round], AssetType: "Image", Name: name });
+  }
+  const state = assetRounds(plan, ctx.preflightResponses);
+  const pending = state.assets.filter((id) => id && state.statuses[id] !== "Active" && state.statuses[id] !== "Failed");
+  if (!pending.length) return null;
+  // Assets process side by side: wait before the first read and before
+  // reading one again, not before reading the next once another is Active.
+  const known = Object.prototype.hasOwnProperty.call(state.statuses, pending[0]);
+  const wait = known || Object.keys(state.statuses).length === 0;
+  return assetRequest(plan.library, "GetAsset", { Id: pending[0] }, wait ? ASSET_POLL_DELAY_MS : 0);
 }
 
 function rewriteDraftTaskContent(content, originTasks) {
@@ -831,28 +923,48 @@ export function buildSubmitRequest(ctx) {
     return {
       url: apiRoot(ctx) + "/api/v3/images/generations",
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + ctx.apiKey },
+      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + channelKey(ctx.apiKey).arkKey },
       body: converted.body,
       action: converted.action,
       rewriteModel: converted.body.model,
     };
   }
-  const req = ctx.requestBody;
   // Reject output tiers the model does not offer before any quota is reserved.
   videoResolution(ctx);
+  const body = videoSubmitBody(ctx);
+  const plan = assetPlan(ctx, body.content);
+  if (plan) {
+    const state = assetRounds(plan, ctx.preflightResponses);
+    const assets = {};
+    plan.urls.forEach(function (url, index) {
+      const id = state.assets[index];
+      if (id && state.statuses[id] === "Active") assets[url] = "asset://" + id;
+    });
+    body.content = body.content.map(function (item) {
+      if (!item || typeof item !== "object" || item.type !== "image_url" || !item.image_url) return item;
+      const asset = assets[trimmed(item.image_url.url)];
+      return asset ? Object.assign({}, item, { image_url: Object.assign({}, item.image_url, { url: asset }) }) : item;
+    });
+  }
+  return {
+    url: apiRoot(ctx) + "/api/v3/contents/generations/tasks",
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + channelKey(ctx.apiKey).arkKey },
+    body: body,
+    action: body.content.some((item) => item && typeof item === "object" && item.type !== "text") ? "image_to_video" : "text_to_video",
+    rewriteModel: body.model,
+  };
+}
+
+// The Ark task body of a video request: a native request's own body, or the
+// one the host protocols map the prompt, images and seconds onto.
+function videoSubmitBody(ctx) {
+  const req = ctx.requestBody || {};
   if (req.vendorBody) {
     const sent = Object.assign({}, req.vendorBody, { model: ctx.upstreamModel || req.vendorBody.model });
     sent.content = rewriteDraftTaskContent(sent.content, ctx.originTasks);
-    return {
-      url: apiRoot(ctx) + "/api/v3/contents/generations/tasks",
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + ctx.apiKey },
-      body: sent,
-      action: sent.content.some((item) => item && typeof item === "object" && item.type !== "text") ? "image_to_video" : "text_to_video",
-      rewriteModel: sent.model,
-    };
+    return sent;
   }
-  // The host protocols map the prompt, images and seconds onto Ark's fields.
   const metadata = req.metadata || {};
   const body = Object.assign({ model: req.model || "", content: [] }, metadata);
   const imageContent = [];
@@ -862,19 +974,12 @@ export function buildSubmitRequest(ctx) {
   body.content = imageContent.concat(metadataContent).filter((item) => item && item.type !== "text");
   const hasReference = body.content.length > 0;
   if (trimmed(req.prompt) || !hasReference) body.content.push({ type: "text", text: req.prompt || "" });
-  if (Array.isArray(body.content)) body.content = rewriteDraftTaskContent(body.content, ctx.originTasks);
+  body.content = rewriteDraftTaskContent(body.content, ctx.originTasks);
   // -1 lets the model pick the length; extractUsage reserves the longest one.
   const seconds = Number.parseInt(req.seconds || "", 10);
   if (seconds > 0 || seconds === -1) body.duration = seconds;
   body.model = ctx.upstreamModel || body.model;
-  return {
-    url: apiRoot(ctx) + "/api/v3/contents/generations/tasks",
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + ctx.apiKey },
-    body: body,
-    action: hasReference ? "image_to_video" : "text_to_video",
-    rewriteModel: body.model,
-  };
+  return body;
 }
 
 export function parseSubmitResponse(ctx, resp) {
@@ -944,7 +1049,7 @@ export function buildQueryRequest(ctx) {
   return {
     url: apiRoot(ctx) + "/api/v3/contents/generations/tasks/" + ctx.taskId,
     method: "GET",
-    headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: "Bearer " + ctx.apiKey },
+    headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: "Bearer " + channelKey(ctx.apiKey).arkKey },
   };
 }
 
