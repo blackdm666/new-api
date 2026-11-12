@@ -322,7 +322,7 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.3",
+  version: "1.4.0-88api.4",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -391,17 +391,22 @@ function videoSubmitIntent(intent, arkFields) {
   return intent;
 }
 
-// Seedance refuses reference photos of real people sent as links but takes the
-// same images from the Ark asset library. A channel key of the form
-// "<ark api key>|<access key>|<secret key>|<project>|<asset group id>" turns
-// the http(s) reference images of a video request into assets of that group
-// before submission: one CreateAsset round per image, then GetAsset rounds
-// until each is Active (Ark refuses an asset that is still processing). An
-// image whose asset is refused, or not ready when the rounds run out, keeps
-// its link. The project must be the one the Ark API key belongs to.
-// Leaves rounds for polling within the host's 32 preflight rounds.
-const MAX_ASSET_IMAGES = 12;
-const ASSET_POLL_DELAY_MS = 1500;
+// Seedance refuses reference photos and videos of real people sent as links
+// but takes the same media from the Ark asset library. A channel key of the
+// form "<ark api key>|<access key>|<secret key>|<project>|<asset group id>"
+// turns the http(s) reference images and videos of a video request into
+// assets of that group before submission: one CreateAsset round per link,
+// then GetAsset rounds until each is Active (Ark refuses an asset that is
+// still processing). A link whose asset is refused, or not ready when the
+// rounds run out, is submitted as it was. The project must be the one the Ark
+// API key belongs to. The caps leave rounds for polling within the host's 32
+// preflight rounds; 10 is the most reference videos any Seedance model takes.
+// Audio links are not converted.
+const ASSET_KINDS = [
+  { type: "image_url", assetType: "Image", limit: 12, pollDelayMs: 1500 },
+  // Videos take 10-15 s to process, so they are read less often.
+  { type: "video_url", assetType: "Video", limit: 10, pollDelayMs: 3000 },
+];
 
 function channelKey(apiKey) {
   const parts = String(apiKey || "").split("|").map(trimmed);
@@ -429,20 +434,24 @@ function assetRequest(library, action, params, delayMs) {
   return { url: url, method: "POST", headers: Object.assign(headers, signed), body: body, acceptErrorStatus: true, delayMs: delayMs || 0 };
 }
 
-// The images of an Ark video body that become assets, in content order.
+// The links of an Ark video body that become assets: distinct http(s) image
+// and video links in content order, each kind up to its cap.
 function assetPlan(ctx, content) {
   const library = channelKey(ctx.apiKey).library;
   if (!library || !Array.isArray(content)) return null;
-  const urls = [];
+  const entries = [];
   for (const item of content) {
-    if (!item || typeof item !== "object" || item.type !== "image_url" || !item.image_url) continue;
-    const url = trimmed(item.image_url.url);
-    if (/^https?:\/\//i.test(url) && !urls.includes(url)) urls.push(url);
+    const kind = item && typeof item === "object" ? ASSET_KINDS.find((candidate) => candidate.type === item.type) : null;
+    const media = kind ? item[kind.type] : null;
+    if (!media || typeof media !== "object") continue;
+    const url = trimmed(media.url);
+    if (!/^https?:\/\//i.test(url) || entries.some((entry) => entry.url === url)) continue;
+    if (entries.filter((entry) => entry.kind === kind).length < kind.limit) entries.push({ kind: kind, url: url });
   }
-  return urls.length ? { library: library, urls: urls.slice(0, MAX_ASSET_IMAGES) } : null;
+  return entries.length ? { library: library, entries: entries } : null;
 }
 
-// What the rounds so far established: the asset each planned image became
+// What the rounds so far established: the asset each planned link became
 // ("" when refused) and the last status read for each asset.
 function assetRounds(plan, responses) {
   const assets = [];
@@ -451,7 +460,7 @@ function assetRounds(plan, responses) {
     const body = response && response.body;
     const result = body && typeof body === "object" && !Array.isArray(body) ? body.Result : null;
     const id = response && response.status >= 200 && response.status < 300 && result ? trimmed(result.Id) : "";
-    if (round < plan.urls.length) assets.push(id);
+    if (round < plan.entries.length) assets.push(id);
     else if (id) statuses[id] = trimmed(result.Status);
   });
   return { assets: assets, statuses: statuses };
@@ -464,18 +473,23 @@ export function buildPreflightRequest(ctx) {
   const plan = assetPlan(ctx, videoSubmitBody(ctx).content);
   if (!plan) return null;
   const round = ctx.preflightRound || 0;
-  if (round < plan.urls.length) {
+  if (round < plan.entries.length) {
+    const entry = plan.entries[round];
     const name = trimmed(ctx.publicTaskId) + "-" + (round + 1);
-    return assetRequest(plan.library, "CreateAsset", { GroupId: plan.library.groupId, URL: plan.urls[round], AssetType: "Image", Name: name });
+    return assetRequest(plan.library, "CreateAsset", { GroupId: plan.library.groupId, URL: entry.url, AssetType: entry.kind.assetType, Name: name });
   }
   const state = assetRounds(plan, ctx.preflightResponses);
-  const pending = state.assets.filter((id) => id && state.statuses[id] !== "Active" && state.statuses[id] !== "Failed");
-  if (!pending.length) return null;
+  const pending = plan.entries.findIndex(function (entry, index) {
+    const id = state.assets[index];
+    return id && state.statuses[id] !== "Active" && state.statuses[id] !== "Failed";
+  });
+  if (pending < 0) return null;
   // Assets process side by side: wait before the first read and before
   // reading one again, not before reading the next once another is Active.
-  const known = Object.prototype.hasOwnProperty.call(state.statuses, pending[0]);
+  const id = state.assets[pending];
+  const known = Object.prototype.hasOwnProperty.call(state.statuses, id);
   const wait = known || Object.keys(state.statuses).length === 0;
-  return assetRequest(plan.library, "GetAsset", { Id: pending[0] }, wait ? ASSET_POLL_DELAY_MS : 0);
+  return assetRequest(plan.library, "GetAsset", { Id: id }, wait ? plan.entries[pending].kind.pollDelayMs : 0);
 }
 
 function rewriteDraftTaskContent(content, originTasks) {
@@ -936,14 +950,15 @@ export function buildSubmitRequest(ctx) {
   if (plan) {
     const state = assetRounds(plan, ctx.preflightResponses);
     const assets = {};
-    plan.urls.forEach(function (url, index) {
+    plan.entries.forEach(function (entry, index) {
       const id = state.assets[index];
-      if (id && state.statuses[id] === "Active") assets[url] = "asset://" + id;
+      if (id && state.statuses[id] === "Active") assets[entry.kind.type + " " + entry.url] = "asset://" + id;
     });
     body.content = body.content.map(function (item) {
-      if (!item || typeof item !== "object" || item.type !== "image_url" || !item.image_url) return item;
-      const asset = assets[trimmed(item.image_url.url)];
-      return asset ? Object.assign({}, item, { image_url: Object.assign({}, item.image_url, { url: asset }) }) : item;
+      const media = item && typeof item === "object" && ASSET_KINDS.some((kind) => kind.type === item.type) ? item[item.type] : null;
+      if (!media || typeof media !== "object") return item;
+      const asset = assets[item.type + " " + trimmed(media.url)];
+      return asset ? Object.assign({}, item, { [item.type]: Object.assign({}, media, { url: asset }) }) : item;
     });
   }
   return {
