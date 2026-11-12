@@ -145,6 +145,9 @@ type TaskAdaptor struct {
 	// requestBodyText is the decoded requestBody as JSON text, which hooks
 	// of a plugin that preserves JSON order receive instead.
 	requestBodyText json.RawMessage
+	// servedModel is the declared model the request is served as, resolved by
+	// the first submitContext call that sees the channel mapping.
+	servedModel string
 }
 
 // Replaced in tests; production stores inputs as public reference media.
@@ -2284,12 +2287,44 @@ func (a *TaskAdaptor) submitContext(c *gin.Context, info *relaycommon.RelayInfo)
 	ctx["publicTaskId"] = info.PublicTaskID
 	ctx["model"] = info.OriginModelName
 	ctx["upstreamModel"] = info.UpstreamModelName
+	if c != nil {
+		a.servedModel = a.declaredServedModel(info.OriginModelName, c.GetString("model_mapping"))
+	}
+	ctx["servedModel"] = a.servedModel
 	ctx["baseUrl"] = info.ChannelBaseUrl
 	ctx["userSetting"] = info.UserSetting
 	if err := a.applyUpstreamCredentials(ctx, info.ChannelType, info.ApiKey, info.ChannelSetting.Proxy); err != nil {
 		ctx["authError"] = err.Error()
 	}
 	return ctx
+}
+
+// declaredServedModel returns the model this plugin declares that a request
+// is served as. A channel mapping chain may pass a declared model on its way
+// to a vendor endpoint ID (alias -> declared model -> endpoint ID); the last
+// declared hop names the model the endpoint serves. Empty when no hop is
+// declared.
+func (a *TaskAdaptor) declaredServedModel(origin, modelMapping string) string {
+	served := ""
+	if slices.Contains(a.plugin.Meta.Models, origin) {
+		served = origin
+	}
+	modelMap := map[string]string{}
+	if modelMapping != "" && common.UnmarshalJsonStr(modelMapping, &modelMap) != nil {
+		return served
+	}
+	visited := map[string]bool{origin: true}
+	for current := origin; ; {
+		next := modelMap[current]
+		if next == "" || visited[next] {
+			return served
+		}
+		visited[next] = true
+		if slices.Contains(a.plugin.Meta.Models, next) {
+			served = next
+		}
+		current = next
+	}
 }
 
 func (a *TaskAdaptor) usageRatios(ctx context.Context, models []string, hook string, args ...any) (map[string]float64, error) {

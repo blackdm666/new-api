@@ -409,6 +409,53 @@ func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 		})
 	}
 
+	// A channel that maps a sales alias through the declared model on to an Ark
+	// endpoint ID (alias -> declared -> ep-...) still reserves and validates
+	// with that declared model's profile, not the default one.
+	t.Run("endpoint mapping keeps the declared model profile", func(t *testing.T) {
+		for _, tc := range []struct {
+			name     string
+			declared string
+			request  map[string]any
+			want     map[string]any
+			wantErr  string
+		}{
+			{"2.0 without duration reserves 15 seconds at 1080p", v20, map[string]any{},
+				map[string]any{"tokens": float64(729000), "resolution": "1080p", "video_input": "none"}, ""},
+			{"2.5 rejects 4k before Ark", v25, map[string]any{"seconds": float64(5), "metadata": map[string]any{"resolution": "4k"}},
+				nil, "sales-alias resolution must be one of 480p, 720p, 1080p"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				request := map[string]any{"model": "sales-alias", "prompt": "a cat"}
+				maps.Copy(request, tc.request)
+				info := &relaycommon.RelayInfo{
+					ChannelMeta:     &relaycommon.ChannelMeta{ChannelBaseUrl: doubaoBaseURL, UpstreamModelName: "ep-20261112000000-abcde", IsModelMapped: true},
+					OriginModelName: "sales-alias",
+					TaskRelayInfo:   &relaycommon.TaskRelayInfo{PublicTaskID: "task_public", Action: "text_to_video"},
+				}
+				adaptor := taskplugin.New(plugin)
+				adaptor.Init(info)
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+				c.Set("model_mapping", `{"sales-alias":"`+tc.declared+`","`+tc.declared+`":"ep-20261112000000-abcde"}`)
+				c.Set("task_request", request)
+				taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+				if tc.wantErr != "" {
+					require.NotNil(t, taskErr)
+					assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+					assert.Contains(t, taskErr.Message, tc.wantErr)
+					return
+				}
+				require.Nil(t, taskErr)
+				_, err := adaptor.BuildRequestBody(c, info)
+				require.NoError(t, err)
+				facts, err := adaptor.ExtractUsageFactsValidated(c, info)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, alibabaObject(t, facts))
+			})
+		}
+	})
+
 	// Ark reads duration -1 as "the model picks the length" (Seedance 1.5 pro
 	// and 2.x; 2.5 also defaults to it). The reservation covers the longest
 	// output: 720p is 1280 × 720 × 24 / 1024 = 21,600 tokens per second.
