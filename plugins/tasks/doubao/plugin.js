@@ -322,7 +322,7 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.5",
+  version: "1.4.0-88api.6",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -531,8 +531,10 @@ function hasVideo(content) {
 
 // Capability profile of the executing Seedance model. Channel mapping may send
 // a declared model to an Ark endpoint ID; the declared name still describes it.
+// A channel may map a declared model on to an Ark endpoint ID; servedModel
+// names the declared model that endpoint serves.
 function videoProfile(ctx) {
-  for (const model of [ctx && ctx.upstreamModel, ctx && ctx.model].map(trimmed)) {
+  for (const model of [ctx && ctx.servedModel, ctx && ctx.upstreamModel, ctx && ctx.model].map(trimmed)) {
     if (Object.prototype.hasOwnProperty.call(VIDEO_MODELS, model)) return VIDEO_MODELS[model];
   }
   return DEFAULT_VIDEO_PROFILE;
@@ -551,7 +553,7 @@ function videoResolution(ctx) {
   if (!recognized) return profile.resolutions.includes("1080p") ? "1080p" : profile.resolutions[profile.resolutions.length - 1];
   const resolution = normalizeResolution(raw);
   if (!profile.resolutions.includes(resolution))
-    throw new Error(trimmed(ctx.upstreamModel || ctx.model) + " resolution must be one of " + profile.resolutions.join(", "));
+    throw new Error(trimmed(ctx.model || ctx.upstreamModel) + " resolution must be one of " + profile.resolutions.join(", "));
   return resolution;
 }
 
@@ -592,7 +594,7 @@ function videoInputRatio(model, resolution, content) {
 // ID; the declared name the client sent still describes that endpoint.
 function imageModelCandidates(ctx) {
   const req = (ctx && ctx.requestBody) || {};
-  return [ctx && ctx.upstreamModel, ctx && ctx.model, req.model].map(trimmed).filter(Boolean);
+  return [ctx && ctx.servedModel, ctx && ctx.upstreamModel, ctx && ctx.model, req.model].map(trimmed).filter(Boolean);
 }
 
 // Lower-tier ceiling for a request or task: the 1K ceiling applies whenever
@@ -1128,7 +1130,7 @@ export function extractUsage(ctx) {
   const metadata = req.vendorBody || req.metadata || {};
   const content = req.vendorBody ? metadata.content : videoReferenceContent(ctx);
   if (ctx.usagePurpose === "billing_ratios") {
-    const ratio = videoInputRatio(ctx.upstreamModel || ctx.model, metadata.resolution || req.resolution, content);
+    const ratio = videoInputRatio(ctx.servedModel || ctx.upstreamModel || ctx.model, metadata.resolution || req.resolution, content);
     return ratio === 1 ? null : { video_input_ratio: ratio };
   }
   const profile = videoProfile(ctx);

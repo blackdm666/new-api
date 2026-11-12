@@ -2256,7 +2256,7 @@ func TestTaskAdaptorBatchBridge(t *testing.T) {
 const mappingOrderAdaptorPlugin = `
 export const meta = {apiVersion:1,key:"map-order-adaptor",name:"Map Order Adaptor",version:"1.0.0",author:{name:"Test"},models:["declared-model"],fetchMode:"per_task"};
 export function buildSubmitRequest(ctx) {
-  return {url: ctx.baseUrl+"/submit", method:"POST", body:{upstreamModel: ctx.upstreamModel, model: ctx.model}};
+  return {url: ctx.baseUrl+"/submit", method:"POST", body:{upstreamModel: ctx.upstreamModel, model: ctx.model, servedModel: ctx.servedModel}};
 }
 export function parseSubmitResponse(){return {taskId:"1"};}
 export function buildQueryRequest(){return {url:"https://provider.example"};}
@@ -2297,6 +2297,19 @@ func TestTaskAdaptorBuildSubmitReceivesMappedUpstreamModel(t *testing.T) {
 	require.NoError(t, common.Unmarshal(mapped, &decoded))
 	assert.Equal(t, "declared-model", decoded["upstreamModel"])
 	assert.Equal(t, "alias-model", decoded["model"])
+	assert.Equal(t, "declared-model", decoded["servedModel"])
+
+	// A chain that ends past the declared model at a vendor endpoint ID keeps
+	// the declared hop as the served model for model-keyed capability tables.
+	endpoint := mappingOrderSubmitBody(t, "alias-model", `{"alias-model":"declared-model","declared-model":"ep-123"}`)
+	require.NoError(t, common.Unmarshal(endpoint, &decoded))
+	assert.Equal(t, "ep-123", decoded["upstreamModel"])
+	assert.Equal(t, "alias-model", decoded["model"])
+	assert.Equal(t, "declared-model", decoded["servedModel"])
+
+	undeclared := mappingOrderSubmitBody(t, "alias-model", `{"alias-model":"ep-123"}`)
+	require.NoError(t, common.Unmarshal(undeclared, &decoded))
+	assert.Equal(t, "", decoded["servedModel"])
 
 	withoutMapping := mappingOrderSubmitBody(t, "declared-model", "")
 	emptyMapping := mappingOrderSubmitBody(t, "declared-model", "{}")
@@ -2304,6 +2317,7 @@ func TestTaskAdaptorBuildSubmitReceivesMappedUpstreamModel(t *testing.T) {
 	require.NoError(t, common.Unmarshal(withoutMapping, &decoded))
 	assert.Equal(t, "declared-model", decoded["upstreamModel"])
 	assert.Equal(t, "declared-model", decoded["model"])
+	assert.Equal(t, "declared-model", decoded["servedModel"])
 }
 
 // Polling has no relay info, so query hooks can only branch on the model when
