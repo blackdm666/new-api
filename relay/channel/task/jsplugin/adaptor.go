@@ -50,6 +50,11 @@ type requestDescriptor struct {
 	BodyType       string            `json:"bodyType"`
 	Parts          []requestPart     `json:"parts"`
 	FileRef        string            `json:"fileRef"`
+	// DelayMs and AcceptErrorStatus apply to preflight requests only: the
+	// host waits DelayMs before sending, and hands a non-2xx answer to the
+	// plugin as the round's response instead of failing the submission.
+	DelayMs           int  `json:"delayMs"`
+	AcceptErrorStatus bool `json:"acceptErrorStatus"`
 	// BodyText is the body as JSON.stringify wrote it, for a plugin that
 	// preserves JSON order: the upstream gets the members in that order.
 	BodyText json.RawMessage `json:"-"`
@@ -112,7 +117,10 @@ const (
 	taskUploadTimeout = 5 * time.Minute
 	// maxTaskPreflightRounds matches the multipart file limit of task routes.
 	maxTaskPreflightRounds = 32
-	taskCancelTimeout      = 30 * time.Second
+	// maxTaskPreflightDelay bounds the wait a preflight round may ask for,
+	// for example between polls of a resource the provider prepares.
+	maxTaskPreflightDelay = 5 * time.Second
+	taskCancelTimeout     = 30 * time.Second
 )
 
 // maxTaskPluginPersistedJSONBytes is the shared ceiling for taskData and plugin state.
@@ -265,11 +273,25 @@ func (a *TaskAdaptor) runTaskPreflightRound(c *gin.Context, info *relaycommon.Re
 	if err = convert(value, &descriptor); err != nil {
 		return false, fmt.Errorf("plugin returned an invalid preflight request")
 	}
+	delay := time.Duration(descriptor.DelayMs) * time.Millisecond
+	if delay < 0 || delay > maxTaskPreflightDelay {
+		return false, fmt.Errorf("plugin preflight delayMs must be between 0 and %d", maxTaskPreflightDelay.Milliseconds())
+	}
+	if delay > 0 {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false, ctx.Err()
+		case <-timer.C:
+		}
+	}
 	response, err := a.executePreflightRequest(c, info, descriptor, false)
 	if err != nil {
 		return false, err
 	}
-	if response.StatusCode/100 != 2 {
+	succeeded := response.StatusCode/100 == 2
+	if !succeeded && !descriptor.AcceptErrorStatus {
 		_ = response.Body.Close()
 		return false, fmt.Errorf("plugin preflight request returned status %d", response.StatusCode)
 	}
@@ -279,7 +301,11 @@ func (a *TaskAdaptor) runTaskPreflightRound(c *gin.Context, info *relaycommon.Re
 	}
 	var decoded any
 	if err = common.Unmarshal(body, &decoded); err != nil {
-		return false, fmt.Errorf("plugin preflight response is not valid JSON")
+		if succeeded {
+			return false, fmt.Errorf("plugin preflight response is not valid JSON")
+		}
+		// An accepted error answer need not be JSON; the plugin reads its text.
+		decoded = string(body)
 	}
 	data := decoded
 	if object, ok := decoded.(map[string]any); ok {

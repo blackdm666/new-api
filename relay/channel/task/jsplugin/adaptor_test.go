@@ -17,6 +17,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -629,6 +630,95 @@ export function parseTaskResult(){return {status:"SUCCESS"}}
 	defer response.Body.Close()
 	assert.Equal(t, []any{"tos://face.png", "tos://motion.mp4"}, submitted["sources"])
 	assert.Equal(t, "tos://motion.mp4", submitted["last"])
+}
+
+// A round may wait before its request, for a provider that prepares a
+// resource asynchronously, and may take an error answer as its result.
+func TestTaskPreflightRoundDelayAndAcceptedErrorStatus(t *testing.T) {
+	var sent []time.Time
+	var submitted map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/refuse":
+			sent = append(sent, time.Now())
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("image too small"))
+		case "/ready":
+			sent = append(sent, time.Now())
+			_, _ = w.Write([]byte(`{"Result":{"Status":"Active"}}`))
+		case "/submit":
+			require.NoError(t, common.DecodeJson(r.Body, &submitted))
+			_, _ = w.Write([]byte(`{"id":"task-1"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	run := func(t *testing.T, rounds string) error {
+		source := strings.Replace(`
+export const meta = {apiVersion:1, key:"preflight-wait", name:"Preflight Wait", version:"1.0.0",
+  author:{name:"Test"}, models:["m"], fetchMode:"per_task", requiredCapabilities:["task-preflight@2"]};
+const ROUNDS = ROUNDS_LITERAL;
+export function buildPreflightRequest(ctx) {
+  const round = ROUNDS[ctx.preflightRound];
+  return round ? Object.assign({url:ctx.baseUrl+round.path, method:"POST"}, round.options) : null;
+}
+export function buildSubmitRequest(ctx) {
+  return {url:ctx.baseUrl+"/submit", method:"POST", body:{responses:ctx.preflightResponses.map((r) => ({status:r.status, body:r.body}))}};
+}
+export function parseSubmitResponse(ctx,r){return {taskId:r.body.id}}
+export function buildQueryRequest(){return {url:"https://example.com"}}
+export function parseTaskResult(){return {status:"SUCCESS"}}
+`, "ROUNDS_LITERAL", rounds, 1)
+		plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+		require.NoError(t, err)
+		adaptor := New(plugin)
+		info := &relaycommon.RelayInfo{
+			ChannelMeta:     &relaycommon.ChannelMeta{ChannelBaseUrl: server.URL, ApiKey: "secret"},
+			OriginModelName: "m",
+			TaskRelayInfo:   &relaycommon.TaskRelayInfo{PublicTaskID: "public-1"},
+		}
+		adaptor.Init(info)
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+		c.Set("task_request", map[string]any{"prompt": "p"})
+		if taskErr := adaptor.ValidateRequestAndSetAction(c, info); taskErr != nil {
+			return taskErr.Error
+		}
+		body, err := adaptor.BuildRequestBody(c, info)
+		require.NoError(t, err)
+		response, err := adaptor.DoRequest(c, info, body)
+		require.NoError(t, err)
+		return response.Body.Close()
+	}
+
+	t.Run("an accepted error answer and a delayed round reach the plugin", func(t *testing.T) {
+		sent, submitted = nil, nil
+		require.NoError(t, run(t, `[{path:"/refuse", options:{acceptErrorStatus:true}}, {path:"/ready", options:{delayMs:300}}]`))
+		require.Len(t, sent, 2)
+		assert.GreaterOrEqual(t, sent[1].Sub(sent[0]), 300*time.Millisecond)
+		assert.Equal(t, []any{
+			map[string]any{"status": float64(400), "body": "image too small"},
+			map[string]any{"status": float64(200), "body": map[string]any{"Result": map[string]any{"Status": "Active"}}},
+		}, submitted["responses"])
+	})
+
+	for _, tc := range []struct {
+		name    string
+		rounds  string
+		wantErr string
+	}{
+		{"an error answer fails the submission unless accepted", `[{path:"/refuse"}]`, "plugin preflight request returned status 400"},
+		{"a delay is bounded", `[{path:"/ready", options:{delayMs:5001}}]`, "plugin preflight delayMs must be between 0 and 5000"},
+		{"a delay is not negative", `[{path:"/ready", options:{delayMs:-1}}]`, "plugin preflight delayMs must be between 0 and 5000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sent, submitted = nil, nil
+			require.ErrorContains(t, run(t, tc.rounds), tc.wantErr)
+			assert.Nil(t, submitted)
+		})
+	}
 }
 
 func TestTaskAdaptorDoesNotEmitInjectedMultipartDispositionHeaders(t *testing.T) {
