@@ -1271,6 +1271,47 @@ func TestDoubaoAssetLibraryReferences(t *testing.T) {
 		assert.Equal(t, []any{"https://cdn.example/a.png", "https://cdn.example/b.png", "asset://asset-own", "https://cdn.example/a.png"}, urls(submit(withRefusal)))
 	})
 
+	t.Run("reference videos become video assets; audio links stay", func(t *testing.T) {
+		mixed := map[string]any{"model": seedance, "prompt": "视频1中的人挥手", "metadata": map[string]any{"content": []any{
+			map[string]any{"type": "image_url", "role": "reference_image", "image_url": map[string]any{"url": "https://cdn.example/a.png"}},
+			map[string]any{"type": "video_url", "role": "reference_video", "video_url": map[string]any{"url": "https://cdn.example/v.mp4"}},
+			map[string]any{"type": "audio_url", "role": "reference_audio", "audio_url": map[string]any{"url": "https://cdn.example/s.mp3"}},
+		}}}
+		mixedDriver := func(responses []any) map[string]any {
+			ctx := driver(libraryKey, len(responses), responses)
+			ctx["requestBody"] = mixed
+			return ctx
+		}
+		upload := preflight(mixedDriver([]any{created("asset-a")}))
+		var body map[string]any
+		require.NoError(t, common.UnmarshalJsonStr(upload["body"].(string), &body))
+		assert.Equal(t, map[string]any{"ProjectName": "proj", "GroupId": "group-1", "URL": "https://cdn.example/v.mp4", "AssetType": "Video", "Name": "task_pub-2"}, body)
+		assert.Nil(t, preflight(mixedDriver([]any{created("asset-a"), created("asset-v"), read("asset-a", "Active"), read("asset-v", "Active")})),
+			"the audio link is not uploaded")
+
+		poll := preflight(mixedDriver([]any{created("asset-a"), created("asset-v"), read("asset-a", "Active"), read("asset-v", "Processing")}))
+		assert.Equal(t, float64(3000), poll["delayMs"], "a processing video is read again after the longer wait")
+
+		value, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", mixedDriver([]any{created("asset-a"), created("asset-v"), read("asset-a", "Active"), read("asset-v", "Active")}))
+		require.NoError(t, err)
+		content := alibabaObject(t, value)["body"].(map[string]any)["content"].([]any)
+		assert.Equal(t, "asset://asset-a", content[0].(map[string]any)["image_url"].(map[string]any)["url"])
+		assert.Equal(t, map[string]any{"type": "video_url", "role": "reference_video", "video_url": map[string]any{"url": "asset://asset-v"}}, content[1])
+		assert.Equal(t, "https://cdn.example/s.mp3", content[2].(map[string]any)["audio_url"].(map[string]any)["url"])
+
+		var videos []any
+		for i := range 11 {
+			videos = append(videos, map[string]any{"type": "video_url", "role": "reference_video", "video_url": map[string]any{"url": fmt.Sprintf("https://cdn.example/%d.mp4", i)}})
+		}
+		mixed = map[string]any{"model": seedance, "metadata": map[string]any{"content": videos}}
+		var responses []any
+		for i := range 10 {
+			responses = append(responses, created(fmt.Sprintf("asset-%d", i)))
+		}
+		assert.Equal(t, "https://ark.cn-beijing.volcengineapi.com/?Action=GetAsset&Version=2024-01-01", preflight(mixedDriver(responses))["url"],
+			"at most 10 reference videos are uploaded")
+	})
+
 	t.Run("a plain Ark key submits links without preparation", func(t *testing.T) {
 		assert.Nil(t, preflight(driver("ark-key", 0, []any{})))
 		value, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", driver("ark-key", 0, []any{}))
