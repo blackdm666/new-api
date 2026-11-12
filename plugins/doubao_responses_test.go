@@ -1326,3 +1326,115 @@ func TestDoubaoAssetLibraryReferences(t *testing.T) {
 		require.ErrorContains(t, err, "<ark api key>|<access key>|<secret key>|<project>|<asset group id>")
 	})
 }
+
+// Clients that send references as fields rather than Ark content items (the
+// 88API canvas, OpenAI-style input_reference, /v1/video/generations lists)
+// get content items with the roles Ark 2.x requires; Ark refuses an image
+// without one.
+func TestDoubaoVideoReferenceFields(t *testing.T) {
+	_, plugin := newDoubaoPlugin(t)
+	const (
+		v20   = "doubao-seedance-2-0-260128"
+		pro10 = "doubao-seedance-1-0-pro-250528"
+	)
+	image := func(url, role string) map[string]any {
+		item := map[string]any{"type": "image_url", "image_url": map[string]any{"url": url}}
+		if role != "" {
+			item["role"] = role
+		}
+		return item
+	}
+	video := map[string]any{"type": "video_url", "role": "reference_video", "video_url": map[string]any{"url": "https://cdn.example/v.mp4"}}
+	audio := map[string]any{"type": "audio_url", "role": "reference_audio", "audio_url": map[string]any{"url": "https://cdn.example/s.mp3"}}
+	text := map[string]any{"type": "text", "text": "four kids run"}
+	submit := func(t *testing.T, model string, value map[string]any) (map[string]any, map[string]any, string) {
+		t.Helper()
+		decoded, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+			"model": model, "body": map[string]any{"kind": "json", "value": value},
+		})
+		require.NoError(t, err)
+		intent := alibabaObject(t, decoded)
+		driver := map[string]any{"model": model, "upstreamModel": model, "requestBody": intent["requestBody"], "baseUrl": doubaoBaseURL, "apiKey": "key"}
+		descriptor, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", driver)
+		require.NoError(t, err)
+		facts, err := plugin.Engine.Call(t.Context(), "extractUsage", driver)
+		require.NoError(t, err)
+		return alibabaObject(t, descriptor)["body"].(map[string]any), alibabaObject(t, facts), intent["action"].(string)
+	}
+
+	t.Run("canvas reference mode", func(t *testing.T) {
+		body, facts, action := submit(t, v20, map[string]any{
+			"model": v20, "prompt": "four kids run", "duration": 8, "size": "9:16",
+			"images": []any{"https://cdn.example/a.png", "https://cdn.example/b.png"},
+			"metadata": map[string]any{
+				"resolution": "720p", "generate_audio": true, "watermark": false,
+				"reference_videos": []any{"https://cdn.example/v.mp4"}, "reference_audios": []any{"https://cdn.example/s.mp3"},
+			},
+		})
+		assert.Equal(t, "image_to_video", action)
+		assert.Equal(t, map[string]any{
+			"model": v20, "duration": float64(8), "ratio": "9:16", "resolution": "720p", "generate_audio": true, "watermark": false,
+			"content": []any{image("https://cdn.example/a.png", "reference_image"), image("https://cdn.example/b.png", "reference_image"), video, audio, text},
+		}, body)
+		assert.Equal(t, "video", facts["video_input"], "a reference video given as a field prices the reference-video tier")
+	})
+
+	t.Run("canvas frame mode", func(t *testing.T) {
+		body, _, action := submit(t, v20, map[string]any{
+			"model": v20, "prompt": "four kids run", "duration": 8, "size": "adaptive",
+			"metadata": map[string]any{"resolution": "720p", "firstFrame": "https://cdn.example/a.png", "lastFrame": "https://cdn.example/b.png"},
+		})
+		assert.Equal(t, "image_to_video", action)
+		assert.Equal(t, map[string]any{
+			"model": v20, "duration": float64(8), "ratio": "adaptive", "resolution": "720p",
+			"content": []any{image("https://cdn.example/a.png", "first_frame"), image("https://cdn.example/b.png", "last_frame"), text},
+		}, body)
+	})
+
+	t.Run("each link is sent once, before metadata content", func(t *testing.T) {
+		body, _, _ := submit(t, v20, map[string]any{
+			"model": v20, "prompt": "four kids run", "size": "1280x720", "resolution": "720p",
+			"input_reference": map[string]any{"image_url": "https://cdn.example/a.png"},
+			"images":          []any{"https://cdn.example/a.png", "https://cdn.example/c.png"},
+			"media":           []any{map[string]any{"type": "reference_video", "url": "https://cdn.example/v.mp4"}},
+			"metadata":        map[string]any{"content": []any{image("https://cdn.example/c.png", "reference_image")}},
+		})
+		assert.Equal(t, map[string]any{
+			"model": v20, "resolution": "720p",
+			"content": []any{image("https://cdn.example/a.png", "reference_image"), video, image("https://cdn.example/c.png", "reference_image"), text},
+		}, body, "a WxH size is a resolution, not a ratio")
+	})
+
+	t.Run("Seedance 1.x keeps the role-less first frame", func(t *testing.T) {
+		body, _, _ := submit(t, pro10, map[string]any{"model": pro10, "prompt": "four kids run", "images": []any{"https://cdn.example/a.png"}})
+		assert.Equal(t, []any{image("https://cdn.example/a.png", ""), text}, body["content"])
+	})
+
+	t.Run("/v1/video/generations lists", func(t *testing.T) {
+		info := &relaycommon.RelayInfo{
+			ChannelMeta:     &relaycommon.ChannelMeta{ChannelBaseUrl: doubaoBaseURL, UpstreamModelName: v20},
+			OriginModelName: v20,
+			TaskRelayInfo:   &relaycommon.TaskRelayInfo{PublicTaskID: "task_public", Action: "image_to_video"},
+		}
+		adaptor := taskplugin.New(plugin)
+		adaptor.Init(info)
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+		c.Set("task_request", relaycommon.TaskSubmitReq{Model: v20, Prompt: "four kids run", Images: []string{"https://cdn.example/a.png"}, Videos: []string{"https://cdn.example/v.mp4"}})
+		require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+		reader, err := adaptor.BuildRequestBody(c, info)
+		require.NoError(t, err)
+		encoded, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		var body map[string]any
+		require.NoError(t, common.Unmarshal(encoded, &body))
+		assert.Equal(t, []any{image("https://cdn.example/a.png", "reference_image"), video, text}, body["content"])
+	})
+
+	t.Run("a reference that is not a link is refused", func(t *testing.T) {
+		_, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+			"model": v20, "body": map[string]any{"kind": "json", "value": map[string]any{"model": v20, "prompt": "a cat", "images": []any{float64(1)}}},
+		})
+		require.ErrorContains(t, err, "images must contain media URLs")
+	})
+}

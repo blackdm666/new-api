@@ -322,7 +322,7 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.4",
+  version: "1.4.0-88api.5",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -546,7 +546,7 @@ function videoResolution(ctx) {
   const req = ctx.requestBody || {};
   const metadata = req.vendorBody || req.metadata || {};
   const profile = videoProfile(ctx);
-  const raw = trimmed(metadata.resolution || req.size).toLowerCase();
+  const raw = trimmed(metadata.resolution || req.resolution || req.size).toLowerCase();
   const recognized = SEEDANCE_RESOLUTIONS.includes(raw) || raw.replace("*", "x").split("x").length === 2;
   if (!recognized) return profile.resolutions.includes("1080p") ? "1080p" : profile.resolutions[profile.resolutions.length - 1];
   const resolution = normalizeResolution(raw);
@@ -971,8 +971,105 @@ export function buildSubmitRequest(ctx) {
   };
 }
 
+// Reference fields clients send instead of Ark content items: the OpenAI-style
+// input_reference, the lists of /v1/video/generations, and the frame and
+// reference fields other Seedance gateways take (the 88API canvas sends these),
+// at the top level or in metadata. Ark 2.x refuses an image without a role, so
+// each link becomes a content item with the role its field names. Generic
+// image fields are reference images on models that take references, and keep
+// the role-less image Seedance 1.x reads as the first frame.
+const VIDEO_REFERENCE_FIELDS = [
+  { keys: ["firstFrame", "first_frame"], type: "image_url", role: "first_frame" },
+  { keys: ["lastFrame", "last_frame"], type: "image_url", role: "last_frame" },
+  { keys: ["images", "image", "image_urls", "input_reference", "reference_images", "referenceImages"], type: "image_url", role: "" },
+  { keys: ["videos", "video", "video_urls", "reference_videos", "referenceVideos"], type: "video_url", role: "reference_video" },
+  { keys: ["audios", "audio", "audio_urls", "reference_audios", "referenceAudios"], type: "audio_url", role: "reference_audio" },
+];
+
+// `media` entries of /v1/video/generations name their role as their type.
+const VIDEO_MEDIA_TYPES = {
+  first_frame: "image_url",
+  last_frame: "image_url",
+  reference_image: "image_url",
+  reference_video: "video_url",
+  reference_audio: "audio_url",
+};
+
+// Ark's aspect ratios: W:H or adaptive. A size such as 1280x720 is a
+// resolution, not a ratio.
+const VIDEO_RATIO = /^(\d+:\d+|adaptive)$/i;
+
+function referenceLinks(value, name) {
+  if (value === undefined || value === null || value === "") return [];
+  let list = value;
+  // Multipart fields carry a list as JSON text.
+  if (typeof value === "string" && value.trim().startsWith("[")) {
+    try {
+      list = JSON.parse(value);
+    } catch (e) {
+      throw new Error(name + " must be a URL or a JSON array of URLs");
+    }
+  }
+  if (!Array.isArray(list)) list = [list];
+  return list.map(function (entry) {
+    if (typeof entry === "string" && trimmed(entry)) return trimmed(entry);
+    if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+      for (const key of ["url", "image_url", "video_url", "audio_url"]) {
+        const inner = entry[key];
+        if (typeof inner === "string" && trimmed(inner)) return trimmed(inner);
+        if (inner && typeof inner === "object" && typeof inner.url === "string" && trimmed(inner.url)) return trimmed(inner.url);
+      }
+    }
+    throw new Error(name + " must contain media URLs");
+  });
+}
+
+// The non-text content items of a video request: the reference fields in the
+// order of VIDEO_REFERENCE_FIELDS, then metadata.content as sent. A link the
+// request already lists is added once.
+function videoReferenceContent(ctx) {
+  const req = ctx.requestBody || {};
+  const metadata = req.metadata || {};
+  const sent = (Array.isArray(metadata.content) ? metadata.content : []).filter((item) => item && item.type !== "text");
+  const listed = sent.map((item) => (item && typeof item === "object" && item[item.type] ? trimmed(item[item.type].url) : "")).filter(Boolean);
+  const imageRole = videoProfile(ctx).videoInput ? "reference_image" : "";
+  const content = [];
+  const add = function (type, role, url) {
+    if (listed.includes(url)) return;
+    listed.push(url);
+    const item = { type: type, [type]: { url: url } };
+    if (role) item.role = role;
+    content.push(item);
+  };
+  for (const field of VIDEO_REFERENCE_FIELDS) {
+    for (const source of [req, metadata]) {
+      for (const key of field.keys) {
+        for (const url of referenceLinks(source[key], key)) add(field.type, field.role || imageRole, url);
+      }
+    }
+  }
+  for (const source of [req, metadata]) {
+    if (source.media === undefined) continue;
+    let media = source.media;
+    if (typeof media === "string") {
+      try {
+        media = JSON.parse(media);
+      } catch (e) {
+        throw new Error("media must be an array");
+      }
+    }
+    if (!Array.isArray(media)) throw new Error("media must be an array");
+    for (const entry of media) {
+      const role = entry && typeof entry === "object" ? trimmed(entry.type) : "";
+      if (!VIDEO_MEDIA_TYPES[role]) throw new Error("media type must be one of " + Object.keys(VIDEO_MEDIA_TYPES).join(", "));
+      for (const url of referenceLinks(entry.url, "media url")) add(VIDEO_MEDIA_TYPES[role], role, url);
+    }
+  }
+  return content.concat(sent);
+}
+
 // The Ark task body of a video request: a native request's own body, or the
-// one the host protocols map the prompt, images and seconds onto.
+// one the host protocols map the prompt, references and seconds onto.
 function videoSubmitBody(ctx) {
   const req = ctx.requestBody || {};
   if (req.vendorBody) {
@@ -982,11 +1079,15 @@ function videoSubmitBody(ctx) {
   }
   const metadata = req.metadata || {};
   const body = Object.assign({ model: req.model || "", content: [] }, metadata);
-  const imageContent = [];
-  const images = Array.isArray(req.images) ? req.images : [];
-  for (const url of images) imageContent.push({ type: "image_url", image_url: { url: url } });
-  const metadataContent = Array.isArray(body.content) ? body.content : [];
-  body.content = imageContent.concat(metadataContent).filter((item) => item && item.type !== "text");
+  for (const field of VIDEO_REFERENCE_FIELDS) for (const key of field.keys) delete body[key];
+  delete body.media;
+  delete body.aspect_ratio;
+  body.content = videoReferenceContent(ctx);
+  if (body.resolution === undefined && trimmed(req.resolution)) body.resolution = req.resolution;
+  if (body.ratio === undefined) {
+    const ratio = [metadata.aspect_ratio, req.ratio, req.aspect_ratio, req.size].map(trimmed).find((value) => VIDEO_RATIO.test(value));
+    if (ratio) body.ratio = ratio.toLowerCase();
+  }
   const hasReference = body.content.length > 0;
   if (trimmed(req.prompt) || !hasReference) body.content.push({ type: "text", text: req.prompt || "" });
   body.content = rewriteDraftTaskContent(body.content, ctx.originTasks);
@@ -1025,8 +1126,9 @@ export function extractUsage(ctx) {
   }
   const req = ctx.requestBody || {};
   const metadata = req.vendorBody || req.metadata || {};
+  const content = req.vendorBody ? metadata.content : videoReferenceContent(ctx);
   if (ctx.usagePurpose === "billing_ratios") {
-    const ratio = videoInputRatio(ctx.upstreamModel || ctx.model, metadata.resolution, metadata.content);
+    const ratio = videoInputRatio(ctx.upstreamModel || ctx.model, metadata.resolution || req.resolution, content);
     return ratio === 1 ? null : { video_input_ratio: ratio };
   }
   const profile = videoProfile(ctx);
@@ -1045,7 +1147,7 @@ export function extractUsage(ctx) {
   // Every model reports video_input, including those whose profile omits it:
   // expressions saved when all Seedance models declared the field then keep
   // matching their no-video tier.
-  facts.video_input = hasVideo(metadata.content) ? "video" : "none";
+  facts.video_input = hasVideo(content) ? "video" : "none";
   if (profile.audio) facts.generate_audio = metadata.generate_audio !== false;
   return facts;
 }
@@ -1336,7 +1438,7 @@ protocols.openai_video = {
       if (seconds !== undefined) requestBody.seconds = seconds;
       // buildSubmitRequest sends metadata's fields to Ark as they are.
       return videoSubmitIntent(
-        { kind: "submit", model: ctx.model, action: req.input_reference || req.image ? "image_to_video" : "text_to_video", requestBody: requestBody },
+        { kind: "submit", model: ctx.model, action: videoReferenceContent({ requestBody: requestBody }).length ? "image_to_video" : "text_to_video", requestBody: requestBody },
         req.metadata,
       );
     }
@@ -1368,8 +1470,9 @@ protocols.openai_video = {
       throw new Error("seconds must be -1 or between 1 and 3600");
     // vendorBody carries a native request's own body; clients of this protocol cannot set it.
     delete req.vendorBody;
+    const requestBody = Object.assign({}, req, { model: ctx.model });
     return videoSubmitIntent(
-      { kind: "submit", model: ctx.model, action: req.input_reference || req.image ? "image_to_video" : "text_to_video", requestBody: Object.assign({}, req, { model: ctx.model }) },
+      { kind: "submit", model: ctx.model, action: videoReferenceContent({ requestBody: requestBody }).length ? "image_to_video" : "text_to_video", requestBody: requestBody },
       req.metadata,
     );
   },
