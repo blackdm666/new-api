@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +64,9 @@ func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Hea
 }
 
 const clientHeaderPlaceholderPrefix = "{client_header:"
+
+// userIdPlaceholder resolves to the requesting user's id, e.g. for upstream end-user headers.
+const userIdPlaceholder = "{user_id}"
 
 const (
 	headerPassthroughAllKey        = "*"
@@ -150,7 +154,7 @@ func shouldSkipPassthroughHeader(name string) bool {
 	return false
 }
 
-func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey string) (string, bool, error) {
+func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey string, userId int) (string, bool, error) {
 	trimmed := strings.TrimSpace(template)
 	if strings.HasPrefix(trimmed, clientHeaderPlaceholderPrefix) {
 		afterPrefix := trimmed[len(clientHeaderPlaceholderPrefix):]
@@ -177,6 +181,13 @@ func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey str
 	if strings.Contains(template, "{api_key}") {
 		template = strings.ReplaceAll(template, "{api_key}", apiKey)
 	}
+	if strings.Contains(template, userIdPlaceholder) {
+		// Requests without a user (balance queries, model listing) omit the header.
+		if userId <= 0 {
+			return "", false, nil
+		}
+		template = strings.ReplaceAll(template, userIdPlaceholder, strconv.Itoa(userId))
+	}
 	if strings.TrimSpace(template) == "" {
 		return "", false, nil
 	}
@@ -186,6 +197,7 @@ func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey str
 // processHeaderOverride applies channel header overrides, with placeholder substitution.
 // Supported placeholders:
 //   - {api_key}: resolved to the channel API key
+//   - {user_id}: resolved to the requesting user's id; the header is omitted when there is no user
 //   - {client_header:<name>}: resolved to the incoming request header value
 //
 // Header passthrough rules (keys only; values are ignored):
@@ -279,7 +291,7 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 			continue
 		}
 
-		value, include, err := applyHeaderOverridePlaceholders(str, c, info.ApiKey)
+		value, include, err := applyHeaderOverridePlaceholders(str, c, info.ApiKey, info.UserId)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid)
 		}
