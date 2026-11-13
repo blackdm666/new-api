@@ -459,7 +459,7 @@ func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 	// Ark reads duration -1 as "the model picks the length" (Seedance 1.5 pro
 	// and 2.x; 2.5 also defaults to it). The reservation covers the longest
 	// output: 720p is 1280 × 720 × 24 / 1024 = 21,600 tokens per second.
-	t.Run("duration -1 reaches Ark and reserves the longest duration", func(t *testing.T) {
+	t.Run("the stated duration reaches Ark and -1 reserves the longest one", func(t *testing.T) {
 		for _, tc := range []struct {
 			name         string
 			model        string
@@ -470,6 +470,9 @@ func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 			{"2.5 metadata on /v1/video/generations", v25, relaycommon.TaskSubmitReq{
 				Model: v25, Prompt: "a cat", Metadata: map[string]any{"duration": -1, "resolution": "720p"},
 			}, float64(-1), 30 * 21600},
+			{"2.0 duration on /v1/video/generations", v20, relaycommon.TaskSubmitReq{
+				Model: v20, Prompt: "a cat", Duration: 8, Metadata: map[string]any{"resolution": "720p"},
+			}, float64(8), 8 * 21600},
 			{"2.5 without a duration keeps the Ark default", v25, map[string]any{
 				"model": v25, "prompt": "a cat", "metadata": map[string]any{"resolution": "720p"},
 			}, nil, 30 * 21600},

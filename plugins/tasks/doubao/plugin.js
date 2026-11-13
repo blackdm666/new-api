@@ -322,7 +322,7 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.6",
+  version: "1.4.0-88api.7",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -1094,7 +1094,8 @@ function videoSubmitBody(ctx) {
   if (trimmed(req.prompt) || !hasReference) body.content.push({ type: "text", text: req.prompt || "" });
   body.content = rewriteDraftTaskContent(body.content, ctx.originTasks);
   // -1 lets the model pick the length; extractUsage reserves the longest one.
-  const seconds = Number.parseInt(req.seconds || "", 10);
+  // /v1/video/generations names the length duration, the other protocols seconds.
+  const seconds = Number.parseInt(req.seconds || req.duration || "", 10);
   if (seconds > 0 || seconds === -1) body.duration = seconds;
   body.model = ctx.upstreamModel || body.model;
   return body;
