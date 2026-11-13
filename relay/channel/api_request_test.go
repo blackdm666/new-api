@@ -217,3 +217,67 @@ func TestToWebSocketURL(t *testing.T) {
 		assert.Equal(t, want, toWebSocketURL(input), input)
 	}
 }
+
+func TestProcessHeaderOverride_UserIdPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name       string
+		userId     int
+		override   map[string]any
+		clientHdr  string
+		wantHeader string
+		wantSet    bool
+	}{
+		{
+			name:       "resolves requesting user id",
+			userId:     13992,
+			override:   map[string]any{"X-DeRouter-End-User": "u{user_id}"},
+			wantHeader: "u13992",
+			wantSet:    true,
+		},
+		{
+			name:     "omits header without a user",
+			userId:   0,
+			override: map[string]any{"X-DeRouter-End-User": "u{user_id}"},
+			wantSet:  false,
+		},
+		{
+			name:       "overwrites client supplied header",
+			userId:     7,
+			override:   map[string]any{"X-DeRouter-End-User": "u{user_id}"},
+			clientHdr:  "u1",
+			wantHeader: "u7",
+			wantSet:    true,
+		},
+		{
+			name:       "does not expand placeholder inside client header value",
+			userId:     7,
+			override:   map[string]any{"X-DeRouter-End-User": "{client_header:X-DeRouter-End-User}"},
+			clientHdr:  "{user_id}",
+			wantHeader: "{user_id}",
+			wantSet:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			if tt.clientHdr != "" {
+				ctx.Request.Header.Set("X-DeRouter-End-User", tt.clientHdr)
+			}
+			info := &relaycommon.RelayInfo{
+				UserId:      tt.userId,
+				ChannelMeta: &relaycommon.ChannelMeta{HeadersOverride: tt.override},
+			}
+
+			headers, err := processHeaderOverride(info, ctx)
+			require.NoError(t, err)
+			value, ok := headers["x-derouter-end-user"]
+			assert.Equal(t, tt.wantSet, ok)
+			assert.Equal(t, tt.wantHeader, value)
+		})
+	}
+}
