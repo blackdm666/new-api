@@ -322,7 +322,7 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.8",
+  version: "1.4.0-88api.9",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -385,7 +385,10 @@ function draftTaskIds(content) {
 // name gateway task ids the host resolves to Ark's before submission.
 function videoSubmitIntent(intent, arkFields, content) {
   const fields = arkFields && typeof arkFields === "object" && !Array.isArray(arkFields) ? arkFields : {};
-  if (fields.callback_url !== undefined && fields.callback_url !== null) throw new Error("callback_url is not supported; query the task instead");
+  const top = intent.requestBody || {};
+  for (const source of [fields, top]) {
+    if (source.callback_url !== undefined && source.callback_url !== null) throw new Error("callback_url is not supported; query the task instead");
+  }
   const originTaskIds = draftTaskIds(content === undefined ? fields.content : content);
   if (originTaskIds.length) intent.originTaskIds = originTaskIds;
   return intent;
@@ -1001,6 +1004,27 @@ const VIDEO_MEDIA_TYPES = {
 // resolution, not a ratio.
 const VIDEO_RATIO = /^(\d+:\d+|adaptive)$/i;
 
+// Ark video fields a request may send at the top level as well as in metadata,
+// as the 88API video docs describe; a field set in metadata wins. Dropping a
+// top-level draft would have Ark generate, and the gateway bill, a full video.
+const VIDEO_ARK_FIELDS = [
+  "generate_audio",
+  "watermark",
+  "seed",
+  "draft",
+  "return_last_frame",
+  "priority",
+  "tools",
+  "omni_reference_task_type",
+  "output_format",
+  "service_tier",
+  "execution_expires_after",
+  "camera_fixed",
+  "frames",
+];
+const VIDEO_ARK_BOOLEANS = ["generate_audio", "watermark", "draft", "return_last_frame", "camera_fixed"];
+const VIDEO_ARK_INTEGERS = ["seed", "priority", "frames", "execution_expires_after"];
+
 function referenceLinks(value, name) {
   if (value === undefined || value === null || value === "") return [];
   let list = value;
@@ -1100,6 +1124,7 @@ function videoSubmitBody(ctx) {
   }
   const metadata = req.metadata || {};
   const body = Object.assign({ model: req.model || "", content: [] }, metadata);
+  for (const key of VIDEO_ARK_FIELDS) if (body[key] === undefined && req[key] !== undefined) body[key] = req[key];
   for (const field of VIDEO_REFERENCE_FIELDS) for (const key of field.keys) delete body[key];
   delete body.media;
   delete body.aspect_ratio;
@@ -1493,6 +1518,24 @@ protocols.openai_video = {
       req.metadata = parsed;
     }
     if ((ctx.body.files || []).length) throw new Error("Doubao requires image and video references to be URLs inside metadata.content");
+    // Multipart fields are text; Ark takes these as booleans, integers and a tool list.
+    for (const key of VIDEO_ARK_BOOLEANS) {
+      if (req[key] === undefined) continue;
+      if (req[key] !== "true" && req[key] !== "false") throw new Error(key + " must be true or false");
+      req[key] = req[key] === "true";
+    }
+    for (const key of VIDEO_ARK_INTEGERS) {
+      if (req[key] === undefined) continue;
+      if (!/^-?\d+$/.test(trimmed(req[key]))) throw new Error(key + " must be an integer");
+      req[key] = Number(req[key]);
+    }
+    if (req.tools !== undefined) {
+      try {
+        req.tools = JSON.parse(req.tools);
+      } catch (e) {
+        throw new Error("tools must be a JSON array");
+      }
+    }
     if (req.seconds !== undefined) req.seconds = Number(req.seconds);
     else if (req.duration !== undefined) req.seconds = Number(req.duration);
     const seconds = req.seconds === undefined ? req.duration : req.seconds;

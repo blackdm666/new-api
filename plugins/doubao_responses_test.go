@@ -1437,6 +1437,44 @@ func TestDoubaoVideoReferenceFields(t *testing.T) {
 		assert.Equal(t, []any{"task_draft_pub"}, alibabaObject(t, decoded)["originTaskIds"])
 	})
 
+	// The 88API docs take Ark's video fields at the top level as well as in
+	// metadata; metadata wins when both are set.
+	t.Run("Ark fields at the top level", func(t *testing.T) {
+		body, _, _ := submit(t, v20, map[string]any{
+			"model": v20, "prompt": "four kids run", "seconds": 4,
+			"generate_audio": false, "watermark": true, "seed": 7, "draft": true, "return_last_frame": true, "priority": 3,
+			"tools": []any{map[string]any{"type": "web_search"}}, "omni_reference_task_type": "edit", "output_format": "mov",
+			"metadata": map[string]any{"resolution": "480p", "seed": 9},
+		})
+		assert.Equal(t, map[string]any{
+			"model": v20, "duration": float64(4), "resolution": "480p",
+			"generate_audio": false, "watermark": true, "seed": float64(9), "draft": true, "return_last_frame": true, "priority": float64(3),
+			"tools": []any{map[string]any{"type": "web_search"}}, "omni_reference_task_type": "edit", "output_format": "mov",
+			"content": []any{text},
+		}, body)
+
+		_, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+			"model": v20, "body": map[string]any{"kind": "json", "value": map[string]any{"model": v20, "prompt": "x", "callback_url": "https://example.com/hook"}},
+		})
+		require.ErrorContains(t, err, "callback_url is not supported")
+
+		decoded, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+			"model": v20, "body": map[string]any{"kind": "multipart", "fields": map[string]any{
+				"model": []any{v20}, "prompt": []any{"x"}, "generate_audio": []any{"false"}, "seed": []any{"12"}, "tools": []any{`[{"type":"web_search"}]`},
+			}},
+		})
+		require.NoError(t, err)
+		sent := alibabaObject(t, decoded)["requestBody"].(map[string]any)
+		assert.Equal(t, false, sent["generate_audio"])
+		assert.Equal(t, float64(12), sent["seed"])
+		assert.Equal(t, []any{map[string]any{"type": "web_search"}}, sent["tools"])
+
+		_, err = plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+			"model": v20, "body": map[string]any{"kind": "multipart", "fields": map[string]any{"model": []any{v20}, "prompt": []any{"x"}, "draft": []any{"yes"}}},
+		})
+		require.ErrorContains(t, err, "draft must be true or false")
+	})
+
 	t.Run("canvas reference mode", func(t *testing.T) {
 		body, facts, action := submit(t, v20, map[string]any{
 			"model": v20, "prompt": "four kids run", "duration": 8, "size": "9:16",
