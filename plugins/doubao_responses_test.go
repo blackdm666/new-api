@@ -1412,6 +1412,31 @@ func TestDoubaoVideoReferenceFields(t *testing.T) {
 		return alibabaObject(t, descriptor)["body"].(map[string]any), alibabaObject(t, facts), intent["action"].(string)
 	}
 
+	// The 88API docs take Ark content items at the top level as well as in
+	// metadata; a client that sends no prompt field writes it as a text item.
+	t.Run("Ark content at the top level", func(t *testing.T) {
+		body, facts, action := submit(t, v20, map[string]any{
+			"model": v20, "seconds": 8, "metadata": map[string]any{"resolution": "480p", "ratio": "9:16"},
+			"content": []any{
+				text,
+				image("https://cdn.example/a.png", "reference_image"),
+				image("https://cdn.example/b.png", "reference_image"),
+				video,
+			},
+		})
+		assert.Equal(t, "image_to_video", action)
+		assert.Equal(t, []any{image("https://cdn.example/a.png", "reference_image"), image("https://cdn.example/b.png", "reference_image"), video, text}, body["content"])
+		assert.Equal(t, "video", facts["video_input"])
+
+		decoded, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+			"model": v20, "body": map[string]any{"kind": "json", "value": map[string]any{
+				"model": v20, "content": []any{map[string]any{"type": "draft_task", "draft_task": map[string]any{"id": "task_draft_pub"}}},
+			}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []any{"task_draft_pub"}, alibabaObject(t, decoded)["originTaskIds"])
+	})
+
 	t.Run("canvas reference mode", func(t *testing.T) {
 		body, facts, action := submit(t, v20, map[string]any{
 			"model": v20, "prompt": "four kids run", "duration": 8, "size": "9:16",
