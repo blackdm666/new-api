@@ -322,7 +322,7 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.7",
+  version: "1.4.0-88api.8",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -383,10 +383,10 @@ function draftTaskIds(content) {
 // The Ark fields of a video request: Ark would call callback_url back with
 // its own task ids, which the gateway does not hand out, and draft_task items
 // name gateway task ids the host resolves to Ark's before submission.
-function videoSubmitIntent(intent, arkFields) {
+function videoSubmitIntent(intent, arkFields, content) {
   const fields = arkFields && typeof arkFields === "object" && !Array.isArray(arkFields) ? arkFields : {};
   if (fields.callback_url !== undefined && fields.callback_url !== null) throw new Error("callback_url is not supported; query the task instead");
-  const originTaskIds = draftTaskIds(fields.content);
+  const originTaskIds = draftTaskIds(content === undefined ? fields.content : content);
   if (originTaskIds.length) intent.originTaskIds = originTaskIds;
   return intent;
 }
@@ -1026,14 +1026,33 @@ function referenceLinks(value, name) {
   });
 }
 
+// The Ark content items of a video request, which the documented API takes at
+// the top level or in metadata. A multipart field carries the list as JSON text.
+function videoContentItems(req) {
+  const metadata = req.metadata || {};
+  const items = [];
+  for (const value of [req.content, metadata.content]) {
+    let list = value;
+    if (typeof list === "string" && list.trim().startsWith("[")) {
+      try {
+        list = JSON.parse(list);
+      } catch (e) {
+        throw new Error("content must be an array");
+      }
+    }
+    if (Array.isArray(list)) items.push(...list.filter((item) => item && typeof item === "object" && !Array.isArray(item)));
+  }
+  return items;
+}
+
 // The non-text content items of a video request: the reference fields in the
-// order of VIDEO_REFERENCE_FIELDS, then metadata.content as sent. A link the
+// order of VIDEO_REFERENCE_FIELDS, then the content items as sent. A link the
 // request already lists is added once.
 function videoReferenceContent(ctx) {
   const req = ctx.requestBody || {};
   const metadata = req.metadata || {};
-  const sent = (Array.isArray(metadata.content) ? metadata.content : []).filter((item) => item && item.type !== "text");
-  const listed = sent.map((item) => (item && typeof item === "object" && item[item.type] ? trimmed(item[item.type].url) : "")).filter(Boolean);
+  const sent = videoContentItems(req).filter((item) => item.type !== "text");
+  const listed = sent.map((item) => (item[item.type] ? trimmed(item[item.type].url) : "")).filter(Boolean);
   const imageRole = videoProfile(ctx).videoInput ? "reference_image" : "";
   const content = [];
   const add = function (type, role, url) {
@@ -1091,7 +1110,14 @@ function videoSubmitBody(ctx) {
     if (ratio) body.ratio = ratio.toLowerCase();
   }
   const hasReference = body.content.length > 0;
-  if (trimmed(req.prompt) || !hasReference) body.content.push({ type: "text", text: req.prompt || "" });
+  // Without a prompt field, the text items of the request's content are the prompt.
+  const prompt = trimmed(req.prompt)
+    ? req.prompt
+    : videoContentItems(req)
+        .filter((item) => item.type === "text" && trimmed(item.text))
+        .map((item) => item.text)
+        .join("\n");
+  if (trimmed(prompt) || !hasReference) body.content.push({ type: "text", text: prompt || "" });
   body.content = rewriteDraftTaskContent(body.content, ctx.originTasks);
   // -1 lets the model pick the length; extractUsage reserves the longest one.
   // /v1/video/generations names the length duration, the other protocols seconds.
@@ -1443,6 +1469,7 @@ protocols.openai_video = {
       return videoSubmitIntent(
         { kind: "submit", model: ctx.model, action: videoReferenceContent({ requestBody: requestBody }).length ? "image_to_video" : "text_to_video", requestBody: requestBody },
         req.metadata,
+        videoContentItems(requestBody),
       );
     }
     const first = function (name) {
@@ -1477,6 +1504,7 @@ protocols.openai_video = {
     return videoSubmitIntent(
       { kind: "submit", model: ctx.model, action: videoReferenceContent({ requestBody: requestBody }).length ? "image_to_video" : "text_to_video", requestBody: requestBody },
       req.metadata,
+      videoContentItems(requestBody),
     );
   },
   render: function (ctx, task) {
