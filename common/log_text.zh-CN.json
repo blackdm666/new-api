@@ -673,6 +673,8 @@
   "panic in gopool.RelayPool: %v": "gopool.RelayPool 中发生 panic: %v",
   "panic recovered in plugin route": "插件路由发生 panic，已恢复",
   "passkey verification rejected: code=%s reason=%s rp_id=%q": "通行密钥验证未通过: code=%s reason=%s rp_id=%q",
+  "password reset email limit reached: email=%s, ip=%s": "密码重置邮件已达上限: email=%s, ip=%s",
+  "password reset limit check failed: %v": "密码重置限次检查失败: %v",
   "payment compliance confirmed user_id=%d ip=%s terms_version=%s confirmed_at=%d": "用户已确认支付合规条款 user_id=%d ip=%s terms_version=%s confirmed_at=%d",
   "persist task background flag failed: %s": "保存任务的后台运行标记失败: %s",
   "ping data error: %s": "发送 ping 数据出错: %s",

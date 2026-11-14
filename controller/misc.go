@@ -293,7 +293,11 @@ func SendPasswordResetEmail(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
-	if user, err := model.GetUniqueUserByEmail(email); err == nil {
+	if !service.ConsumePasswordResetEmailBudget(email) {
+		// Same response as a sent email: the caller must not learn whether the
+		// address exists or that its reset budget is used up.
+		logger.LogWarn(c.Request.Context(), common.LogText("password reset email limit reached: email=%s, ip=%s", common.MaskEmail(email), c.ClientIP()))
+	} else if user, err := model.GetUniqueUserByEmail(email); err == nil {
 		code := common.GenerateVerificationCode(0)
 		common.RegisterVerificationCodeWithKey(email, code, common.PasswordResetPurpose)
 		lang := strings.TrimSpace(user.GetSetting().Language)
