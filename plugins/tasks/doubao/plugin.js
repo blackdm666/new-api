@@ -322,7 +322,7 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.9",
+  version: "1.4.0-88api.10",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -400,7 +400,12 @@ function videoSubmitIntent(intent, arkFields, content) {
 // turns the http(s) reference images and videos of a video request into
 // assets of that group before submission: one CreateAsset round per link,
 // then GetAsset rounds until each is Active (Ark refuses an asset that is
-// still processing). A link whose asset is refused, or not ready when the
+// still processing). A link Ark could not fetch (it answers DownloadFailed
+// after up to ~30 s when the host is slow from Beijing) or that met a busy
+// asset service is tried once more; if that fails too the request is refused
+// before anything is reserved, naming the medium, since the bare link would
+// only meet Ark's real-person check a minute later. A link whose asset is
+// refused for another reason, fails processing, or is not ready when the
 // rounds run out, is submitted as it was. The project must be the one the Ark
 // API key belongs to. The caps leave rounds for polling within the host's 32
 // preflight rounds; 10 is the most reference videos any Seedance model takes.
@@ -454,36 +459,51 @@ function assetPlan(ctx, content) {
   return entries.length ? { library: library, entries: entries } : null;
 }
 
-// What the rounds so far established: the asset each planned link became
-// ("" when refused) and the last status read for each asset.
-function assetRounds(plan, responses) {
-  const assets = [];
-  const statuses = {};
-  (responses || []).forEach(function (response, round) {
-    const body = response && response.body;
-    const result = body && typeof body === "object" && !Array.isArray(body) ? body.Result : null;
-    const id = response && response.status >= 200 && response.status < 300 && result ? trimmed(result.Id) : "";
-    if (round < plan.entries.length) assets.push(id);
-    else if (id) statuses[id] = trimmed(result.Status);
-  });
-  return { assets: assets, statuses: statuses };
+// The host runs at most this many preflight rounds.
+const PREFLIGHT_ROUNDS = 32;
+// A link Ark could not fetch, or that met a busy asset service, gets one more try.
+const ASSET_ATTEMPTS = 2;
+const ASSET_RETRY_DELAY_MS = 2000;
+
+function assetResult(response) {
+  const body = response && response.body;
+  const result = body && typeof body === "object" && !Array.isArray(body) ? body.Result : null;
+  const ok = response && response.status >= 200 && response.status < 300;
+  return ok && result && typeof result === "object" ? result : null;
 }
 
-export function buildPreflightRequest(ctx) {
-  if (imageTask(ctx)) return null;
-  // A tier the model does not offer fails here, before anything is uploaded.
-  videoResolution(ctx);
-  const plan = assetPlan(ctx, videoSubmitBody(ctx).content);
-  if (!plan) return null;
-  const round = ctx.preflightRound || 0;
-  if (round < plan.entries.length) {
-    const entry = plan.entries[round];
-    const name = trimmed(ctx.publicTaskId) + "-" + (round + 1);
-    return assetRequest(plan.library, "CreateAsset", { GroupId: plan.library.groupId, URL: entry.url, AssetType: entry.kind.assetType, Name: name });
+function assetFailure(response) {
+  const body = response && response.body;
+  const meta = body && typeof body === "object" && !Array.isArray(body) ? body.ResponseMetadata : null;
+  const error = meta && meta.Error && typeof meta.Error === "object" ? meta.Error : {};
+  return { status: Number(response && response.status) || 0, code: trimmed(error.Code), message: trimmed(error.Message) };
+}
+
+// A failure another try may get past: Ark could not fetch the link in time,
+// or the asset service was busy. Refusals of the medium itself are final.
+function assetRetryable(failure) {
+  return failure.status === 429 || failure.status >= 500 || /DownloadFailed|Timeout|Throttl|InternalError|ServiceUnavailable/i.test(failure.code);
+}
+
+// The next asset round: a first CreateAsset for each link in order, one more
+// try for a link that failed in a way another try may get past, then GetAsset
+// reads until every asset is Active or Failed.
+function assetStep(plan, state) {
+  let index = state.attempts.findIndex((attempts) => attempts === 0);
+  if (index >= 0) return { action: "CreateAsset", index: index, delayMs: 0 };
+  const unread = plan.entries.filter(function (entry, i) {
+    const id = state.assets[i];
+    return id && state.statuses[id] !== "Active" && state.statuses[id] !== "Failed";
+  }).length;
+  // A retry must leave a round for each asset still to be read.
+  if (state.rounds + unread < PREFLIGHT_ROUNDS - 1) {
+    index = plan.entries.findIndex(function (entry, i) {
+      return !state.assets[i] && state.failures[i] && state.attempts[i] < ASSET_ATTEMPTS && assetRetryable(state.failures[i]);
+    });
+    if (index >= 0) return { action: "CreateAsset", index: index, delayMs: ASSET_RETRY_DELAY_MS };
   }
-  const state = assetRounds(plan, ctx.preflightResponses);
-  const pending = plan.entries.findIndex(function (entry, index) {
-    const id = state.assets[index];
+  const pending = plan.entries.findIndex(function (entry, i) {
+    const id = state.assets[i];
     return id && state.statuses[id] !== "Active" && state.statuses[id] !== "Failed";
   });
   if (pending < 0) return null;
@@ -492,7 +512,83 @@ export function buildPreflightRequest(ctx) {
   const id = state.assets[pending];
   const known = Object.prototype.hasOwnProperty.call(state.statuses, id);
   const wait = known || Object.keys(state.statuses).length === 0;
-  return assetRequest(plan.library, "GetAsset", { Id: id }, wait ? plan.entries[pending].kind.pollDelayMs : 0);
+  return { action: "GetAsset", id: id, delayMs: wait ? plan.entries[pending].kind.pollDelayMs : 0 };
+}
+
+// What the rounds so far established, replayed in order: the asset each
+// planned link became, the last failure of a link that has none, how often
+// each link was tried, and the last status read for each asset.
+function assetRounds(plan, responses) {
+  const count = plan.entries.length;
+  const state = { assets: [], failures: [], attempts: [], statuses: {}, rounds: 0 };
+  for (let i = 0; i < count; i++) {
+    state.assets.push("");
+    state.failures.push(null);
+    state.attempts.push(0);
+  }
+  for (const response of responses || []) {
+    const step = assetStep(plan, state);
+    if (!step) break;
+    state.rounds++;
+    const result = assetResult(response);
+    if (step.action === "CreateAsset") {
+      state.attempts[step.index]++;
+      const id = result ? trimmed(result.Id) : "";
+      if (id) {
+        state.assets[step.index] = id;
+        state.failures[step.index] = null;
+      } else state.failures[step.index] = assetFailure(response);
+    } else if (result && trimmed(result.Id)) {
+      state.statuses[trimmed(result.Id)] = trimmed(result.Status);
+    }
+  }
+  return state;
+}
+
+// The customer-facing name of a planned link: frames by role, references by
+// their place among the request's reference images or videos.
+function assetLabel(plan, content, index) {
+  const entry = plan.entries[index];
+  const item = (content || []).find(function (candidate) {
+    const media = candidate && typeof candidate === "object" ? candidate[entry.kind.type] : null;
+    return candidate && candidate.type === entry.kind.type && media && trimmed(media.url) === entry.url;
+  });
+  const role = item ? trimmed(item.role) : "";
+  if (role === "first_frame") return "首帧图片";
+  if (role === "last_frame") return "尾帧图片";
+  const peers = plan.entries.filter(function (other) {
+    if (other.kind !== entry.kind) return false;
+    const peer = (content || []).find((candidate) => candidate && candidate.type === other.kind.type && candidate[other.kind.type] && trimmed(candidate[other.kind.type].url) === other.url);
+    const peerRole = peer ? trimmed(peer.role) : "";
+    return peerRole !== "first_frame" && peerRole !== "last_frame";
+  });
+  const place = peers.indexOf(entry) + 1;
+  return entry.kind.type === "video_url" ? "第 " + place + " 个参考视频" : "第 " + place + " 张参考图";
+}
+
+// The refusal for a link Ark still could not take after its retry.
+function assetFailureMessage(label, failure) {
+  const bracket = /^\[([^\]]+)\]/.exec(failure.message);
+  const detail = (bracket ? bracket[1] : failure.message).slice(0, 160);
+  const reason = [failure.code || (failure.status ? "HTTP " + failure.status : ""), detail].filter(Boolean).join(": ");
+  const hint = /DownloadFailed|Timeout/i.test(failure.code)
+    ? "方舟没能下载这个文件，请确认链接无需登录、能从中国大陆稳定访问，或换一个图床后重试。"
+    : "方舟素材库暂时不可用，请稍后重试。";
+  return label + "无法存入方舟素材库" + (reason ? "（" + reason + "）" : "") + "，任务未提交，不扣费。" + hint;
+}
+
+export function buildPreflightRequest(ctx) {
+  if (imageTask(ctx)) return null;
+  // A tier the model does not offer fails here, before anything is uploaded.
+  videoResolution(ctx);
+  const plan = assetPlan(ctx, videoSubmitBody(ctx).content);
+  if (!plan) return null;
+  const step = assetStep(plan, assetRounds(plan, ctx.preflightResponses));
+  if (!step) return null;
+  if (step.action === "GetAsset") return assetRequest(plan.library, "GetAsset", { Id: step.id }, step.delayMs);
+  const entry = plan.entries[step.index];
+  const name = trimmed(ctx.publicTaskId) + "-" + (step.index + 1);
+  return assetRequest(plan.library, "CreateAsset", { GroupId: plan.library.groupId, URL: entry.url, AssetType: entry.kind.assetType, Name: name }, step.delayMs);
 }
 
 function rewriteDraftTaskContent(content, originTasks) {
@@ -954,6 +1050,11 @@ export function buildSubmitRequest(ctx) {
   const plan = assetPlan(ctx, body.content);
   if (plan) {
     const state = assetRounds(plan, ctx.preflightResponses);
+    plan.entries.forEach(function (entry, index) {
+      const failure = state.failures[index];
+      if (!state.assets[index] && failure && state.attempts[index] >= ASSET_ATTEMPTS && assetRetryable(failure))
+        throw new Error(assetFailureMessage(assetLabel(plan, body.content, index), failure));
+    });
     const assets = {};
     plan.entries.forEach(function (entry, index) {
       const id = state.assets[index];
