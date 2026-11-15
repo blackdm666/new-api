@@ -1321,6 +1321,57 @@ func TestDoubaoAssetLibraryReferences(t *testing.T) {
 		assert.Equal(t, []any{"https://cdn.example/a.png", "https://cdn.example/b.png", "asset://asset-own", "https://cdn.example/a.png"}, urls(submit(withRefusal)))
 	})
 
+	// Ark answers DownloadFailed after up to ~30 s when it cannot fetch a link
+	// from Beijing; the bare link then met the real-person check a minute later.
+	t.Run("a link Ark could not fetch is tried once more, then the request names it", func(t *testing.T) {
+		downloadFailed := map[string]any{"status": 400, "body": map[string]any{"ResponseMetadata": map[string]any{"Error": map[string]any{
+			"Code":    "InvalidParameter.DownloadFailed",
+			"Message": "[Failed to download media from the provided URL. Please check if the link is accessible.] tos: request error: Message=fetch object return status code: 400",
+		}}}}
+		busy := map[string]any{"status": 503, "body": map[string]any{}}
+		createBody := func(descriptor map[string]any) map[string]any {
+			var body map[string]any
+			require.NoError(t, common.UnmarshalJsonStr(descriptor["body"].(string), &body))
+			return body
+		}
+
+		next := preflight(driver(libraryKey, 1, []any{downloadFailed}))
+		assert.Equal(t, "https://cdn.example/b.png", createBody(next)["URL"], "every link gets its first try before any retry")
+		assert.Equal(t, float64(0), next["delayMs"])
+
+		retry := preflight(driver(libraryKey, 2, []any{downloadFailed, created("asset-b")}))
+		assert.Equal(t, "https://ark.cn-beijing.volcengineapi.com/?Action=CreateAsset&Version=2024-01-01", retry["url"])
+		assert.Equal(t, map[string]any{"ProjectName": "proj", "GroupId": "group-1", "URL": "https://cdn.example/a.png", "AssetType": "Image", "Name": "task_pub-1"}, createBody(retry))
+		assert.Equal(t, float64(2000), retry["delayMs"])
+
+		recovered := []any{downloadFailed, created("asset-b"), created("asset-a"), read("asset-b", "Active"), read("asset-a", "Active")}
+		assert.Nil(t, preflight(driver(libraryKey, len(recovered), recovered)))
+		assert.Equal(t, []any{"asset://asset-a", "asset://asset-b", "asset://asset-own", "asset://asset-a"}, urls(submit(recovered)))
+
+		failedTwice := []any{created("asset-a"), downloadFailed, downloadFailed, read("asset-a", "Active")}
+		assert.Nil(t, preflight(driver(libraryKey, len(failedTwice), failedTwice)), "a link is tried at most twice")
+		_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", driver(libraryKey, len(failedTwice), failedTwice))
+		require.ErrorContains(t, err, "第 2 张参考图无法存入方舟素材库（InvalidParameter.DownloadFailed: Failed to download media from the provided URL. Please check if the link is accessible.），任务未提交，不扣费。方舟没能下载这个文件")
+
+		busyTwice := []any{busy, created("asset-b"), busy, read("asset-b", "Active")}
+		_, err = plugin.Engine.Call(t.Context(), "buildSubmitRequest", driver(libraryKey, len(busyTwice), busyTwice))
+		require.ErrorContains(t, err, "第 1 张参考图无法存入方舟素材库（HTTP 503），任务未提交，不扣费。方舟素材库暂时不可用，请稍后重试。")
+
+		// A refusal of the medium itself is not retried and keeps the link.
+		refusedOnce := []any{refused, created("asset-b")}
+		next = preflight(driver(libraryKey, len(refusedOnce), refusedOnce))
+		assert.Equal(t, "https://ark.cn-beijing.volcengineapi.com/?Action=GetAsset&Version=2024-01-01", next["url"])
+	})
+
+	t.Run("a first frame Ark could not fetch is named as the first frame", func(t *testing.T) {
+		downloadFailed := map[string]any{"status": 400, "body": map[string]any{"ResponseMetadata": map[string]any{"Error": map[string]any{"Code": "InvalidParameter.DownloadFailed"}}}}
+		frames := map[string]any{"model": seedance, "prompt": "x", "metadata": map[string]any{"firstFrame": "https://cdn.example/f.png", "lastFrame": "https://cdn.example/l.png"}}
+		ctx := driver(libraryKey, 3, []any{downloadFailed, created("asset-l"), downloadFailed})
+		ctx["requestBody"] = frames
+		_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", ctx)
+		require.ErrorContains(t, err, "首帧图片无法存入方舟素材库（InvalidParameter.DownloadFailed）")
+	})
+
 	t.Run("reference videos become video assets; audio links stay", func(t *testing.T) {
 		mixed := map[string]any{"model": seedance, "prompt": "视频1中的人挥手", "metadata": map[string]any{"content": []any{
 			map[string]any{"type": "image_url", "role": "reference_image", "image_url": map[string]any{"url": "https://cdn.example/a.png"}},
