@@ -295,12 +295,13 @@ func TestDoubaoImageSubmission(t *testing.T) {
 func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 	_, plugin := newDoubaoPlugin(t)
 	const (
-		pro10  = "doubao-seedance-1-0-pro-250528"
-		pro15  = "doubao-seedance-1-5-pro-251215"
-		v20    = "doubao-seedance-2-0-260128"
-		fast20 = "doubao-seedance-2-0-fast-260128"
-		mini20 = "doubao-seedance-2-0-mini-260615"
-		v25    = "doubao-seedance-2-5-260628"
+		pro10   = "doubao-seedance-1-0-pro-250528"
+		pro15   = "doubao-seedance-1-5-pro-251215"
+		v20     = "doubao-seedance-2-0-260128"
+		fast20  = "doubao-seedance-2-0-fast-260128"
+		mini20  = "doubao-seedance-2-0-mini-260615"
+		v25     = "doubao-seedance-2-5-260628"
+		flash25 = "doubao-seedance-2-5-flash-261115"
 	)
 	families := []struct {
 		models      []string
@@ -310,7 +311,7 @@ func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 		{[]string{pro10, "doubao-seedance-1-0-lite-t2v", "doubao-seedance-1-0-lite-i2v"}, []string{"480p", "720p", "1080p"}, []string{"resolution", "tokens"}},
 		{[]string{pro15}, []string{"480p", "720p", "1080p"}, []string{"generate_audio", "resolution", "tokens"}},
 		{[]string{v20}, []string{"480p", "720p", "1080p", "4k"}, []string{"resolution", "tokens", "video_input"}},
-		{[]string{fast20, mini20}, []string{"480p", "720p"}, []string{"resolution", "tokens", "video_input"}},
+		{[]string{fast20, mini20, flash25}, []string{"480p", "720p"}, []string{"resolution", "tokens", "video_input"}},
 		{[]string{v25}, []string{"480p", "720p", "1080p"}, []string{"resolution", "tokens", "video_input"}},
 	}
 	profiled := make([]string, 0, len(plugin.Meta.Models))
@@ -369,6 +370,7 @@ func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 		{"mini rejects 1080p", mini20, map[string]any{"metadata": map[string]any{"resolution": "1080p"}}, nil, mini20 + " resolution must be one of 480p, 720p"},
 		{"mini rejects a 1080p size", mini20, map[string]any{"size": "1920x1080"}, nil, mini20 + " resolution must be one of 480p, 720p"},
 		{"fast rejects 4k", fast20, map[string]any{"metadata": map[string]any{"resolution": "4k"}}, nil, fast20 + " resolution must be one of 480p, 720p"},
+		{"2.5 flash rejects 1080p", flash25, map[string]any{"metadata": map[string]any{"resolution": "1080p"}}, nil, flash25 + " resolution must be one of 480p, 720p"},
 		{"2.5 rejects 4k", v25, map[string]any{"metadata": map[string]any{"resolution": "4K"}}, nil, v25 + " resolution must be one of 480p, 720p, 1080p"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
