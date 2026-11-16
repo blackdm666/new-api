@@ -4,7 +4,8 @@
 // it accepts reference video input (Seedance 2.x prices video-to-video tokens
 // separately) and whether audio output is priced separately (Seedance 1.5 pro;
 // generate_audio defaults to true). Seedance 1.0 lite is no longer listed and
-// keeps the 1.0 pro tiers.
+// keeps the 1.0 pro tiers. frameSetsRatio marks a model whose output takes the
+// aspect ratio of its first frame and that rejects a ratio sent with one.
 const VIDEO_MODELS = {
   "doubao-seedance-1-0-pro-250528": { resolutions: ["480p", "720p", "1080p"], maxDuration: 12 },
   "doubao-seedance-1-0-lite-t2v": { resolutions: ["480p", "720p", "1080p"], maxDuration: 12 },
@@ -14,7 +15,7 @@ const VIDEO_MODELS = {
   "doubao-seedance-2-0-fast-260128": { resolutions: ["480p", "720p"], maxDuration: 15, videoInput: true },
   "doubao-seedance-2-0-mini-260615": { resolutions: ["480p", "720p"], maxDuration: 15, videoInput: true },
   "doubao-seedance-2-5-260628": { resolutions: ["480p", "720p", "1080p"], maxDuration: 30, videoInput: true },
-  "doubao-seedance-2-5-flash-261115": { resolutions: ["480p", "720p"], maxDuration: 30, videoInput: true },
+  "doubao-seedance-2-5-flash-261115": { resolutions: ["480p", "720p"], maxDuration: 30, videoInput: true, frameSetsRatio: true },
 };
 // Every Ark resolution tier; an endpoint ID reached through channel mapping
 // without a declared profile keeps them all and the longest Seedance duration.
@@ -323,7 +324,7 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.11",
+  version: "1.4.0-88api.12",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -1237,6 +1238,9 @@ function videoSubmitBody(ctx) {
     const ratio = [metadata.aspect_ratio, req.ratio, req.aspect_ratio, req.size].map(trimmed).find((value) => VIDEO_RATIO.test(value));
     if (ratio) body.ratio = ratio.toLowerCase();
   }
+  // Seedance 2.5 flash takes the first frame's aspect ratio and rejects any
+  // ratio sent with a first or last frame, such as the canvas's size 9:16.
+  if (videoProfile(ctx).frameSetsRatio && body.content.some((item) => item.role === "first_frame" || item.role === "last_frame")) delete body.ratio;
   const hasReference = body.content.length > 0;
   // Without a prompt field, the text items of the request's content are the prompt.
   const prompt = trimmed(req.prompt)

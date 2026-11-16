@@ -1557,6 +1557,43 @@ func TestDoubaoVideoReferenceFields(t *testing.T) {
 		}, body)
 	})
 
+	// Seedance 2.5 flash takes the first frame's aspect ratio and rejects a ratio
+	// sent with a frame; the channel maps the alias to an endpoint ID.
+	t.Run("2.5 flash frames drop the ratio", func(t *testing.T) {
+		const flash = "doubao-seedance-2-5-flash-261115"
+		build := func(t *testing.T, value map[string]any) map[string]any {
+			t.Helper()
+			decoded, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+				"model": "doubao-seedance-2.5-flash", "body": map[string]any{"kind": "json", "value": value},
+			})
+			require.NoError(t, err)
+			descriptor, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", map[string]any{
+				"model": "doubao-seedance-2.5-flash", "upstreamModel": "ep-20261116114004-m7qsq", "servedModel": flash,
+				"requestBody": alibabaObject(t, decoded)["requestBody"], "baseUrl": doubaoBaseURL, "apiKey": "key",
+			})
+			require.NoError(t, err)
+			return alibabaObject(t, descriptor)["body"].(map[string]any)
+		}
+		body := build(t, map[string]any{
+			"model": "doubao-seedance-2.5-flash", "prompt": "four kids run", "duration": 4, "size": "9:16",
+			"metadata": map[string]any{"resolution": "480p", "firstFrame": "https://cdn.example/a.png"},
+		})
+		assert.Equal(t, map[string]any{
+			"model": "ep-20261116114004-m7qsq", "duration": float64(4), "resolution": "480p",
+			"content": []any{image("https://cdn.example/a.png", "first_frame"), text},
+		}, body)
+		body = build(t, map[string]any{
+			"model": "doubao-seedance-2.5-flash", "prompt": "four kids run", "seconds": 4,
+			"metadata": map[string]any{"ratio": "9:16", "content": []any{image("https://cdn.example/a.png", "first_frame"), image("https://cdn.example/b.png", "last_frame")}},
+		})
+		assert.NotContains(t, body, "ratio", "a metadata ratio is dropped with first and last frames")
+		body = build(t, map[string]any{
+			"model": "doubao-seedance-2.5-flash", "prompt": "four kids run", "seconds": 4, "size": "9:16",
+			"images": []any{"https://cdn.example/a.png"},
+		})
+		assert.Equal(t, "9:16", body["ratio"], "reference images keep the ratio")
+	})
+
 	t.Run("each link is sent once, before metadata content", func(t *testing.T) {
 		body, _, _ := submit(t, v20, map[string]any{
 			"model": v20, "prompt": "four kids run", "size": "1280x720", "resolution": "720p",
