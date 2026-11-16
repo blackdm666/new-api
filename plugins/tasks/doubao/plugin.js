@@ -14,6 +14,7 @@ const VIDEO_MODELS = {
   "doubao-seedance-2-0-fast-260128": { resolutions: ["480p", "720p"], maxDuration: 15, videoInput: true },
   "doubao-seedance-2-0-mini-260615": { resolutions: ["480p", "720p"], maxDuration: 15, videoInput: true },
   "doubao-seedance-2-5-260628": { resolutions: ["480p", "720p", "1080p"], maxDuration: 30, videoInput: true },
+  "doubao-seedance-2-5-flash-261115": { resolutions: ["480p", "720p"], maxDuration: 30, videoInput: true },
 };
 // Every Ark resolution tier; an endpoint ID reached through channel mapping
 // without a declared profile keeps them all and the longest Seedance duration.
@@ -322,7 +323,7 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.10",
+  version: "1.4.0-88api.11",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -686,6 +687,7 @@ function videoInputRatio(model, resolution, content) {
   }
   if (model === "doubao-seedance-2-0-fast-260128") return video ? 22 / 37 : 1;
   if (model === "doubao-seedance-2-0-mini-260615") return video ? 14 / 23 : 1;
+  if (model === "doubao-seedance-2-5-flash-261115") return video ? 28 / 46 : 1;
   return 1;
 }
 
