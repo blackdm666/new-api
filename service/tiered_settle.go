@@ -112,10 +112,15 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 			p -= cr
 		}
 		// prompt_tokens counts every cache write once. A 12h write without
-		// its own price joins cc at twice its count; ccTokens keeps the real
-		// count that cc takes out of p, and an unpriced cc leaves p the extra.
+		// its own price joins cc at twice its count, and a 1h write (Qwen4)
+		// at the Claude 1h multiple; ccTokens keeps the real count that cc
+		// takes out of p, and an unpriced cc leaves p the extra.
 		cc12h = float64(usage.PromptTokensDetails.CacheWrite12hTokens())
-		cc -= cc12h
+		cache1h := float64(0)
+		if usage.UsageSemantic != "anthropic" {
+			cache1h = float64(usage.PromptTokensDetails.CacheWrite1hTokens())
+		}
+		cc -= cc12h + cache1h
 		ccTokens := cc
 		if usedVars["cc12h"] {
 			p -= cc12h
@@ -123,6 +128,12 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 			ccTokens += cc12h
 			cc += cc12h * hosttypes.OpenAICacheCreation12hMultiplier
 			cc12h = 0
+		}
+		if usedVars["cc1h"] {
+			cc1h += cache1h
+		} else {
+			ccTokens += cache1h
+			cc += cache1h * hosttypes.ClaudeCacheCreation1hMultiplier
 		}
 		if usedVars["cc"] {
 			p -= ccTokens

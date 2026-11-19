@@ -270,20 +270,27 @@ type InputTokenDetails struct {
 	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 	// CacheWriteTokensDetails splits CacheWriteTokens by cache lifetime.
 	CacheWriteTokensDetails *CacheWriteTokenDetails `json:"cache_write_tokens_details,omitempty"`
-	TextTokens              int                     `json:"text_tokens"`
-	AudioTokens             int                     `json:"audio_tokens"`
-	ImageTokens             int                     `json:"image_tokens"`
+	// CacheCreation splits cache writes by lifetime in Qwen4's
+	// OpenAI-compatible Chat Completions usage
+	// (prompt_tokens_details.cache_creation.ephemeral_{5m,1h}_input_tokens).
+	CacheCreation *ClaudeCacheCreationUsage `json:"cache_creation,omitempty"`
+	TextTokens    int                       `json:"text_tokens"`
+	AudioTokens   int                       `json:"audio_tokens"`
+	ImageTokens   int                       `json:"image_tokens"`
 }
 
-// CacheWriteTokenDetails is OpenAI's split of cache writes by lifetime. The
-// two counts do not overlap and sum to cache_write_tokens.
+// CacheWriteTokenDetails is the split of cache writes by lifetime. OpenAI
+// reports 30m and 12h; Qwen4's Responses usage reports 5m and 1h. The counts
+// do not overlap and sum to cache_write_tokens.
 type CacheWriteTokenDetails struct {
 	TTL30mTokens int `json:"ttl_30m_tokens"`
 	TTL12hTokens int `json:"ttl_12h_tokens"`
+	TTL5mTokens  int `json:"ttl_5m_tokens,omitempty"`
+	TTL1hTokens  int `json:"ttl_1h_tokens,omitempty"`
 }
 
 func (d *CacheWriteTokenDetails) HasTokens() bool {
-	return d != nil && (d.TTL30mTokens != 0 || d.TTL12hTokens != 0)
+	return d != nil && (d.TTL30mTokens != 0 || d.TTL12hTokens != 0 || d.TTL5mTokens != 0 || d.TTL1hTokens != 0)
 }
 
 // UnmarshalJSON accepts Qwen's OpenAI-compatible cache creation count. Normalize
@@ -340,6 +347,10 @@ func (d InputTokenDetails) Clone() InputTokenDetails {
 		cacheWrite := *d.CacheWriteTokensDetails
 		d.CacheWriteTokensDetails = &cacheWrite
 	}
+	if d.CacheCreation != nil {
+		cacheCreation := *d.CacheCreation
+		d.CacheCreation = &cacheCreation
+	}
 	return d
 }
 
@@ -364,6 +375,20 @@ func (d InputTokenDetails) CacheWrite12hTokens() int {
 		return 0
 	}
 	return min(max(d.CacheWriteTokensDetails.TTL12hTokens, 0), d.CacheCreationTokensTotal())
+}
+
+// CacheWrite1hTokens returns the 1-hour subset of the cache writes reported in
+// OpenAI-compatible usage (Qwen4), bounded by the writes not already counted
+// as 12h so it never bills more writes than reported.
+func (d InputTokenDetails) CacheWrite1hTokens() int {
+	tokens := 0
+	if d.CacheCreation != nil {
+		tokens = d.CacheCreation.Ephemeral1hInputTokens
+	}
+	if d.CacheWriteTokensDetails != nil {
+		tokens = max(tokens, d.CacheWriteTokensDetails.TTL1hTokens)
+	}
+	return min(max(tokens, 0), d.CacheCreationTokensTotal()-d.CacheWrite12hTokens())
 }
 
 type OutputTokenDetails struct {
