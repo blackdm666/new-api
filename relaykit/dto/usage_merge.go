@@ -333,7 +333,26 @@ func mergeInputTokenDetails(current *InputTokenDetails, incoming InputTokenDetai
 		if incoming.CacheWriteTokensDetails.TTL12hTokens > 0 {
 			merged.TTL12hTokens = incoming.CacheWriteTokensDetails.TTL12hTokens
 		}
+		if incoming.CacheWriteTokensDetails.TTL5mTokens > 0 {
+			merged.TTL5mTokens = incoming.CacheWriteTokensDetails.TTL5mTokens
+		}
+		if incoming.CacheWriteTokensDetails.TTL1hTokens > 0 {
+			merged.TTL1hTokens = incoming.CacheWriteTokensDetails.TTL1hTokens
+		}
 		current.CacheWriteTokensDetails = &merged
+	}
+	if incoming.CacheCreation != nil {
+		var merged ClaudeCacheCreationUsage
+		if current.CacheCreation != nil {
+			merged = *current.CacheCreation
+		}
+		if incoming.CacheCreation.Ephemeral5mInputTokens > 0 {
+			merged.Ephemeral5mInputTokens = incoming.CacheCreation.Ephemeral5mInputTokens
+		}
+		if incoming.CacheCreation.Ephemeral1hInputTokens > 0 {
+			merged.Ephemeral1hInputTokens = incoming.CacheCreation.Ephemeral1hInputTokens
+		}
+		current.CacheCreation = &merged
 	}
 	if incoming.TextTokens > 0 {
 		current.TextTokens = incoming.TextTokens

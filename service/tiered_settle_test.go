@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"net/http"
@@ -1024,6 +1025,60 @@ func TestBuildTieredTokenParams_UnpricedLongTTLCacheWrites(t *testing.T) {
 			cost, _, err := billingexpr.RunExpr(tc.expr, params)
 			require.NoError(t, err)
 			assert.Equal(t, tc.cost, cost)
+		})
+	}
+}
+
+// Qwen4 reports the 5m/1h split of cache writes inside OpenAI-compatible usage:
+// prompt_tokens_details.cache_creation on Chat Completions and
+// input_tokens_details.cache_write_tokens_details on Responses. The split must
+// survive decoding and stream merging so 1h writes reach cc1h.
+func TestBuildTieredTokenParams_QwenCacheWriteTTLSplit(t *testing.T) {
+	chat := func(split5m, split1h int) string {
+		return fmt.Sprintf(`{"prompt_tokens":2793,"completion_tokens":2,"total_tokens":2795,`+
+			`"prompt_tokens_details":{"cached_tokens":0,"cache_creation_input_tokens":%d,"cache_write_tokens":%d,`+
+			`"cache_creation":{"ephemeral_5m_input_tokens":%d,"ephemeral_1h_input_tokens":%d},"text_tokens":2793}}`,
+			split5m+split1h, split5m+split1h, split5m, split1h)
+	}
+	responses := `{"input_tokens":2793,"output_tokens":2,"input_tokens_details":{"cached_tokens":0,` +
+		`"cache_write_tokens":2777,"cache_write_tokens_details":{"ttl_5m_tokens":0,"ttl_1h_tokens":2777}}}`
+	const priced = `tier("base", p * 10 + c * 30 + cr * 0.5 + cc * 12.5 + cc1h * 20)`
+	const unpriced1h = `tier("base", p * 10 + c * 30 + cr * 0.5 + cc * 12.5)`
+	for _, tc := range []struct {
+		name        string
+		body        string
+		stream      bool
+		expr        string
+		p, cc, cc1h float64
+		cost        float64
+	}{
+		{"chat 1h priced", chat(0, 2777), false, priced, 16, 0, 2777, 55760},
+		{"chat 1h joins cc at 1.6x", chat(0, 2777), false, unpriced1h, 16, 4443.2, 0, 55760},
+		{"chat 5m and 1h", chat(1000, 1777), false, priced, 16, 1000, 1777, 48260},
+		{"chat 5m only", chat(2777, 0), false, priced, 16, 2777, 0, 34932.5},
+		{"chat split kept by stream merge", chat(0, 2777), true, priced, 16, 0, 2777, 55760},
+		{"responses 1h priced", responses, false, priced, 16, 0, 2777, 55760},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var usage dto.Usage
+			require.NoError(t, common.UnmarshalJsonStr(tc.body, &usage))
+			if usage.InputTokensDetails != nil {
+				usage.PromptTokens = usage.InputTokens
+				usage.CompletionTokens = usage.OutputTokens
+				usage.PromptTokensDetails = usage.InputTokensDetails.Clone()
+			}
+			if tc.stream {
+				merged := dto.MergeUsageNonZero(&dto.Usage{PromptTokens: 1}, &usage)
+				usage = *dto.MergeUsageNonZero(merged, &dto.Usage{CompletionTokens: 2})
+			}
+			params := BuildTieredTokenParams(&usage, false, billingexpr.UsedVars(tc.expr))
+			assert.Equal(t, tc.p, params.P)
+			assert.Equal(t, tc.cc, params.CC)
+			assert.Equal(t, tc.cc1h, params.CC1h)
+			assert.Equal(t, float64(2793), params.Len)
+			cost, _, err := billingexpr.RunExpr(tc.expr, params)
+			require.NoError(t, err)
+			assert.InDelta(t, tc.cost, cost, 1e-6)
 		})
 	}
 }
