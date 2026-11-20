@@ -312,7 +312,7 @@ func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 		{[]string{pro15}, []string{"480p", "720p", "1080p"}, []string{"generate_audio", "resolution", "tokens"}},
 		{[]string{v20}, []string{"480p", "720p", "1080p", "4k"}, []string{"resolution", "tokens", "video_input"}},
 		{[]string{fast20, mini20, flash25}, []string{"480p", "720p"}, []string{"resolution", "tokens", "video_input"}},
-		{[]string{v25}, []string{"480p", "720p", "1080p"}, []string{"resolution", "tokens", "video_input"}},
+		{[]string{v25}, []string{"480p", "720p", "1080p", "4k"}, []string{"resolution", "tokens", "video_input"}},
 	}
 	profiled := make([]string, 0, len(plugin.Meta.Models))
 	for _, family := range families {
@@ -371,7 +371,8 @@ func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 		{"mini rejects a 1080p size", mini20, map[string]any{"size": "1920x1080"}, nil, mini20 + " resolution must be one of 480p, 720p"},
 		{"fast rejects 4k", fast20, map[string]any{"metadata": map[string]any{"resolution": "4k"}}, nil, fast20 + " resolution must be one of 480p, 720p"},
 		{"2.5 flash rejects 1080p", flash25, map[string]any{"metadata": map[string]any{"resolution": "1080p"}}, nil, flash25 + " resolution must be one of 480p, 720p"},
-		{"2.5 rejects 4k", v25, map[string]any{"metadata": map[string]any{"resolution": "4K"}}, nil, v25 + " resolution must be one of 480p, 720p, 1080p"},
+		{"2.5 offers 4k", v25, map[string]any{"metadata": map[string]any{"resolution": "4k"}},
+			map[string]any{"tokens": float64(972000), "resolution": "4k", "video_input": "none"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			request := map[string]any{"model": tc.model, "prompt": "a cat", "seconds": float64(5)}
@@ -424,8 +425,10 @@ func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 		}{
 			{"2.0 without duration reserves 15 seconds at 1080p", v20, map[string]any{},
 				map[string]any{"tokens": float64(729000), "resolution": "1080p", "video_input": "none"}, ""},
-			{"2.5 rejects 4k before Ark", v25, map[string]any{"seconds": float64(5), "metadata": map[string]any{"resolution": "4k"}},
-				nil, "sales-alias resolution must be one of 480p, 720p, 1080p"},
+			{"2.5 reserves 4k", v25, map[string]any{"seconds": float64(5), "metadata": map[string]any{"resolution": "4k"}},
+				map[string]any{"tokens": float64(972000), "resolution": "4k", "video_input": "none"}, ""},
+			{"2.5 flash rejects 1080p before Ark", flash25, map[string]any{"seconds": float64(5), "metadata": map[string]any{"resolution": "1080p"}},
+				nil, "sales-alias resolution must be one of 480p, 720p"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				request := map[string]any{"model": "sales-alias", "prompt": "a cat"}
@@ -529,7 +532,7 @@ func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 			want       map[string]any
 		}{
 			{mini20, "1080p", map[string]any{"tokens": float64(90000)}},
-			{v25, "4k", map[string]any{"tokens": float64(90000)}},
+			{v25, "4k", map[string]any{"tokens": float64(90000), "resolution": "4k"}},
 			{v20, "4k", map[string]any{"tokens": float64(90000), "resolution": "4k"}},
 		} {
 			queryContext := map[string]any{"model": tc.model, "upstreamModel": tc.model, "action": "text_to_video"}
