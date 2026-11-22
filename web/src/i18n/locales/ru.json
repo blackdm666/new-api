@@ -8922,6 +8922,9 @@
     "Enter the issuer name printed on Hong Kong bills.": "Укажите название выставителя, которое печатается на счетах для Гонконга.",
     "Turn on invoice file delivery before generating Hong Kong bills automatically.": "Сначала включите выдачу файлов счетов, затем автоматическое формирование счетов для Гонконга.",
     "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "Счета для Гонконга формируются сразу после отправки, и их можно сразу скачать в сведениях о заявке.",
-    "Invoice issued. Download it from the application details.": "Счёт выставлен. Скачайте его в сведениях о заявке."
+    "Invoice issued. Download it from the application details.": "Счёт выставлен. Скачайте его в сведениях о заявке.",
+    "Groups without top-up discount": "Группы без скидки на пополнение",
+    "Enter a user group name and press Enter": "Введите название группы пользователей и нажмите Enter",
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "Пользователи этих групп всегда платят полную цену: скидки за сумму к ним не применяются и не показываются"
   }
 }

@@ -27,6 +27,7 @@ import * as z from 'zod'
 
 import { JsonCodeEditor } from '@/components/json-code-editor'
 import { RiskAcknowledgementDialog } from '@/components/risk-acknowledgement-dialog'
+import { TagInput } from '@/components/tag-input'
 import {
   Alert,
   AlertAction,
@@ -72,6 +73,7 @@ import {
   formatJsonForEditor,
   getJsonError,
   normalizeJsonForComparison,
+  parseJsonStringArray,
   removeTrailingSlash,
 } from './utils'
 import { saveWaffoPancakeConfig } from './waffo-pancake-api'
@@ -181,6 +183,7 @@ const paymentBaseSchema = z.object({
       })
     }
   }),
+  NoDiscountGroups: z.string(),
   StripeApiSecret: z.string(),
   StripeWebhookSecret: z.string(),
   StripePriceId: z.string(),
@@ -522,6 +525,9 @@ export function PaymentSettingsSection({
       PayMethods: values.PayMethods.trim(),
       AmountOptions: values.AmountOptions.trim(),
       AmountDiscount: values.AmountDiscount.trim(),
+      NoDiscountGroups: JSON.stringify(
+        parseJsonStringArray(values.NoDiscountGroups)
+      ),
       StripeApiSecret: values.StripeApiSecret.trim(),
       StripeWebhookSecret: values.StripeWebhookSecret.trim(),
       StripePriceId: values.StripePriceId.trim(),
@@ -574,6 +580,9 @@ export function PaymentSettingsSection({
       PayMethods: initialRef.current.PayMethods.trim(),
       AmountOptions: initialRef.current.AmountOptions.trim(),
       AmountDiscount: initialRef.current.AmountDiscount.trim(),
+      NoDiscountGroups: JSON.stringify(
+        parseJsonStringArray(initialRef.current.NoDiscountGroups)
+      ),
       StripeApiSecret: initialRef.current.StripeApiSecret.trim(),
       StripeWebhookSecret: initialRef.current.StripeWebhookSecret.trim(),
       StripePriceId: initialRef.current.StripePriceId.trim(),
@@ -671,6 +680,13 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'payment_setting.amount_discount',
         value: sanitized.AmountDiscount,
+      })
+    }
+
+    if (sanitized.NoDiscountGroups !== initial.NoDiscountGroups) {
+      updates.push({
+        key: 'payment_setting.no_discount_groups',
+        value: sanitized.NoDiscountGroups,
       })
     }
 
@@ -1292,6 +1308,35 @@ export function PaymentSettingsSection({
                         </FormControl>
                         <FormDescription>
                           {t('Discount map by recharge amount (JSON object)')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='NoDiscountGroups'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          {t('Groups without top-up discount')}
+                        </FormLabel>
+                        <FormControl>
+                          <TagInput
+                            value={parseJsonStringArray(field.value)}
+                            onChange={(groups) =>
+                              field.onChange(JSON.stringify(groups))
+                            }
+                            placeholder={t(
+                              'Enter a user group name and press Enter'
+                            )}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Users in these groups always pay the normal price: amount discounts are not applied or shown to them'
+                          )}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>

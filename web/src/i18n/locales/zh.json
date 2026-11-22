@@ -9017,6 +9017,9 @@
     "Enter the issuer name printed on Hong Kong bills.": "请填写印在香港帳單上的开票方名称。",
     "Turn on invoice file delivery before generating Hong Kong bills automatically.": "请先开启发票文件交付，再开启自动生成香港帳單。",
     "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "香港帳單在提交后立即生成，可直接在申请详情中下载。",
-    "Invoice issued. Download it from the application details.": "发票已开具，可在申请详情中下载。"
+    "Invoice issued. Download it from the application details.": "发票已开具，可在申请详情中下载。",
+    "Groups without top-up discount": "不享受充值优惠的分组",
+    "Enter a user group name and press Enter": "输入用户分组名后按回车",
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "这些分组的用户充值一律按原价，不享受也不显示满额优惠"
   }
 }
