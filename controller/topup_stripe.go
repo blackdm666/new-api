@@ -455,7 +455,7 @@ func getStripePayMoney(amount float64, group string) float64 {
 	}
 	// Apply the highest configured discount threshold reached by the original
 	// request amount.
-	discount := operation_setting.GetAmountDiscount(int64(originalAmount))
+	discount := operation_setting.GetAmountDiscountForGroup(int64(originalAmount), group)
 	payMoney := amount * setting.StripeUnitPrice * topupGroupRatio * discount
 	return payMoney
 }

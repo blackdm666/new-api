@@ -8922,6 +8922,9 @@
     "Enter the issuer name printed on Hong Kong bills.": "Nhập tên bên xuất in trên hóa đơn Hồng Kông.",
     "Turn on invoice file delivery before generating Hong Kong bills automatically.": "Hãy bật gửi tệp hóa đơn trước khi tự động tạo hóa đơn Hồng Kông.",
     "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "Hóa đơn Hồng Kông được tạo ngay khi bạn gửi và có thể tải xuống ngay trong chi tiết đơn.",
-    "Invoice issued. Download it from the application details.": "Đã xuất hóa đơn. Tải xuống trong chi tiết đơn."
+    "Invoice issued. Download it from the application details.": "Đã xuất hóa đơn. Tải xuống trong chi tiết đơn.",
+    "Groups without top-up discount": "Nhóm không được giảm giá nạp tiền",
+    "Enter a user group name and press Enter": "Nhập tên nhóm người dùng rồi nhấn Enter",
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "Người dùng trong các nhóm này luôn trả giá gốc: không được áp dụng và không hiển thị giảm giá theo số tiền"
   }
 }

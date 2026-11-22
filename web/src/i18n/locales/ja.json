@@ -8922,6 +8922,9 @@
     "Enter the issuer name printed on Hong Kong bills.": "香港向け請求書に印字する発行者名を入力してください。",
     "Turn on invoice file delivery before generating Hong Kong bills automatically.": "香港向け請求書を自動発行する前に、請求書ファイルの提供を有効にしてください。",
     "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "香港向け請求書は送信後すぐに作成され、申請の詳細からすぐにダウンロードできます。",
-    "Invoice issued. Download it from the application details.": "請求書を発行しました。申請の詳細からダウンロードしてください。"
+    "Invoice issued. Download it from the application details.": "請求書を発行しました。申請の詳細からダウンロードしてください。",
+    "Groups without top-up discount": "チャージ割引の対象外グループ",
+    "Enter a user group name and press Enter": "ユーザーグループ名を入力して Enter を押してください",
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "これらのグループのユーザーは常に通常価格で支払い、金額割引は適用も表示もされません"
   }
 }

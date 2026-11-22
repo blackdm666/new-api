@@ -32,6 +32,24 @@ export function formatJsonForEditor(value: string) {
   }
 }
 
+// Parses a stored JSON string array (for example a group list). Invalid or
+// non-array input yields an empty list; entries are trimmed and de-duplicated.
+export function parseJsonStringArray(value: string): string[] {
+  const trimmed = value.trim()
+  if (!trimmed) return []
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    if (!Array.isArray(parsed)) return []
+    const items = parsed
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    return [...new Set(items)]
+  } catch {
+    return []
+  }
+}
+
 export function normalizeJsonForComparison(value: string) {
   const trimmed = value.trim()
   if (!trimmed) return ''
@@ -56,7 +74,7 @@ function extractErrorPosition(
     const lines = jsonString.substring(0, position).split('\n')
     return {
       line: lines.length,
-      column: lines[lines.length - 1].length + 1,
+      column: (lines.at(-1) ?? '').length + 1,
     }
   }
 

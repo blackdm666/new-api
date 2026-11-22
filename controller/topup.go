@@ -114,6 +114,14 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	// Only advertise discounts the user will actually get. If the group lookup
+	// fails the normal tiers are shown; the charged price is still computed
+	// per group when the order is created.
+	userGroup, err := model.GetUserGroup(c.GetInt("id"), true)
+	if err != nil {
+		userGroup = ""
+	}
+
 	data := gin.H{
 		"enable_online_topup":              enableEpay || enableAntom,
 		"enable_antom_topup":               enableAntom,
@@ -137,7 +145,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"waffo_min_topup":         setting.WaffoMinTopUp,
 		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
-		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
+		"discount":                operation_setting.GetAmountDiscountMapForGroup(userGroup),
 		"topup_link":              common.TopUpLink,
 	}
 	common.ApiSuccess(c, data)
@@ -184,7 +192,7 @@ func getPayMoneyDecimal(amount int64, group string) decimal.Decimal {
 	dPrice := decimal.NewFromFloat(operation_setting.Price)
 	// Apply the highest configured discount threshold reached by the original
 	// request amount.
-	discount := operation_setting.GetAmountDiscount(amount)
+	discount := operation_setting.GetAmountDiscountForGroup(amount, group)
 	dDiscount := decimal.NewFromFloat(discount)
 
 	return dAmount.Mul(dPrice).Mul(dTopupGroupRatio).Mul(dDiscount)

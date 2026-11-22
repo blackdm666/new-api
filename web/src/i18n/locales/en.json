@@ -9016,6 +9016,9 @@
     "Enter the issuer name printed on Hong Kong bills.": "Enter the issuer name printed on Hong Kong bills.",
     "Turn on invoice file delivery before generating Hong Kong bills automatically.": "Turn on invoice file delivery before generating Hong Kong bills automatically.",
     "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.",
-    "Invoice issued. Download it from the application details.": "Invoice issued. Download it from the application details."
+    "Invoice issued. Download it from the application details.": "Invoice issued. Download it from the application details.",
+    "Groups without top-up discount": "Groups without top-up discount",
+    "Enter a user group name and press Enter": "Enter a user group name and press Enter",
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "Users in these groups always pay the normal price: amount discounts are not applied or shown to them"
   }
 }

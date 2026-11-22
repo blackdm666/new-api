@@ -8924,6 +8924,9 @@
     "Enter the issuer name printed on Hong Kong bills.": "請填寫印在香港帳單上的開票方名稱。",
     "Turn on invoice file delivery before generating Hong Kong bills automatically.": "請先開啟發票檔案交付，再開啟自動產生香港帳單。",
     "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "香港帳單在提交後立即產生，可直接在申請詳情中下載。",
-    "Invoice issued. Download it from the application details.": "發票已開具，可在申請詳情中下載。"
+    "Invoice issued. Download it from the application details.": "發票已開具，可在申請詳情中下載。",
+    "Groups without top-up discount": "不享受儲值優惠的分組",
+    "Enter a user group name and press Enter": "輸入使用者分組名稱後按 Enter",
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "這些分組的使用者儲值一律按原價，不享受也不顯示滿額優惠"
   }
 }

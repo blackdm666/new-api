@@ -8922,6 +8922,9 @@
     "Enter the issuer name printed on Hong Kong bills.": "Saisissez le nom de l’émetteur imprimé sur les factures Hong Kong.",
     "Turn on invoice file delivery before generating Hong Kong bills automatically.": "Activez la remise des fichiers de facture avant de générer automatiquement les factures Hong Kong.",
     "Hong Kong invoices are generated as soon as you submit and can be downloaded from the application details right away.": "Les factures Hong Kong sont générées dès l’envoi et peuvent être téléchargées immédiatement depuis le détail de la demande.",
-    "Invoice issued. Download it from the application details.": "Facture émise. Téléchargez-la depuis le détail de la demande."
+    "Invoice issued. Download it from the application details.": "Facture émise. Téléchargez-la depuis le détail de la demande.",
+    "Groups without top-up discount": "Groupes sans remise de recharge",
+    "Enter a user group name and press Enter": "Saisissez un nom de groupe d’utilisateurs puis appuyez sur Entrée",
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "Les utilisateurs de ces groupes paient toujours le prix normal : les remises par montant ne leur sont ni appliquées ni affichées"
   }
 }
