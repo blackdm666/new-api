@@ -28,7 +28,9 @@ import {
   getUserBillingHistory,
   getAllBillingHistory,
   completeOrder,
+  downloadTopUpReceipt,
   isApiSuccess,
+  sendTopUpReceipt,
 } from '../api'
 import type { TopupRecord } from '../types'
 
@@ -56,6 +58,7 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
   const requestIdRef = useRef(0)
   const [loading, setLoading] = useState(false)
   const [completing, setCompleting] = useState(false)
+  const [receiptBusyId, setReceiptBusyId] = useState<number | null>(null)
 
   /**
    * Fetch billing history
@@ -153,6 +156,43 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
     fetchBillingHistory()
   }, [debouncedKeyword, fetchBillingHistory, keyword])
 
+  const handleDownloadReceipt = useCallback(async (record: TopupRecord) => {
+    setReceiptBusyId(record.id)
+    try {
+      const failure = await downloadTopUpReceipt(record.id)
+      if (failure) {
+        handleServerError(failure, i18next.t('Failed to download receipt'))
+      }
+    } catch (error) {
+      handleServerError(error, i18next.t('Failed to download receipt'))
+    } finally {
+      setReceiptBusyId(null)
+    }
+  }, [])
+
+  const handleSendReceipt = useCallback(
+    async (record: TopupRecord) => {
+      if (!isAdmin) {
+        toast.error(i18next.t('Admin access required'))
+        return
+      }
+      setReceiptBusyId(record.id)
+      try {
+        const response = await sendTopUpReceipt(record.trade_no)
+        if (isApiSuccess(response)) {
+          toast.success(i18next.t('Receipt email queued'))
+        } else {
+          handleServerError(response, i18next.t('Failed to send receipt'))
+        }
+      } catch (error) {
+        handleServerError(error, i18next.t('Failed to send receipt'))
+      } finally {
+        setReceiptBusyId(null)
+      }
+    },
+    [isAdmin]
+  )
+
   return {
     records,
     total,
@@ -166,6 +206,9 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
     handlePageSizeChange,
     handleSearch,
     handleCompleteOrder,
+    receiptBusyId,
+    handleDownloadReceipt,
+    handleSendReceipt,
     refresh: fetchBillingHistory,
   }
 }

@@ -86,10 +86,69 @@ type Item struct {
 	AmountCents int64
 }
 
+// Labels is the fixed wording of a document. Empty fields keep the wording of
+// the Hong Kong bill (帳單 INVOICE), so a receipt only sets what differs.
+type Labels struct {
+	Title            string
+	Subtitle         string
+	NumberLabel      string
+	RecipientHeading string
+	// Amount labels the headline amount and the last line of the totals.
+	Amount      string
+	Subtotal    string
+	Total       string
+	Description string
+	Quantity    string
+	UnitPrice   string
+	LineAmount  string
+}
+
+var invoiceLabels = Labels{
+	Title:            "帳單",
+	Subtitle:         "INVOICE",
+	NumberLabel:      "帳單編號",
+	RecipientHeading: "收件人",
+	Amount:           "應付金額",
+	Subtotal:         "小計",
+	Total:            "合計",
+	Description:      "描述",
+	Quantity:         "數量",
+	UnitPrice:        "單價",
+	LineAmount:       "金額",
+}
+
+func (labels Labels) withDefaults() Labels {
+	for _, pair := range []struct {
+		value    *string
+		fallback string
+	}{
+		{&labels.Title, invoiceLabels.Title},
+		{&labels.Subtitle, invoiceLabels.Subtitle},
+		{&labels.NumberLabel, invoiceLabels.NumberLabel},
+		{&labels.RecipientHeading, invoiceLabels.RecipientHeading},
+		{&labels.Amount, invoiceLabels.Amount},
+		{&labels.Subtotal, invoiceLabels.Subtotal},
+		{&labels.Total, invoiceLabels.Total},
+		{&labels.Description, invoiceLabels.Description},
+		{&labels.Quantity, invoiceLabels.Quantity},
+		{&labels.UnitPrice, invoiceLabels.UnitPrice},
+		{&labels.LineAmount, invoiceLabels.LineAmount},
+	} {
+		if strings.TrimSpace(*pair.value) == "" {
+			*pair.value = pair.fallback
+		}
+	}
+	return labels
+}
+
 type Bill struct {
-	Number    string
-	IssueDate string
-	DueDate   string
+	Labels Labels
+	// HeaderFields replace the issue date and due date lines printed under
+	// the number when set.
+	HeaderFields []Field
+	Number       string
+	IssueDate    string
+	DueDate      string
 	// Currency is printed before every amount, e.g. "CNY".
 	Currency      string
 	IssuerHeading string
@@ -247,8 +306,9 @@ func Render(bill Bill) ([]byte, error) {
 	if createdAt.IsZero() {
 		createdAt = time.Now()
 	}
+	bill.Labels = bill.Labels.withDefaults()
 	pdf.SetInfo(gopdf.PdfInfo{
-		Title:        "帳單 INVOICE " + bill.Number,
+		Title:        bill.Labels.Title + " " + bill.Labels.Subtitle + " " + bill.Number,
 		Author:       bill.IssuerHeading,
 		Creator:      bill.IssuerHeading,
 		Producer:     bill.IssuerHeading,
@@ -272,7 +332,7 @@ func (r *renderer) render(bill Bill) error {
 	if err := r.amountDue(bill); err != nil {
 		return err
 	}
-	if err := r.tableHeader(); err != nil {
+	if err := r.tableHeader(bill.Labels); err != nil {
 		return err
 	}
 	for _, item := range bill.Items {
@@ -372,13 +432,13 @@ func (r *renderer) header(bill Bill) error {
 	if err := r.setFont(fontBold, 30, colorText); err != nil {
 		return err
 	}
-	if err := r.text(marginX, marginTop-2*mm, 60*mm, "帳單", gopdf.Left); err != nil {
+	if err := r.text(marginX, marginTop-2*mm, 60*mm, bill.Labels.Title, gopdf.Left); err != nil {
 		return err
 	}
 	if err := r.setFont(fontRegular, 11, colorText); err != nil {
 		return err
 	}
-	if err := r.text(marginX, marginTop+12*mm, 60*mm, "INVOICE", gopdf.Left); err != nil {
+	if err := r.text(marginX, marginTop+12*mm, 60*mm, bill.Labels.Subtitle, gopdf.Left); err != nil {
 		return err
 	}
 	if err := r.setFont(fontBold, 46, colorText); err != nil {
@@ -389,22 +449,35 @@ func (r *renderer) header(bill Bill) error {
 	}
 
 	r.y = marginTop + 20*mm
-	for _, field := range []Field{
-		{Label: "帳單編號", Value: bill.Number},
-		{Label: "發出日期", Value: bill.IssueDate},
-		{Label: "到期日", Value: bill.DueDate},
-	} {
+	fields := []Field{{Label: "發出日期", Value: bill.IssueDate}, {Label: "到期日", Value: bill.DueDate}}
+	if len(bill.HeaderFields) > 0 {
+		fields = bill.HeaderFields
+	}
+	fields = append([]Field{{Label: bill.Labels.NumberLabel, Value: bill.Number}}, fields...)
+	if err := r.setFont(fontRegular, 10.5, colorText); err != nil {
+		return err
+	}
+	// Values start after the widest label, and never before 24 mm.
+	labelW := 24 * mm
+	for _, field := range fields {
+		width, err := r.measure(field.Label)
+		if err != nil {
+			return err
+		}
+		labelW = max(labelW, width+4*mm)
+	}
+	for _, field := range fields {
 		if err := r.setFont(fontRegular, 10.5, colorText); err != nil {
 			return err
 		}
-		if err := r.text(marginX, r.y+2.5*mm, 24*mm, field.Label, gopdf.Left); err != nil {
+		if err := r.text(marginX, r.y+2.5*mm, labelW, field.Label, gopdf.Left); err != nil {
 			return err
 		}
-		if err := r.text(marginX+24*mm, r.y+2*mm, 68*mm, field.Value, gopdf.Left); err != nil {
+		if err := r.text(marginX+labelW, r.y+2*mm, 68*mm, field.Value, gopdf.Left); err != nil {
 			return err
 		}
 		r.y += rowHeight
-		r.rule(marginX+24*mm, r.y, marginX+92*mm, 0.6, colorRule)
+		r.rule(marginX+labelW, r.y, marginX+labelW+68*mm, 0.6, colorRule)
 	}
 	return nil
 }
@@ -467,7 +540,7 @@ func (r *renderer) parties(bill Bill) error {
 	if err != nil {
 		return err
 	}
-	recipientEnd, err := r.partyColumn(marginX+125*mm, top, 100*mm, "收件人", bill.Recipient)
+	recipientEnd, err := r.partyColumn(marginX+125*mm, top, 100*mm, bill.Labels.RecipientHeading, bill.Recipient)
 	if err != nil {
 		return err
 	}
@@ -480,36 +553,42 @@ func (r *renderer) amountDue(bill Bill) error {
 	if err := r.setFont(fontBold, 21, colorText); err != nil {
 		return err
 	}
-	if err := r.text(marginX, top, 50*mm, "應付金額", gopdf.Left); err != nil {
+	labelW, err := r.measure(bill.Labels.Amount)
+	if err != nil {
+		return err
+	}
+	// The amount starts at 48 mm unless the label is wider.
+	amountX := marginX + max(48*mm, labelW+6*mm)
+	if err := r.text(marginX, top, amountX-marginX, bill.Labels.Amount, gopdf.Left); err != nil {
 		return err
 	}
 	if err := r.setFont(fontBold, 19, colorText); err != nil {
 		return err
 	}
-	if err := r.text(marginX+48*mm, top+0.5*mm, 100*mm, formatAmount(bill.Currency, bill.TotalCents), gopdf.Left); err != nil {
+	if err := r.text(amountX, top+0.5*mm, 100*mm, formatAmount(bill.Currency, bill.TotalCents), gopdf.Left); err != nil {
 		return err
 	}
-	r.rule(marginX+48*mm, top+10*mm, marginX+148*mm, 0.8, colorRule)
+	r.rule(amountX, top+10*mm, amountX+100*mm, 0.8, colorRule)
 	r.y = top + 10*mm
 	return nil
 }
 
-func (r *renderer) tableHeader() error {
+func (r *renderer) tableHeader(labels Labels) error {
 	top := r.y + 8*mm
 	if err := r.setFont(fontRegular, 10.5, colorText); err != nil {
 		return err
 	}
 	right := marginX + contentW
-	if err := r.text(marginX, top, 100*mm, "描述", gopdf.Left); err != nil {
+	if err := r.text(marginX, top, 100*mm, labels.Description, gopdf.Left); err != nil {
 		return err
 	}
-	if err := r.text(right-colAmountW-colUnitW-colQtyW, top, colQtyW, "數量", gopdf.Right); err != nil {
+	if err := r.text(right-colAmountW-colUnitW-colQtyW, top, colQtyW, labels.Quantity, gopdf.Right); err != nil {
 		return err
 	}
-	if err := r.text(right-colAmountW-colUnitW, top, colUnitW, "單價", gopdf.Right); err != nil {
+	if err := r.text(right-colAmountW-colUnitW, top, colUnitW, labels.UnitPrice, gopdf.Right); err != nil {
 		return err
 	}
-	if err := r.text(right-colAmountW, top, colAmountW, "金額", gopdf.Right); err != nil {
+	if err := r.text(right-colAmountW, top, colAmountW, labels.LineAmount, gopdf.Right); err != nil {
 		return err
 	}
 	r.y = top + 6.5*mm
@@ -527,12 +606,12 @@ func (r *renderer) newPage(bill Bill, withTableHeader bool) error {
 	if err := r.setFont(fontRegular, 10, colorMuted); err != nil {
 		return err
 	}
-	if err := r.text(marginX, marginTop, contentW, fmt.Sprintf("帳單 INVOICE %s（續）", bill.Number), gopdf.Left); err != nil {
+	if err := r.text(marginX, marginTop, contentW, fmt.Sprintf("%s %s %s（續）", bill.Labels.Title, bill.Labels.Subtitle, bill.Number), gopdf.Left); err != nil {
 		return err
 	}
 	r.y = marginTop + 2*mm
 	if withTableHeader {
-		return r.tableHeader()
+		return r.tableHeader(bill.Labels)
 	}
 	r.y += 6 * mm
 	return nil
@@ -612,7 +691,7 @@ func (r *renderer) totals(bill Bill) error {
 	left := right - 172*mm
 	y := r.y + 4*mm
 	total := formatAmount(bill.Currency, bill.TotalCents)
-	for index, label := range []string{"小計", "合計", "應付金額"} {
+	for index, label := range []string{bill.Labels.Subtotal, bill.Labels.Total, bill.Labels.Amount} {
 		family, size := fontRegular, 10.5
 		if index == 2 {
 			family, size = fontBold, 12.5

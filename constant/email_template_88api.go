@@ -79,3 +79,28 @@ func referralApplicationUserEmailTemplateSpec() EmailTemplateSpec {
 		DefaultBody:    referralApplicationUserDefaultBody,
 	}
 }
+
+// 88api topup receipt: sent after a successful top-up with the PDF receipt
+// attached, when payment_setting.topup_receipt_email_enabled is on.
+const EmailTemplateKeyTopUpReceiptUser = "topup_receipt_user"
+
+func topUpReceiptUserEmailTemplateSpec() EmailTemplateSpec {
+	return EmailTemplateSpec{
+		Key:         EmailTemplateKeyTopUpReceiptUser,
+		Name:        "充值收据-通知用户",
+		Description: "充值付款成功后发送给用户，附带 PDF 收据（每笔订单一张，金额为实付金额）；在支付设置里打开「充值后自动发送 PDF 收据」才会发送。",
+		Variables: []EmailTemplateVariable{
+			varSystemName, varServerAddr, varEmailSubject, varHeading,
+			{Name: "intro", Description: "正文开头说明", Sample: "感谢你的充值。本次付款的 PDF 收据在附件中，也可以随时在控制台「钱包 → 账单」里下载。"},
+			{Name: "username", Description: "用户名", Sample: "alice"},
+			{Name: "receipt_number", Description: "收据编号", Sample: "88API-RC-20261123-026659"},
+			{Name: "trade_no", Description: "充值订单号", Sample: "USR13992NO5UpC2w1795427480"},
+			{Name: "amount", Description: "实付金额", Sample: "CNY 1900.00"},
+			{Name: "paid_at", Description: "付款时间（北京时间）", Sample: "2026-11-23 17:51"},
+			{Name: "payment_method", Description: "支付方式", Sample: "Stripe"},
+			varInfoTable, varActionURL, varActionLabel,
+		},
+		DefaultSubject: "{{email_subject}}",
+		DefaultBody:    defaultBody,
+	}
+}

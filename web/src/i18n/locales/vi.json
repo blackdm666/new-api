@@ -8925,6 +8925,21 @@
     "Invoice issued. Download it from the application details.": "Đã xuất hóa đơn. Tải xuống trong chi tiết đơn.",
     "Groups without top-up discount": "Nhóm không được giảm giá nạp tiền",
     "Enter a user group name and press Enter": "Nhập tên nhóm người dùng rồi nhấn Enter",
-    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "Người dùng trong các nhóm này luôn trả giá gốc: không được áp dụng và không hiển thị giảm giá theo số tiền"
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "Người dùng trong các nhóm này luôn trả giá gốc: không được áp dụng và không hiển thị giảm giá theo số tiền",
+    "Email PDF receipts": "Gửi biên lai PDF qua email",
+    "After each successful top-up, email the user a PDF receipt showing the amount paid": "Sau mỗi lần nạp tiền thành công, gửi cho người dùng biên lai PDF ghi số tiền đã thanh toán",
+    "Payment methods with emailed receipts": "Phương thức thanh toán gửi biên lai",
+    "Enter a payment method type and press Enter": "Nhập loại phương thức thanh toán rồi nhấn Enter",
+    "Payment method types such as 88fkstripe; leave empty to email receipts for every payment method": "Loại phương thức thanh toán, ví dụ 88fkstripe; để trống để gửi biên lai cho mọi phương thức",
+    "Failed to download receipt": "Tải biên lai thất bại",
+    "Receipt email queued": "Đã đưa email biên lai vào hàng đợi gửi",
+    "Failed to send receipt": "Gửi biên lai thất bại",
+    "Email receipt": "Gửi biên lai",
+    "Download receipt": "Tải biên lai",
+    "Top-up order not found": "Không tìm thấy đơn nạp tiền",
+    "Only paid and completed top-up orders have a receipt": "Chỉ đơn nạp tiền đã thanh toán và hoàn tất mới có biên lai",
+    "The user has no email address": "Người dùng này chưa có địa chỉ email",
+    "Top-up receipt user notification": "Thông báo biên lai nạp tiền cho người dùng",
+    "Sent to the user after a successful top-up with the PDF receipt attached, when emailed PDF receipts are enabled in payment settings.": "Gửi cho người dùng sau khi nạp tiền thành công, kèm biên lai PDF, khi đã bật gửi biên lai PDF trong cài đặt thanh toán."
   }
 }

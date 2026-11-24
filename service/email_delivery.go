@@ -164,6 +164,8 @@ func deliverSystemEmail(delivery *model.EmailDelivery) {
 	result := common.SMTPDeliveryResult{Profile: delivery.SMTPProfile}
 	if delivery.InvoiceDeliveryId > 0 {
 		err = sendInvoiceEmailDelivery(delivery)
+	} else if delivery.Category == TopUpReceiptEmailCategory { // 88api topup receipt
+		result, err = sendTopUpReceiptEmailDelivery(delivery)
 	} else if delivery.Priority != model.EmailPriorityMarketing && !strings.HasPrefix(delivery.Category, "marketing_") {
 		result, err = common.SendEmailWithProfileResult(delivery.SMTPProfile, delivery.Subject, delivery.Recipient, delivery.Body)
 	}

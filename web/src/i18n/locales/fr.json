@@ -8925,6 +8925,21 @@
     "Invoice issued. Download it from the application details.": "Facture émise. Téléchargez-la depuis le détail de la demande.",
     "Groups without top-up discount": "Groupes sans remise de recharge",
     "Enter a user group name and press Enter": "Saisissez un nom de groupe d’utilisateurs puis appuyez sur Entrée",
-    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "Les utilisateurs de ces groupes paient toujours le prix normal : les remises par montant ne leur sont ni appliquées ni affichées"
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "Les utilisateurs de ces groupes paient toujours le prix normal : les remises par montant ne leur sont ni appliquées ni affichées",
+    "Email PDF receipts": "Envoyer les reçus PDF par e-mail",
+    "After each successful top-up, email the user a PDF receipt showing the amount paid": "Après chaque recharge réussie, envoyer à l'utilisateur un reçu PDF indiquant le montant payé",
+    "Payment methods with emailed receipts": "Moyens de paiement avec reçu par e-mail",
+    "Enter a payment method type and press Enter": "Saisissez un type de moyen de paiement puis appuyez sur Entrée",
+    "Payment method types such as 88fkstripe; leave empty to email receipts for every payment method": "Types de moyens de paiement, par exemple 88fkstripe ; laissez vide pour envoyer un reçu pour tous les moyens de paiement",
+    "Failed to download receipt": "Échec du téléchargement du reçu",
+    "Receipt email queued": "L'e-mail du reçu a été mis en file d'attente",
+    "Failed to send receipt": "Échec de l'envoi du reçu",
+    "Email receipt": "Envoyer le reçu",
+    "Download receipt": "Télécharger le reçu",
+    "Top-up order not found": "Commande de recharge introuvable",
+    "Only paid and completed top-up orders have a receipt": "Seules les commandes de recharge payées et terminées ont un reçu",
+    "The user has no email address": "Cet utilisateur n'a pas d'adresse e-mail",
+    "Top-up receipt user notification": "Notification de reçu de recharge à l'utilisateur",
+    "Sent to the user after a successful top-up with the PDF receipt attached, when emailed PDF receipts are enabled in payment settings.": "Envoyé à l'utilisateur après une recharge réussie, avec le reçu PDF en pièce jointe, lorsque l'envoi des reçus PDF est activé dans les paramètres de paiement."
   }
 }

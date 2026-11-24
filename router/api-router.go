@@ -138,6 +138,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/aff/payouts/:id/cancel", middleware.UserCriticalRateLimit("affiliate-payout-cancel"), controller.CancelAffiliatePayout)
 				selfRoute.GET("/topup/info", controller.GetTopUpInfo)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)
+				selfRoute.GET("/topup/receipt/:id", controller.DownloadTopUpReceipt) // 88api topup receipt
 				selfRoute.POST("/topup", middleware.CriticalRateLimit(), controller.TopUp)
 				selfRoute.POST("/pay", middleware.CriticalRateLimit(), controller.RequestEpay)
 				selfRoute.POST("/amount", controller.RequestAmount)
@@ -175,6 +176,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/", controller.GetAllUsers)
 				adminRoute.GET("/topup", controller.GetAllTopUps)
 				adminRoute.POST("/topup/complete", controller.AdminCompleteTopUp)
+				adminRoute.POST("/topup/receipt/send", controller.AdminSendTopUpReceipt) // 88api topup receipt
 				adminRoute.GET("/search", controller.SearchUsers)
 				adminRoute.GET("/inviter-options", controller.GetUserInviterOptions)
 				adminRoute.GET("/:id/oauth/bindings", controller.GetUserOAuthBindingsByAdmin)
