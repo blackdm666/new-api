@@ -9019,6 +9019,21 @@
     "Invoice issued. Download it from the application details.": "Invoice issued. Download it from the application details.",
     "Groups without top-up discount": "Groups without top-up discount",
     "Enter a user group name and press Enter": "Enter a user group name and press Enter",
-    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "Users in these groups always pay the normal price: amount discounts are not applied or shown to them"
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "Users in these groups always pay the normal price: amount discounts are not applied or shown to them",
+    "Email PDF receipts": "Email PDF receipts",
+    "After each successful top-up, email the user a PDF receipt showing the amount paid": "After each successful top-up, email the user a PDF receipt showing the amount paid",
+    "Payment methods with emailed receipts": "Payment methods with emailed receipts",
+    "Enter a payment method type and press Enter": "Enter a payment method type and press Enter",
+    "Payment method types such as 88fkstripe; leave empty to email receipts for every payment method": "Payment method types such as 88fkstripe; leave empty to email receipts for every payment method",
+    "Failed to download receipt": "Failed to download receipt",
+    "Receipt email queued": "Receipt email queued",
+    "Failed to send receipt": "Failed to send receipt",
+    "Email receipt": "Email receipt",
+    "Download receipt": "Download receipt",
+    "Top-up order not found": "Top-up order not found",
+    "Only paid and completed top-up orders have a receipt": "Only paid and completed top-up orders have a receipt",
+    "The user has no email address": "The user has no email address",
+    "Top-up receipt user notification": "Top-up receipt user notification",
+    "Sent to the user after a successful top-up with the PDF receipt attached, when emailed PDF receipts are enabled in payment settings.": "Sent to the user after a successful top-up with the PDF receipt attached, when emailed PDF receipts are enabled in payment settings."
   }
 }

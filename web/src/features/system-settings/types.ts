@@ -463,6 +463,8 @@ export type BillingSettings = {
   'payment_setting.amount_options': string
   'payment_setting.amount_discount': string
   'payment_setting.no_discount_groups': string
+  'payment_setting.topup_receipt_email_enabled': boolean
+  'payment_setting.topup_receipt_payment_methods': string
   'payment_setting.compliance_confirmed': boolean
   'payment_setting.compliance_terms_version': string
   'payment_setting.compliance_confirmed_at': number

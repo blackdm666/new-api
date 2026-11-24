@@ -110,6 +110,13 @@ func sampleVarsFromSpecForLang(spec constant.EmailTemplateSpec, lang string) map
 	if spec.Key == constant.EmailTemplateKeyReferralApplicationUser {
 		maps.Copy(vars, referralApplicationReplyVars("RA-7K2M9QXD", lang))
 	}
+	// 88api topup receipt
+	if spec.Key == constant.EmailTemplateKeyTopUpReceiptUser {
+		maps.Copy(vars, topUpReceiptEmailVars(&model.TopUp{
+			Id: 26659, TradeNo: "USR13992NO5UpC2w1795427480", Money: 1900, PaymentMethod: "88fkstripe",
+			Status: common.TopUpStatusSuccess, CompleteTime: 1795427515,
+		}, &model.User{Id: 13992, Username: "alice"}, lang))
+	}
 	return vars
 }
 

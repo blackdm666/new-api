@@ -8925,6 +8925,21 @@
     "Invoice issued. Download it from the application details.": "Счёт выставлен. Скачайте его в сведениях о заявке.",
     "Groups without top-up discount": "Группы без скидки на пополнение",
     "Enter a user group name and press Enter": "Введите название группы пользователей и нажмите Enter",
-    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "Пользователи этих групп всегда платят полную цену: скидки за сумму к ним не применяются и не показываются"
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "Пользователи этих групп всегда платят полную цену: скидки за сумму к ним не применяются и не показываются",
+    "Email PDF receipts": "Отправлять PDF-квитанции на почту",
+    "After each successful top-up, email the user a PDF receipt showing the amount paid": "После каждого успешного пополнения отправлять пользователю PDF-квитанцию с оплаченной суммой",
+    "Payment methods with emailed receipts": "Способы оплаты с отправкой квитанций",
+    "Enter a payment method type and press Enter": "Введите тип способа оплаты и нажмите Enter",
+    "Payment method types such as 88fkstripe; leave empty to email receipts for every payment method": "Типы способов оплаты, например 88fkstripe; оставьте пустым, чтобы отправлять квитанции для всех способов",
+    "Failed to download receipt": "Не удалось скачать квитанцию",
+    "Receipt email queued": "Письмо с квитанцией поставлено в очередь",
+    "Failed to send receipt": "Не удалось отправить квитанцию",
+    "Email receipt": "Отправить квитанцию",
+    "Download receipt": "Скачать квитанцию",
+    "Top-up order not found": "Заказ на пополнение не найден",
+    "Only paid and completed top-up orders have a receipt": "Квитанция есть только у оплаченных и завершённых заказов",
+    "The user has no email address": "У пользователя нет адреса эл. почты",
+    "Top-up receipt user notification": "Уведомление пользователя с квитанцией о пополнении",
+    "Sent to the user after a successful top-up with the PDF receipt attached, when emailed PDF receipts are enabled in payment settings.": "Отправляется пользователю после успешного пополнения с PDF-квитанцией во вложении, если в настройках оплаты включена отправка PDF-квитанций."
   }
 }

@@ -8925,6 +8925,21 @@
     "Invoice issued. Download it from the application details.": "請求書を発行しました。申請の詳細からダウンロードしてください。",
     "Groups without top-up discount": "チャージ割引の対象外グループ",
     "Enter a user group name and press Enter": "ユーザーグループ名を入力して Enter を押してください",
-    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "これらのグループのユーザーは常に通常価格で支払い、金額割引は適用も表示もされません"
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "これらのグループのユーザーは常に通常価格で支払い、金額割引は適用も表示もされません",
+    "Email PDF receipts": "PDF 領収書をメール送信",
+    "After each successful top-up, email the user a PDF receipt showing the amount paid": "チャージの支払いが完了するたびに、支払金額を記載した PDF 領収書をユーザーにメールで送信します",
+    "Payment methods with emailed receipts": "領収書を送信する支払方法",
+    "Enter a payment method type and press Enter": "支払方法のタイプを入力して Enter を押してください",
+    "Payment method types such as 88fkstripe; leave empty to email receipts for every payment method": "支払方法のタイプ（例：88fkstripe）。空欄にするとすべての支払方法で送信します",
+    "Failed to download receipt": "領収書のダウンロードに失敗しました",
+    "Receipt email queued": "領収書メールを送信キューに追加しました",
+    "Failed to send receipt": "領収書の送信に失敗しました",
+    "Email receipt": "領収書を送信",
+    "Download receipt": "領収書をダウンロード",
+    "Top-up order not found": "チャージ注文が見つかりません",
+    "Only paid and completed top-up orders have a receipt": "領収書は支払い済みで完了したチャージ注文にのみ発行されます",
+    "The user has no email address": "このユーザーにはメールアドレスがありません",
+    "Top-up receipt user notification": "チャージ領収書のユーザー通知",
+    "Sent to the user after a successful top-up with the PDF receipt attached, when emailed PDF receipts are enabled in payment settings.": "チャージの支払い完了後、PDF 領収書を添付してユーザーに送信します。支払設定で「PDF 領収書をメール送信」を有効にした場合のみ送信されます。"
   }
 }

@@ -8927,6 +8927,21 @@
     "Invoice issued. Download it from the application details.": "發票已開具，可在申請詳情中下載。",
     "Groups without top-up discount": "不享受儲值優惠的分組",
     "Enter a user group name and press Enter": "輸入使用者分組名稱後按 Enter",
-    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "這些分組的使用者儲值一律按原價，不享受也不顯示滿額優惠"
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "這些分組的使用者儲值一律按原價，不享受也不顯示滿額優惠",
+    "Email PDF receipts": "自動寄送 PDF 收據",
+    "After each successful top-up, email the user a PDF receipt showing the amount paid": "每筆儲值付款成功後，寄給使用者一封附帶 PDF 收據的郵件，收據金額為實付金額",
+    "Payment methods with emailed receipts": "寄送收據的付款方式",
+    "Enter a payment method type and press Enter": "輸入付款方式類型後按 Enter",
+    "Payment method types such as 88fkstripe; leave empty to email receipts for every payment method": "填付款方式類型，例如 88fkstripe；留空表示所有付款方式都寄送",
+    "Failed to download receipt": "下載收據失敗",
+    "Receipt email queued": "收據郵件已加入寄送佇列",
+    "Failed to send receipt": "寄送收據失敗",
+    "Email receipt": "寄送收據",
+    "Download receipt": "下載收據",
+    "Top-up order not found": "儲值訂單不存在",
+    "Only paid and completed top-up orders have a receipt": "只有已付款完成的儲值訂單才有收據",
+    "The user has no email address": "該使用者沒有綁定電子郵件",
+    "Top-up receipt user notification": "儲值收據-通知使用者",
+    "Sent to the user after a successful top-up with the PDF receipt attached, when emailed PDF receipts are enabled in payment settings.": "儲值付款成功後寄給使用者，附帶 PDF 收據；需在付款設定中開啟「自動寄送 PDF 收據」。"
   }
 }

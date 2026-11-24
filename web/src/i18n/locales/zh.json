@@ -9020,6 +9020,21 @@
     "Invoice issued. Download it from the application details.": "发票已开具，可在申请详情中下载。",
     "Groups without top-up discount": "不享受充值优惠的分组",
     "Enter a user group name and press Enter": "输入用户分组名后按回车",
-    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "这些分组的用户充值一律按原价，不享受也不显示满额优惠"
+    "Users in these groups always pay the normal price: amount discounts are not applied or shown to them": "这些分组的用户充值一律按原价，不享受也不显示满额优惠",
+    "Email PDF receipts": "自动发送 PDF 收据",
+    "After each successful top-up, email the user a PDF receipt showing the amount paid": "每笔充值付款成功后，给用户发送一封附带 PDF 收据的邮件，收据金额为实付金额",
+    "Payment methods with emailed receipts": "发送收据的支付方式",
+    "Enter a payment method type and press Enter": "输入支付方式类型后按回车",
+    "Payment method types such as 88fkstripe; leave empty to email receipts for every payment method": "填支付方式类型，例如 88fkstripe；留空表示所有支付方式都发送",
+    "Failed to download receipt": "下载收据失败",
+    "Receipt email queued": "收据邮件已加入发送队列",
+    "Failed to send receipt": "发送收据失败",
+    "Email receipt": "发送收据",
+    "Download receipt": "下载收据",
+    "Top-up order not found": "充值订单不存在",
+    "Only paid and completed top-up orders have a receipt": "只有已付款完成的充值订单才有收据",
+    "The user has no email address": "该用户没有绑定邮箱",
+    "Top-up receipt user notification": "充值收据-通知用户",
+    "Sent to the user after a successful top-up with the PDF receipt attached, when emailed PDF receipts are enabled in payment settings.": "充值付款成功后发送给用户，附带 PDF 收据；需在支付设置中打开「自动发送 PDF 收据」。"
   }
 }

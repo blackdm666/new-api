@@ -282,6 +282,45 @@ export async function getAllBillingHistory(
 }
 
 /**
+ * Download the PDF receipt of a successful top-up. The receipt is fetched
+ * through the shared client because dashboard authentication is carried in
+ * request headers that a plain browser navigation cannot attach. A JSON body
+ * instead of a PDF is the API's error response and is returned to the caller.
+ */
+export async function downloadTopUpReceipt(
+  id: number
+): Promise<ApiResponse | undefined> {
+  const res = await api.get<Blob>(`/api/user/topup/receipt/${id}`, {
+    responseType: 'blob',
+  })
+  if (res.data.type.includes('application/json')) {
+    return JSON.parse(await res.data.text()) as ApiResponse
+  }
+  const disposition = String(res.headers['content-disposition'] ?? '')
+  const fileName =
+    /filename="([^"]+)"/.exec(disposition)?.[1] ?? `receipt-${id}.pdf`
+  const objectUrl = URL.createObjectURL(res.data)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = fileName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
+  return undefined
+}
+
+/**
+ * Email the PDF receipt of a successful top-up to its user again (admin only)
+ */
+export async function sendTopUpReceipt(tradeNo: string): Promise<ApiResponse> {
+  const res = await api.post('/api/user/topup/receipt/send', {
+    trade_no: tradeNo,
+  })
+  return res.data
+}
+
+/**
  * Complete a pending order (admin only)
  */
 export async function completeOrder(

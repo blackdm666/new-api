@@ -204,6 +204,15 @@ const TEMPLATE_META: Record<string, TemplateMeta> = {
     audience: 'user',
     icon: BellRing,
   },
+  // 88api topup receipt
+  topup_receipt_user: {
+    name: 'Top-up receipt user notification',
+    description:
+      'Sent to the user after a successful top-up with the PDF receipt attached, when emailed PDF receipts are enabled in payment settings.',
+    group: 'invoice',
+    audience: 'user',
+    icon: ReceiptText,
+  },
   invoice_expiry_admin: {
     name: 'Expiring invoice application reminder',
     description:

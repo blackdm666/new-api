@@ -381,6 +381,7 @@ func InitResources() error {
 	service.StartInvoiceFileCleanup()
 	service.StartInvoiceNotificationDelivery()
 	service.StartEmailDelivery()
+	service.StartTopUpReceiptEmail() // 88api topup receipt
 	service.StartTaskCallbackDelivery()
 	service.StartInvoiceDataRetention()
 	service.StartInvoiceWechatReminder()

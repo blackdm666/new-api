@@ -327,6 +327,7 @@ func EmailTemplateSpecs() []EmailTemplateSpec {
 		},
 		cyberGuardBanEmailTemplateSpec(),           // 88api cyberguard
 		referralApplicationUserEmailTemplateSpec(), // 88api referral
+		topUpReceiptUserEmailTemplateSpec(),        // 88api topup receipt
 	}
 }
 

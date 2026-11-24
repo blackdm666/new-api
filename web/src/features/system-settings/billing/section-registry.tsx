@@ -197,6 +197,10 @@ const BILLING_SECTIONS = [
           AmountOptions: settings['payment_setting.amount_options'],
           AmountDiscount: settings['payment_setting.amount_discount'],
           NoDiscountGroups: settings['payment_setting.no_discount_groups'],
+          TopUpReceiptEmailEnabled:
+            settings['payment_setting.topup_receipt_email_enabled'],
+          TopUpReceiptPaymentMethods:
+            settings['payment_setting.topup_receipt_payment_methods'],
           StripeApiSecret: settings.StripeApiSecret,
           StripeWebhookSecret: settings.StripeWebhookSecret,
           StripePriceId: settings.StripePriceId,

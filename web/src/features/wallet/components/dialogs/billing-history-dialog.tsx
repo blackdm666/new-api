@@ -16,7 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Search, Copy, Check, ChevronLeft, ChevronRight } from 'lucide-react'
+import {
+  Search,
+  Copy,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Mail,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -78,6 +86,9 @@ export function BillingHistoryDialog({
     handlePageSizeChange,
     handleSearch,
     handleCompleteOrder,
+    receiptBusyId,
+    handleDownloadReceipt,
+    handleSendReceipt,
   } = useBillingHistory()
 
   const [confirmTradeNo, setConfirmTradeNo] = useState<string | null>(null)
@@ -264,6 +275,32 @@ export function BillingHistoryDialog({
                           </div>
                         </div>
                       </div>
+
+                      {/* Receipt Actions */}
+                      {record.status === 'success' && (
+                        <div className='mt-4 flex flex-wrap justify-end gap-2'>
+                          {isAdmin && (
+                            <Button
+                              size='sm'
+                              variant='outline'
+                              onClick={() => handleSendReceipt(record)}
+                              disabled={receiptBusyId === record.id}
+                            >
+                              <Mail className='h-4 w-4' />
+                              {t('Email receipt')}
+                            </Button>
+                          )}
+                          <Button
+                            size='sm'
+                            variant='outline'
+                            onClick={() => handleDownloadReceipt(record)}
+                            disabled={receiptBusyId === record.id}
+                          >
+                            <Download className='h-4 w-4' />
+                            {t('Download receipt')}
+                          </Button>
+                        </div>
+                      )}
 
                       {/* Admin Actions */}
                       {isAdmin && record.status === 'pending' && (

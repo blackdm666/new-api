@@ -184,6 +184,8 @@ const paymentBaseSchema = z.object({
     }
   }),
   NoDiscountGroups: z.string(),
+  TopUpReceiptEmailEnabled: z.boolean(),
+  TopUpReceiptPaymentMethods: z.string(),
   StripeApiSecret: z.string(),
   StripeWebhookSecret: z.string(),
   StripePriceId: z.string(),
@@ -528,6 +530,10 @@ export function PaymentSettingsSection({
       NoDiscountGroups: JSON.stringify(
         parseJsonStringArray(values.NoDiscountGroups)
       ),
+      TopUpReceiptEmailEnabled: values.TopUpReceiptEmailEnabled,
+      TopUpReceiptPaymentMethods: JSON.stringify(
+        parseJsonStringArray(values.TopUpReceiptPaymentMethods)
+      ),
       StripeApiSecret: values.StripeApiSecret.trim(),
       StripeWebhookSecret: values.StripeWebhookSecret.trim(),
       StripePriceId: values.StripePriceId.trim(),
@@ -582,6 +588,10 @@ export function PaymentSettingsSection({
       AmountDiscount: initialRef.current.AmountDiscount.trim(),
       NoDiscountGroups: JSON.stringify(
         parseJsonStringArray(initialRef.current.NoDiscountGroups)
+      ),
+      TopUpReceiptEmailEnabled: initialRef.current.TopUpReceiptEmailEnabled,
+      TopUpReceiptPaymentMethods: JSON.stringify(
+        parseJsonStringArray(initialRef.current.TopUpReceiptPaymentMethods)
       ),
       StripeApiSecret: initialRef.current.StripeApiSecret.trim(),
       StripeWebhookSecret: initialRef.current.StripeWebhookSecret.trim(),
@@ -687,6 +697,25 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'payment_setting.no_discount_groups',
         value: sanitized.NoDiscountGroups,
+      })
+    }
+
+    if (
+      sanitized.TopUpReceiptEmailEnabled !== initial.TopUpReceiptEmailEnabled
+    ) {
+      updates.push({
+        key: 'payment_setting.topup_receipt_email_enabled',
+        value: sanitized.TopUpReceiptEmailEnabled,
+      })
+    }
+
+    if (
+      sanitized.TopUpReceiptPaymentMethods !==
+      initial.TopUpReceiptPaymentMethods
+    ) {
+      updates.push({
+        key: 'payment_setting.topup_receipt_payment_methods',
+        value: sanitized.TopUpReceiptPaymentMethods,
       })
     }
 
@@ -1336,6 +1365,58 @@ export function PaymentSettingsSection({
                         <FormDescription>
                           {t(
                             'Users in these groups always pay the normal price: amount discounts are not applied or shown to them'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='TopUpReceiptEmailEnabled'
+                    render={({ field }) => (
+                      <SettingsSwitchItem>
+                        <SettingsSwitchContent>
+                          <FormLabel>{t('Email PDF receipts')}</FormLabel>
+                          <FormDescription>
+                            {t(
+                              'After each successful top-up, email the user a PDF receipt showing the amount paid'
+                            )}
+                          </FormDescription>
+                        </SettingsSwitchContent>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </SettingsSwitchItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='TopUpReceiptPaymentMethods'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          {t('Payment methods with emailed receipts')}
+                        </FormLabel>
+                        <FormControl>
+                          <TagInput
+                            value={parseJsonStringArray(field.value)}
+                            onChange={(methods) =>
+                              field.onChange(JSON.stringify(methods))
+                            }
+                            placeholder={t(
+                              'Enter a payment method type and press Enter'
+                            )}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Payment method types such as 88fkstripe; leave empty to email receipts for every payment method'
                           )}
                         </FormDescription>
                         <FormMessage />

@@ -13,6 +13,11 @@ type PaymentSetting struct {
 	// NoDiscountGroups lists user groups that always pay the normal price:
 	// AmountDiscount is neither applied nor shown to users in these groups.
 	NoDiscountGroups []string `json:"no_discount_groups"`
+	// 88api topup receipt: TopUpReceiptEmailEnabled emails a PDF receipt to
+	// the user after each successful top-up. TopUpReceiptPaymentMethods limits
+	// it to these payment methods (for example 88fkstripe); empty means all.
+	TopUpReceiptEmailEnabled   bool     `json:"topup_receipt_email_enabled"`
+	TopUpReceiptPaymentMethods []string `json:"topup_receipt_payment_methods"`
 
 	ComplianceConfirmed    bool   `json:"compliance_confirmed"`
 	ComplianceTermsVersion string `json:"compliance_terms_version"`
@@ -28,6 +33,8 @@ var paymentSetting = PaymentSetting{
 	AmountOptions:    []int{10, 20, 50, 100, 200, 500},
 	AmountDiscount:   map[int]float64{},
 	NoDiscountGroups: []string{},
+
+	TopUpReceiptPaymentMethods: []string{},
 }
 
 func init() {
