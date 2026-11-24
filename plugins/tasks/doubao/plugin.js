@@ -14,7 +14,7 @@ const VIDEO_MODELS = {
   "doubao-seedance-2-0-260128": { resolutions: ["480p", "720p", "1080p", "4k"], maxDuration: 15, videoInput: true },
   "doubao-seedance-2-0-fast-260128": { resolutions: ["480p", "720p"], maxDuration: 15, videoInput: true },
   "doubao-seedance-2-0-mini-260615": { resolutions: ["480p", "720p"], maxDuration: 15, videoInput: true },
-  "doubao-seedance-2-5-260628": { resolutions: ["480p", "720p", "1080p", "4k"], maxDuration: 30, videoInput: true },
+  "doubao-seedance-2-5-260628": { resolutions: ["480p", "720p", "1080p", "4k"], maxDuration: 30, videoInput: true, frameSetsRatio: true },
   "doubao-seedance-2-5-flash-261115": { resolutions: ["480p", "720p"], maxDuration: 30, videoInput: true, frameSetsRatio: true },
 };
 // Every Ark resolution tier; an endpoint ID reached through channel mapping
@@ -324,7 +324,7 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.13",
+  version: "1.4.0-88api.14",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -1239,8 +1239,8 @@ function videoSubmitBody(ctx) {
     const ratio = [metadata.aspect_ratio, req.ratio, req.aspect_ratio, req.size].map(trimmed).find((value) => VIDEO_RATIO.test(value));
     if (ratio) body.ratio = ratio.toLowerCase();
   }
-  // Seedance 2.5 flash takes the first frame's aspect ratio and rejects any
-  // ratio sent with a first or last frame, such as the canvas's size 9:16.
+  // Seedance 2.5 and 2.5 flash take the first frame's aspect ratio and reject
+  // any ratio sent with a first or last frame, such as the canvas's size 9:16.
   if (videoProfile(ctx).frameSetsRatio && body.content.some((item) => item.role === "first_frame" || item.role === "last_frame")) delete body.ratio;
   const hasReference = body.content.length > 0;
   // Without a prompt field, the text items of the request's content are the prompt.
@@ -1256,6 +1256,13 @@ function videoSubmitBody(ctx) {
   // /v1/video/generations names the length duration, the other protocols seconds.
   const seconds = Number.parseInt(req.seconds || req.duration || "", 10);
   if (seconds > 0 || seconds === -1) body.duration = seconds;
+  // Left to itself, Seedance reads the prompt to decide whether a request with
+  // a reference video edits or extends that video, and those outputs take the
+  // video's ratio and length: a request naming its own ratio or length is then
+  // accepted and fails minutes later. Such a request asks for a generated video,
+  // so it is sent as reference generation, which keeps the ratio and length.
+  const namesShape = (body.ratio !== undefined && body.ratio !== "adaptive") || body.duration > 0;
+  if (body.omni_reference_task_type === undefined && namesShape && hasVideo(body.content)) body.omni_reference_task_type = "reference";
   body.model = ctx.upstreamModel || body.model;
   return body;
 }
@@ -1332,6 +1339,50 @@ export function buildQueryRequest(ctx) {
   };
 }
 
+// Ark's moderation refusal of an input or of the generated output, such as
+// "The request failed because the output video may be related to copyright restrictions."
+const ARK_MODERATION = /the request failed because the (input|output) (image|video|audio|text)(?:\s*'content\[\d+\]')* may (contain sensitive information|be related to copyright restrictions|contain real person)/i;
+const ARK_MODERATED_INPUTS = { image: "参考图片", video: "参考视频", audio: "参考音频", text: "提示词" };
+const ARK_MODERATION_CAUSES = {
+  "contain sensitive information": "可能包含敏感内容",
+  "be related to copyright restrictions": "可能涉及版权限制",
+  "contain real person": "可能包含真人或可识别人物",
+};
+
+// The Chinese failure reason shown to the task owner for a failed Ark task.
+// The gateway refunds every failed task. Ark's own wording is kept only where
+// no fixed sentence covers it, without request ids, links, the Ark account or
+// endpoint IDs.
+function arkTaskFailureReason(error, status) {
+  const code = trimmed(error && error.code);
+  const message = trimmed(error && error.message);
+  const moderated = ARK_MODERATION.exec(message);
+  if (moderated) {
+    const output = moderated[1].toLowerCase() === "output";
+    const kind = moderated[2].toLowerCase();
+    const subject = output ? "生成的" + { image: "图片", video: "视频", audio: "音频", text: "内容" }[kind] : ARK_MODERATED_INPUTS[kind];
+    let action = "请更换" + subject + "后重试";
+    if (output) action = "请修改提示词或参考素材后重试";
+    else if (kind === "text") action = "请修改提示词后重试";
+    return subject + ARK_MODERATION_CAUSES[moderated[3].toLowerCase()] + "，未通过上游内容审核，本次不扣费。" + action + "。";
+  }
+  if (code === "InvalidParameter.TaskTypeConstraint")
+    return "方舟按提示词把任务识别为视频编辑或视频延长，这类任务的画面比例和时长跟随输入视频，不能另行指定。请去掉比例和时长（或改为 adaptive 和 -1），或指定 omni_reference_task_type 为 reference 后重试，本次不扣费。";
+  if (code === "InvalidParameter.TaskTypeMismatch")
+    return "指定的任务类型与方舟按提示词识别的不一致（例如指定了视频编辑，但被识别为参考生成）。请调整提示词或 omni_reference_task_type 后重试，本次不扣费。";
+  if (code === "SetLimitExceeded" || /^(QuotaExceeded|AccountOverdue|ServiceNotOpen)/.test(code)) return "视频服务暂时不可用，请稍后重试，本次不扣费。";
+  if (status === "expired") return "任务超时未完成，本次不扣费。";
+  if (status === "cancelled") return "任务已取消，本次不扣费。";
+  const detail = message
+    .replace(/\s*Request id:.*$/i, "")
+    .replace(/https?:\/\/\S+/g, "[链接]")
+    .replace(/\s*\[\d{6,}\]/g, "")
+    .replace(/\[?\bep-\d{14}-[a-z0-9]+\b\]?/gi, "[接入点]")
+    .replace(/[\s.。]+$/, "");
+  if (code.startsWith("InvalidParameter")) return "视频服务拒绝了这次请求的参数或素材" + (detail ? "，原因：" + detail : "") + "。请修改后重试，本次不扣费。";
+  return "生成失败" + (detail ? "，原因：" + detail : "") + "。本次不扣费。";
+}
+
 export function parseTaskResult(ctx, body) {
   if (body.status === "pending" || body.status === "queued") return { status: "QUEUED", progress: "10%" };
   if (body.status === "processing" || body.status === "running") return { status: "IN_PROGRESS", progress: "50%" };
@@ -1345,8 +1396,7 @@ export function parseTaskResult(ctx, body) {
     return result;
   }
   if (body.status === "failed" || body.status === "expired" || body.status === "cancelled") {
-    const reason = body.error && body.error.message ? body.error.message : body.status;
-    return { status: "FAILURE", progress: "100%", reason: reason };
+    return { status: "FAILURE", progress: "100%", reason: arkTaskFailureReason(body.error, body.status) };
   }
   return { status: "UNKNOWN", reason: "unrecognized status: " + String(body.status || "") };
 }
