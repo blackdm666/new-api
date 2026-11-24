@@ -1085,6 +1085,34 @@ func TestDoubaoImageEndpointMappingKeepsDeclaredModel(t *testing.T) {
 	}
 }
 
+// Failed Ark tasks reach the task owner in Chinese, without Ark request ids,
+// links, the Ark account or endpoint IDs; the gateway refunds them all.
+func TestDoubaoVideoFailureReasons(t *testing.T) {
+	_, plugin := newDoubaoPlugin(t)
+	cases := []struct {
+		status, code, message, want string
+	}{
+		{"failed", "OutputVideoSensitiveContentDetected.PolicyViolation", "The request failed because the output video may be related to copyright restrictions. Request id: 0217955", "生成的视频可能涉及版权限制，未通过上游内容审核，本次不扣费。请修改提示词或参考素材后重试。"},
+		{"failed", "InputImageSensitiveContentDetected", "The request failed because the input image 'content[0]' 'content[2]' may contain real person. Request id: 02", "参考图片可能包含真人或可识别人物，未通过上游内容审核，本次不扣费。请更换参考图片后重试。"},
+		{"failed", "InvalidParameter.TaskTypeConstraint", "The parameters `ratio` and `duration` specified in the request are not valid. Seedance identified your task as video editing based on your prompt.", "方舟按提示词把任务识别为视频编辑或视频延长，这类任务的画面比例和时长跟随输入视频，不能另行指定。请去掉比例和时长（或改为 adaptive 和 -1），或指定 omni_reference_task_type 为 reference 后重试，本次不扣费。"},
+		{"failed", "SetLimitExceeded", "Your account [2100158866] has reached the set usage limit for the [ep-20261112021639-fpcg8] endpoint, and the endpoint service has been paused.", "视频服务暂时不可用，请稍后重试，本次不扣费。"},
+		{"failed", "InvalidParameter", "Error while downloading: https://m14e8bd28e3bd-mrap.mrap.accesspoint.tos-global.volces.com/2100158866/Image/46f7?X-Tos-Algorithm=TOS4 for [ep-20261112021639-fpcg8]. Request id: 0217", "视频服务拒绝了这次请求的参数或素材，原因：Error while downloading: [链接] for [接入点]。请修改后重试，本次不扣费。"},
+		{"failed", "InternalServiceError", "input media detect failed: invalid_media ", "生成失败，原因：input media detect failed: invalid_media。本次不扣费。"},
+		{"expired", "", "", "任务超时未完成，本次不扣费。"},
+	}
+	for _, tc := range cases {
+		body := map[string]any{"id": "cgt-1", "status": tc.status}
+		if tc.code != "" {
+			body["error"] = map[string]any{"code": tc.code, "message": tc.message}
+		}
+		value, err := plugin.Engine.Call(t.Context(), "parseTaskResult", map[string]any{}, body)
+		require.NoError(t, err)
+		result := alibabaObject(t, value)
+		assert.Equal(t, "FAILURE", result["status"], tc.code)
+		assert.Equal(t, tc.want, result["reason"], tc.code)
+	}
+}
+
 func TestDoubaoNativeOfficialBodies(t *testing.T) {
 	_, plugin := newDoubaoPlugin(t)
 	const seedance = "doubao-seedance-2-0-260128"
@@ -1543,7 +1571,8 @@ func TestDoubaoVideoReferenceFields(t *testing.T) {
 		assert.Equal(t, "image_to_video", action)
 		assert.Equal(t, map[string]any{
 			"model": v20, "duration": float64(8), "ratio": "9:16", "resolution": "720p", "generate_audio": true, "watermark": false,
-			"content": []any{image("https://cdn.example/a.png", "reference_image"), image("https://cdn.example/b.png", "reference_image"), video, audio, text},
+			"omni_reference_task_type": "reference",
+			"content":                  []any{image("https://cdn.example/a.png", "reference_image"), image("https://cdn.example/b.png", "reference_image"), video, audio, text},
 		}, body)
 		assert.Equal(t, "video", facts["video_input"], "a reference video given as a field prices the reference-video tier")
 	})
@@ -1595,6 +1624,40 @@ func TestDoubaoVideoReferenceFields(t *testing.T) {
 			"images": []any{"https://cdn.example/a.png"},
 		})
 		assert.Equal(t, "9:16", body["ratio"], "reference images keep the ratio")
+	})
+
+	t.Run("2.5 frames drop the ratio, 2.0 frames keep it", func(t *testing.T) {
+		value := map[string]any{"prompt": "four kids run", "seconds": 4, "size": "16:9", "metadata": map[string]any{"firstFrame": "https://cdn.example/a.png"}}
+		value["model"] = "doubao-seedance-2-5-260628"
+		body, _, _ := submit(t, "doubao-seedance-2-5-260628", value)
+		assert.NotContains(t, body, "ratio")
+		value["model"] = v20
+		body, _, _ = submit(t, v20, value)
+		assert.Equal(t, "16:9", body["ratio"])
+	})
+
+	// Left to itself, Seedance may read the prompt as an edit of the reference
+	// video and then fail a request that names its own ratio or length.
+	t.Run("a reference video with a named ratio or length is sent as reference generation", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			value map[string]any
+			want  any
+		}{
+			{"ratio", map[string]any{"size": "16:9", "videos": []any{"https://cdn.example/v.mp4"}}, "reference"},
+			{"length", map[string]any{"seconds": 4, "videos": []any{"https://cdn.example/v.mp4"}}, "reference"},
+			{"shape left to Ark", map[string]any{"seconds": -1, "metadata": map[string]any{"ratio": "adaptive", "reference_videos": []any{"https://cdn.example/v.mp4"}}}, nil},
+			{"explicit edit", map[string]any{"seconds": 4, "omni_reference_task_type": "edit", "videos": []any{"https://cdn.example/v.mp4"}}, "edit"},
+			{"no reference video", map[string]any{"size": "16:9", "seconds": 4, "images": []any{"https://cdn.example/a.png"}}, nil},
+		}
+		for _, tc := range cases {
+			value := map[string]any{"model": v20, "prompt": "four kids run"}
+			for key, field := range tc.value {
+				value[key] = field
+			}
+			body, _, _ := submit(t, v20, value)
+			assert.Equal(t, tc.want, body["omni_reference_task_type"], tc.name)
+		}
 	})
 
 	t.Run("each link is sent once, before metadata content", func(t *testing.T) {
