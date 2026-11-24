@@ -324,7 +324,7 @@ export const meta = {
   },
   // 1.4.0's Seedance native changes on the current host; Seedream streaming,
   // Base64 output and the unprefixed vendor paths need the newer host.
-  version: "1.4.0-88api.14",
+  version: "1.4.0-88api.15",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -1629,7 +1629,11 @@ const legacyRenderers = {
       created_at: task.created_at,
       completed_at: task.updated_at,
     };
-    if (data.status === "failed") output.error = { message: data.error ? data.error.message || "" : "", code: data.error ? data.error.code || "" : "" };
+    // The owner sees the same Chinese reason as the task list, never Ark's raw
+    // message with its request id, links, account or endpoint IDs.
+    if (data.status === "failed" || data.status === "expired" || data.status === "cancelled")
+      output.error = { message: arkTaskFailureReason(data.error, data.status), code: data.error ? trimmed(data.error.code) : "" };
+    else if (task.status === "FAILURE") output.error = { message: trimmed(task.fail_reason) || "task failed", code: "" };
     return output;
   },
 };
