@@ -1110,6 +1110,11 @@ func TestDoubaoVideoFailureReasons(t *testing.T) {
 		result := alibabaObject(t, value)
 		assert.Equal(t, "FAILURE", result["status"], tc.code)
 		assert.Equal(t, tc.want, result["reason"], tc.code)
+
+		rendered, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "render"}, map[string]any{"model": "doubao-seedance-2.5"},
+			map[string]any{"task_id": "task_public", "status": "FAILURE", "fail_reason": tc.want, "data": body})
+		require.NoError(t, err)
+		assert.Equal(t, tc.want, alibabaObject(t, rendered)["error"].(map[string]any)["message"], "/v1/videos shows the same reason: "+tc.code)
 	}
 }
 
