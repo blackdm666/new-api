@@ -81,3 +81,22 @@ func TestCountCutsOnlyLongRuns(t *testing.T) {
 		assert.InEpsilon(t, exact, Count("gpt-5.6-sol", text), 0.005)
 	}
 }
+
+// A response that degenerates into one repeated whitespace character must not
+// be estimated far above its real size; short runs keep their weights.
+func TestEstimateDampsLongWhitespaceRuns(t *testing.T) {
+	encoder := codec.NewO200kBase()
+	for _, unit := range []string{"\n", "\t", " "} {
+		text := "a" + strings.Repeat(unit, 100000) + "b"
+		exact, _ := encoder.Count(text)
+		got := EstimateFamily(FamilyOpenAI, text)
+		assert.LessOrEqual(t, got, exact*2, "%q", unit)
+		assert.GreaterOrEqual(t, got, exact/2, "%q", unit)
+	}
+
+	// Newline weight 0.95, space weight 0.17: indentation and blank lines
+	// are estimated as before, and only the ninth character onward is damped.
+	assert.Equal(t, 8, EstimateFamily(FamilyOpenAI, strings.Repeat("\t", 8)))
+	assert.Equal(t, 4, EstimateFamily(FamilyOpenAI, "\n    \n    "))
+	assert.Equal(t, 9, EstimateFamily(FamilyOpenAI, strings.Repeat("\n", 24)))
+}
