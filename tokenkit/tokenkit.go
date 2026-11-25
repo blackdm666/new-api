@@ -161,16 +161,34 @@ func EstimateFamily(family Family, text string) int {
 	)
 	current := none
 
+	// A tokenizer folds a long run of one whitespace character into few
+	// tokens: o200k_base spends one token on 16 newlines or tabs. The weights
+	// fit ordinary text, where such runs are short, so they apply in full to
+	// the first 8 characters of a run and at 1/16 after that. Otherwise a
+	// response that degenerates into endless newlines or tabs is estimated at
+	// about 15 times its real size.
+	const fullWeightRun, longRunDivisor = 8, 16
+	var spaceRune rune
+	spaceRun := 0
+
 	for _, r := range text {
 		if unicode.IsSpace(r) {
 			current = none
-			if r == '\n' || r == '\t' {
-				count += w.Newline
-			} else {
-				count += w.Space
+			if r != spaceRune {
+				spaceRune, spaceRun = r, 0
 			}
+			spaceRun++
+			weight := w.Space
+			if r == '\n' || r == '\t' {
+				weight = w.Newline
+			}
+			if spaceRun > fullWeightRun {
+				weight /= longRunDivisor
+			}
+			count += weight
 			continue
 		}
+		spaceRun = 0
 
 		if isCJK(r) {
 			current = none
