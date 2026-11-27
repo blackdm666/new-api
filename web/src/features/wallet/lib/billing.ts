@@ -40,7 +40,9 @@ export const STATUS_CONFIG: Record<TopupStatus, StatusConfig> = {
   },
   pending: {
     variant: 'warning',
-    label: 'Pending',
+    // An order stays pending until the payment callback arrives; one the user
+    // never paid stays here for good, so call it what it is.
+    label: 'Unpaid',
   },
   failed: {
     variant: 'danger',

@@ -716,6 +716,7 @@ export const STATIC_I18N_KEYS = [
   'Review billing details, upload issued invoices, and update request status',
   'Invoices are processed together on the 10th of every month. Please verify the invoice title and tax number before submitting; completed electronic invoices can be downloaded from the request details.',
   'Pending',
+  'Unpaid',
   'In progress',
   'Resolved',
   'Closed',

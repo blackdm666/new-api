@@ -64,11 +64,11 @@ it('translates billing history statuses and updates them when the language chang
     </I18nextProvider>
   )
   await screen.findByText('order-0')
-  for (const label of ['成功', '待确认', '已过期']) {
+  for (const label of ['成功', '未支付', '已过期']) {
     expect(screen.getByText(label)).toBeVisible()
   }
   await act(() => i18n.changeLanguage('en'))
-  for (const label of ['Success', 'Pending', 'Expired']) {
+  for (const label of ['Success', 'Unpaid', 'Expired']) {
     expect(screen.getByText(label)).toBeVisible()
   }
 })
