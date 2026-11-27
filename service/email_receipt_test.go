@@ -78,6 +78,37 @@ func TestMarketingDeliveryDefersAtAccountMinuteLimit(t *testing.T) {
 	assert.Greater(t, delivery.NextAttemptTime, now)
 }
 
+func TestMarketingDeliveryReportsUndecryptableSenderCredential(t *testing.T) {
+	truncate(t)
+	_, err := model.RotateEmailReceiptEndpointToken()
+	require.NoError(t, err)
+	require.NoError(t, model.UpdateEmailReceiptEndpointEnabled(true))
+	require.NoError(t, model.UpdateEmailReceiptEndpointActivity(true, ""))
+	account := newReceiptTestAccount(t)
+	now := common.GetTimestamp()
+	require.NoError(t, model.DB.Model(account).Updates(map[string]any{
+		"enabled": true, "tested_time": now, "receipt_verified_time": now,
+		"health_status": model.EmailSenderHealthHealthy,
+	}).Error)
+	delivery, _, err := model.EnqueueEmailDelivery(&model.EmailDelivery{
+		DeliveryKey: "undecryptable-sender", Category: "marketing_custom",
+		Recipient: "recipient@qq.com", Subject: "subject", Body: "body",
+		Priority: model.EmailPriorityMarketing,
+	})
+	require.NoError(t, err)
+	// The credential was sealed before CRYPTO_SECRET changed.
+	previousSecret := common.CryptoSecret
+	common.CryptoSecret = previousSecret + "-rotated"
+	t.Cleanup(func() { common.CryptoSecret = previousSecret })
+
+	err = SendMarketingEmailDelivery(delivery)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, account.Name)
+	var attempts int64
+	require.NoError(t, model.DB.Model(&model.EmailDeliveryAttempt{}).Count(&attempts).Error)
+	assert.Zero(t, attempts)
+}
+
 func TestAliyunUnmatchedReceiptIsReprocessedAfterAttemptAppears(t *testing.T) {
 	truncate(t)
 	account := newReceiptTestAccount(t)

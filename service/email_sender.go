@@ -68,7 +68,10 @@ func SendMarketingEmailDelivery(delivery *model.EmailDelivery) error {
 		attempt, result, sendErr := sendEmailThroughMarketingAccount(delivery, account, model.EmailAttemptPurposeDelivery)
 		if sendErr != nil {
 			sendErrors = append(sendErrors, fmt.Sprintf("%s: %v", account.Name, sendErr))
-			_ = model.MarkEmailDeliveryAttemptSubmissionFailure(attempt.Id, sendErr.Error(), common.GetTimestamp())
+			// No attempt row exists when the stored credential cannot be decrypted.
+			if attempt != nil {
+				_ = model.MarkEmailDeliveryAttemptSubmissionFailure(attempt.Id, sendErr.Error(), common.GetTimestamp())
+			}
 			continue
 		}
 		now := common.GetTimestamp()
