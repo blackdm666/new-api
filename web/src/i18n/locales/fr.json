@@ -2748,6 +2748,8 @@
     "Failed to query statistics": "Échec de la requête des statistiques",
     "Failed to query the upstream task status": "Impossible d'obtenir l'état de la tâche en amont",
     "Failed to create account": "Échec de la création du compte",
+    "This password is too simple and was blocked by the site firewall. Please choose a stronger password. If it is your current password, reset it with Forgot password.": "Ce mot de passe est trop simple et a été bloqué par le pare-feu du site. Choisissez un mot de passe plus robuste. S'il s'agit de votre mot de passe actuel, réinitialisez-le via « Mot de passe oublié ».",
+    "This request was blocked by the site firewall. Please check your input and try again, or contact support.": "Cette requête a été bloquée par le pare-feu du site. Vérifiez votre saisie et réessayez, ou contactez le support.",
     "Failed to create API key": "Échec de la création de la clé API",
     "Failed to refresh credentials. Please try again later": "Échec de l'actualisation des identifiants. Veuillez réessayer plus tard",
     "Failed to create channel": "Échec de la création du canal",

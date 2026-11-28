@@ -2749,6 +2749,8 @@
     "Failed to query statistics": "Failed to query statistics",
     "Failed to query the upstream task status": "Failed to query the upstream task status",
     "Failed to create account": "Failed to create account",
+    "This password is too simple and was blocked by the site firewall. Please choose a stronger password. If it is your current password, reset it with Forgot password.": "This password is too simple and was blocked by the site firewall. Please choose a stronger password. If it is your current password, reset it with Forgot password.",
+    "This request was blocked by the site firewall. Please check your input and try again, or contact support.": "This request was blocked by the site firewall. Please check your input and try again, or contact support.",
     "Failed to create API key": "Failed to create API key",
     "Failed to refresh credentials. Please try again later": "Failed to refresh credentials. Please try again later",
     "Failed to create channel": "Failed to create channel",

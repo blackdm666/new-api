@@ -28,6 +28,7 @@ import { createElement, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { afterEach, expect, it, vi } from 'vitest'
 
+import { register } from '@/features/auth/api'
 import { saveModelPricing } from '@/features/model-pricing/api'
 import { useUpdateOption } from '@/features/system-settings/hooks/use-update-option'
 import { handleServerError } from '@/lib/handle-server-error'
@@ -238,8 +239,57 @@ it.each([
   [{ message: ' ' }, 'Operation failed'],
   [null, 'Operation failed'],
   [{ response: { data: '<html>proxy error</html>' } }, 'Operation failed'],
+  [
+    {
+      response: {
+        status: 403,
+        data: '<!doctype html><html><head><title>aaPanel</title></head><body>Your request has dangerous content</body></html>',
+      },
+    },
+    'This request was blocked by the site firewall. Please check your input and try again, or contact support.',
+  ],
+  [
+    {
+      response: {
+        status: 403,
+        data: '<html><head><title>403 Forbidden</title></head><body>nginx</body></html>',
+      },
+    },
+    'Operation failed',
+  ],
 ])('extracts a useful message or fallback from %j', (error, expected) => {
   expect(getServerErrorMessage(error, 'Operation failed')).toBe(expected)
+})
+
+it('explains a site firewall weak password block during sign-up instead of a raw HTTP status', async () => {
+  const notify = vi.spyOn(toast, 'error').mockReturnValue('error')
+  const firewallPage =
+    '<!doctype html><html><head><meta charset="utf-8"><title>Website Firewall</title></head><body><div class="title">Website Firewall</div><p class="t1">The password you used for login is weak and has been blocked by the administrator</p></body></html>'
+  api.defaults.adapter = async (config) => {
+    throw new AxiosError(
+      'Request failed with status code 403',
+      'ERR_BAD_REQUEST',
+      config,
+      undefined,
+      {
+        data: firewallPage,
+        status: 403,
+        statusText: 'Forbidden',
+        headers: { 'content-type': 'text/html;charset=utf8' },
+        config,
+      }
+    )
+  }
+  await register({ username: 'wanglei', password: '12345678' }).catch(
+    (error) => {
+      handleServerError(
+        AuthOperationError.from(error, 'Failed to create account')
+      )
+    }
+  )
+  expect(notify.mock.calls.map(([message]) => message)).toEqual([
+    'This password is too simple and was blocked by the site firewall. Please choose a stronger password. If it is your current password, reset it with Forgot password.',
+  ])
 })
 
 it('preserves safe authentication messages and recognizes their original failure without exposing its payload', () => {
@@ -304,23 +354,23 @@ it.each([200, 401])(
       access_expires_at: 2_000_000_000,
     }
     const open = vi.spyOn(XMLHttpRequest.prototype, 'open')
-    vi.spyOn(XMLHttpRequest.prototype, 'send').mockImplementation(
-      function (this: XMLHttpRequest) {
-        Object.defineProperties(this, {
-          status: { value: refreshStatus, configurable: true },
-          statusText: { value: 'Refresh response', configurable: true },
-          responseText: {
-            value: JSON.stringify({
-              success: refreshStatus === 200,
-              data: fresh,
-            }),
-            configurable: true,
-          },
-          readyState: { value: 4, configurable: true },
-        })
-        this.onloadend?.(new ProgressEvent('loadend'))
-      }
-    )
+    vi.spyOn(XMLHttpRequest.prototype, 'send').mockImplementation(function (
+      this: XMLHttpRequest
+    ) {
+      Object.defineProperties(this, {
+        status: { value: refreshStatus, configurable: true },
+        statusText: { value: 'Refresh response', configurable: true },
+        responseText: {
+          value: JSON.stringify({
+            success: refreshStatus === 200,
+            data: fresh,
+          }),
+          configurable: true,
+        },
+        readyState: { value: 4, configurable: true },
+      })
+      this.onloadend?.(new ProgressEvent('loadend'))
+    })
     let requests = 0
     api.defaults.adapter = async (config) => {
       requests++

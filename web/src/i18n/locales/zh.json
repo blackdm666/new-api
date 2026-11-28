@@ -2749,6 +2749,8 @@
     "Failed to query statistics": "查询统计数据失败",
     "Failed to query the upstream task status": "查询上游任务状态失败",
     "Failed to create account": "创建账户失败",
+    "This password is too simple and was blocked by the site firewall. Please choose a stronger password. If it is your current password, reset it with Forgot password.": "密码过于简单，被网站防火墙拦截。请换一个更复杂的密码；如果这是你现在的登录密码，请通过「忘记密码」重新设置。",
+    "This request was blocked by the site firewall. Please check your input and try again, or contact support.": "请求被网站防火墙拦截。请检查输入内容后重试，或联系客服。",
     "Failed to create API key": "创建API密钥失败",
     "Failed to refresh credentials. Please try again later": "刷新凭证失败，请稍后重试",
     "Failed to create channel": "创建渠道失败",
