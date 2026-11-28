@@ -34,11 +34,23 @@ import {
   type ReactNode,
 } from 'react'
 
+// Official Sand AI (MAGI) favicon: https://sand.ai/migrated/assets/svg/favicon.svg
+import sandaiLogo from '@/assets/brand-icons/sandai.svg'
 import sglangLogo from '@/assets/brand-icons/sglang.svg'
 import { IconSub2api } from '@/assets/custom/icon-sub2api'
 import { IconWan } from '@/assets/custom/icon-wan'
 
 const CUSTOM_ICONS: Record<string, ComponentType<{ size?: number }>> = {
+  SandAI: (props) => (
+    <img
+      src={sandaiLogo}
+      alt=''
+      aria-hidden='true'
+      width={props.size ?? 20}
+      height={props.size ?? 20}
+      className='object-contain'
+    />
+  ),
   SGLang: (props) => (
     <img
       src={sglangLogo}
