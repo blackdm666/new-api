@@ -135,10 +135,18 @@ describe('Lobe icons', () => {
       expect.arrayContaining([
         'OpenAI',
         'Claude.Color',
+        'SandAI',
         'SGLang',
         'Sub2API',
         'Wan',
       ])
     )
+  })
+
+  it('renders the Sand AI logo for the SandAI vendor icon instead of a letter placeholder', () => {
+    render(getLobeIcon('SandAI', 28))
+    const logo = screen.getByRole('presentation', { hidden: true })
+    expect(logo).toHaveAttribute('width', '28')
+    expect(screen.queryByText('S')).toBeNull()
   })
 })
