@@ -2748,6 +2748,8 @@
     "Failed to query statistics": "Не удалось получить статистику",
     "Failed to query the upstream task status": "Не удалось получить статус задачи в upstream",
     "Failed to create account": "Не удалось создать аккаунт",
+    "This password is too simple and was blocked by the site firewall. Please choose a stronger password. If it is your current password, reset it with Forgot password.": "Этот пароль слишком простой и был заблокирован межсетевым экраном сайта. Выберите более надёжный пароль. Если это ваш текущий пароль, сбросьте его через «Забыли пароль».",
+    "This request was blocked by the site firewall. Please check your input and try again, or contact support.": "Запрос заблокирован межсетевым экраном сайта. Проверьте введённые данные и повторите попытку или обратитесь в поддержку.",
     "Failed to create API key": "Не удалось создать API ключ",
     "Failed to refresh credentials. Please try again later": "Не удалось обновить учётные данные. Попробуйте позже",
     "Failed to create channel": "Не удалось создать канал",

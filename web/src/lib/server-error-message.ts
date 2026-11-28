@@ -86,6 +86,18 @@ const serverErrorMessageKeys = {
   TELEGRAM_BIND_INTERNAL_ERROR: 'Telegram binding failed. Please try again.',
 } as const
 
+// A web application firewall in front of the site (aaPanel/BT WAF) answers some
+// requests itself with an HTTP 403 HTML page instead of an API response. Its
+// weak password rule rejects a common username with a common password, mostly
+// at sign-up where the password is sent as plain text.
+const firewallWeakPasswordPage = /The password you used for login is weak/i
+const firewallBlockPage =
+  /<title>\s*(?:aaPanel|Website firewalls?)\s*<\/title>/i
+const firewallWeakPasswordMessageKey =
+  'This password is too simple and was blocked by the site firewall. Please choose a stronger password. If it is your current password, reset it with Forgot password.'
+const firewallBlockMessageKey =
+  'This request was blocked by the site firewall. Please check your input and try again, or contact support.'
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object'
 }
@@ -116,6 +128,17 @@ export function getServerErrorMessageKey(value: unknown): string | null {
           source.code as keyof typeof serverErrorMessageKeys
         ]
       if (key) return key
+    }
+    const response = source.response
+    if (
+      isRecord(response) &&
+      response.status === 403 &&
+      typeof response.data === 'string'
+    ) {
+      if (firewallWeakPasswordPage.test(response.data)) {
+        return firewallWeakPasswordMessageKey
+      }
+      if (firewallBlockPage.test(response.data)) return firewallBlockMessageKey
     }
     if (source[safeServerErrorMessage]) break
   }

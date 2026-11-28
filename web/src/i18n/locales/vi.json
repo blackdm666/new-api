@@ -2748,6 +2748,8 @@
     "Failed to query statistics": "Truy vấn dữ liệu thống kê thất bại",
     "Failed to query the upstream task status": "Không truy vấn được trạng thái tác vụ thượng nguồn",
     "Failed to create account": "Tạo tài khoản thất bại",
+    "This password is too simple and was blocked by the site firewall. Please choose a stronger password. If it is your current password, reset it with Forgot password.": "Mật khẩu này quá đơn giản và đã bị tường lửa của trang chặn. Vui lòng chọn mật khẩu mạnh hơn. Nếu đây là mật khẩu hiện tại của bạn, hãy đặt lại bằng chức năng Quên mật khẩu.",
+    "This request was blocked by the site firewall. Please check your input and try again, or contact support.": "Yêu cầu này đã bị tường lửa của trang chặn. Vui lòng kiểm tra thông tin đã nhập và thử lại, hoặc liên hệ bộ phận hỗ trợ.",
     "Failed to create API key": "Tạo API key thất bại",
     "Failed to refresh credentials. Please try again later": "Không thể làm mới thông tin xác thực. Vui lòng thử lại sau",
     "Failed to create channel": "Không thể tạo kênh",

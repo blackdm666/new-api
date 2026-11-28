@@ -2748,6 +2748,8 @@
     "Failed to query statistics": "統計データの取得に失敗しました",
     "Failed to query the upstream task status": "上流タスクの状態を取得できませんでした",
     "Failed to create account": "アカウントの作成に失敗しました",
+    "This password is too simple and was blocked by the site firewall. Please choose a stronger password. If it is your current password, reset it with Forgot password.": "このパスワードは単純すぎるため、サイトのファイアウォールによってブロックされました。より強力なパスワードを設定してください。現在お使いのパスワードの場合は「パスワードを忘れた場合」から再設定してください。",
+    "This request was blocked by the site firewall. Please check your input and try again, or contact support.": "このリクエストはサイトのファイアウォールによってブロックされました。入力内容を確認して再試行するか、サポートにお問い合わせください。",
     "Failed to create API key": "APIキーの作成に失敗しました",
     "Failed to refresh credentials. Please try again later": "認証情報の更新に失敗しました。後でもう一度お試しください",
     "Failed to create channel": "チャネルの作成に失敗しました",

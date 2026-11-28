@@ -1182,6 +1182,9 @@ export const STATIC_I18N_KEYS = [
   'This user account no longer exists.',
   'This user account is disabled.',
   'Telegram binding failed. Please try again.',
+  // Site firewall (aaPanel/BT WAF) block pages, see lib/server-error-message.ts.
+  'This password is too simple and was blocked by the site firewall. Please choose a stronger password. If it is your current password, reset it with Forgot password.',
+  'This request was blocked by the site firewall. Please check your input and try again, or contact support.',
   'Telegram authorization failed. Please try again.',
   'This Telegram account is not linked. Sign in using another method and link it first.',
   'The telegram OAuth provider name is reserved. Ask your administrator to rename the conflicting custom provider.',
